@@ -1592,12 +1592,36 @@ def update_sidebar(
     quick_entries: List[Tuple[str, str, List[Tuple[str, str]]]],
     date_label: str | None = None,
 ) -> None:
-    def render_sidebar_tag(kind: str, label: str) -> str:
-        safe_kind = html.escape(kind or "other")
-        if kind == "score":
-            star_html = build_sidebar_stars_html(label)
-            return f'<span class="dpr-sidebar-tag dpr-sidebar-tag-{safe_kind}">{star_html}</span>'
-        return f'<span class="dpr-sidebar-tag dpr-sidebar-tag-{safe_kind}">{html.escape(label)}</span>'
+    def build_sidebar_item_payload(
+        paper_id: str,
+        title: str,
+        tags: List[Tuple[str, str]],
+        route_href: str,
+    ) -> str:
+        score_text = "-"
+        clean_tags: List[Dict[str, str]] = []
+        for kind, label in (tags or []):
+            safe_kind = (kind or "other").strip() or "other"
+            safe_label = (label or "").strip()
+            if not safe_label:
+                continue
+            if safe_kind == "score":
+                try:
+                    score_text = f"{float(safe_label):.1f}"
+                except Exception:
+                    score_text = safe_label
+                continue
+            clean_tags.append({"kind": safe_kind, "label": safe_label})
+
+        arxiv_id = str(paper_id or "").strip().split("/")[-1]
+        paper_link = f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else route_href
+        payload = {
+            "title": (title or "").strip() or paper_id,
+            "link": paper_link,
+            "score": score_text,
+            "tags": clean_tags,
+        }
+        return html.escape(json.dumps(payload, ensure_ascii=False), quote=True)
 
     effective_label = (date_label or "").strip() or format_date_str(date_str)
     # 用隐藏 marker 做稳定定位，避免“展示标题”变更导致无法覆盖更新
@@ -1649,24 +1673,20 @@ def update_sidebar(
         for paper_id, title, tags in deep_entries:
             safe_title = html.escape((title or "").strip() or paper_id)
             href = f"#/{paper_id}"
-            tag_html = " ".join(render_sidebar_tag(kind, label) for kind, label in (tags or []))
-            tags_block = f'<div class="dpr-sidebar-tags">{tag_html}</div>' if tag_html else ""
+            payload_json = build_sidebar_item_payload(paper_id, title, tags, href)
             block.append(
                 "      * "
-                f'<a class="dpr-sidebar-item-link" href="{href}"><div class="dpr-sidebar-title">{safe_title}</div>'
-                f"{tags_block}</a>\n"
+                f'<a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="{href}" data-sidebar-item="{payload_json}">{safe_title}</a>\n'
             )
     if quick_entries:
         block.append("    * 速读区\n")
         for paper_id, title, tags in quick_entries:
             safe_title = html.escape((title or "").strip() or paper_id)
             href = f"#/{paper_id}"
-            tag_html = " ".join(render_sidebar_tag(kind, label) for kind, label in (tags or []))
-            tags_block = f'<div class="dpr-sidebar-tags">{tag_html}</div>' if tag_html else ""
+            payload_json = build_sidebar_item_payload(paper_id, title, tags, href)
             block.append(
                 "      * "
-                f'<a class="dpr-sidebar-item-link" href="{href}"><div class="dpr-sidebar-title">{safe_title}</div>'
-                f"{tags_block}</a>\n"
+                f'<a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="{href}" data-sidebar-item="{payload_json}">{safe_title}</a>\n'
             )
 
     insert_idx = daily_idx + 1

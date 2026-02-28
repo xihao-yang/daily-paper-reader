@@ -2123,6 +2123,75 @@ window.$docsify = {
 	        });
 	      };
 
+      const scoreToStarRating = (scoreValue) => {
+        const score = Number(scoreValue);
+        if (!Number.isFinite(score)) return 0;
+        const clamped = Math.max(0, Math.min(10, score));
+        return Math.floor(clamped + 0.5) / 2;
+      };
+
+      const buildSidebarStarsHtml = (scoreValue) => {
+        const rating = scoreToStarRating(scoreValue);
+        const scoreNum = Number(scoreValue);
+        const scoreText = Number.isFinite(scoreNum) ? scoreNum.toFixed(1) : '';
+        const title = scoreText
+          ? `评分：${scoreText}/10（${rating.toFixed(1)}/5）`
+          : '评分：无';
+        const pct = Math.max(0, Math.min(100, (rating / 5) * 100));
+        return (
+          `<span class="dpr-stars" title="${escapeHtml(title)}" aria-label="${rating.toFixed(1)} out of 5">` +
+          '<span class="dpr-stars-bg">☆☆☆☆☆</span>' +
+          `<span class="dpr-stars-fill" style="width:${pct.toFixed(0)}%">★★★★★</span>` +
+          '</span>'
+        );
+      };
+
+      const hydrateStructuredSidebarItems = () => {
+        const nav = document.querySelector('.sidebar-nav');
+        if (!nav) return;
+        const links = nav.querySelectorAll('a.dpr-sidebar-item-structured[data-sidebar-item]');
+        links.forEach((a) => {
+          if (a.dataset.sidebarStructuredHydrated === '1') return;
+          const raw = a.getAttribute('data-sidebar-item') || '';
+          if (!raw) return;
+          let payload = null;
+          try {
+            payload = JSON.parse(raw);
+          } catch {
+            return;
+          }
+          if (!payload || typeof payload !== 'object') return;
+
+          const title = String(payload.title || a.textContent || '').trim();
+          const link = String(payload.link || '').trim();
+          const score = String(payload.score || '').trim();
+          const tags = Array.isArray(payload.tags) ? payload.tags : [];
+
+          const scoreHtml =
+            score && score !== '-'
+              ? `<span class="dpr-sidebar-tag dpr-sidebar-tag-score">${buildSidebarStarsHtml(score)}</span>`
+              : '<span class="dpr-sidebar-score-empty">-</span>';
+
+          const tagsHtml = tags
+            .map((item) => {
+              const rawKind = String((item && item.kind) || 'other').trim().toLowerCase();
+              const kind = /^(keyword|query|paper|other)$/.test(rawKind) ? rawKind : 'other';
+              const label = String((item && item.label) || '').trim();
+              if (!label) return '';
+              return `<span class="dpr-sidebar-tag dpr-sidebar-tag-${kind}">${escapeHtml(label)}</span>`;
+            })
+            .filter(Boolean)
+            .join(' ');
+
+          a.innerHTML =
+            `<div class="dpr-sidebar-title">${escapeHtml(title)}</div>` +
+            `<div class="dpr-sidebar-link-line">${escapeHtml(link || '-')}</div>` +
+            `<div class="dpr-sidebar-score-line">${scoreHtml}</div>` +
+            `<div class="dpr-sidebar-tags">${tagsHtml || '<span class="dpr-sidebar-tag dpr-sidebar-tag-other">-</span>'}</div>`;
+          a.dataset.sidebarStructuredHydrated = '1';
+        });
+      };
+
       // 侧边栏/正文的论文页标题条：英文右侧，中文左侧，中间竖线
       const isPaperRouteFile = (file) => {
         const f = String(file || '');
@@ -3359,6 +3428,7 @@ window.$docsify = {
         // F. 侧边栏按日期折叠
         // ----------------------------------------------------
         setupCollapsibleSidebarByDay();
+        hydrateStructuredSidebarItems();
 
         // ----------------------------------------------------
         // G. 侧边栏已阅读论文状态高亮
