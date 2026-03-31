@@ -6,73 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-22 ~ 2026-03-31
-- 运行时间：2026-03-31 15:42:53 UTC
+- 最新运行日期：2026-03-31
+- 运行时间：2026-03-31 20:29:06 UTC
 - 运行状态：成功
 - 本次总论文数：17
 - 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-聚焦本期17篇AI与软件工程研究，深度精读6篇、速读11篇。  
-最值得关注的是LLM生成代码的检测-修复验证体系与动态分析在问题解决中的新成效。  
-建议读者重点了解多语言代码质量改进方法，关注AI模型在开发环节的自动测试与偏差分析进展。
-- 详情：[/20260322-20260331/README](/20260322-20260331/README)
+今天集中研读了 17 篇论文，重点关注大模型生成代码的错误检测与修复。  
+最值得关注的是多语言、多粒度代码修复流程与上下文压缩在问题解析中的显著提升效果。  
+建议读者关注自动化代码修复和可维护性基准建设，这将决定未来智能开发工具的可靠性。
+- 详情：[/202603/31/README](/202603/31/README)
 
 ### 精读区论文标签
-1. [Detect--Repair--Verify for LLM-Generated Code: A Multi-Language, Multi-Granularity Empirical Study](/20260322-20260331/2603.23633v1-detect--repair--verify-for-llm-generated-code-a-multi-language-multi-granularity-empirical-study)  
-   标签：评分：10.0/10、query:apr-oracle
-   evidence：针对大模型生成代码的检测-修复-验证工作流及修复可信度
-2. [Dynamic analysis enhances issue resolution](/20260322-20260331/2603.22048v1-dynamic-analysis-enhances-issue-resolution)  
+1. [Detect--Repair--Verify for LLM-Generated Code: A Multi-Language, Multi-Granularity Empirical Study](/202603/31/2603.23633v1-detect--repair--verify-for-llm-generated-code-a-multi-language-multi-granularity-empirical-study)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：用于自动问题解决和修复的动态分析
-3. [LLMLOOP: Improving LLM-Generated Code and Tests through Automated Iterative Feedback Loops](/20260322-20260331/2603.23613v1-llmloop-improving-llm-generated-code-and-tests-through-automated-iterative-feedback-loops)  
+   evidence：检测-修复-验证工作流，用于确保大模型生成代码的可信度
+2. [Compressing Code Context for LLM-based Issue Resolution](/202603/31/2603.28119v1-compressing-code-context-for-llm-based-issue-resolution)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：用于修复代码和提高测试质量的迭代反馈循环
-4. [Learning From Developers: Towards Reliable Patch Validation at Scale for Linux](/20260322-20260331/2603.24825v1-learning-from-developers-towards-reliable-patch-validation-at-scale-for-linux)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：针对Linux内核开发的补丁验证系统框架
-5. [Predicting Program Correctness By Ensemble Semantic Entropy](/20260322-20260331/2603.27098v1-predicting-program-correctness-by-ensemble-semantic-entropy)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：使用集成语义熵在没有外部预言机的情况下确保程序正确性
-6. [BACE: LLM-based Code Generation through Bayesian Anchored Co-Evolution of Code and Test Populations](/20260322-20260331/2603.28653v1-bace-llm-based-code-generation-through-bayesian-anchored-co-evolution-of-code-and-test-populations)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：将生成的测试建模为噪声传感器，以改进代码生成和验证
+   evidence：预言机引导的代码蒸馏，用于在问题解决中保留关键补丁成分
+3. [LLMLOOP: Improving LLM-Generated Code and Tests through Automated Iterative Feedback Loops](/202603/31/2603.23613v1-llmloop-improving-llm-generated-code-and-tests-through-automated-iterative-feedback-loops)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：用于改进代码和测试的自动化迭代反馈循环
+4. [TRAJEVAL: Decomposing Code Agent Trajectories for Fine-Grained Diagnosis](/202603/31/2603.24631v1-trajeval-decomposing-code-agent-trajectories-for-fine-grained-diagnosis)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：通过与参考补丁对比来诊断代码代理的执行轨迹
+5. [From Untestable to Testable: Metamorphic Testing in the Age of LLMs](/202603/31/2603.24774v1-from-untestable-to-testable-metamorphic-testing-in-the-age-of-llms)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：蜕变测试作为大模型的可执行测试预言
+6. [ExVerus: Verus Proof Repair via Counterexample Reasoning](/202603/31/2603.25810v1-exverus-verus-proof-repair-via-counterexample-reasoning)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：通过行为反馈进行自动证明修复
 
 ### 速读区论文标签
-1. [Polaris: A Gödel Agent Framework for Small Language Models through Experience-Abstracted Policy Repair](/20260322-20260331/2603.23129v1-polaris-a-gdel-agent-framework-for-small-language-models-through-experience-abstracted-policy-repair)  
+1. [ExVerus: Verus Proof Repair via Counterexample Reasoning](/202603/31/2603.25810v2-exverus-verus-proof-repair-via-counterexample-reasoning)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：通过保守检查进行最小代码补丁修复的神经程序修复
-2. [LLMORPH: Automated Metamorphic Testing of Large Language Models](/20260322-20260331/2603.23611v1-llmorph-automated-metamorphic-testing-of-large-language-models)  
+   evidence：利用大模型和反例自动进行形式化验证和证明修复
+2. [ComBench: A Repo-level Real-world Benchmark for Compilation Error Repair](/202603/31/2603.27333v1-combench-a-repo-level-real-world-benchmark-for-compilation-error-repair)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：通过蜕变测试实现验证输出正确性的自动预言
-3. [Comparing Developer and LLM Biases in Code Evaluation](/20260322-20260331/2603.24586v1-comparing-developer-and-llm-biases-in-code-evaluation)  
+   evidence：针对真实仓库级复杂性的自动化编译错误修复基准
+3. [Needle in the Repo: A Benchmark for Maintainability in AI-Generated Repository Edits](/202603/31/2603.27745v1-needle-in-the-repo-a-benchmark-for-maintainability-in-ai-generated-repository-edits)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：用于代码评估的大模型裁判及预测代码编辑中的人类偏好
-4. [Quantum Circuit Repair by Gate Prioritisation](/20260322-20260331/2603.25587v1-quantum-circuit-repair-by-gate-prioritisation)  
+   evidence：用于评估仓库编辑的诊断探针与预言机框架
+4. [CoT2-Meta: Budgeted Metacognitive Control for Test-Time Reasoning](/202603/31/2603.28135v1-cot2-meta-budgeted-metacognitive-control-for-test-time-reasoning)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：识别并修复量子电路故障的自动修复方法
-5. [From Natural Language to Executable Properties for Property-based Testing of Mobile Apps](/20260322-20260331/2603.21263v1-from-natural-language-to-executable-properties-for-property-based-testing-of-mobile-apps)  
+   evidence：用于步骤级推理评估和修复的在线过程预言机
+5. [Bridging Code Property Graphs and Language Models for Program Analysis](/202603/31/2603.24837v1-bridging-code-property-graphs-and-language-models-for-program-analysis)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：合成用于测试的可执行属性
-6. [Dynamic analysis enhances issue resolution](/20260322-20260331/2603.22048v2-dynamic-analysis-enhances-issue-resolution)  
+   evidence：将代码属性图与大模型结合用于程序分析和漏洞检测
+6. [MobileDev-Bench: A Comprehensive Benchmark for Evaluating Language Models on Mobile Application Development](/202603/31/2603.24946v1-mobiledev-bench-a-comprehensive-benchmark-for-evaluating-language-models-on-mobile-application-development)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：自动化仓库级调试与问题修复智能体
-7. [Evaluating LLM-Based Test Generation Under Software Evolution](/20260322-20260331/2603.23443v1-evaluating-llm-based-test-generation-under-software-evolution)  
+   evidence：评估模型生成修复验证的基准
+7. [Error Understanding in Program Code With LLM-DL for Multi-label Classification](/202603/31/2603.25005v1-error-understanding-in-program-code-with-llm-dl-for-multi-label-classification)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估测试生成以及语义改变与语义保持的变化
-8. [Code Review Agent Benchmark](/20260322-20260331/2603.23448v2-code-review-agent-benchmark)  
+   evidence：使用微调的 LLM 对编程错误进行多标签分类
+8. [Quantum Circuit Repair by Gate Prioritisation](/202603/31/2603.25587v2-quantum-circuit-repair-by-gate-prioritisation)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：通过自动评审评估代码质量和补丁正确性
-9. [AdaRubric: Task-Adaptive Rubrics for LLM Agent Evaluation](/20260322-20260331/2603.21362v1-adarubric-task-adaptive-rubrics-for-llm-agent-evaluation)  
+   evidence：使用可疑度分数识别并修复故障的自动化修复方法
+9. [Cross-Context Verification: Hierarchical Detection of Benchmark Contamination through Session-Isolated Analysis](/202603/31/2603.21454v1-cross-context-verification-hierarchical-detection-of-benchmark-contamination-through-session-isolated-analysis)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于评估代码调试正确性的任务自适应准则
-10. [Does Teaming-Up LLMs Improve Secure Code Generation? A Comprehensive Evaluation with Multi-LLMSecCodeEval](/20260322-20260331/2603.22717v1-does-teaming-up-llms-improve-secure-code-generation-a-comprehensive-evaluation-with-multi-llmseccodeeval)  
+   evidence：检测基准污染并确保编程基准中解决方案的有效性
+10. [LLM-Based Test Case Generation in DBMS through Monte Carlo Tree Search](/202603/31/2603.21530v1-llm-based-test-case-generation-in-dbms-through-monte-carlo-tree-search)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：评估并增强自动代码生成中的安全性
-11. [Code Review Agent Benchmark](/20260322-20260331/2603.23448v1-code-review-agent-benchmark)  
+   evidence：为数据库管理系统可靠性自动生成SQL测试用例
+11. [ConceptCoder: Improve Code Reasoning via Concept Learning](/202603/31/2603.23470v1-conceptcoder-improve-code-reasoning-via-concept-learning)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：评估代码质量和审查能力
+   evidence：基于学习的代码推理用于漏洞检测
 
 
 <div class="dpr-home-promo-card">
