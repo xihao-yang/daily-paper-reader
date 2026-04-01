@@ -6,73 +6,67 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-03-31
-- 运行时间：2026-03-31 20:29:06 UTC
+- 最新运行日期：2026-04-01
+- 运行时间：2026-04-01 21:07:04 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
-- 速读区：11
+- 本次总论文数：15
+- 精读区：5
+- 速读区：10
 
 ### 今日简报（AI）
-今天集中研读了 17 篇论文，重点关注大模型生成代码的错误检测与修复。  
-最值得关注的是多语言、多粒度代码修复流程与上下文压缩在问题解析中的显著提升效果。  
-建议读者关注自动化代码修复和可维护性基准建设，这将决定未来智能开发工具的可靠性。
-- 详情：[/202603/31/README](/202603/31/README)
+聚焦15篇论文，重点精读LLM代码修复与仓库级RAG自动补丁两项前沿研究。  
+值得关注的方向是通过上下文压缩提升代码问题定位效率，以及探索可恢复冗余在自动修复中的潜力。  
+建议读者优先了解这些方法在企业级代码维护中的应用可行性与工具化路径。
+- 详情：[/202604/01/README](/202604/01/README)
 
 ### 精读区论文标签
-1. [Detect--Repair--Verify for LLM-Generated Code: A Multi-Language, Multi-Granularity Empirical Study](/202603/31/2603.23633v1-detect--repair--verify-for-llm-generated-code-a-multi-language-multi-granularity-empirical-study)  
+1. [Compressing Code Context for LLM-based Issue Resolution](/202604/01/2603.28119v1-compressing-code-context-for-llm-based-issue-resolution)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：检测-修复-验证工作流，用于确保大模型生成代码的可信度
-2. [Compressing Code Context for LLM-based Issue Resolution](/202603/31/2603.28119v1-compressing-code-context-for-llm-based-issue-resolution)  
+   evidence：用于LLM问题解决和补丁成分提取的预言机引导代码蒸馏
+2. [Beyond Localization: Recoverable Headroom and Residual Frontier in Repository-Level RAG-APR](/202604/01/2603.29067v1-beyond-localization-recoverable-headroom-and-residual-frontier-in-repository-level-rag-apr)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：预言机引导的代码蒸馏，用于在问题解决中保留关键补丁成分
-3. [LLMLOOP: Improving LLM-Generated Code and Tests through Automated Iterative Feedback Loops](/202603/31/2603.23613v1-llmloop-improving-llm-generated-code-and-tests-through-automated-iterative-feedback-loops)  
+   evidence：仓库级 RAG-APR，侧重于预言机定位和补丁验证
+3. [EcoScratch: Cost-Effective Multimodal Repair for Scratch Using Execution Feedback](/202604/01/2603.29624v1-ecoscratch-cost-effective-multimodal-repair-for-scratch-using-execution-feedback)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：带有执行反馈和候选修复验证的自动修复循环
+4. [The Specification as Quality Gate: Three Hypotheses on AI-Assisted Code Review](/202604/01/2603.25773v1-the-specification-as-quality-gate-three-hypotheses-on-ai-assisted-code-review)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：用于改进代码和测试的自动化迭代反馈循环
-4. [TRAJEVAL: Decomposing Code Agent Trajectories for Fine-Grained Diagnosis](/202603/31/2603.24631v1-trajeval-decomposing-code-agent-trajectories-for-fine-grained-diagnosis)  
+   evidence：AI辅助代码审查以及对可执行规范作为质量门禁的需求
+5. [A Benchmark for Evaluating Repository-Level Code Agents with Intermediate Reasoning on Feature Addition Task](/202604/01/2603.26337v1-a-benchmark-for-evaluating-repository-level-code-agents-with-intermediate-reasoning-on-feature-addition-task)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：通过与参考补丁对比来诊断代码代理的执行轨迹
-5. [From Untestable to Testable: Metamorphic Testing in the Age of LLMs](/202603/31/2603.24774v1-from-untestable-to-testable-metamorphic-testing-in-the-age-of-llms)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：蜕变测试作为大模型的可执行测试预言
-6. [ExVerus: Verus Proof Repair via Counterexample Reasoning](/202603/31/2603.25810v1-exverus-verus-proof-repair-via-counterexample-reasoning)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：通过行为反馈进行自动证明修复
+   evidence：代码代理的可执行补丁验证与推理
 
 ### 速读区论文标签
-1. [ExVerus: Verus Proof Repair via Counterexample Reasoning](/202603/31/2603.25810v2-exverus-verus-proof-repair-via-counterexample-reasoning)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：利用大模型和反例自动进行形式化验证和证明修复
-2. [ComBench: A Repo-level Real-world Benchmark for Compilation Error Repair](/202603/31/2603.27333v1-combench-a-repo-level-real-world-benchmark-for-compilation-error-repair)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：针对真实仓库级复杂性的自动化编译错误修复基准
-3. [Needle in the Repo: A Benchmark for Maintainability in AI-Generated Repository Edits](/202603/31/2603.27745v1-needle-in-the-repo-a-benchmark-for-maintainability-in-ai-generated-repository-edits)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：用于评估仓库编辑的诊断探针与预言机框架
-4. [CoT2-Meta: Budgeted Metacognitive Control for Test-Time Reasoning](/202603/31/2603.28135v1-cot2-meta-budgeted-metacognitive-control-for-test-time-reasoning)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：用于步骤级推理评估和修复的在线过程预言机
-5. [Bridging Code Property Graphs and Language Models for Program Analysis](/202603/31/2603.24837v1-bridging-code-property-graphs-and-language-models-for-program-analysis)  
+1. [The Kitchen Loop: User-Spec-Driven Development for a Self-Evolving Codebase](/202604/01/2603.25697v1-the-kitchen-loop-user-spec-driven-development-for-a-self-evolving-codebase)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：将代码属性图与大模型结合用于程序分析和漏洞检测
-6. [MobileDev-Bench: A Comprehensive Benchmark for Evaluating Language Models on Mobile Application Development](/202603/31/2603.24946v1-mobiledev-bench-a-comprehensive-benchmark-for-evaluating-language-models-on-mobile-application-development)  
+   evidence：自演化代码的基准真相验证和回归测试预言
+2. [WybeCoder: Verified Imperative Code Generation](/202604/01/2603.29088v1-wybecoder-verified-imperative-code-generation)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估模型生成修复验证的基准
-7. [Error Understanding in Program Code With LLM-DL for Multi-label Classification](/202603/31/2603.25005v1-error-understanding-in-program-code-with-llm-dl-for-multi-label-classification)  
+   evidence：验证代码生成和形式化验证条件生成
+3. [SemLoc: Structured Grounding of Free-Form LLM Reasoning for Fault Localization](/202604/01/2603.29109v1-semloc-structured-grounding-of-free-form-llm-reasoning-for-fault-localization)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：使用微调的 LLM 对编程错误进行多标签分类
-8. [Quantum Circuit Repair by Gate Prioritisation](/202603/31/2603.25587v2-quantum-circuit-repair-by-gate-prioritisation)  
+   evidence：基于大语言模型的语义推理用于故障定位和预言机可靠性
+4. [Self-Improving Code Generation via Semantic Entropy and Behavioral Consensus](/202604/01/2603.29292v1-self-improving-code-generation-via-semantic-entropy-and-behavioral-consensus)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：使用可疑度分数识别并修复故障的自动化修复方法
-9. [Cross-Context Verification: Hierarchical Detection of Benchmark Contamination through Session-Isolated Analysis](/202603/31/2603.21454v1-cross-context-verification-hierarchical-detection-of-benchmark-contamination-through-session-isolated-analysis)  
+   evidence：解决了在没有测试预言的情况下改进代码生成能力的挑战
+5. [Willful Disobedience: Automatically Detecting Failures in Agentic Traces](/202604/01/2603.23806v1-willful-disobedience-automatically-detecting-failures-in-agentic-traces)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：检测基准污染并确保编程基准中解决方案的有效性
-10. [LLM-Based Test Case Generation in DBMS through Monte Carlo Tree Search](/202603/31/2603.21530v1-llm-based-test-case-generation-in-dbms-through-monte-carlo-tree-search)  
+   evidence：自动检测代理执行轨迹中的故障和规则违反
+6. [Walma: Learning to See Memory Corruption in WebAssembly](/202604/01/2603.24167v1-walma-learning-to-see-memory-corruption-in-webassembly)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：为数据库管理系统可靠性自动生成SQL测试用例
-11. [ConceptCoder: Improve Code Reasoning via Concept Learning](/202603/31/2603.23470v1-conceptcoder-improve-code-reasoning-via-concept-learning)  
+   evidence：利用机器学习分类内存快照以检测内存损坏，作为验证后端
+7. [Boosting LLMs for Mutation Generation](/202604/01/2603.24560v1-boosting-llms-for-mutation-generation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：基于学习的代码推理用于漏洞检测
+   evidence：利用真实漏洞生成语义变异以用于测试技术
+8. [Factors Influencing the Quality of AI-Generated Code: A Synthesis of Empirical Evidence](/202604/01/2603.25146v1-factors-influencing-the-quality-of-ai-generated-code-a-synthesis-of-empirical-evidence)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：综合分析了影响AI生成代码质量和可靠性的因素
+9. [SWE-PRBench: Benchmarking AI Code Review Quality Against Pull Request Feedback](/202604/01/2603.26130v1-swe-prbench-benchmarking-ai-code-review-quality-against-pull-request-feedback)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：针对人类反馈评估AI代码审查质量的基准测试
+10. [How and Why Agents Can Identify Bug-Introducing Commits](/202604/01/2603.29378v1-how-and-why-agents-can-identify-bug-introducing-commits)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：基于大模型的智能体从修复提交中识别引入错误的提交
 
 
 <div class="dpr-home-promo-card">
