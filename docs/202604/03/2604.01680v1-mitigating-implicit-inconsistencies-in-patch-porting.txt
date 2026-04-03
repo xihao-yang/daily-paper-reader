@@ -1,0 +1,548 @@
+Title: Mitigating Implicit Inconsistencies in Patch Porting
+
+URL Source: https://arxiv.org/pdf/2604.01680v1
+
+Published Time: Fri, 03 Apr 2026 00:33:16 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Mitigating Implicit Inconsistencies in Patch Porting 
+
+## Shengyi Pan 
+
+The State Key Laboratory of Blockchain and Data Security, Zhejiang University Hangzhou, China shengyi.pan@zju.edu.cn 
+
+## Zhongxin Liu ∗† 
+
+The State Key Laboratory of Blockchain and Data Security, Zhejiang University Hangzhou, Zhejiang, China liu_zx@zju.edu.cn 
+
+## Jiayuan Zhou 
+
+Waterloo Research Center, Huawei Waterloo, Ontario, Canada jiayuan.zhou1@huawei.com 
+
+## Xing Hu 
+
+The State Key Laboratory of Blockchain and Data Security, Zhejiang University Ningbo, China xinghu@zju.edu.cn 
+
+## Xin Xia ‡
+
+The State Key Laboratory of Blockchain and Data Security, Zhejiang University Hangzhou, China xin.xia@acm.org 
+
+## Shanping Li 
+
+The State Key Laboratory of Blockchain and Data Security, Zhejiang University Hangzhou, China shan@zju.edu.cn 
+
+## Abstract 
+
+Promptly porting patches from a source codebase to its variants (e.g., forks and branches) is essential for mitigating propagated defects and vulnerabilities. Recent studies have explored automated patch porting to reduce manual effort and delay, but existing ap-proaches mainly handle inconsistencies visible in a patch’s local context and struggle with those requiring global mapping knowl-edge between codebases. We refer to such non-local inconsistencies as implicit inconsistencies. Implicit inconsistencies pose greater challenges for developers to resolve due to their non-local nature. To address them, we propose MIP , which enables collaboration among an LLM, a compiler, and code analysis utilities. MIP adopts different strategies for different cases: when source identifiers exist in the target codebase, it leverages compiler diagnostics; otherwise, it retrieves matched code segment pairs from the two codebases as mapping knowledge for mitigation. Experiments on two represen-tative scenarios, cross-fork and cross-branch patch porting, show that MIP successfully resolves more than twice as many patches as the best-performing baseline in both settings. A user study with our industry partner further demonstrates its practical effectiveness. 
+
+## CCS Concepts 
+
+• Software and its engineering → Software maintenance tools .
+
+## Keywords 
+
+Patch Porting, Large Language Model, Software Maintenance 
+
+ACM Reference Format: 
+
+Shengyi Pan, Zhongxin Liu, Jiayuan Zhou, Xing Hu, Xin Xia, and Shan-ping Li. 2026. Mitigating Implicit Inconsistencies in Patch Porting. In  
+
+> ∗Corresponding Author
+> †Also with College of Computer Science and Technology, Zhejiang University
+> ‡Also with Hangzhou High-Tech Zone (Binjiang) Institute of Blockchain and Data Security
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> FSE Companion ’26, Montreal, QC, Canada
+> ©2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2636-1/26/07 https://doi.org/10.1145/3803437.3805248
+
+34th ACM Joint European Software Engineering Conference and Sympo-sium on the Foundations of Software Engineering (FSE Companion ’26), July 5–9, 2026, Montreal, QC, Canada. ACM, New York, NY, USA, 11 pages. https://doi.org/10.1145/3803437.3805248 
+
+## 1 Introduction 
+
+Forking [ 18 , 39 , 40 ] and branching [ 28 , 33 , 41 ] are widely used to reuse and adapt open source software (OSS) to accommodate different stability and feature requirements. In industrial produc-tion settings, organizations typically prioritize operational stability and compatibility over rapid adoption of the latest releases, and as a result often deploy older, well-validated versions [ 15 ]. In addi-tion, companies commonly customize OSS to address production-specific needs and maintain internal forks to support these variants over long lifecycles [ 20 , 35 ]. The Linux ecosystem is a represen-tative example of this pattern. Enterprise distributions such as OpenEuler [ 10 ] and Red Hat Enterprise Linux [ 11 ] are downstream forks that combine vendor-specific customizations with selected stable or long-term support (LTS) branches of the Linux kernel. To maintain reliability and security guarantees, downstream vari-ants must continuously port important patches (e.g., security fixes) from their upstream source (e.g., the Linux mainline). However, the dramatic growth in the number of patches requiring porting poses substantial challenges, as unresponsive porting practices can compromise the stability and security of downstream variants that remain unpatched [ 26 , 29 ]. For example, the Linux kernel saw approximately 3,529 disclosed vulnerabilities in 2024, nearly an order-of-magnitude increase over 2023 [ 13 , 14 ]. Meanwhile, exist-ing patch porting practices in the kernel ecosystem continue to suffer from significant delays, leaving extended exploit windows open to attackers [ 22 , 32 ]. These industrial realities make timely and low-cost patch porting a foundational capability for reducing maintenance burden, shortening security-fix latency, and sustaining production-grade reliability [21, 25]. Many patches cannot be directly ported by copy-and-paste due to the divergence between source and target codebases [ 26 , 31 ]. For example, Figure 1 presents a patch ported from Vim [ 3 ] (a widely-used text editor) to Neovim [ 2 ] (a fork of vim that focuses on extensibility and usability). The two code segments share the  
+
+> arXiv:2604.01680v1 [cs.SE] 2 Apr 2026 FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada Shengyi Pan, Zhongxin Liu, Jiayuan Zhou, Xing Hu, Xin Xia, and Shanping Li
+
+same functionality and suffer from the same issue. However, their implementations diverge, e.g., function dict_find() is renamed as 
+
+tv_dict_find() in Neovim. Thus, effective patch porting requires handling implementation differences between codebases [26, 31]. Prior works have explored automated patch porting to reduce the cost and delay of manual porting [ 26 , 31 , 38 ]. Given a patch from the source codebase, existing techniques leverage certain proxies (e.g., syntactic structure [ 31 ] or semantic information [ 26 ] of a local code segment) that remain consistent across the two codebases to locate the corresponding code segment in the target codebase and then adapt the patch to local differences. However, these approaches only address inconsistencies visible in the local context [ 27 , 31 ] and fail to handle inconsistencies that require a global knowledge of differences between codebases (see Section 3.1 for an example). We refer to the inconsistencies that are not exposed in the local context as implicit inconsistencies. Implicit inconsistencies commonly arise when patches reference identifiers whose definitions differ across codebases, such as renamed functions or global variables, modified function signatures or variable types. It is challenging to address the implicit inconsistencies, which requires knowledge of the global mappings between the source and the target codebase. For example, if a function in the source code-base is not defined in the target codebase, one needs to identify how the same functionality is implemented in the target codebase, which may not has a corresponding function but implemented in a com-pletely different way (see Figure 2 for an example). Moreover, such mappings may be consistently updated as the two codebases evolve. In practice, patch porting is performed exclusively by core project members [ 6, 22 ], who are deeply familiar with both the source and target codebases. However, this reliance imposes substantial mainte-nance burdens and causes significant porting delays [ 5, 22 , 26 ]. For instance, Linux kernel LTS has been reduced from six to two years due to maintenance challenges [ 5 ]. Investigation with developers at our industry partner also suggests that implicit inconsistencies impose the greatest overhead in patch porting (see Section 6.1). To this end, we proposes an approach (namely MIP ) to automat-ically address implicit inconsistencies in the ported patches. MIP 
+
+is independent of the porting workflow. It can be used to assist manual patch porting or refine the results of automated porting tools. Specifically, we first apply the compiler to detect implicit in-consistencies in an incorrect patch, as such inconsistencies indicate conflicts with the target project’s context. For cases where source identifiers exist in the target codebase but have changed attributes, compiler diagnostics provide useful information (e.g., conflicts be-tween identifier usage and definitions). We therefore leverage an LLM to resolve these inconsistencies using compiler diagnostics. In contrast, for the majority cases where source identifiers do not exist in the target codebase, compiler diagnostics alone are insufficient. Resolving these non-existent identifiers requires knowledge of how equivalent functionality is implemented across the source and tar-get codebases. To acquire this mapping knowledge, we retrieve matched code segment pairs involving the non-existent identifier from both codebases and present them to the LLM as demonstra-tions to guide the transformation. Overall, MIP follows an iterative check-and-fix schedule that consists of ❶ invoking the compiler to check the incorrect patch, ❷ browsing the source and target codebases to retrieve necessary fixing ingredients, ❸ invoking the LLM to generate fixes. This process repeats until no errors remain or a predefined iteration limit is reached. We conduct evaluations under two typical patch porting scenar-ios, i.e., cross-fork [ 26 , 40 ] and cross-branch [ 31 , 38 ]. Specifically, we follow the existing studies to adopt the patches ported from Vim to Neovim and from the mainline of Linux kernel to older versions for cross-fork and cross-branch evaluation, respectively. The experiment results verify the effectiveness of MIP in refining ported patches with unresolved implicit inconsistencies. MIP fixes more than twice as many patches as the best-performing baseline under both scenarios. Experiment results also verify the generaliz-ability of MIP regarding different underlying LLMs. Furthermore, we conduct a user study with our industry partner to validate the effectiveness of our prototype and to gather feedback prior to pro-duction deployment. 
+
+• We are the first to propose to mitigate implicit inconsistencies in patch porting, an essential challenge overlooked by the existing studies. We design an approach (namely MIP ) that facilitates the collaboration among the LLM, compiler, and utilities for analyzing the codebase to mitigate implicit inconsistencies. 
+
+• We propose to build the mapping knowledge of two codebases by retrieving pairs of matched code segments involving the usage of identifiers, which is effective and offers explainability. 
+
+• Experiments across two patch porting scenarios show that MIP 
+
+substantially outperforms baselines, and a user study confirms its practical value and distills lessons learned. 
+
+## 2 Background and Related Work 
+
+In this section, we introduce background of patch porting. 
+
+Forking and Branching. Forking [ 18 , 39 , 40 ] and branching [ 28 ,33 , 41 ] are widely employed to reuse and customize OSS but in-evitability leads to the propagation of shared defects among a soft-ware family. Ren et al. [30 ] conducted an empirical study revealing that 20.5% of patches require porting across forked projects. Shar-iffdeen et al. [ 31 ] find that during 2011 to 2019, over 50k patches made to the mainline of the Linux kernel have been backported to older versions. Due to the divergence between the source and target codebases, patch porting remains largely a manual task, which has been identified as inefficient in several studies [ 16 , 22 , 40 ]. Pan et al. [ 26 ] find that over half of the Vim patches being ported to the Neovim take a delay of more than half a year. Shariffdeen et al. [ 31 ] and Li et al. [ 22 ] explore patch porting within the Linux kernel ecosystem, finding that current practices suffer from signif-icant delays. The delay can be fatal considering security-related flaws [ 26 , 29 ]. While existing works underscore the importance of patch porting, this paper goes further by addressing implicit inconsistencies, a significant challenge in patch porting. 
+
+Automated Patch Porting. Patch porting aims to transplant a given patch from the source codebase to the target codebase to ad-dress a similar issue (e.g., fixing a bug). Its key challenge is to adapt the patch regarding different implementations of the same func-tionality between the two codebases [ 26 , 31 , 38 ]. FixMorph [31 ]abstracts the source patch and necessary surrounding context into transformation rules at the syntax level. It locates the patch in the target codebase by matching the same pre-patch syntactic structure, while allowing certain generalizations over specific expressions to cope with inconsistencies. The inconsistencies exposed in the Mitigating Implicit Inconsistencies in Patch Porting FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada 
+
+localization process are used to adjust the patch. TSBPORT [36 ]enhances FixMorph by incorporating program dependency graph matching to align code segments from two codebases, and defines fine-grained patterns to adjust patches. Recently, PPatHF [ 26 ] first leverages LLMs to automate patch porting and achieve substantial improvements over traditional approaches. Specifically, the LLM is prompted to imitate the transformation demonstrated by the pre-and post-patch versions of the source function, and apply it to the pre-patch target function. With the superiority of LLMs in under-standing code semantics, PPatHF can align the code segments from the source and target codebases based on their functionality or semantics, and thus is capable of dealing with porting cases where the patch syntactic structure changes greatly. In summary, existing patch porting techniques leverage certain proxy that remains consistent across the source and target codebase to locate and align a local code unit containing the patch, and adapt the patch according to the inconsistencies exhibited in the context within the local unit. Unlike existing works, we aim to automate the mitigation of implicit inconsistencies, which is an essential challenge in patch porting while overlooked by existing studies. Our approach is orthogonal to existing approaches. 
+
+## 3 Motivation and Preliminaries 
+
+In this section, we provide a motivating example to show the inabil-ity of existing patch porting techniques when faced with implicit inconsistencies. Then, we introduce two specific types of implicit inconsistencies and the challenges to fix them. 
+
+## 3.1 Motivating Example 
+
+Figure 1(a) shows a patch ported from Vim (the source codebase) to Neovim (the target codebase). The patch fixes a bug [ 8] in the function f_getscriptinfo() , which retrieves script information based on a script ID or a name-based filter. In the pre-patch version, after extracting the script ID sid using dict_get_number_def() ,the code assumes that an invalid sid (i.e., sid==-1 ) implies that the user specified a script name pattern. However, an invalid sid can also result from supplying a non-positive integer as the script ID. To fix this bug, the patch refactors the extraction of sid into two steps. It first attempts to retrieve the item associated with the key "sid" 
+
+from the input dictionary using dict_find() . If the item exists (i.e., 
+
+sid_di != NULL ), the code then invokes tv_get_number_chk() to extract sid and reports an error when the value is invalid. Because this bug also exists in Neovim due to the initial fork, the patch must be ported to Neovim as well. As shown in Figure 1(b), porting this patch seems straightfor-ward, as it does not require changes to the patch structure. However, 
+
+PPatHF fails to port it correctly, producing an incorrect patch (Fig-ure 1(c)). This failure stems from several unresolved inconsistencies between the source and target codebases: ❶ dict_find() is re-named to tv_dict_find() in Neovim; ❷ the second parameter of dict_find() changes from char_u * to char * , making the explicit cast (char_u *) unnecessary; ❸ the second parameter of tv_get_number_chk() changes from int to _Bool , requiring the input argument error to be updated from int to bool ; and 
+
+❹ the global constant e_invalid_value_for_argument_str_str 
+
+is renamed to e_invargNval .
+
+PPatHF fails to correctly adjust the patch because inconsisten-cies in identifier definitions (e.g., changes in function signatures or variable names) are implicit: they are not exposed in the modified or context statements of the patch. In our motivating example, the un-resolved inconsistencies involve three identifiers newly introduced by the source patch, i.e., dict_find() , tv_get_number_chk() , and 
+
+e_invalid_value_for_argument_str_str , whose definitions are changed in the target codebase. Moreover, these changes are not reflected in the local context. Thus, PPatHF cannot perceive, let alone adapt to, these inconsistencies. More generally, implicit incon-sistencies are difficult to perceive during patch porting because the process typically focuses on applying transformation logic within a localized context, whereas identifying such inconsistencies requires examining patch details in the context of the entire codebase, i.e., ensuring the definition of every identifier in the patch remains con-sistent across two codebases. Addressing implicit inconsistencies is more challenging, even for human developers (see our user study in Section 6.1), as it requires knowledge of global mappings between the source and target codebases (i.e., how equivalent functionality is implemented in the target codebase). We aim to propose an approach to automatically address im-plicit inconsistencies in patch porting. Specifically, we leverage the compiler as a checker to give feedback on unresolved incon-sistencies in ported patches. Due to inconsistencies in identifier definitions, incorrectly ported patches contradict the context of the target codebase, resulting in compilation errors. By compiling the target codebase after applying the ported patch, we can accurately identify potential inconsistencies. For example, Figure 1(d) shows compiler diagnostics that clearly pinpoint the locations and causes of compilation errors induced by implicit inconsistencies. In the fol-lowing sections, we elaborate on addressing implicit inconsistencies based on compiler diagnostics. 
+
+## 3.2 Types of Implicit Inconsistencies 
+
+We conduct a preliminary study on patches ported from Vim to Neovim (i.e., cross-fork porting) and from the Linux kernel mainline to older versions (i.e., cross-branch porting) to gain a comprehensive view of the types of implicit inconsistencies in patch porting. We observe that implicit inconsistencies can be classified into two categories based on their causes. 
+
+Type-1: The identifier exists but with changed attributes. This type of inconsistency arises when an identifier exists in the target codebase but its definition has changed, leading to a mismatch between the identifier’s usage and its definition. Taking the patch shown in Figure 1 as an example, the type of the second parameter in the function definition of tv_get_number_chk() is changed from int * to _Bool * , resulting in an incompatible pointer type between the input argument and the defined parameter. 
+
+Type-2: The identifier does not exist. This type of incon-sistency is caused by ❶ the namespace conversion of iden-tifiers (e.g., functions, variables, and macros) between the source and target codebases. For example, the global con-stant e_invalid_value_for_argument_str_str is renamed to 
+
+e_invargNval in Figure 1; ❷ the identifier involved in the source patch does not have a corresponding one in the target codebase, i.e., the functionality of the identifier is not needed or is implemented in a different way. For example, in the patch shown in Figure 2, FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada Shengyi Pan, Zhongxin Liu, Jiayuan Zhou, Xing Hu, Xin Xia, and Shanping Li …                                   
+
+> sid =dict_get_number_def (argvars [0]. vval .v_dict ,"sid ",-1); -
+> if (sid == -1){-
+> dictitem_T *sid_di =dict_find (argvars [0]. vval .v_dict ,(char_u *) "sid ",3); +
+> if (sid_di != NULL ){+
+> int error =FALSE ;+
+> sid =tv_get_number_chk (& sid_di ->di_tv ,&error ); +
+> …+
+> if (sid <= 0){+
+> semsg (e_invalid_value_for_argument_str_str ,"sid ",+
+> tv_get_string (& sid_di ->di_tv )); +
+> return ;+
+> }+
+> }else {+
+> pat =dict_get_string (argvars [0]. vval .v_dict ,"name" ,TRUE );
+> …
+
+Project: Vim 
+
+Commit Message : patch 9.0.1431: getscriptinfo () loops even when specific SID is given 
+
+Problem : getscriptinfo () loops even when specific SID is given. 
+
+Solution : Only loop when needed. Give a clearer error message. ( closes #12207 )
+
+Commit Date : Ma r 31, 2023 
+
+void f_getscriptinfo (typval_T *argvars , typval_T *rettv )                                   
+
+> …
+> sid =tv_dict_get_number_def (argvars [0]. vval .v_dict ,"sid ",-1); -
+> if (sid == -1){-
+> dictitem_T *sid_di =dict_find (argvars [0]. vval .v_dict ,(char_u *) "sid ",3); +
+> if (sid_di != NULL ){+
+> int error =false ;+
+> sid =tv_get_number_chk (& sid_di ->di_tv ,&error ); +
+> …+
+> if (sid <= 0){+
+> semsg (e_invalid_value_for_argument_str_str ,"sid ",+
+> tv_get_string (& sid_di ->di_tv )); +
+> return ;+
+> }+
+> }else {+
+> pat =tv_dict_get_string (argvars [0]. vval .v_dict ,"name" ,true );
+> …
+
+(a) Source Patch (b) Target Patch 
+
+(c) Target Patch Ported by PPatH F (d) Compiler Diagnostics                                    
+
+> …
+> sid =tv_dict_get_number_def (argvars [0]. vval .v_dict ,"sid ",-1); -
+> if (sid == -1){-
+> dictitem_T *sid_di =tv_dict_find (argvars [0]. vval .v_dict ,"sid ",3); +
+> if (sid_di != NULL ){+
+> bool error =false ;+
+> sid =tv_get_number_chk (& sid_di ->di_tv ,&error ); +
+> …+
+> if (sid <= 0){+
+> semsg (e_invargNval ,"sid ",tv_get_string (& sid_di ->di_tv )); +
+> return ;+
+> }+
+> }else {+
+> pat =tv_dict_get_string (argvars [0]. vval .v_dict ,"name" ,true );
+> …
+
+Project: Neovim 
+
+Commit Message : vim -patch 9.0.1431: … 
+
+Commit Date : Apr 15, 2023 
+
+void f_getscriptinfo (typval_T *argvars , typval_T *rettv , EvalFuncData fptr )
+
+Figure 1: An example of patch porting with implicit inconsistencies int expand_wildcards_eval (…, char *** file , …)
+
+…
+
+*file = ALLOC_ONE (char *); +
+
+Source Patch 
+
+Target Patch 
+
+int expand_wildcards_eval (…, char *** file , …) 
+
+…
+
+*file = xmalloc (sizeof (char *)); +
+
+Figure 2: An example of structure changes in patch porting 
+
+the functionality of the macro ALLOC_ONE() in the source patch is implemented through the function xmalloc() in the target patch. 
+
+## 3.3 Challenges to Fix Implicit Inconsistencies 
+
+We can leverage compiler diagnostics to facilitate the fix of type-1 implicit inconsistencies. Compiler diagnostics explicitly point out the contradictions between identifier usage and its definition, which can be used to guide the fix. Taking the patch shown in Figure 1 as an example, the diagnostics given by the compiler clearly indicates that the second input argument of the function tv_get_number_chk() 
+
+is of type int * , while the expected type should be _Bool * const .Additionally, the diagnostics provide the retrieved function defini-tion from the target codebase for reference. Resolving type-2 inconsistencies (i.e., non-existent identifiers) is more challenging, which requires knowing mapping relation-ships between the implementations of equivalent functionality in static ff_stack_T * ff_create_stack_element (
+
+char_u *fix_part , char_u *wc_part , int level , int star_star_empty )
+
+{
+
+ff_stack_T *new ;
+
+new = ALLOC_ONE (ff_stack_T ); 
+
+…
+
+new ->ffs_prev = NULL ;
+
+…
+
+new ->ffs_wc_path = vim_strsave (wc_part ); 
+
+…
+
+return new ;
+
+}
+
+Function from the Source Codebase 
+
+static ff_stack_T *ff_create_stack_element (
+
+char_u *fix_part , char_u *wc_part , int level , int star_star_empty )
+
+{
+
+ff_stack_T *new = xmalloc (sizeof (ff_stack_T )); 
+
+new ->ffs_prev = NULL ;
+
+…
+
+new ->ffs_wc_path = vim_strsave (wc_part ); 
+
+return new ;
+
+}
+
+Function from the Target Codebase 
+
+Figure 3: A function pair showing ALLOC_ONE mapping 
+
+the source and target codebases. A straightforward approach is to retrieve the code element (e.g., a variable or function) that the iden-tifier points to in the source codebase, and then search for the most similar element of the same type in the target codebase. However, this approach has two limitations: ❶ the content of the identifier can differ significantly across two codebases, leading to incorrect Mitigating Implicit Inconsistencies in Patch Porting FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada Codebase 
+
+> target
+
+LLM 
+
+> Codebase
+> source
+
+Compiler Scheduler 
+
+Ported Patch 
+
+Figure 4: Overview of MIP 
+
+mappings; ❷ such mappings can only deal with namespace conver-sions. However, replacing non-existent identifiers can involve more complex structural transformations, where equivalent functionality is implemented in different ways (see Figure 2 for an example). Our insight is that the identifiers involved in implicit inconsis-tencies, typically newly introduced functions, macros, or global variables/constants, are often used in multiple locations across the codebase. Thus, we can construct code snippet pairs that involve the usage of the identifier between the source and target codebases. These usage snippet pairs provide an opportunity to infer how the functionality of the identifier is implemented in the target codebase. Taking the patch shown in Figure 2 as an example, we can retrieve a function from the source codebase that calls ALLOC_ONE , as well as its corresponding function in the target codebase (see Figure 3). This pair of functions share similar implementations, i.e., first create a ff_stack_T (a self-defined Struct ) object and then initialize its attributes using the input parameters. According to the function pair, we can infer that ALLOC_ONE() is used to allocate memory of a given type, and the same functionality in the target codebase is implemented through xmalloc(sizeof()) . Such indirect map-pings based on the usage context offer several benefits over direct mappings based on the identifier content: ❶ Since usage snippet pairs present broader context of how the same functionality (involv-ing the identifier usage) is fulfilled across codebases, we can deal with complex mappings that involve structural changes beyond namespace conversions. ❷ Alleviating mapping errors caused by substantial implementation divergence between codebases. When conducting mappings based on usage snippets, we can have multi-ple pairs (i.e., an identifier is typically used multiple times in the codebase) and rely on the promising ones. 
+
+## 4 Approach 
+
+In this section, we introduce our proposed approach, namely MIP .
+
+MIP automatically refines ported patches by detecting and address-ing implicit inconsistencies. We follow the setting of PPatHF [ 26 ], which ports the patch in a function-wise style, to conduct refine-ment at the function granularity. Specifically, given the function applied with the initially ported patch, MIP aims to output a refined version with potential implicit inconsistencies addressed. Note that 
+
+MIP is orthogonal to how the patch is initially ported (e.g., manually done by developers or automatically done by existing approaches). We first give an overview of MIP , then describe two specific mitiga-tion strategies used in its pipeline. 
+
+Algorithm 1: Refinement of Ported Patch                                                                               
+
+> 1Function MIP :Input :tgtFunc (target function applied with initially ported patch), tgtCB (target codebase), srcCB (source codebase), maxIter (max iterations)
+> Output : tgtFuncRefin (target function with implicit inconsistencies refined)
+> 2tgtFuncRefin ,curIter ←tgtFunc , 0
+> 3tgtCB ←apply_patch (tgtCB ,tgtFuncRefin )
+> 4errList ←compile (tgtCB )
+> 5while errList ≠∅and curIter <maxIter do
+> 6noIDErrList ←get_nonexist_identifier_err (errList )
+> 7if noIDErrList is not NONE then
+> 8for noIDErr in noIDErrList do
+> 9tgtFuncRefin ←fix_by_usage_pairs
+> (tgtFuncRefin ,noIDErr ,srcCB ,tgtCB )
+> 10 end
+> 11 else
+> 12 tgtFuncRefin ←fix_by_diagnostics (tgtFuncRefin ,
+> errList ,tgtCB )
+> 13 end
+> 14 curIter ←curIter +1
+> 15 tgtCB ←apply_patch (tgtCB ,tgtFuncRefin )
+> 16 errList ←compile (tgtCB )
+> 17 end
+> 18 return tgtFuncRefin
+
+## 4.1 Overview 
+
+Figure 4 presents the overview of MIP , consisting of three modules: 
+
+• Scheduler executes our designed mitigation plan. It first invokes the compiler to perform compilation and parses compiler diagnos-tics. Next, it browses the source and target codebases to retrieve fixing ingredients based on these diagnostics. Specifically, given an identifier, Scheduler can retrieve its definition and code snip-pets that involve its usage. Finallly, Scheduler invokes the LLM to execute instructions and parses the responses. 
+
+• LLM performs inferences (e.g., fixing specified errors) as in-structed by the Scheduler. 
+
+• Compiler compiles the target codebase and outputs diagnostics. As discussed in Section 3, implicit inconsistencies lead to compi-lation errors, and the compiler diagnostics offer information that facilitates error fix, including the exact location, detailed causes, and potential fixing suggestions. Algorithm 1 details our proposed patch refinement process for mitigating implicit inconsistencies. To start with, given the function applied with the initially ported patch, MIP first uses it to replace the corresponding unpatched function in the target codebase (Line 3). Then, MIP runs the compiler to compile the updated codebase and retrieves the initial compiler diagnostics (Line 4). Based on the initial diagnostics, MIP iteratively refines the patched function. The refinement process iterates until either no compilation errors are detected, implying that all inconsistencies have been resolved, or a pre-set maximum iteration number is reached (Line 5). In each iteration, MIP first fixes certain errors (Lines 6-12) and then refresh the diagnostics (Line 15&16). FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada Shengyi Pan, Zhongxin Liu, Jiayuan Zhou, Xing Hu, Xin Xia, and Shanping Li Codebase                                    
+
+> source
+> Codebase
+> target
+> Search
+> Source Usage
+> Functions
+> srcFunc !
+> …
+> srcFunc "
+> srcFunc #
+> tgt Func !
+> …
+> tgt Func "
+> tgt Func #
+> srcFunc !tgt Func !
+> srcFunc $tgt Func $
+> …
+> Match
+> &
+> Filter
+> Below are several examples demonstrating the equal transformation of
+> the `{ identifier_source }` from the source codebase to the target
+> codebase. Specifically, each example consists of …
+> ### Example –function that uses `{ identifier_source }`:
+> ### Example –function with `{ identifier_source }` transformed:
+> …
+> Explanations of the input u sage function pairs
+> Given a function that involves the usage of `{ identifier_source }`,
+> transform the `{ identifier_source }` into the equal implementation as
+> shown in the examples and generate the function after transformation .
+> ### Function before transforming `{ identifier_source }`: {input_function }
+> Instructions to conduct transformation following the demonstration s
+> Matched Target
+> Functions
+> Note that you should …Only answer with the function after
+> transformation, enclosed within three backticks (```)
+> srcFunc !
+> tgt Func !
+> Specific guidelines
+> Diagnostics
+> Process
+> Identifier
+> sourc e
+
+Figure 5: Pipeline of fixing non-existent identifiers through matched pairs of usage code snippets 
+
+Regarding the specific refinement process in each iteration (Lines 6-12), MIP first checks for errors caused by non-existent identifiers (Line 6). MIP prioritizes fixing this type of error, as is can be the cause of other errors. A typical example is the implicit function declaration error, i.e., a function is called before declara-tion [ 1]. The C compiler proceeds with compilation by generating a default implicit declaration, specifying an integer return type and no parameters. Typically, this implicit declaration does not match the intended function signature, leading to associated er-rors. MIP fixes non-existent identifier errors one by one based on mapping knowledge derived from retrieved usage code snippet pairs from two codebases, as discussed in Section 3.3. The details of fix_by_usage_pairs() are introduced in Section 4.2. Once fin-ished mitigating these errors, MIP directly transitions to the next refinement iteration, skipping any remaining errors in the current iteration and refreshing the diagnostics. If no non-existent identifier error is detected in the current iteration, MIP simultaneously fixes all remaining errors based on compiler diagnostics (see Section 4.3). 
+
+## 4.2 Fix by Matching Pairs of Usage Snippets 
+
+As discussed in Section 3.3, MIP fixes non-existent identifier errors by leveraging mapping knowledge derived from matched usage function pairs across two codebases. Figure 5 shows the pipeline. We first extract the source identifier, i.e., the non-existent identifier to be replaced in the ported patch, from the compiler diagnostics. Next, we search the source codebase to retrieve code snippets (functions in our implementation) that use this identifier. For each retrieved source function, we try to identify a corre-sponding function in the target codebase based on text and semantic similarities. We first narrow down the pool of candidates by se-lecting the top 𝑛 (i.e., five in our implementation) functions with the highest text similarities. Specifically, after preprocessing (e.g., removing comments and parsing code into tokens), we consider a hierarchy of text similarities at three levels of granularity: the function name, declaration, and body. We adopt this hierarchical approach, rather than directly comparing entire functions, to place greater emphasis on similarities in function declarations, which are generally more stable and less prone to change than function bod-ies. All functions from the target codebase are ranked by the sum of three similarity measures. For the top 𝑛 candidates, we further utilize the LLM to identify the one that is semantically equivalent to the given source function, thereby reducing potential mapping errors of relying solely on text similarity. Furthermore, since a global identifier is typically used multiple times throughout the codebase, we can retrieve multiple usage function pairs for it. To ensure the quality of the demonstrations used to guide the LLM, we further introduce two strategies to filter the candidate usage function pairs. First, we exclude usage function pairs with name or body similarity falls below preset thresholds. We seek to present the LLM with function pairs that are as similar as possible, since implementation differences could confuse the LLM in extracting the correct transformations of the designated identifier. Second, we sort the usage function pairs to select the top 𝑘 (i.e., three in our implementation) pairs with the shortest lengths. We aim to present the LLM with functions as concisely as possible, as excessive irrelevant context could distract the LLM from focusing on the transformation of the designated identifier. After retrieving the candidate usage function pairs, we use them to build the prompt as shown in Figure 5. The prompt is parame-terized over error-specific content, indicated with the ‘ {} ’ syntax. The prompt consists of three sections. The first section instructs the LLM on how to interpret input usage function pairs, i.e., exam-ples showing the transformations of the identifier from the source codebase to the target codebase. The second section directs the LLM to replace the use of the source identifier in the function to be refined, following the transformations shown in the provided usage function pairs. The third section offers specific guidelines to align the LLM’s behavior with our expectations (e.g., output format). 
+
+## 4.3 Fix by Compiler Diagnostics 
+
+For errors caused by changed definitions of the same identifier, we instruct the LLM to simultaneously fix all of them based on compiler diagnostics. Figure 6 presents the prompt constructed for our motivating example (see Figure 1). The prompt consists of three sections: a preamble, error-wise formatted diagnostics alongside the input buggy function, and instructions to guide the LLM to perform fix according to the compiler diagnostics. Rather than employing the infilling-style prompt commonly adopted by existing program repair works [ 19 , 34 , 37 ] (i.e., asks the LLM to fill in a specific masked buggy line), we use a refinement-style prompt (i.e., ask the LLM to refine the entire function). The rationale for this design is that a fix may not occur at the specific buggy location identified by the compiler, but in relevant contexts instead. For example, to address the incompatible pointer type of the input argument error 
+
+against the definition of tv_get_number_chk() shown in Figure 1, one needs to modify the variable type in the definition of error .The diagnostics for each compilation error consist of two parts: the error location and the error message, which may be accom-panied by additional notes providing necessary context for inter-preting the message. Instead of directly supplying the LLM with the text format of compiler diagnostics, we set the compiler to output the raw structured diagnostics (e.g., in json format) and convert it into an LLM-friendly format. Specifically, the text format of diagnostics visualizes the error with markers (see Figure 1(d)) Mitigating Implicit Inconsistencies in Patch Porting FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada Below is a buggy function, with the diagnostics output by the compiler .       
+
+> Prompt preamble
+> ### Compiler Diagnostics:
+> Buggy Line:
+> sid =tv_get_number_chk (& sid_di ->di_tv , &error);
+> Specific buggy token within the line: ‘tv_get_number_chk ’
+> Compiler error message:
+> passing argument 2 of ‘ tv_get_number_chk ’ from incompatible pointer type
+> note:expected ‘_Bool * const’ but argument is of type ‘int *’
+> …
+> ### Buggy Function: ```{ input_function }```
+> Formatted compiler diagnostics and input buggy function
+> Repair the buggy function to address the compilation errors.
+> You should make minimal but essential changes on the real buggy line(s). …
+> Only answer with the fixed function, enclosed within three backticks (```).
+> Instructions to fix the buggy function based on the compiler diagnostics
+> Error 1
+
+Figure 6: Prompt template for fixing by compiler diagnostics 
+
+to allow human developers to intuitively understand it. However, such visualization can be confusing for the LLM as it interprets the input as a sequence of tokens. We format the diagnostics in a straightforward way for the LLM to interpret, including three segments: 1) the specific buggy line extracted from the function, 2) the specific buggy token within the buggy line, 3) the error message, together with supplementary explanations. 
+
+## 5 Evaluation 
+
+In this section, we first introduce our experiment setting. Then, we describe the experiment results. 
+
+## 5.1 Experiment Setting 
+
+We aim to answer the following two RQs: 
+
+• RQ1: How effective is MIP in mitigating implicit inconsis-tencies during patch porting? 
+
+• RQ2: How effective is MIP with different LLMs? Dataset. We consider two typical patch porting scenarios in our experiments: cross-fork [ 26 , 40 ] and cross-branch [ 31 , 38 ]. For cross-fork porting, we use the dataset from PPatHF [26 ], which contains patches ported from Vim to Neovim. For cross-branch porting, we use the datasets from FixMorph [ 31 ] and TSBPORT [38 ], which contain patches backported from Linux mainline to older versions. Since this work focuses on automatically mitigating implicit incon-sistencies in ported patches, we further collect incorrectly ported patches with unresolved inconsistencies for evaluation. To avoid the high cost of manual porting, we apply state-of-the-art tech-niques (i.e., PPatHF for Vim-Neovim and TSBPORT for Linux) to port patches automatically and collect those that trigger compila-tion errors. Because automatically ported patches may also contain other types of errors (e.g., missing patch logic or incorrect patch lo-cations) that are beyond the scope of this work, we manually curate the results to retain only errors caused by implicit inconsistencies. Our user study (see Section 6.1) shows that implicit inconsisten-cies are more challenging for developers during manual validation, whereas other porting errors can usually be resolved using local information. Finally, the Vim-Neovim dataset contains 64 patch porting sam-ples with 143 implicit inconsistencies; one sample may contain multiple inconsistencies. Among them, 37 (25.8%) are type-1 and 106 (74.1%) are type-2. The Linux backporting dataset contains 44 samples with 62 implicit inconsistencies. All of them are type-2, possibly because the source and target codebases are less divergent in cross-branch porting [26]. 
+
+Validation Process. Following existing patch porting studies [ 31 ,32 , 38 ], we measure effectiveness by the number (percentage) of cor-rect fixes, where a correct fix is defined as one that is semantically equivalent to the ground truth. Since a ported patch may contain multiple implicit inconsistencies, we report results at both the patch and inconsistency levels for a more comprehensive evaluation. We manually validate each fix, following prior work on automated patch porting [ 31 , 38 ]. Specifically, two authors independently per-form the following steps: ❶ For each implicit inconsistency, we check the compiler diagnostics after applying the refined patch to ensure that the original compilation errors are resolved and no new compilation errors are introduced. ❷ We verify the semantic equivalence between the fix and the ground truth. ❸ If all implicit inconsistencies in a patch are correctly fixed without introducing irrelevant modifications, we regard it as a correct patch-level fix. After the independent annotations, the two authors discuss and resolve disagreements. The Cohen’s Kappa coefficient between the two annotators is 0.82, indicating strong inter-annotator agreement. 
+
+Implementation Details. We implement MIP with Llama3.1-70b [ 17 ] as the underlying LLM. We use gcc [ 1] as the proxy of the 
+
+Compiler in MIP , and set the output format of compiler diagnostics to json . The functionality of MIP that retrieves the definition and references of a given identifier from the codebase is implemented using GNU Global (i.e., a source code tagging system [ 4 ]). We imple-ment the source code analysis functionality of MIP (e.g., function signature extraction) using Tree-sitter [7]. 
+
+## 5.2 RQ1. The Effectiveness of MIP 
+
+Method. We evaluate the effectiveness of MIP in mitigating implicit inconsistencies on the test sets collected in Section 5.1. As the first study on mitigating implicit inconsistencies in patch porting, there is no direct baseline. We therefore include the following baselines: 
+
+❶ Compiler Suggestion (CS). For type-2 implicit inconsistencies (i.e., non-existent identifiers), compiler diagnostics may provide hints for potential fixes. For example, as shown in Figure 1(d), the compiler suggests replacing dict_find with tv_dict_find .Accordingly, this baseline replaces non-existent identifiers with compiler-recommended ones. ❷ Compiler Suggestion Enhanced by Function Definition Matching (CS+). For non-existent function calls, a more precise fix may be obtained by matching function defini-tions rather than relying only on compiler suggestions. Specifically, for each non-existent function detected by the compiler, we first retrieve its definition from the source codebase and then search the target codebase for the function with the most similar definition. We adopt the same similarity measure as MIP (see Section 4.2). 
+
+❸ Llama3.1-70b [17 ]. We also include the underlying LLM used in MIP as a baseline. Specifically, we keep all settings the same as FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada Shengyi Pan, Zhongxin Liu, Jiayuan Zhou, Xing Hu, Xin Xia, and Shanping Li 
+
+Table 1: Performance comparisons between MIP and base-lines for mitigating implicit inconsistencies Task Method Patch Level Inconsistency Level #Patch Patch% #T1 T1% #T2 T2%                                                 
+
+> Vim Neovim CS 2 / 64 3.1% 0 / 37 0.0% 9 / 106 8.5% CS+ 5 / 64 7.8% 0 / 37 0.0% 15 / 106 14.2% Llama 26 / 64 40.6% 27 / 37 73.0% 55 / 106 51.9%
+> MIP 52 / 64 81.3% 33 / 37 89.2% 98 / 106 92.5%
+> Linux Backport CS 0 / 44 0.0% //1 / 62 1.6% CS+ 4 / 44 9.1% //5 / 62 8.1% Llama 13 / 44 29.5% //21 / 62 33.9%
+> MIP 32 / 44 72.7% //50 / 62 80.6%
+
+MIP , except that for type-2 inconsistencies, we provide Llama with compiler diagnostics directly instead of retrieved pairs of usage snippets. Comparing MIP with Llama helps evaluate the effective-ness of our design, especially the use of usage-snippet pairs to guide the mitigation of type-2 inconsistencies. 
+
+Results. Table 1 compares MIP with the baselines in mitigating implicit inconsistencies during patch porting, where T1 and T2 denote type-1 and type-2 inconsistencies, respectively. For the CS 
+
+baseline, it fixes only a very limited number (less than 10% on both datasets) of type-2 inconsistencies. Based on our manual review, compiler suggestions for non-existent identifiers are mainly heuris-tic, typically searching for identifiers of the same type with the most similar names. As a result, they are effective only for simple namespace conversions (i.e., without structural changes) and when the corresponding identifier in the target codebase has a similar name. For CS+ , incorporating definition-based matching brings only limited improvement. Compared with CS , it correctly fixes six more type-2 inconsistencies (from 9 to 15) on Vim-Neovim and four more (from 1 to 5) on Linux. We identify two main reasons for its limited effectiveness. First, like compiler suggestions, it cannot handle fixes involving structural changes. Second, definition-based matching may fail when the source and corresponding target function im-plementations have significantly diverged. The poor performance of CS and CS+ supports our motivation for inferring indirect map-pings from identifier usage context, rather than relying on direct mappings based on identifier content. Regarding MIP , it correctly fixes 81.3% of patches on Vim-Neovim and 72.7% on Linux. Compared with Llama, MIP improves patch-level performance by over 100% on both datasets, mainly due to its stronger ability to handle type-2 inconsistencies. Specifically, 
+
+MIP correctly fixes 78.2% and 138.1% more type-2 inconsistencies on the two datasets, respectively. This improvement demonstrates the effectiveness of retrieving pairs of code segments involving the non-existent identifier to inject mapping knowledge into the LLM. Essentially, the off-the-shelf Llama lacks mapping knowledge between the source and target codebases. Instead, it mainly recalls 
+
+candidate implementations from the given context, relying on com-mon code patterns memorized during pretraining. After manually inspecting Llama’s results, we find that most correctly mitigated type-2 inconsistencies fall into two categories: 1) simple namespace conversions, and 2) common global constants or utility functions widely used in the target codebase, e.g., replacing vim_free() with 
+
+xfree() for memory deallocation. However, this recall -based strat-egy lacks rationale and is unreliable. ❶ Its effectiveness is highly if (( opt_type == 1 || opt_type == -1)+                          
+
+> && (tv ->v_type != VAR_STRING || !in_vim9script ())) +
+> Source Patch
+> Target Patch
+> Target Patch Refined by Our Approach
+> if (opt_type == 1|| opt_type == -1)+
+> if (( opt_type == 1|| opt_type == -1)+
+> && tv ->v_type != VAR_ STRING )+
+
+Figure 7: An example of failed mitigation 
+
+context-dependent; for example, we observe that the same non-existent identifier may be fixed differently across contexts, such as incorrectly fixing vim_free() by adding a type cast to its parame-ter. ❷ Since both source and target codebases continuously evolve, memorized knowledge from pretraining can also become outdated. This further highlights an advantage of MIP . Specifically, unlike the black-box recall of LLMs, our approach is evidence-based, with fixes guided by retrieved pairs of usage functions that explicitly show how the source identifier should be transformed. These usage function pairs also make it easier for developers to validate and adjust the suggested fixes. In addition, MIP increases the number of correctly fixed type-1 inconsistencies by 22.2% on Vim-Neovim. This is because provid-ing the LLM with all compilation errors at once can be confusing, especially when some errors are caused by non-existent identifiers (see Section 4.1). To address this, MIP adopts a schedule that first resolves non-existent identifiers and refreshes compiler diagnostics before handling other errors. 
+
+Failure Cases. We manually analyze the failure cases of MIP and categorize them into two main types: ❶ No valid code-segment pairs involving the identifier usage can be retrieved, or the retrieved pairs do not demonstrate valid and generalizable transformations. Such failures usually involve identifiers that are rarely used in the codebases. ❷ MIP (specifically, its underlying LLM) fails to accu-rately reason about the transformations shown in the retrieved code-segment pairs. These failures typically involve complex trans-formations. For example, for in_vim9script() (see Figure 7), MIP 
+
+successfully removes in_vim9script() in the refined patch, as in-dicated by the retrieved pairs, but fails to also remove the associated condition (i.e., tv->v_type != VAR_STRING ) that depends on it. 
+
+RQ1: Matching the corresponding identifier in the target codebase using only the identifier’s own information is ineffective. MIP 
+
+outperforms the baselines significantly. 
+
+## 5.3 RQ2. The Generalizability of MIP 
+
+Method. In RQ2, we evaluate the generalizability of MIP across different underlying LLMs. Specifically, we replace the default LLM with two additional models (i.e., GPT-4o [ 9] and DeepSeek-v3 [ 23 ]) while keeping all other settings unchanged. We conduct this eval-uation on the Vim-Neovim dataset, which exhibits a larger gap between the source and target codebases. 
+
+Results. Table 2 shows the performance of MIP with different underlying LLMs. Figure 8 further shows the overlap of failure cases among the three models. MIP -DeepSeek and MIP -GPT slightly outperform MIP -Llama , likely due to differences in the underlying Mitigating Implicit Inconsistencies in Patch Porting FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada 
+
+Table 2: Performance of MIP with different underlying LLMs Approach Patch Level Inconsistency Level #Patch Patch% #T1 T1% #T2 T2%                      
+
+> MIP -Llama 52 / 64 81.3% 33 / 37 89.2% 98 / 106 92.5%
+> MIP -GPT 54 / 64 84.4% 34 / 37 91.9% 98 / 106 92.5%
+> MIP -DeepSeek 55 / 64 85.9% 34 / 37 91.9% 99 / 106 93.4% 100009
+> GPT-4o DeepSeek-v3
+> 3
+> Llama3.1-70b
+
+Figure 8: Venn diagram of failure cases of different LLMs 
+
+coding abilities of the LLMs, as DeepSeek-v3 and GPT-4o have re-ported stronger performance than Llama3.1-70b on general coding benchmarks [ 12 , 24 ]. Notably, Figure 8 shows that the three vari-ants share a large portion of failure cases. Overall, these results suggest that MIP works effectively and consistently across different underlying LLMs, although its performance is still influenced by their coding capabilities. 
+
+RQ2: MIP performs consistently across different underlying LLMs, with better performance achieved by stronger coding models. 
+
+## 6 Discussion 
+
+In this section, we discuss the practical application of MIP , the lessons learned and the threats to validity. 
+
+## 6.1 User Study 
+
+We conduct a user study with developers at our industry partner to validate the effectiveness of our prototype. 
+
+Design. We select ten patch porting cases from Vim-Neovim, all involving implicit inconsistencies. For each case, participants are provided with a) the source patch and source codebase, b) the target codebase to be patched, and c) the patch initially ported by PPatHF [ 26 ] and further refined by MIP , which serves as a reference. Participants are asked to port the source patch to the target codebase and submit the patched version. During the process, they can run MIP to check the ported patch for unresolved implicit inconsistencies and obtain suggested fixes. We provide the compiler diagnostics, the retrieved usage function pairs referenced by MIP ,and the generated fix. We ensure that the selected cases do not overlap in the specific implicit inconsistencies involved. Among them, seven cases are ones where MIP correctly fixes the implicit inconsistencies, and three are ones where it fails. We include the failed cases to provide a more comprehensive view of MIP ’s impact on patch porting. We recruit six software engineers from our industry partner as participants. 
+
+Table 3: User study results                                                              
+
+> Tasks Correct Cases Failed Cases T1 T2 T3 T5 T6 T7 T9 T4 T8 T10 #Correct Exp. 3333333000Ctrl. 0331331000Time(s) Exp. 378.7 164.3 138.3 256.0 369.0 166.3 369.7 333.0 /269.7 Ctrl. 539.5 213.0 296.3 409.7 547.3 337.0 509.0 472.3 /423.3 Usefulness Exp. 5.0 4.7 4.7 4.7 5.0 4.7 5.0 5.0 1.0 5.0
+
+The six participants are randomly divided into two groups of three: a) the experimental group uses MIP , which provides diagnostics, suggested fixes, and retrieved usage function pairs; b) the control group uses only the compiler, which provides diagnostics alone. Before the study, we introduce the patch porting task and explain how to use MIP . To ensure familiarity with the task and tool, all participants complete three pilot tasks before the formal study. Each task has a time limit of 10 minutes, and participants may submit as soon as they finish. We record task completion time and participants’ ratings of MIP ’s usefulness on a 5-point Likert scale. If a participant fail to submit within the time limit, we mark the task as failed and ask them to explain the obstacles preventing completion. We also record the modifications participants make each time they run MIP /compiler for post-experiment analysis. 
+
+Results. Table 3 reports the correctness and average completion time of each task for the experimental and control groups. Com-pared with the control group, which has access only to compiler diagnostics, the experimental group completed tasks faster (271.7 vs. 416.4 seconds) and achieved higher correctness (21 vs. 14 correct answers). We interview the control-group participants about how they locate corresponding implementations in the target codebase. Two participants report that they first inspect compiler sugges-tions (if any), and then search the target codebase for identifiers with similar names or definitions. When these simple attempts fail, they adopt the same strategy as MIP , i.e., finding pairs of code snippets involving the identifier and inferring the mapping. The remaining participant uses this strategy directly. This helps explain the shorter completion times and higher correctness of the exper-imental group: MIP automates a process that the control group performs manually and conducts large-scale searches to retrieve high-quality usage-function pairs for mapping inference. For ex-ample, in T6, two non-existent identifiers need to be fixed, and locating the usage-function pairs is time-consuming because the corresponding functions in Neovim are renamed and placed in dif-ferent files. Thus, the control group spends much longer than the experimental group. By contrast, in T2, replacing STRLEN (a custom macro in Vim) with strlen is relatively straightforward, so the time gap between the two groups is small. For tasks (i.e., T4/8/10) where MIP fails to provide the correct fix, we find that the control group also struggles. In T4/10, where 
+
+MIP incorrectly reasons about the transformations demonstrated in the retrieved usage function pairs, developers also find these cases confusing. For example, in T4, the control group makes the same mistake as MIP , i.e., they remove only in_vim9script() but fail to remove the associated condition (see Figure 7). In T8, MIP fails because no valid usage-function pairs demonstrating the mapping can be retrieved. We observe that control-group participants aban-don the task, stating that they cannot find relevant information on how to replace the non-existent identifier. FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada Shengyi Pan, Zhongxin Liu, Jiayuan Zhou, Xing Hu, Xin Xia, and Shanping Li 
+
+Regarding the usefulness of MIP , participants in the experimental group generally give ratings of four or five (except for T8, where MIP 
+
+fails to retrieve any usage-function pairs). Our interview suggests that these high ratings stem from MIP providing both the fix and verifiable usage-function pairs that explain the mapping, allowing developers to efficiently verify the generated fixes. In addition, there are five cases (i.e., T1/2/4/6/9) where PPatHF 
+
+exhibits other porting errors, such as patch-location mismatch or failure to port part of the patch logic. We observe that all partici-pants still port the patches correctly. Participant feedback further indicates that porting errors other than implicit inconsistencies are usually easy to resolve, as they only require inspecting local context (e.g., the functions being patched). 
+
+## 6.2 Lessons Learned 
+
+Global contextual knowledge across codebases is a funda-mental challenge in patch porting, and effective automation should primarily focus on assisting developers in collecting such context. Our user study shows that developers can reliably and efficiently resolve porting errors confined to local context. In contrast, addressing implicit inconsistencies, which requires extab-lishing correct global mappings between semantically equivalent program elements across codebases, consistently incur the highest time overhead. Developers abandon tasks when no reliable map-ping evidence can be identified. MIP is effective precisely because it automates the collection of global contextual information by re-trieving usage-function pairs that expose cross-codebase mappings. However, MIP relies on the availability of such usage-based evi-dence and fails when no valid usage function pairs can be retrieved. Future tools should support collecting richer forms of context (e.g., code evolution history) to further reduce the burden on developers in collecting the global context required for patch porting. 
+
+Providing verifiable rationale for tool outputs is critical to the practical adoption of the tool. Our userstudy shows that developers require sufficient transparency to understand why a particular modification is applied before trusting and integrating it into production code. Participants consistently emphasized the importance of being informed about the MIP ’s underlying princi-ples, as well as the evidence provided by MIP (e.g., the retrieved usage function pairs demonstrating how equivalent functionality is implemented across codebases). Importantly, developers expect this evidence to be verifiable, rather than merely an explanation generated by the LLM. Moreover, making intermediate results in-spectable enables developers to efficiently follow the tool’s logic and validate the correctness of the ported patch. Future patch porting tools should prioritize transparency and evidence-driven outputs over opaque automation, ensuring that developers can confidently participate in, audit, and ultimately trust the porting process. 
+
+Controlling LLM hallucinations and limiting over-aggressive automation are essential for reliable patch porting. We ob-serve that LLMs may exhibit overly proactive behaviors, i.e., intro-ducing speculative or unintended code modifications, which can pose unexpected risks to the codebase and undermine developers’ trust in the tool. In practice, developers prefer conservative repair behavior, where modifications made by the tool are precise, mini-mal, and well-justified. Moreover, prompt inspection and feedback after each modification are crucial to preventing error accumulation and to avoid successive repairs diverging from the intended patch semantics. To support such conservativeness, it is critical to incor-porate validation mechanisms that constrain LLM hallucinations. In MIP , we employ a set of heuristics to validate each proposed modification, e.g., preventing the introduction of new non-existent identifiers, disallowing changes unrelated to the error location, and rejecting excessive or unnecessary edits. A modification is accepted and allowed to proceed to the next iteration only when all valida-tion conditions are satisfied. Otherwise, MIP refrains from making changes and falls back to the original code. Effective porting tools should adopt conservative modification strategies, relying on auto-matic validation and deferring to explicit human verification when necessary, rather than pursuing aggressive end-to-end automation. 
+
+## 6.3 Threats to Validity 
+
+Internal validity. First, our benchmark is constructed by running existing patch porting tools and then manually retaining patches whose remaining errors are caused by implicit inconsistencies. This process may introduce selection bias and make the benchmark partially dependent on prior tool behavior and manual curation decisions. Second, we manually assess fix correctness without be-havioral validation through testing and treat developer-submitted patches as the ground truth. As a result, the assessment may be influenced by validator expertise, and any errors in the developer patches could further bias the validation results. 
+
+External validity. Though our datasets cover two typical patch porting scenarios, only one project (pair) is involved in each sce-nario, i.e., the Vim-Neovim dataset for cross-fork porting and the Linux dataset for cross-branch porting. Nevertheless, these two datasets are typical and exclusively investigated in existing works [ 26 , 31 , 38 ]. Future works are required to collect larger patch porting datasets, involving more projects written in different pro-gramming languages, to more comprehensively evaluate the gener-alizability of MIP .
+
+## 7 Conclusion and Future Work 
+
+In this paper, we take the first step toward automating the mitiga-tion of implicit inconsistencies in patch porting. Our approach, MIP ,enables collaboration among an LLM, a compiler, and code analysis utilities. For inconsistencies caused by non-existent identifiers, MIP 
+
+retrieves matched code-segment pairs involving the identifier as mapping knowledge to guide mitigation. Experiments on cross-fork and cross-branch porting show that MIP effectively refines patches with unresolved implicit inconsistencies and fixes more than twice as many patches as the best-performing baseline. The results also demonstrate its generalizability across different underlying LLMs. We further conduct a user study with our industry partner to eval-uate its practical value in patch porting workflows. In future work, we plan to apply MIP to more projects and programming languages. 
+
+## ACKNOWLEDGMENTS 
+
+This research/project is supported by the National Natural Science Foundation of China (No.92582107) and Zhejiang Provincial Natural Science Foundation of China (No.LZ25F020003) Mitigating Implicit Inconsistencies in Patch Porting FSE Companion ’26, July 5–9, 2026, Montreal, QC, Canada 
+
+## References 
+
+[1] 2024. GCC Manual. https://gcc.gnu.org/onlinedocs/gcc-14.2.0/gcc.pdf. [2] 2024. GitHub Neovim Repository. https://github.com/neovim/neovim. [3] 2024. GitHub Vim Repository. https://github.com/vim/vim. [4] 2024. GUN Global source code tagging system. https://www.gnu.org/software/ global/global.html. [5] 2024. Linux Kernel Faces Reduction in Long-Term Support Due to Maintenance Challenges | Linux Jornal. https://www.linuxjournal.com/content/linux-kernel-reduction-longterm-support. [6] 2024. The top committer in Neovim is now zeertzjq. https://www.reddit.com/r/ neovim/comments/1dk860e/the_top_committer_in_neovim_is_now_zeertzjq/. [7] 2024. Tree-sitter | Introduction. https://tree-sitter.github.io/tree-sitter/. [8] 2024. vim/vim-issue#12207. https://github.com/vim/vim/pull/12207. [9] 2025. GPT-4o - OpenAI. https://platform.openai.com/docs/models/gpt-4o. [10] 2025. OpenEnler Official Site. https://www.openeuler.org/zh/. [11] 2025. Red Hat Enterprise Linux | Red Hat Customer Portal. https://access.redhat. com/products/red-hat-enterprise-linux/. [12] 2025, title=EvalPlus Leaderboard, howpublished=https://evalplus.github.io/ leaderboard.html. [13] 2026. The Linux Kernel CVE Flood Continues Unabated in 2025. https://tuxcare. com/blog/the-linux-kernel-cve-flood-continues-unabated-in-2025/. [14] 2026. Linux Vulnerability Surge of 2024: Strategic Responses for IT Lead-ers. https://codenotary.com/blog/linux-vulnerability-surge-of-2024-strategic-responses-for-it-leaders. [15] 2026. Long-term support - Wikipedia. https://en.wikipedia.org/wiki/Long-term_ support. [16] John Businge, Moses Openja, Sarah Nadi, and Thorsten Berger. 2022. Reuse and maintenance practices among divergent forks in three software ecosystems. 
+
+Empirical Software Engineering 27, 2 (2022), 54. [17] Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. 2024. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 (2024). [18] Wolfram Fenske, Jens Meinicke, Sandro Schulze, Steffen Schulze, and Gunter Saake. 2017. Variant-preserving refactorings for migrating cloned products to a product line. In 2017 IEEE 24th International Conference on Software Analysis, Evolution and Reengineering (SANER) . IEEE, 316–326. [19] Harshit Joshi, José Cambronero Sanchez, Sumit Gulwani, Vu Le, Gust Verbruggen, and Ivan Radiček. 2023. Repair is nearly generation: Multilingual program repair with llms. In Proceedings of the AAAI Conference on Artificial Intelligence , Vol. 37. 5131–5140. [20] Steffen Keßler and Paul Alpar. 2009. Customization of open source software in companies. In IFIP International Conference on Open Source Systems . Springer, 129–142. [21] Julia Lawall and Gilles Muller. 2018. Coccinelle: 10 years of automated evolution in the Linux kernel. In 2018 USENIX Annual Technical Conference (USENIX ATC 18) . 601–614. [22] Xingyu Li, Zheng Zhang, Zhiyun Qian, Trent Jaeger, and Chengyu Song. 2024. An Investigation of Patch Porting Practices of the Linux Kernel Ecosystem. In 
+
+2024 IEEE/ACM 21st International Conference on Mining Software Repositories (MSR) . IEEE, 63–74. [23] Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang, Bochao Wu, Chengda Lu, Cheng-gang Zhao, Chengqi Deng, Chenyu Zhang, Chong Ruan, et al . 2024. Deepseek-v3 technical report. arXiv preprint arXiv:2412.19437 (2024). [24] Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and LINGMING ZHANG. 2023. Is Your Code Generated by ChatGPT Really Correct? Rigorous Evaluation of Large Language Models for Code Generation. In Thirty-seventh Conference on Neural Information Processing Systems . https://openreview.net/forum?id=1qvx610Cu7 [25] Yoann Padioleau, Julia Lawall, René Rydhof Hansen, and Gilles Muller. 2008. Documenting and automating collateral evolutions in Linux device drivers. Acm sigops operating systems review 42, 4 (2008), 247–260. [26] Shengyi Pan, You Wang, Zhongxin Liu, Xing Hu, Xin Xia, and Shanping Li. 2024. Automating Zero-Shot Patch Porting for Hard Forks. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . 1–1. [27] Shengyi Pan, Jiayuan Zhou, Filipe Roseiro Cogo, Xin Xia, Lingfeng Bao, Xing Hu, Shanping Li, and Ahmed E Hassan. 2022. Automated unearthing of dangerous issue reports. In Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . 834–846. [28] Shaun Phillips, Jonathan Sillito, and Rob Walker. 2011. Branching and merging: an investigation into current version control practices. In Proceedings of the 4th international workshop on cooperative and human aspects of software engineering .9–15. [29] David Reid, Mahmoud Jahanshahi, and Audris Mockus. 2022. The extent of orphan vulnerabilities from code reuse in open source software. In Proceedings of the 44th International Conference on Software Engineering . 2104–2115. [30] Luyao Ren. 2019. Automated patch porting across forked projects. In Proceedings of the 2019 27th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering . 1199–1201. [31] Ridwan Shariffdeen, Xiang Gao, Gregory J Duck, Shin Hwei Tan, Julia Lawall, and Abhik Roychoudhury. 2021. Automated patch backporting in Linux (experience paper). In Proceedings of the 30th ACM SIGSOFT International Symposium on Software Testing and Analysis . 633–645. [32] Ridwan Salihin Shariffdeen, Shin Hwei Tan, Mingyuan Gao, and Abhik Roychoud-hury. 2020. Automated patch transplantation. ACM Transactions on Software Engineering and Methodology (TOSEM) 30, 1 (2020), 1–36. [33] Emad Shihab, Christian Bird, and Thomas Zimmermann. 2012. The effect of branching strategies on software quality. In Proceedings of the ACM-IEEE interna-tional symposium on Empirical software engineering and measurement . 301–310. [34] Weishi Wang, Yue Wang, Shafiq Joty, and Steven CH Hoi. 2023. Rap-gen: Retrieval-augmented patch generation with codet5 for automatic program repair. In Pro-ceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . 146–158. [35] Seunghoon Woo, Sunghan Park, Seulbae Kim, Heejo Lee, and Hakjoo Oh. 2021. CENTRIS: A precise and scalable approach for identifying modified open-source software reuse. In 2021 IEEE/ACM 43rd International Conference on Software Engineering (ICSE) . IEEE, 860–872. [36] Bozhi Wu, Shangqing Liu, Ruitao Feng, Xiaofei Xie, Jingkai Siow, and Shang-Wei Lin. 2022. Enhancing security patch identification by capturing structures in commits. IEEE Transactions on Dependable and Secure Computing (2022). [37] Chunqiu Steven Xia and Lingming Zhang. 2022. Less training, more repairing please: revisiting automated program repair via zero-shot learning. In Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . 959–971. [38] Su Yang, Yang Xiao, Zhengzi Xu, Chengyi Sun, Chen Ji, and Yuqing Zhang. 2023. Enhancing OSS Patch Backporting with Semantics. In Proceedings of the 2023 ACM SIGSAC Conference on Computer and Communications Security . 2366–2380. [39] Shurui Zhou. 2020. Improving Collaboration Efficiency in Fork-based Development .Ph. D. Dissertation. Carnegie Mellon University. [40] Shurui Zhou, Bogdan Vasilescu, and Christian Kästner. 2020. How has forking changed in the last 20 years? a study of hard forks on github. In Proceedings of the ACM/IEEE 42nd International Conference on Software Engineering . 445–456. [41] Weiqin Zou, Weiqiang Zhang, Xin Xia, Reid Holmes, and Zhenyu Chen. 2019. Branch use in practice: A large-scale empirical study of 2,923 projects on github. In 2019 IEEE 19th International Conference on Software Quality, Reliability and Security (QRS) . IEEE, 306–317.
