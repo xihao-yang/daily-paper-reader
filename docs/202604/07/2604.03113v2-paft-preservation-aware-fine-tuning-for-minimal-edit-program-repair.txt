@@ -1,0 +1,485 @@
+Title: PAFT: Preservation Aware Fine-Tuning for Minimal-Edit Program Repair
+
+URL Source: https://arxiv.org/pdf/2604.03113v2
+
+Published Time: Tue, 07 Apr 2026 01:41:24 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# PAFT : Preservation-Aware Fine-Tuning for Minimal-Edit Program Repair 
+
+# Boyang Yang 
+
+School of Artificial Intelligence (School of Software), Yanshan University Qinhuangdao, China yby@ieee.org 
+
+# Zijian Cai 
+
+School of Artificial Intelligence (School of Software), Yanshan University Qinhuangdao, China zijiancai6@gmail.com 
+
+# Shunfu Jin 
+
+School of Artificial Intelligence (School of Software), Yanshan University Qinhuangdao, China jsf@ysu.edu.cn 
+
+# Haoye Tian ∗
+
+Department of Computer Science, Aalto University Espoo, Finland tianhaoyemail@gmail.com 
+
+## Abstract 
+
+Large language models (LLMs) are effective for automated program repair, but plausible patches that pass the full test suite often rewrite more code than necessary, increasing review and maintenance costs. This over-editing is common because most bugs are localized, while standard supervised fine-tuning provides no explicit signal about which tokens should be preserved and which should be changed. We propose PAFT , a preservation-aware fine-tuning method for minimal-edit program repair. PAFT derives token-level preservation signals by aligning buggy and fixed code, combines them with full-sequence masking, and applies an edit-difficulty curriculum. Across Defects4J and HumanEval-Java, PAFT improves pass@1 by up to 65.6% over standard supervised fine-tuning ( Sft ) while reducing average edit distance (AED) by up to 32.6%. On Defects4J with DeepSeek-Coder-6.7B, PAFT also outperforms AdaPatcher, a strong preference-based repair baseline, improving pass@1 from 5.9% to 10.1% while reducing median AED from 61.0 to 42.0. Overall, 
+
+PAFT preserves stable context and concentrates edits on faulty regions, yielding smaller, more localized, plausible patches without inference-time search, reranking, or post-processing. 
+
+## CCS Concepts 
+
+• Software and its engineering → Software maintenance tools ;
+
+Software testing and debugging .
+
+## Keywords 
+
+automated program repair, large language models, fine-tuning, minimal-edit repair, software maintenance 
+
+## 1 Introduction 
+
+Large language models (LLMs) have become a dominant foundation for automated program repair (APR) [ 14 , 17 , 26 , 30 ]. In practice, however, a useful repair patch is not merely one that passes the avail-able tests. It should also keep edits localized to the fault-relevant region and preserve stable surrounding implementation whenever broader rewriting is unnecessary. This matters because patches are reviewed, revised, and merged under maintenance constraints, and 
+
+> ∗Corresponding author.
+
+code review studies have shown that change size, change decom-position, and reviewability are closely related [ 1, 8, 22 ]. Yet recent evidence shows that LLM-generated patches often exceed human reference patches in size, indicating systematic over-editing [ 31 ]. Over-editing is especially problematic in APR because most tokens in the buggy input belong to a stable context, while only a small region typically requires modification. Within the broader goal of maintainable patch generation, this paper focuses on one central bottleneck: preventing unnecessary rewriting of stable code. Fig-ure 1 illustrates this failure mode and the minimal-edit behavior we target. A key reason this problem persists is that current LLM-based APR is still largely realized through prompting or standard super-vised fine-tuning [ 12 , 26 ]. Recent work has further shown that the way repair is aligned with the model’s underlying objective ma-terially affects APR performance [ 28 ]. Yet these formulations still optimize generation toward the reference patch without explicitly distinguishing the stable context that should be copied from the fault-relevant code that should be edited. A model can therefore produce a functionally plausible patch while still rewriting sur-rounding logic that ought to remain intact. Repair correctness and edit locality are only weakly coupled in the training signal, which makes localized repair difficult to learn from standard Sft alone. Despite growing interest in more controlled repair, existing work still leaves some gaps. Most APR pipelines are still optimized pri-marily for test-suite passing [ 27 , 31 , 34 ]. Prompt-based repair and standard fine-tuning can improve repair capability, but they do not make preservation an explicit training target [ 12 , 26 , 28 ]. Mean-while, current mechanisms for controlling edit scope are also mostly indirect. Post-hoc reduction methods move minimality control to inference time through repeated validation [ 16 , 35 ]; preference-based repair methods instead rely on extra preference construction beyond paired buggy and fixed code, as in AdaPatcher, and connect naturally to DPO- and RLHF-style alignment recipes [5, 20, 21]. Another gap concerns evaluation. Existing APR work typically reports pass@k together with patch-size statistics, yet prior APR evaluation research has shown that test-suite metrics are only im-perfect proxies for repair reliability and that evaluation choices can materially change conclusions [ 18 , 33 ]. For review-oriented repair, the practical question is narrower: among plausible patches, did  
+
+> arXiv:2604.03113v2 [cs.SE] 6 Apr 2026 , , Boyang Yang, Zijian Cai, Shunfu Jin, and Haoye Tian
+
+the model change only what was necessary? Without an automatic edit metric empirically tied to human judgments of patch quality, it remains difficult to compare methods or to optimize minimal-edit behavior in a principled way. Within the broader goal of maintainable patch generation, this paper studies one measurable subproblem: stable-context preserva-tion under plausible repair, rather than maintainability in full. We ask whether a supervised repair model can be trained to change less code while preserving or improving repair effectiveness, and whether the resulting edit metrics align with human judgments of review-oriented patch quality. We address these gaps with PAFT , a preservation-aware fine-tuning framework for minimal-edit program repair. PAFT starts from a simple observation: paired buggy and fixed code already con-tains a usable preservation signal. We align buggy and fixed code with a deterministic token-matching procedure, derive token-level preservation signals, and upweight aligned target tokens during fine-tuning so that the model learns to copy stable spans and concen-trate edits on the faulty region. We further combine this objective with full-context supervision and an edit-difficulty curriculum to stabilize training. This design moves minimality control into train-ing itself, without extra preference labels, inference-time reduction, reranking, or search. Across Defects4J and HumanEval-Java, PAFT improves pass@1 by up to 65.6% over standard Sft and reduces average edit distance (AED) by up to 32.6%. On Defects4J, it also outperforms repre-sentative prompt-based, fine-tuning-based, and preference-based baselines. We further show, through targeted human annotation, that AED aligns better with review-oriented human judgments than simpler patch-size indicators, while Code Consistency Rate (CCR) provides a complementary view of stable-context preservation. The main contributions of our work are as follows: 
+
+• We identify over-editing, namely unnecessary rewriting of stable code, as a distinct failure mode in LLM-based program repair and, through targeted human annotation, show that AED aligns better with review-oriented human judgments than simpler patch-size indicators, with CCR as a complemen-tary preservation metric. 
+
+• We propose PAFT , a lightweight preservation-aware fine-tuning method that derives preservation supervision directly from aligned buggy and fixed code, without extra preference labels, inference-time reduction, reranking, or search. 
+
+• We conduct comprehensive experiments on Defects4J and HumanEval-Java with three backbone code LLMs, showing that PAFT consistently improves pass@1 and, in most settings, improves AED and CCR over standard Sft . On Defects4J, it also outperforms representative prompt-based, fine-tuning-based, and preference-based baselines. 
+
+## 2 Motivating Example 
+
+Figure 1 presents a representative case on Defects4J Cli-28 with DeepSeek-Coder-6.7B. This defect is a useful stress test for preser-vation because the required semantic change is highly localized, while the surrounding context already makes the intended behavior explicit. The loop should process each option independently. When a property value is not affirmative, the correct behavior is to skip 
+
+Figure 1: Motivating example of PAFT .
+
+only the current option and continue scanning the remaining en-tries. In the buggy code, however, the loop executes break rather than continue , which terminates the iteration prematurely and prevents later options from being processed. The defect therefore concerns the scope of control transfer, rather than the predicate, the loop structure, or the placement of cmd.addOption(opt) .Because the nearby comment already states the intended behavior, any patch that rewrites substantially more than this control token requires additional justification. Panel B shows the behavior of the base model. Instead of re-pairing the control token in place, the model rewrites nearby logic, reformulates the predicate, moves cmd.addOption(opt) into the branch body, and alters the surrounding comment. This pro-duces a much larger diff than the defect warrants and changes the original filter-then-add structure of the loop. The resulting patch is superficially plausible, but it mixes the true fix with predicate rewriting and statement motion; in this case, the extra structural drift also causes the patch to fail tests. This example highlights a common failure mode of unconstrained generation: when the model is not explicitly encouraged to preserve stable spans, it tends to re-express surrounding logic, even when the fault itself is narrow and well-localized. Panel C illustrates a subtler limitation of standard Sft . After fine-tuning, the model repairs the premature termination and passes the test suite, but it still adds an explicit guard for null or empty strings that is not required by the defect. Even if the resulting be-havior remains acceptable, the patch becomes semantically noisier than necessary. A reviewer must now inspect an additional branch whose connection to the original fault is weak. This is precisely the distinction that pass@ 𝑘 misses: a patch can be plausible and func-tionally correct, yet still expand the edit scope beyond the causal location of the bug. In review-oriented settings, that extra verifi-cation burden matters, because unnecessary control-flow changes make it harder to determine whether the patch is truly faithful to the original implementation intent. Panel D shows the behavior encouraged by PAFT . The model changes only break to continue and preserves the predicate, PAFT : Preservation-Aware Fine-Tuning for Minimal-Edit Program Repair , , 
+
+the comment, and the placement of cmd.addOption(opt) ex-actly. This one-token repair restores the intended per-option control flow without perturbing stable context. The patch is therefore not only smaller, but also more faithful to the original code narrative, easier to audit, and less likely to introduce incidental behavioral changes outside the true fault. More importantly, it captures the training objective of PAFT : copying should be the default behav-ior on aligned stable spans, while edits should concentrate on the faulty region. The aggregate results in Tables 7 and 9 follow the same pattern. Lower AED and higher CCR are therefore not merely indicators of shorter diffs; they reflect whether a model repairs the true fault while preserving the original code structure, a distinction that pass@ 𝑘 alone does not reveal. 
+
+## 3 Methodology 3.1 Data Preparation 
+
+Each training instance is serialized into a single sequence using the backbone’s instruction or chat template, where the user segment contains the prompt and buggy context, and the assistant segment contains the reference fix as the target generation. Let D be the training corpus built from TutorLLMCode (1535 instances) [ 32 ]. For each (𝑝, 𝑏, 𝑓 ) ∈ D , tokenization with the backbone tokenizer yields 
+
+𝑥 = (𝑥 1, . . . , 𝑥 |𝑥 | ).To derive a preservation signal, we extract the buggy and fixed code segments and tokenize them with the same tokenizer, obtain-ing token identifier sequences 𝑇 (𝑏 ) and 𝑇 (𝑓 ). We then compute a deterministic token-level alignment between these sequences using a Ratcliff/Obershelp-style pattern matching procedure [ 23 ]. The procedure recursively identifies long contiguous matching spans and yields a set of matching blocks (𝑖, 𝑗, 𝑛 ), where the length-
+
+𝑛 span starting at position 𝑖 in 𝑇 (𝑏 ) matches the span starting at position 𝑗 in 𝑇 (𝑓 ). This matching-block alignment is consis-tent with the widely used SequenceMatcher strategy. We treat the union of matched token positions in 𝑇 (𝑓 ) as copy-worthy and map them onto the corresponding response-token positions in 𝑥 . Let 
+
+Ialign ⊆ { 1, . . . , |𝑥 |} denote the set of response positions whose target tokens fall inside these matched spans. Intuitively, Ialign iden-tifies response tokens in the fix that can be copied from the buggy context. Alignment is computed only over code tokens. Specifically, we strip prompt wrappers, role markers, and fenced-block delimiters before matching, and we tokenize the extracted buggy and fixed code with the same backbone tokenizer. After matching, each aligned token position in 𝑇 (𝑓 ) is mapped back to its absolute index inside the assistant code span in 𝑥 ; tokens outside the extracted fixed-code span keep unit weight. When repeated tokens induce overlapping matching blocks, we take their union in 𝑇 (𝑓 ), which yields a deterministic binary preservation mask for the response. 
+
+## 3.2 Preservation-Aware Fine-Tuning 
+
+We fine-tune 4-bit NF4 quantized backbones with QLoRA adapters [ 7 ,11 ]. For an adapted linear layer, let 𝑊 0 ∈ R𝑑 out ×𝑑 in denote the pre-trained weight matrix. Under QLoRA, the backbone weight is stored in 4-bit NF4 form and dequantized on the forward pass, while a trainable low-rank update is added: 
+
+𝑊 eff = Dequant  QNF4 (𝑊 0) + Δ𝑊 , Δ𝑊 = 𝛼 𝑟 𝐵𝐴, 
+
+where 𝐴 ∈ R𝑟 ×𝑑 in and 𝐵 ∈ R𝑑 out ×𝑟 are trainable LoRA factors, and 
+
+𝑟 and 𝛼 are the LoRA rank and scaling factor, respectively. For an input hidden state ℎ, the adapted projection is ℎ′ = 𝑊 eff ℎ. We optimize only the adapter parameters 𝜃 = {𝐴 ℓ , 𝐵 ℓ }ℓ and keep the quantized backbone frozen. The per-token autoregressive negative log-likelihood is 
+
+ℓ𝑡 (𝜃 ) = − log 𝑝 𝜃 (𝑥 𝑡 | 𝑥 <𝑡 ) .
+
+We assign a weight to each token position: 
+
+𝑤 𝑡 =
+
+(
+
+𝑤 align if 𝑡 ∈ I align ,
+
+1 otherwise , 𝑤 align > 1.
+
+The masked, weighted loss for a training instance is 
+
+L( 𝜃 ; 𝑥, 𝑀 ) =
+
+Í|𝑥 |  
+
+> 𝑡 =1
+
+𝑀 𝑡 𝑤 𝑡 ℓ𝑡 (𝜃 )
+
+Í|𝑥 | 
+
+> 𝑡 =1
+
+𝑀 𝑡 𝑤 𝑡 
+
+.
+
+We consider two common types of loss masks: assistant-only masking (loss on response tokens) and full-sequence masking (loss on both prompt and response tokens). In the main comparisons, Sft 
+
+follows the assistant-only convention used in standard instruction tuning, while PAFT uses full-sequence masking unless otherwise stated. Section 5.4 isolates the impact of masking from preservation-aware token reweighting. Since Ialign is defined over response posi-tions, preservation reweighting is applied only to response tokens. Over the training corpus, we optimize 
+
+𝜃 ★ = arg min 
+
+> 𝜃
+
+1
+
+|D| ∑︁ (𝑝,𝑏,𝑓 ) ∈ D 
+
+L( 𝜃 ; 𝑥, 𝑀 ),
+
+where 𝑥 and 𝑀 are induced by the instance (𝑝, 𝑏, 𝑓 ).In this paper, PAFT denotes the full training recipe consisting of full-sequence masking, an edit-difficulty curriculum, and alignment-based preservation weighting. We retain the assistant-only Sft base-line because it matches common widely-used instruction-tuning practice, and we isolate the incremental contribution of each added component in Section 5.4. We therefore interpret the main RQ-2 results as a comparison between a standard Sft baseline and the complete PAFT recipe, rather than as evidence that token reweight-ing alone explains the full gain. 
+
+## 3.3 Curriculum over Edit Difficulty 
+
+To stabilize optimization, we order training examples by an edit-difficulty proxy based on the line-level diff size dl (𝑏, 𝑓 ). Let ℓ𝑏 =
+
+Lines (N ( 𝑏 )) and ℓ 𝑓 = Lines (N ( 𝑓 )) , where N (·) applies the nor-malization used for diff computation. We compute a unified diff between ℓ𝑏 and ℓ 𝑓 , and denote by 𝑎 line (𝑏, 𝑓 ) and 𝑑 line (𝑏, 𝑓 ) the num-bers of added and deleted lines, respectively. We then define 
+
+dl (𝑏, 𝑓 ) = 𝑎 line (𝑏, 𝑓 ) + 𝑑 line (𝑏, 𝑓 ).
+
+Within each epoch, we iterate from smaller dl (𝑏, 𝑓 ) to larger dl (𝑏, 𝑓 ),so the model first learns localized edits and then gradually adapts to larger diffs [2]. , , Boyang Yang, Zijian Cai, Shunfu Jin, and Haoye Tian Input Alignment  Transformer  with  QLoRA  Preservation -Aware Loss                                    
+
+> Buggy:
+> Target :
+> [ctx] [def ][foo] [(] [x] [:]
+> Alignment Label
+> Model Input:
+> [P] [...] [ctx] [def] [foo] [(] [x][:] [SEP] Token + Pos Embedding
+> (Frozen)
+> Transformer
+> Block L N
+> LoRA
+> θN
+> Transformer
+> Block L 1
+> LoRA
+> θ1
+> LM Head / Softmax
+> (Frozen)
+> Predictions ŷ: [Â ] [B̂ ][Ŷ] [Ĉ]
+> Targets y: [A] [B] [Y] [C]
+> Walign Walig n1.0 Walig n
+> [-log p(A)] [-log p(B)] [-log p(Y)] [-log p(C)]
+> Total Weighted Loss L(θ)
+> Stable Token
+> Changed Token
+> Trainable Params
+> Frozen Params
+> Alignmen tWeight
+> Gradient Flow
+> [ctx] [def] [foo] [(] [:] [self ]
+
+Figure 2: Overview of PAFT . We derive an alignment-guided preservation signal from (𝑝, 𝑏, 𝑓 ) and fine-tune a quantized code LLM with QLoRA using a preservation-aware token weighting and an edit-difficulty curriculum. 
+
+## 3.4 Repair Inference 
+
+At inference time, PAFT uses the same instruction or chat template as in training to serialize a repair context 𝑐 , consisting of the prompt and buggy code followed by the assistant-generation prefix. The concrete prompt templates and decoding settings are specified in the experimental setup. Given 𝑐 , the model generates a repair sequence 
+
+ˆ𝑦 = ( ˆ𝑦 1, . . . , ˆ𝑦 𝑚 ) autoregressively: 
+
+𝑝 𝜃 ( ˆ𝑦 | 𝑐 ) =
+
+> 𝑚
+
+Ö
+
+> 𝑡 =1
+
+𝑝 𝜃 ( ˆ𝑦 𝑡 | 𝑐, ˆ𝑦 <𝑡 ) .
+
+Each conditional distribution is computed by the same QLoRA-adapted model used during fine-tuning. For every adapted layer ℓ,the effective inference weight is 
+
+𝑊 eff  
+
+> ℓ
+
+= Dequant  QNF4 (𝑊 ℓ, 0) + 𝛼 𝑟 𝐵 ℓ 𝐴 ℓ ,
+
+that is, the frozen 4-bit NF4 backbone plus the learned low-rank update. No alignment set Ialign , token weights 𝑤 𝑡 , or loss mask 𝑀 𝑡 
+
+is used at inference time. 
+
+PAFT performs standard left-to-right decoding and produces a candidate patch in one pass, stopping at the end-of-sequence token or a preset generation limit. When multiple candidates are needed for pass@ 𝑘 , we independently repeat the same sampling process under the same model and prompt. PAFT does not introduce inference-time alignment computation, edit-distance regularization, reranking, or search. Any behavioral differences relative to Sft are induced solely by training-time differences in the learned QLoRA adapters, not by changes to the decoding algorithm. 
+
+## 4 Experimental Setup 4.1 Benchmarks 
+
+We evaluate PAFT on 2 complementary Java repair benchmarks. HumanEval-Java contains function-level buggy programs with unit tests, enabling controlled evaluation within a single-function scope [ 14 ]. Defects4J is a project-level benchmark that uses realistic build-and-test harnesses to capture repository-scale defects under compilation and integration constraints [ 15 ]. For Defects4J, we di-rectly reuse the benchmark data and evaluation scripts released by MORepair [ 32 ]. Together, these benchmarks cover both local single-function repair and repository-scale repair under full project constraints. We follow the same test-driven evaluation workflow as MORe-pair. A generated patch is counted as plausible only if it compiles and passes the corresponding benchmark test suite. We report pass@ 𝑘 for 𝑘 ∈ { 1, 5, 10 } as the main functional-correctness met-ric. Beyond test validation, we also evaluate edit magnitude and preservation on plausible patches using the metrics in Section 4.5, namely CCR, AED, ATCL, and ATCT. 
+
+## 4.2 Models 
+
+We evaluate 5 models in total. The 3 open-source backbones that we fine-tune under the unified QLoRA setting are Qwen3-8B [29], OpenCoder-8B-Instruct [ 13 ] (denoted as OpenCoder-8B), and Deep-Seek-Coder-6.7B [ 10 ] (denoted as DS-Coder-6.7B). We addition-ally report zero-shot reference results from Qwen3-Max [ 29 ] and DeepSeek-V3 [ 6 ] to provide stronger reference points beyond the 6B to 8B fine-tuned setting. PAFT : Preservation-Aware Fine-Tuning for Minimal-Edit Program Repair , , 
+
+## 4.3 Training Data 
+
+For supervised training, we use the TutorLLMCode repair cor-pus released by MORepair [ 32 ]. After applying the same parsing rules across all backbones, we obtain 1535 valid buggy-fix pairs in instruction-following format. Each parsed instance contains an 
+
+instruction field that includes the task statement and buggy program, and a response field that contains the corrected pro-gram. From each instance, we extract the prompt 𝑝 , buggy code 𝑏 ,and fixed code 𝑓 for training. TutorLLMCode also provides an expert-assigned problem-diff-iculty label on an 11-point scale. Difficulty 1 corresponds to intro-ductory programming exercises, while Difficulty 11 corresponds to top-tier algorithmic contest problems. This label describes the intrinsic difficulty of the underlying problem, not the size of the concrete repair. Table 1 reports the distribution. Overall, 58.18% of the instances fall into difficulty levels 1–4, whereas only 14.72% fall into levels 8–11. Therefore the dataset spans a broad pedagogical range, but it is concentrated in the lower-to-middle portion of the scale.                                 
+
+> Difficulty Instances Share (%) Difficulty Instances Share (%) 1189 12.3 7155 10.1 2184 12.0 891 5.9 3228 14.9 962 4.0 4292 19.0 10 67 4.4 572 4.7 11 60.4 6189 12.3
+
+Table 1: Expert-annotated problem difficulty of TutorLLM-Code (1535 instances). 
+
+Our curriculum does not use the expert-assigned problem diffi-culty above. Instead, it uses an edit-difficulty signal derived directly from each buggy-fix pair. We compute a unified diff between the buggy and repaired code, exclude the diff headers, and count only the added and deleted lines. The resulting diff sizes range from 1 to 119 lines, with a mean of 16.66 and a median of 11. The distri-bution is right-skewed: 49.25% of the instances require no more than 10 diff lines, 70.88% require no more than 20 diff lines, and only 5.34% involve more than 50 diff lines. Most training examples, therefore, correspond to small-to-moderate local repairs, while a small long-tail subset requires substantially larger edits. Table 2 summarizes this edit-difficulty distribution using 3 coarse stages. The table is descriptive rather than operational. During training, we still traverse examples in ascending order by the exact line-diff size dl (𝑏, 𝑓 ), with ties preserved in the original order. This keeps the curriculum simple, tokenizer-independent, and directly tied to the granularity of edits. We also check for train-test contamination. We normalize buggy and fixed code snippets with the same function used in our diff metrics, including whitespace normalization and comment removal, and compare SHA-256 hashes between TutorLLMCode and both evaluation benchmarks. We find no exact overlap between any normalized training snippet and any normalized evaluation snippet.                      
+
+> Stage Diff-line range Instances Ratio (%) Mean diff Stage 1 1–5 444 28.93 2.89 Stage 2 6–17 563 36.68 10.51 Stage 3 ≥18 528 34.40 34.80 Total 1–119 1535 100.00 16.66
+
+Table 2: Three-stage summary of the edit-difficulty distribu-tion in the training set, based on diff-line counts. 
+
+## 4.4 Training and Inference Protocol 
+
+We fine-tune each open-source backbone with QLoRA under a unified configuration: 4-bit NF4 quantization, maximum sequence length 2048, LoRA rank 𝑟 = 32 with 𝛼 = 16 and dropout 0.05, AdamW with learning rate 2 × 10 −4, batch size 1, and 3 epochs [7 , 19 ]. All experiments are run on a single NVIDIA RTX 4090 GPU. Unless otherwise stated, we set 𝑤 align = 2.0.All methods use the same self-contained repair prompt and the same decoding configuration so that differences come from the training objective rather than prompt wording. For Defects4J, the prompt includes the title, natural-language bug description, file-name, and buggy Java code. HumanEval-Java contains the filename and the buggy function. In both benchmarks, the buggy code is wrapped by the literal markers <BOF> and <EOF> and rendered inside a fenced Java block. We append an opening “‘java fence after <EOF> and extract the first fenced Java block as the candidate patch. The Prompting baseline differs only by inserting the phrase 
+
+with the minimal change into the final request sentence. Backbone-specific chat wrappers are used only for serialization and share the same parsing logic for buggy and fixed code. At inference time, sampling uses a temperature of 0.7, a maximum gen-eration length of 1024 tokens, and identical decoding termination criteria across all settings. 
+
+## 4.5 Evaluation Metrics 
+
+We report functional correctness as pass@ 𝑘 for 𝑘 ∈ { 1, 5, 10 }. A candidate patch is considered plausible if it compiles and passes the benchmark test suite [4]. To measure patch minimality, we compare each plausible pre-dicted patch 𝑃 𝑖 against its buggy input 𝐵 𝑖 after applying a shared normalization function N (·) , which normalizes whitespace and removes comments. Let ℓ𝑋 𝑖 = Lines (N ( 𝑋 𝑖 )) and 𝑡 𝑋 𝑖 = 𝑇 (N ( 𝑋 𝑖 )) 
+
+denote the normalized line and token sequences for 𝑋 ∈ { 𝐵, 𝑃 }. Un-less otherwise noted, all minimality metrics are averaged over the subset of tasks for which a method produces at least one plausible patch. We use Average Edit Distance (AED) as the primary edit-locality metric: 
+
+AED = 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+Lev char (N ( 𝐵 𝑖 ), N ( 𝑃 𝑖 )) , (1) where a lower AED indicates fewer character-level edits. We use Code Consistency Rate (CCR) as a complementary preser-vation metric: 
+
+CCR = 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+𝑘 𝑖 
+
+𝑚 𝑖 
+
+, (2) , , Boyang Yang, Zijian Cai, Shunfu Jin, and Haoye Tian 
+
+where 𝑚 𝑖 = |ℓ𝑃 𝑖 | and 𝑘 𝑖 is the number of lines in ℓ𝑃 𝑖 that also appear verbatim in ℓ𝐵 𝑖 after normalization. Higher CCR indicates stronger preservation of stable context. We additionally report Average Total Changed Lines (ATCL) and Average Total Changed Tokens (ATCT), defined as the total number of added and deleted lines or tokens in the normalized diff between the buggy code and the plausible patch. 
+
+## 5 Experiments & Results 5.1 RQ1: Minimal-Edit Behavior and Metric Validity 
+
+[Experiment Goal for RQ1]: We aim to understand whether current off-the-shelf repair models already produce minimal and review-friendly patches, and whether the automatic metrics used in this paper reflect human judgments of patch reasonableness. This RQ establishes both the need for preservation-aware training and the metric choice used in the later experiments. 
+
+[Experiment Design for RQ1]: We use two complementary anal-yses. First, we evaluate selected off-the-shelf code LLMs on De-fects4J under the same decoding and evaluation pipeline, and report pass@ 𝑘 , CCR, AED, ATCL, and ATCT. Second, we conduct a human preference study on 50 randomly selected Defects4J bugs. For each bug, we present the buggy code and 2 plausible candidate patches in randomized order to 3 annotators, who choose the more reasonable patch based on semantic correctness and the extent of unnecessary modification. The study contains 2 rounds. Round I uses randomly sampled patch pairs. Round II restricts attention to cases where a metric-preferred patch conflicts with at least 1 size-related indicator. We measure inter-annotator reliability with Fleiss’ 𝜅 , then compare metric-induced rankings with each annotator’s preference using Macro-F1 and Cohen’s 𝜅 .The annotation protocol was intentionally comparative. Each item contained the buggy snippet and two plausible patches with model identities removed. The left-right order of the two patches was randomized independently for each annotator. We recruited three annotators with Ph.D. degrees in computer science. Anno-tators were instructed to prefer the patch that best preserves the original intent while avoiding unnecessary modifications, assuming that both candidates pass the available tests. Ties were not allowed, so that every item yielded a forced preference. Tables 5and 6 re-port per-annotator agreement, where metric-induced rankings are compared against each individual annotator’s preference. Because the conflict subset in Round II is defined separately for each metric, the evaluated patch pairs can differ across AED, CCR, ATCL, and ATCT; Table 4 therefore reports Fleiss’ 𝜅 on the metric-specific subsets used in each round. 
+
+[Experimental Results for RQ1]: Table 3 shows that stronger off-the-shelf models achieve higher pass@1, but they still produce patches with substantial edit overhead. For example, Qwen3-Max and DeepSeek-V3 reach pass@1 of 30.4% and 40.6%, yet their AED remains 104.3 and 158.3, respectively. Models with similar CCR can also differ sharply in AED. This pattern shows that functional correctness and edit locality are not tightly coupled. Higher pass@ 𝑘 
+
+does not guarantee a smaller or better-localized patch, which di-rectly motivates a training objective that explicitly rewards the preservation of stable context. Table 4 shows substantial and consistent agreement among an-notators in both rounds, with Fleiss’ 𝜅 between 0.710 and 0.733. Tables 5 and 6 further show that AED and CCR align much better with human judgments than size-only metrics. In Round I, AED and CCR both achieve strong agreement across all annotators. In the conflict subset of Round II, AED remains the most reliable signal, with F1 of 0.929/0.857/0.852 and 𝜅 of 0.838/0.676/0.678, while CCR degrades more noticeably and ATCL/ATCT fall to near-random or even negative agreement. We therefore use AED as the primary metric for patch quality and CCR as a secondary metric for stable-context preservation. 
+
+Table 4: Fleiss’ 𝜅 for the three annotators. In Round II, the evaluated subset is metric-specific because conflict cases are defined by the metric-induced ranking. 
+
+Metric Round I Round II AED 0.733 0.729 CCR 0.732 0.733 ATCL 0.733 0.710 ATCT 0.732 0.727 
+
+Table 5: Alignment between automatic metrics and human preferences in Round I. 
+
+Human Annotator Metric Annotator 1 Annotator 2 Annotator 3 F1 𝜅 F1 𝜅 F1 𝜅 
+
+AED 0.951 0.874 0.881 0.714 0.836 0.648 CCR 0.963 0.919 0.893 0.757 0.846 0.680 ATCL 0.786 0.513 0.692 0.363 0.704 0.357 ATCT 0.724 0.343 0.643 0.190 0.667 0.280 
+
+Table 6: Alignment between automatic metrics and human preferences in Round II (conflict subset). 
+
+Human Annotator Metric Annotator 1 Annotator 2 Annotator 3 F1 𝜅 F1 𝜅 F1 𝜅 
+
+AED 0.929 0.838 0.857 0.676 0.852 0.678 CCR 0.826 0.680 0.773 0.595 0.739 0.520 ATCL 0.531 0.074 0.533 0.131 0.453 −0.137 
+
+ATCT 0.500 −0.016 0.480 −0.025 0.520 0.054 
+
+[RQ-1] Findings: Even the strongest off-the-shelf models still over-edit, with DeepSeek-V3 reaching 40.6% pass@1 but AED still at 158.3; in the human study, AED is the most reliable metric on the conflict subset, with F1 up to 0.929 and 𝜅 up to 0.838. 
+
+Insights: The main quality risk in LLM-based repair is often not a missed fix but a misplaced diff: a model can repair the observed behavior while editing well beyond the causal fault, and AED exposes that error earlier than pass@k. PAFT : Preservation-Aware Fine-Tuning for Minimal-Edit Program Repair , , 
+
+Table 3: Performance of off-the-shelf code models on Defects4J. Best results in each column are shown in bold. 
+
+Model pass@1 pass@5 pass@10 CCR ↑ AED ↓ ATCL ↓ ATCT ↓
+
+Open-source models 
+
+Qwen3-8B 9.7 19.2 23.5 64.3 190.7 9.7 92.1 OpenCoder-8B 7.9 18.7 25.1 76.6 137.9 8.3 80.1 DS-Coder-6.7B 5.8 14.6 19.4 70.7 142.9 8.3 81.7 
+
+Closed-source models 
+
+Qwen3-Max 30.4 37.4 39.0 78.1 104.3 6.8 68.4 DeepSeek-V3 40.6 48.8 51.1 76.3 158.3 6.7 62.2 
+
+## 5.2 RQ2: Effectiveness of PAFT across Benchmarks 
+
+[Experiment Goal for RQ2]: We aim to evaluate whether preser-vation-aware supervision improves both repair correctness and patch maintainability across benchmarks and backbone models. 
+
+[Experiment Design for RQ2]: For each backbone, we compare 3 settings: (i) Base , the off-the-shelf model; (ii) Sft , standard super-vised fine-tuning with the same data and QLoRA adapters but with-out preservation weighting; and (iii) PAFT , our alignment-weighted fine-tuning method. We evaluate Qwen3-8B, OpenCoder-8B, and DS-Coder-6.7B on Defects4J and HumanEval-Java using the same prompt templates, decoding configuration, and evaluation harness. AED and CCR are computed on plausible patches and averaged over the subset of tasks with plausible outputs. Loss masking details are described in Section 3 and are further isolated in RQ4. 
+
+[Experimental Results for RQ2]: On Defects4J, Table 7 shows that PAFT improves pass@1 for all 3 backbones and substantially reduces AED relative to both Base and Sft . The strongest gain appears on DS-Coder-6.7B, where PAFT raises pass@1 from 5.8% to 10.1%, reduces AED from 142.9 to 80.7, and increases CCR from 70.7 to 76.3. Qwen3-8B and OpenCoder-8B show the same pattern. On HumanEval-Java, Table 8 shows that PAFT again improves pass@1 for all 3 backbones and usually improves AED and CCR over Sft , with the largest pass@1 gain on OpenCoder-8B from 33.0% to 50.4%. Although CCR is not uniformly improved in every setting, the overlap analysis shows that PAFT retains a large shared core with Base and Sft while contributing the largest unique region, including 35 unique instances on Defects4J and 20 on HumanEval-Java. These gains indicate that PAFT does not merely shrink diffs; it learns to preserve stable spans while still improving repair success. Compared to Base and Sft , PAFT contributes the largest unique solved set on Defects4J, with 35 instances solved only by PAFT ,compared with 12 for Base and 7 for Sft .On HumanEval-Java, Table 8 shows that PAFT generalizes be-yond project-level repair and continues to improve correctness under a function-level setting. Relative to Base , PAFT sharply im-proves pass@1 and reduces AED for all 3 backbones. Relative to Sft ,
+
+PAFT consistently improves pass@1 and usually improves AED and CCR. The largest gain appears on OpenCoder-8B, where pass@1 increases from 33.0% under Sft to 50.4% under PAFT , while AED drops from 100.4 to 74.2 and CCR rises from 69.9 to 74.8. Qwen3-8B also improves from 51.3% to 57.3% in pass@1 while reducing AED from 76.0 to 69.2. The main exception is DS-Coder-6.7B, where 
+
+PAFT improves pass@10 from 71.8% to 78.3% with better AED, but CCR decreases from 71.4 to 67.2. This exception confirms that correctness gains do not automatically imply better preservation, which is why both AED and CCR should be reported. Overlap analysis shows the same overall trend at the instance level: PAFT 
+
+contributes the largest unique solved set on HumanEval-Java, with 20 instances solved only by PAFT , compared with 4 for Sft and 0 for Base .
+
+[RQ-2] Findings: Across all settings, PAFT improves pass@1 over Sft , with gains up to 52.7% on HumanEval-Java and up to 65.6% relative on Defects4J, while reducing AED among all settings. Insights: PAFT changes the repair distribution rather than merely shrinking outputs: it makes the model treat sur-rounding code as default context to preserve, so gains in cor-rectness come from better edit placement rather than broader rewriting. 
+
+## 5.3 RQ3: Comparison with Representative Baselines 
+
+[Experiment Goal for RQ3]: We aim to determine whether the gains of PAFT come from preservation-aware learning itself, rather than from a minimal-change prompt or from generic fine-tuning. 
+
+[Experiment Design for RQ3]: We fix DS-Coder-6.7B and eval-uate on Defects4J. We compare Base , Sft , Prompting , RepairL-LaMA [ 24 ], AdaPatcher [ 5], and PAFT under the same evaluation harness and decoding configuration. The Prompting setting dif-fers from Base only by adding an explicit instruction requesting minimal changes. We also report Min@10 AED and Max@10 CCR, obtained by selecting for each bug the plausible candidate with the smallest AED or the largest CCR among the 10 sampled can-didates. These statistics provide an optimistic bound for test-time selection policies, while all main comparisons still use the default single-sample decoding. 
+
+[Experimental Results for RQ3]: Table 9 shows that PAFT achiev-es the best pass@ 𝑘 and the lowest AED across average, median, and Min@10 statistics. Figure 3 provides a distributional view over plausible patches and shows the same pattern: PAFT shifts the AED distribution leftward and attains the lowest mean and median AED among all methods. Compared with RepairLLaMA, PAFT raises pass@1 from 7.0% to 10.1%, reduces average/median AED from 149.1/111.0 to 80.7/42.0, and increases average/median CCR from 35.3/25.0 to 76.3/85.4. Compared with Prompting , PAFT still im-proves pass@1 from 8.3% to 10.1% while sharply reducing edits from 148.6/104.5 to 80.7/42.0 under average/median AED, showing , , Boyang Yang, Zijian Cai, Shunfu Jin, and Haoye Tian 
+
+Table 7: Effectiveness of PAFT on Defects4J. 
+
+Model Method @1 @5 @10 AED ↓ CCR ↑
+
+Qwen3-8B 
+
+Base 9.7 19.2 23.5 190.7 64.3 
+
+Sft 10.2 (+5.2%) 23.0 (+19.8%) 30.0 (+27.7%) 101.8 (+46.6%) 72.9 (+13.4%) 
+
+PAFT 13.0 (+34.0%) 25.3 (+31.8%) 30.5 (+29.8%) 68.6 (+64.0%) 76.4 (+18.8%) OpenCoder-8B 
+
+Base 7.9 18.7 25.1 137.9 76.6 
+
+Sft 6.8 (-13.9%) 17.3 (-7.5%) 22.9 (-8.8%) 110.2 (+20.1%) 76.7 (+0.1%) 
+
+PAFT 10.1 (+27.8%) 22.5 (+20.3%) 28.3 (+12.7%) 78.8 (+42.9%) 78.1 (+2.0%) DS-Coder-6.7B 
+
+Base 5.8 14.6 19.4 142.9 70.7 
+
+Sft 6.1 (+5.2%) 15.1 (+3.4%) 18.9 (-2.6%) 93.5 (+34.6%) 70.6 (-0.1%) 
+
+PAFT 10.1 (+74.1%) 21.2 (+45.2%) 26.4 (+36.1%) 80.7 (+43.5%) 76.3 (+7.9%) 
+
+Table 8: Effectiveness of PAFT on HumanEval-Java. 
+
+Model Method @1 @5 @10 AED ↓ CCR ↑
+
+Qwen3-8B 
+
+Base 44.8 69.6 76.5 257.7 51.3 
+
+Sft 51.3 (+14.5%) 77.9 (+11.9%) 83.2 (+8.8%) 76.0 (+70.5%) 74.3 (+44.8%) 
+
+PAFT 57.3 (+27.9%) 82.1 (+18.0%) 86.8 (+13.5%) 69.2 (+73.1%) 74.6 (+45.4%) OpenCoder-8B 
+
+Base 30.9 72.4 85.1 233.3 55.3 
+
+Sft 33.0 (+6.8%) 72.3 (-0.1%) 82.6 (-2.9%) 100.4 (+57.0%) 69.9 (+26.4%) 
+
+PAFT 50.4 (+63.1%) 79.6 (+9.9%) 86.3 (+1.4%) 74.2 (+68.2%) 74.8 (+35.3%) DS-Coder-6.7B 
+
+Base 11.0 35.7 49.7 285.2 56.1 
+
+Sft 19.1 (+73.6%) 55.5 (+55.5%) 71.8 (+44.5%) 112.8 (+60.4%) 71.4 (+27.3%) 
+
+PAFT 21.7 (+97.3%) 60.8 (+70.3%) 78.3 (+57.5%) 103.3 (+63.8%) 67.2 (+19.8%) 
+
+Table 9: Comparison on DS-Coder-6.7B for Defects4J. Min@10 (resp. Max@10) selects the plausible patch with the smallest AED (resp. the largest CCR) among the 𝑘 =10 candidates.                                                 
+
+> Method pass@1 pass@5 pass@10 AED (Avg./Med./Min@10) ↓CCR (Avg./Med./Max@10) ↑
+> Base 5.8 14.6 19.4 142.9 / 113.0 / 95.5 70.7 / 77.0 / 77.5
+> Sft 6.1 (+5.2%) 15.1 (+3.4%) 18.9 (-2.6%) 93.5 (+34.6%) / 73.5 (+35.0%) / 54.7 (+42.7%) 70.6 (-0.1%) / 78.2 (+1.6%) / 80.7 (+4.1%)
+> Prompting 8.3 (+43.1%) 19.3 (+32.2%) 24.7 (+27.3%) 148.6 (-4.0%) / 104.5 (+7.5%) / 77.6 (+18.7%) 72.2 (+2.1%) / 75.0 (-2.6%) / 79.3 (+2.3%) RepairLLaMA 7.0 (+20.7%) 17.7 (+21.2%) 23.7 (+22.2%) 149.1 (-4.3%) / 111.0 (+1.8%) / 105.4 (-10.4%) 35.3 (-50.1%) / 25.0 (-67.5%) / 56.8 (-26.7%) AdaPatcher 5.9 (+1.7%) 16.6 (+13.7%) 22.1 (+13.9%) 112.4 (+21.3%) / 61.0 (+46.0%) / 77.0 (+19.4%) 79.3 (+12.2%) / 87.5 (+13.6%) / 84.2 (+8.6%)
+> PAFT 10.1 (+74.1%) 21.2 (+45.2%) 26.4 (+36.1%) 80.7 (+43.5%) / 42.0 (+62.8%) / 48.9 (+48.8%) 76.3 (+7.9%) / 85.4 (+10.9%) / 81.8 (+5.5%)
+
+that a prompt-only minimal-change instruction does not reliably control edit scope. Compared with AdaPatcher, PAFT improves pass@1 from 5.9% to 10.1% and reduces AED from 112.4/61.0/77.0 to 80.7/42.0/48.9, although AdaPatcher remains higher on CCR. This difference matters because higher CCR alone does not yield better overall repair quality when plausibility is lower and character-level edits remain larger. Even with oracle selection among 10 samples, 
+
+Base reaches AED Min@10 of 95.5 and CCR Max@10 of 77.5, both still worse than PAFT ’s single-sample median AED and CCR of 42.0 and 85.4. Overall, PAFT provides the strongest trade-off be-tween correctness, locality, and preservation, and it consistently outperforms Sft in both plausibility and edit locality. 
+
+[RQ-3] Findings: On Defects4J with DS-Coder-6.7B, PAFT 
+
+achieves the best overall trade-off, raising pass@1 to 10.1% ver-sus 8.3% for Prompting, 7.0% for RepairLLaMA, and 5.9% for AdaPatcher, while lowering average AED to 80.7 versus 148.6, 149.1, and 112.4. Insights: Outperforming strong baselines sug-gests that preservation-aware fine-tuning is an effective general recipe for tasks that require both accuracy and controlled modi-fication, not only for minimal-edit program repair. 
+
+Figure 3: Distribution of AED values over plausible patches on Defects4J for DS-Coder-6.7B and its variants. The first row corresponds to the base DS-Coder-6.7B model. PAFT shifts the distribution toward smaller edits and achieves the lowest mean and median AED among all compared methods. 
+
+## 5.4 RQ4: Which Components of PAFT Matter Most? 
+
+[Experiment Goal for RQ4]: We aim to isolate the contribution of each design choice in PAFT , including standard fine-tuning, cur-riculum learning, alignment weighting, and full-sequence masking. PAFT : Preservation-Aware Fine-Tuning for Minimal-Edit Program Repair , , 
+
+[Experiment Design for RQ4]: We fix DS-Coder-6.7B and evalu-ate all variants on Defects4J under the same data, training budget, and decoding protocol as in the main experiments. Starting from the base checkpoint, we progressively add (i) standard supervised fine-tuning on the target patch tokens, (ii) full-sequence masking, and (iii) an edit-difficulty curriculum. We then sweep the align-ment weight 𝑤 align while keeping the rest of the recipe fixed. Here, 
+
+𝑤 align = 1.0 disables token upweighting, 𝑤 align = 2.0 is the default setting, 𝑤 align = 0.0 ignores the loss on aligned response tokens, and 𝑤 align = 4.0 is an over-weighted diagnostic variant. We also compare variants without full masking, including an assistant-only masking configuration, to isolate the value of full-sequence mask-ing. 
+
+[Experimental Results for RQ4]: Table 10 shows that standard fine-tuning mainly improves minimality rather than correctness. Relative to the base checkpoint, fine-tuning reduces AED from 142.9 to 93.5 while leaving pass@1 nearly unchanged at 6.1. Adding full-sequence masking improves pass@1 to 7.4 and CCR to 71.4, but the subsequent curriculum step pushes AED up to 111.2 and lowers CCR to 68.3, showing that diff-size ordering alone can bias training toward more aggressive edits when preservation is not explicitly optimized. Variants without full masking are consistently weaker than full PAFT . For example, the assistant-only configuration with 
+
+𝑤 align = 2.0 reaches pass@1/5/10 of 9.8/19.5/22.9 with AED 112.2 and CCR 75.1, which remains worse than full PAFT on correctness and edit distance. Sweeping 𝑤 align shows that 𝑤 align = 2.0 provides the best overall trade-off. Relative to the curriculum variant with 𝑤 align = 1.0, the default setting improves pass@1 from 8.3 to 10.1, reduces AED from 111.2 to 80.7, and increases CCR from 68.3 to 76.3. Setting 
+
+𝑤 align = 0.0 increases CCR to 75.8, but it hurts pass@1 and AED, indicating that preservation without sufficient learning on edit tokens is not enough. Increasing 𝑤 align further to 4.0 lowers pass@1 to 8.2 and raises AED to 106.9 while only slightly improving CCR to 77.8. This pattern suggests that overly strong upweighting over-regularizes the model toward copying and weakens learning on the actual edit tokens. 
+
+[RQ-4] Findings: On Defects4J with DS-Coder-6.7B, adding preservation-aware weighting at 𝑤 𝑎𝑙𝑖𝑔𝑛 = 2.0 raises pass@1 from 8.3% to 10.1% and reduces AED from 111.2 to 80.7 over the same curriculum variant without weighting, showing that the main gain comes from preservation-aware supervision rather than generic fine-tuning alone. Insights: A promising applica-tion of PAFT is to use it alongside capability-oriented adaptation methods, enabling models to improve task accuracy while pre-serving more stable content. 
+
+## 6 Discussion 
+
+Our results suggest that minimal-edit repair should be treated as a training objective rather than merely a decoding preference or a post hoc ranking criterion. By making stable-context preserva-tion explicit during fine-tuning, PAFT improves correctness while reducing unnecessary rewriting, which is especially valuable in review-oriented repair settings where a patch must be both test-passing and easy to inspect. The human preference results further suggest that AED and CCR are useful operational proxies for re-view burden among plausible patches, although they should still be interpreted as approximations rather than direct measures of maintainability. The current findings should be interpreted within the scope of the evaluated setting. We study single-file Java repair on De-fects4J (with file-level bug locations) and HumanEval-Java, so the reported gains should not yet be taken as evidence for multi-file, cross-language, or repository-scale repair. Moreover, PAFT uses token-level alignment as a lightweight proxy for preservation. This design is efficient and effective, but it can under-credit semantically equivalent rewrites and does not represent the full space of accept-able fixes, since each training instance provides only one reference patch. 
+
+PAFT should also be viewed as a developer aid rather than a fully autonomous repair system. Since correctness is judged by the available test suites, a plausible patch may still be semantically incorrect when the test suites are incomplete. This is especially im-portant for safety-critical code, where additional validation beyond test passing remains necessary. Our human study was designed to minimize ethical risk: participants compared code snippets only, no personally identifying information was collected, and the displayed examples were screened for identifying or offensive content. The experiments relied on established public datasets, and the released artifacts are limited to scripts and generated results. In practice, 
+
+PAFT is best suited to developer-in-the-loop workflows, where its main benefit is to reduce review overhead by producing patches that are both more accurate and more conservative in edit scope. 
+
+## 7 Threats to Validity 
+
+External validity. To reduce the risk that the observed gains are specific to a single model or evaluation setup, we evaluate 
+
+PAFT across three backbone code LLMs and two complementary Java benchmarks under a unified training and evaluation protocol. These settings cover both function-level and project-level repairs, and the consistent improvements across them provide evidence that the method is not tied to any particular backbone or narrow repair scenario. The remaining external-validity threat concerns the breadth of transfer rather than whether the method works beyond a single setting. 
+
+Internal validity. A central internal-validity threat is whether the observed improvements can be attributed to preservation-aware supervision rather than to unrelated implementation or protocol differences. We reduce this threat by using the same training data, prompt structure, parsing rules, decoding configuration, and unified evaluation harness across Base, Sft , and PAFT , so the compared settings differ only in the intended training recipe. We further mitigate effect-attribution concerns by conducting ablations that separately examine standard fine-tuning, full-sequence masking, curriculum learning, and alignment weighting, all using the same backbone and training budget. These results show that the full PAFT 
+
+recipe is consistently stronger than the corresponding variants and that alignment weighting is a major source of the gain, even though interactions among components also contribute to the final outcome. We also reduce data-leakage risk through an exact SHA-256 contamination check between normalized training snippets , , Boyang Yang, Zijian Cai, Shunfu Jin, and Haoye Tian 
+
+Table 10: Ablation with DS-Coder-6.7B on Defects4J.                                                                                           
+
+> Method pass@1 pass@5 pass@10 AED ↓CCR ↑
+> Base checkpoint 5.8 14.6 19.4 142.9 70.7 + Fine-tuning 6.1 (+5.2%) 15.1 (+3.4%) 18.9 (-2.6%) 93.5 (+34.6%) 70.6 (-0.1%) + Full masking 7.4 (+27.6%) 18.8 (+28.8%) 25.6 (+32.0%) 105.0 (+26.5%) 71.4 (+1.0%) + Curriculum 8.3 (+43.1%) 19.9 (+36.3%) 26.4 (+36.1%) 111.2 (+22.2%) 68.3 (-3.4%)
+> PAFT (Best) 10.1 (+74.1%) 21.2 (+45.2%) 26.4 (+36.1%) 80.7 (+43.5%) 76.3 (+7.9%) - Full masking 8.7 (+50.0%) 18.4 (+26.0%) 22.6 (+16.5%) 110.7 (+22.5%) 74.3 (+5.1%)
+> PAFT (assistant-only, 𝑤 align =2.0)9.8 (+69.0%) 19.5 (+33.6%) 22.9 (+18.0%) 112.2 (+21.5%) 75.1 (+6.2%)
+> PAFT (𝑤 align =0.0)7.3 (+25.9%) 19.3 (+32.2%) 25.9 (+33.5%) 120.2 (+15.9%) 75.8 (+7.2%)
+> PAFT (𝑤 align =1.0)8.3 (+43.1%) 19.9 (+36.3%) 26.4 (+36.1%) 111.2 (+22.2%) 68.3 (-3.4%)
+> PAFT (𝑤 align =2.0)10.1 (+74.1%) 21.2 (+45.2%) 26.4 (+36.1%) 80.7 (+43.5%) 76.3 (+7.9%)
+> PAFT (𝑤 align =4.0)8.2 (+41.4%) 19.6 (+34.2%) 25.1 (+29.4%) 106.9 (+25.2%) 77.8 (+10.0%)
+
+and both evaluation benchmarks. As in all stochastic fine-tuning and sampling-based generation settings, run-to-run variation may affect absolute scores, but the consistency of the gains across models, benchmarks, and ablations reduces the likelihood that the main conclusions are artifacts of a particular run. 
+
+Construct validity. Our construct is intentionally narrow. We study review-oriented minimal-edit repair among plausible patches, rather than claiming to measure maintainability in full. Accordingly, pass@k together with benchmark compilation and test execution operationalizes repair plausibility, while AED, CCR, ATCL, and ATCT operationalize edit locality and stable-context preservation. These metrics do not cover every aspect of semantic equivalence, developer intent, or long-term maintainability, but they are well aligned with the concrete repair behavior targeted by PAFT . We further strengthen this construct with a human-annotation study of 50 Defects4J bugs, which shows that AED and CCR more closely align with human preferences than size-only indicators, especially when metrics disagree. 
+
+## 8 Related Work 8.1 Automated Program Repair 
+
+Automated program repair (APR) has substantially reduced the manual effort required for defect fixing, and LLM-based approaches have become the dominant paradigm, such as ChatRepair [ 26 ], which adopts a procedural conversational framework that decom-poses repair into multiple interaction steps. However, most existing LLM-based APR methods optimize for a single objective, namely generating patches that pass the available test suite, while overlook-ing patch maintainability. Although such patches may pass all the tests, they often introduce redundant code or unnecessarily disrupt the original code structure [ 9 ]. A study of 567 patches generated by Claude Code found that although 83.8% of the patches were ultimately accepted, 41.5% still required manual revision before being merged, with most revisions involving refactoring and style alignment [ 3 ]. These observations motivate our focus on patch min-imization in addition to test-suite passing, to reduce unnecessary edits and ease downstream review. 
+
+## 8.2 Minimal-Edit APR 
+
+To encourage APR systems to generate minimal patches, existing methods mainly rely on prompt design to steer LLMs toward pre-serving the original code intent and avoiding unnecessary modifica-tions. However, prompt-based methods depend heavily on a model’s ability to consistently follow task-specific instructions. Their behav-ior is often unstable across different defect categories, and they usu-ally require manually tailored prompts for different models [ 25 ]. To address this issue, AdaPatcher [ 5] proposes a preference-based fine-tuning framework that constructs a large-scale preference dataset of approximately 52,000 program repair triplets and adopts a two-stage training pipeline, first Sft and then DPO, to guide the model toward smaller edits. This design, however, incurs substantially higher training cost [ 36 ] and additional overhead for preference data construction. Unlike AdaPatcher, PAFT relies only on paired buggy/fixed examples and avoids the additional preference-data construction and DPO stage. In our experiments, this simpler setup yields higher pass rates and lower AED. 
+
+## 9 Conclusion 
+
+PAFT addresses a specific weakness of LLM-based program re-pair: plausible patches often rewrite stable code outside the fault region. By making token-level preservation explicit during fine-tuning, PAFT improves pass@1 over standard Sft in all 6 evaluated backbone-benchmark settings on Defects4J and HumanEval-Java, with gains of up to 65.6%, while reducing AED by up to 32.6%. On Defects4J with DS-Coder-6.7B, PAFT also achieves a better correctness-locality trade-off than representative baselines, reach-ing 10.1% pass@1 with an AED of 80.7, compared with 8.3% and 148.6 for Prompting, 7.0% and 149.1 for RepairLLaMA, and 5.9% and 112.4 for AdaPatcher. The annotation study further shows that AED is the strongest automatic proxy for review-oriented patch quality. These results suggest that preservation-aware strategies should be built into fine-tuning rather than left to prompting alone. PAFT 
+
+could be viewed as a complementary fine-tuning principle rather than a standalone recipe, where combined with other task-specific adaptation strategies to improve task accuracy while preserving stable context. PAFT : Preservation-Aware Fine-Tuning for Minimal-Edit Program Repair , , 
+
+## References 
+
+[1] Alberto Bacchelli and Christian Bird. 2013. Expectations, outcomes, and chal-lenges of modern code review. In 35th International Conference on Software Engineering, ICSE ’13, San Francisco, CA, USA, May 18-26, 2013 , David Notkin, Betty H. C. Cheng, and Klaus Pohl (Eds.). IEEE Computer Society, 712–721. doi:10.1109/ICSE.2013.6606617 [2] Yoshua Bengio, Jérôme Louradour, Ronan Collobert, and Jason Weston. 2009. Curriculum learning. In Proceedings of the 26th Annual International Conference on Machine Learning, ICML 2009, Montreal, Quebec, Canada, June 14-18, 2009 (ACM International Conference Proceeding Series, Vol. 382) , Andrea Pohoreckyj Danyluk, Léon Bottou, and Michael L. Littman (Eds.). ACM, 41–48. doi:10.1145/ 1553374.1553380 [3] Worawalan Chatlatanagulchai, Kundjanasith Thonglek, Brittany Reid, Yutaro Kashiwa, Pattara Leelaprute, Arnon Rungsawang, Bundit Manaskasemsak, and Hajimu Iida. 2025. On the Use of Agentic Coding Manifests: An Empirical Study of Claude Code. In Product-Focused Software Process Improvement - 26th International Conference, PROFES 2025, Salerno, Italy, December 1-3, 2025, Proceedings (Lecture Notes in Computer Science) , Giuseppe Scanniello, Valentina Lenarduzzi, Simone Romano, Sira Vegas, and Rita Francese (Eds.). Springer, 543–551. doi:10.1007/978-3-032-12089-2_40 [4] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian, Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert, Fo-tios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shan-tanu Jain, William Saunders, Christopher Hesse, Andrew N. Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles Brundage, Mira Murati, Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba. 2021. Eval-uating Large Language Models Trained on Code. arXiv:2107.03374 [cs.LG] https://arxiv.org/abs/2107.03374 [5] Zhenlong Dai, Bingrui Chen, Zhuoluo Zhao, Xiu Tang, Sai Wu, Chang Yao, Zhipeng Gao, and Jingyuan Chen. 2025. Less Is More: Adaptive Program Repair with Bug Localization and Preference Learning. In AAAI-25, Sponsored by the Association for the Advancement of Artificial Intelligence, February 25 - March 4, 2025, Philadelphia, PA, USA , Toby Walsh, Julie Shah, and Zico Kolter (Eds.). AAAI Press, 128–136. doi:10.1609/AAAI.V39I1.31988 [6] DeepSeek-AI. 2024. DeepSeek-V3 Technical Report. CoRR abs/2412.19437 (2024). arXiv:2412.19437 doi:10.48550/ARXIV.2412.19437 [7] Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. 2023. QLoRA: Efficient Finetuning of Quantized LLMs. (2023). http://papers.nips. cc/paper_files/paper/2023/hash/1feb87871436031bdc0f2beaa62a049b-Abstract-Conference.html [8] Marco Di Biase, Magiel Bruntink, Arie Van Deursen, and Alberto Bacchelli. 2019. The effects of change decomposition on code review - a controlled experiment. 
+
+PeerJ Computer Science 5 (2019), e193. [9] Ramtin Ehsani, Sakshi Pathak, Shriya Rawal, Abdullah Al Mujahid, Mia Moham-mad Imran, and Preetha Chatterjee. 2026. Where Do AI Coding Agents Fail? An Empirical Study of Failed Agentic Pull Requests in GitHub. CoRR abs/2601.15195 (2026). arXiv:2601.15195 doi:10.48550/ARXIV.2601.15195 [10] Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie, Kai Dong, Wentao Zhang, Guant-ing Chen, Xiao Bi, Y. Wu, Y. K. Li, Fuli Luo, Yingfei Xiong, and Wenfeng Liang. 2024. DeepSeek-Coder: When the Large Language Model Meets Programming - The Rise of Code Intelligence. CoRR abs/2401.14196 (2024). arXiv:2401.14196 doi:10.48550/ARXIV.2401.14196 [11] Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. 2022. LoRA: Low-Rank Adaptation of Large Language Models. In The Tenth International Conference on Learning Representations, ICLR 2022, Virtual Event, April 25-29, 2022 . OpenReview.net. https://openreview.net/forum?id=nZeVKeeFYf9 [12] Kai Huang, Xiangxin Meng, Jian Zhang, Yang Liu, Wenjie Wang, Shuhao Li, and Yuqing Zhang. 2024. An Empirical Study on Fine-Tuning Large Language Models of Code for Automated Program Repair. In Proceedings of the 38th IEEE/ACM International Conference on Automated Software Engineering (Echternach, Luxem-bourg) (ASE ’23) . IEEE Press, 1162–1174. doi:10.1109/ASE56229.2023.00181 [13] Siming Huang, Tianhao Cheng, Jason Klein Liu, Weidi Xu, Jiaran Hao, Liuyihan Song, Yang Xu, Jian Yang, Jiaheng Liu, Chenchen Zhang, Linzheng Chai, Ruifeng Yuan, Xianzhen Luo, Qiufeng Wang, YuanTao Fan, Qingfu Zhu, Zhaoxiang Zhang, Yang Gao, Jie Fu, Qian Liu, Houyi Li, Ge Zhang, Yuan Qi, Yinghui Xu, Wei Chu, and Zili Wang. 2025. OpenCoder: The Open Cookbook for Top-Tier Code Large Language Models. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), ACL 2025, Vienna, Austria, July 27 - August 1, 2025 , Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and Mohammad Taher Pilehvar (Eds.). Association for Computational Linguistics, 33167–33193. https://aclanthology.org/2025.acl-long.1591/ [14] Nan Jiang, Kevin Liu, Thibaud Lutellier, and Lin Tan. 2023. Impact of Code Language Models on Automated Program Repair. In 45th IEEE/ACM International Conference on Software Engineering, ICSE 2023, Melbourne, Australia, May 14-20, 2023 . IEEE, 1430–1442. doi:10.1109/ICSE48619.2023.00125 [15] René Just, Darioush Jalali, and Michael D. Ernst. 2014. Defects4J: a database of existing faults to enable controlled testing studies for Java programs. In Interna-tional Symposium on Software Testing and Analysis, ISSTA ’14, San Jose, CA, USA -July 21 - 26, 2014 , Corina S. Pasareanu and Darko Marinov (Eds.). ACM, 437–440. doi:10.1145/2610384.2628055 [16] Claire Le Goues, ThanhVu Nguyen, Stephanie Forrest, and Westley Weimer. 2012. GenProg: A Generic Method for Automatic Software Repair. IEEE Trans. Software Eng. 38, 1 (2012), 54–72. doi:10.1109/TSE.2011.104 [17] Claire Le Goues, Michael Pradel, and Abhik Roychoudhury. 2019. Automated program repair. Commun. ACM 62, 12 (2019), 56–65. doi:10.1145/3318162 [18] Kui Liu, Li Li, Anil Koyuncu, Dongsun Kim, Zhe Liu, Jacques Klein, and Tegawendé F. Bissyandé. 2021. A critical review on the evaluation of auto-mated program repair systems. J. Syst. Softw. 171 (2021), 110817. doi:10.1016/J. JSS.2020.110817 [19] Ilya Loshchilov and Frank Hutter. 2019. Decoupled Weight Decay Regularization. In 7th International Conference on Learning Representations, ICLR 2019, New Or-leans, LA, USA, May 6-9, 2019 . OpenReview.net. https://openreview.net/forum? id=Bkg6RiCqY7 [20] Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll L. Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Maddie Simens, Amanda Askell, Peter Welinder, Paul F. Christiano, Jan Leike, and Ryan Lowe. 2022. Training language models to follow instructions with hu-man feedback. (2022). http://papers.nips.cc/paper_files/paper/2022/hash/ b1efde53be364a73914f58805a001731-Abstract-Conference.html [21] Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D. Manning, Stefano Ermon, and Chelsea Finn. 2023. Direct Preference Optimization: Your Language Model is Secretly a Reward Model. (2023). http://papers.nips.cc/ paper_files/paper/2023/hash/a85b405ed65c6477a4fe8302b5e06ce7-Abstract-Conference.html [22] Achyudh Ram, Anand Ashok Sawant, Marco Castelluccio, and Alberto Bacchelli. 2018. What makes a code change easier to review: an empirical investigation on code change reviewability. In Proceedings of the 2018 26th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (Lake Buena Vista, FL, USA) (ESEC/FSE 2018) . Association for Computing Machinery, New York, NY, USA, 201–212. doi:10.1145/3236024. 3236080 [23] John W. Ratcliff and David E. Metzener. 1988. Pattern Matching: The Gestalt Approach. Dr. Dobb’s Journal (July 1988), 46. https://jacobfilipp.com/DrDobbs/ articles/DDJ/1988/8807/8807c/8807c.htm HTML reprint/archive of the original magazine article. [24] André Silva, Sen Fang, and Martin Monperrus. 2025. RepairLLaMA: Efficient Rep-resentations and Fine-Tuned Adapters for Program Repair. IEEE Trans. Software Eng. 51, 8 (2025), 2366–2380. doi:10.1109/TSE.2025.3581062 [25] Xiaolong Tian. 2024. Evaluating the Repair Ability of LLM Under Different Prompt Settings. In IEEE International Conference on Software Services Engineering, SSE 2024, Shenzhen, China, July 7-13, 2024 . IEEE, 313–322. doi:10.1109/SSE62657.2024. 00053 [26] Chunqiu Steven Xia, Yuxiang Wei, and Lingming Zhang. 2023. Automated Pro-gram Repair in the Era of Large Pre-trained Language Models. In 45th IEEE/ACM International Conference on Software Engineering, ICSE 2023, Melbourne, Australia, May 14-20, 2023 . IEEE, 1482–1494. doi:10.1109/ICSE48619.2023.00129 [27] Chunqiu Steven Xia and Lingming Zhang. 2024. Automated program repair via conversation: Fixing 162 out of 337 bugs for $0.42 each using chatgpt. In 
+
+Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . 819–831. [28] Junjielong Xu, Ying Fu, Shin Hwei Tan, and Pinjia He. 2025. Aligning the Objective of LLM-Based Program Repair. In 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . IEEE, 2548–2560. [29] An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Dayiheng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jialong Tang, Jian Yang, Jianhong Tu, Jianwei Zhang, Jian Yang, Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang, Keqin Bao, Kexin Yang, Le Yu, Lianghao Deng, Mei Li, Mingfeng Xue, Mingze Li, Pei Zhang, Peng Wang, Qin Zhu, Rui Men, Ruize Gao, Shixuan Liu, Shuang Luo, Tianhao Li, Tianyi Tang, Wenbiao Yin, Xingzhang Ren, Xinyu Wang, Xinyu Zhang, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yinger Zhang, Yu Wan, Yuqiong Liu, Zekun Wang, Zeyu Cui, Zhenru Zhang, Zhipeng Zhou, and Zihan Qiu. 2025. Qwen3 Technical Report. CoRR 
+
+abs/2505.09388 (2025). arXiv:2505.09388 doi:10.48550/ARXIV.2505.09388 [30] Boyang Yang, Zijian Cai, Fengling Liu, Bach Le, Lingming Zhang, Tegawendé F. Bissyandé, Yang Liu, and Haoye Tian. 2025. A Survey of LLM-based Auto-mated Program Repair: Taxonomies, Design Paradigms, and Applications. CoRR 
+
+abs/2506.23749 (2025). arXiv:2506.23749 doi:10.48550/ARXIV.2506.23749 , , Boyang Yang, Zijian Cai, Shunfu Jin, and Haoye Tian 
+
+[31] Boyang Yang, Haoye Tian, Weiguo Pian, Haoran Yu, Haitao Wang, Jacques Klein, Tegawendé F. Bissyandé, and Shunfu Jin. 2024. CREF: An LLM-Based Conversa-tional Software Repair Framework for Programming Tutors. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis, ISSTA 2024, Vienna, Austria, September 16-20, 2024 , Maria Christakis and Michael Pradel (Eds.). ACM, 882–894. doi:10.1145/3650212.3680328 [32] Boyang Yang, Haoye Tian, Jiadong Ren, Hongyu Zhang, Jacques Klein, Tegawende Bissyande, Claire Le Goues, and Shunfu Jin. 2025. MORepair: Teach-ing LLMs to Repair Code via Multi-Objective Fine-Tuning. ACM Transactions on Software Engineering and Methodology (2025). [33] Jooyong Yi, Shin Hwei Tan, Sergey Mechtaev, Marcel Böhme, and Abhik Roy-choudhury. 2018. A correlation study between automated program repair and test-suite metrics. In Proceedings of the 40th International Conference on Soft-ware Engineering, ICSE 2018, Gothenburg, Sweden, May 27 - June 03, 2018 , Michel Chaudron, Ivica Crnkovic, Marsha Chechik, and Mark Harman (Eds.). ACM, 24. doi:10.1145/3180155.3182517 [34] Xin Yin, Chao Ni, Shaohua Wang, Zhenhao Li, Limin Zeng, and Xiaohu Yang. 2024. ThinkRepair: Self-Directed Automated Program Repair. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis, ISSTA 2024, Vienna, Austria, September 16-20, 2024 , Maria Christakis and Michael Pradel (Eds.). ACM, 1274–1286. doi:10.1145/3650212.3680359 [35] Andreas Zeller and Ralf Hildebrandt. 2002. Simplifying and Isolating Failure-Inducing Input. IEEE Trans. Software Eng. 28, 2 (2002), 183–200. doi:10.1109/32. 988498 [36] Chunting Zhou, Pengfei Liu, Puxin Xu, Srinivasan Iyer, Jiao Sun, Yuning Mao, Xuezhe Ma, Avia Efrat, Ping Yu, Lili Yu, Susan Zhang, Gargi Ghosh, Mike Lewis, Luke Zettlemoyer, and Omer Levy. 2023. LIMA: Less Is More for Alignment. In Advances in Neural Information Processing Systems 36: Annual Conference on Neural Information Processing Systems 2023, NeurIPS 2023, New Orleans, LA, USA, December 10 - 16, 2023 , Alice Oh, Tristan Naumann, Amir Globerson, Kate Saenko, Moritz Hardt, and Sergey Levine (Eds.). http://papers.nips.cc/paper_files/paper/ 2023/hash/ac662d74829e4407ce1d126477f4a03a-Abstract-Conference.html

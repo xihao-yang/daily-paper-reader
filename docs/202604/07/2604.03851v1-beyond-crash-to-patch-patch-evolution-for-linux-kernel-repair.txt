@@ -1,0 +1,498 @@
+Title: Beyond Crash-to-Patch: Patch Evolution for Linux Kernel Repair
+
+URL Source: https://arxiv.org/pdf/2604.03851v1
+
+Published Time: Tue, 07 Apr 2026 00:45:18 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Beyond Crash-to-Patch: Patch Evolution for Linux Kernel Repair 
+
+# Luyao Bai 
+
+lbai27@uic.edu University of Illinois Chicago USA 
+
+# Kenan Alghythee 
+
+kalghy2@uic.edu University of Illinois Chicago USA 
+
+# Hang Zhang 
+
+hz64@iu.edu Indiana University USA 
+
+# Xiaoguang Wang 
+
+xgwang9@uic.edu University of Illinois Chicago USA 
+
+## Abstract 
+
+Linux kernel bug repair is typically approached as a direct mapping from crash reports to code patches. In practice, however, kernel fixes undergo iterative revision on mailing lists before acceptance, with reviewer feedback shaping correctness, concurrency handling, and API compliance. This iterative refinement process encodes valuable repair knowledge that existing automated approaches overlook. We present a large-scale study of kernel patch evolution, recon-structing 6,946 syzbot-linked bug-fix lifecycles that connect crash reports, reproducers, mailing-list discussions, revision histories, and merged fixes. Our analysis confirms that accepted repairs are fre-quently non-local and governed by reviewer-enforced constraints not present in bug reports. Building on these insights, we develop 
+
+PatchAdvisor , a repair framework that integrates retrieval-based memory with a fine-tuned diagnostic advisor to guide a coding agent toward reviewer-aligned patches. Evaluation on temporally held-out syzbot cases demonstrates that leveraging patch-evolution history yields measurable gains in both reviewer-aligned refine-ment signals and end-to-end repair quality compared to unguided and retrieval-only baselines. 
+
+## 1 Introduction 
+
+Continuous fuzzing infrastructure such as syzbot [ 29 , 31 ] has dra-matically accelerated the discovery of Linux kernel bugs, yet trans-lating crash reports into correct, merge-worthy patches remains a bottleneck. The difficulty lies not only in generating plausible code changes, but in satisfying the implicit constraints that kernel maintainers enforce during review. In the Linux kernel workflow, candidate fixes are submitted to mailing lists, scrutinized by subsystem experts, and revised—often through multiple patch versions—before acceptance (Figure 1). Each revision incorporates feedback on correctness, locking discipline, API conventions, error handling, and interactions with neighboring subsystems. The final merged patch therefore reflects not just a code change but the outcome of an iterative refinement process whose intermediate reasoning is lost if one examines only the bug report and the eventual fix. This observation has direct implications for automated program repair (APR) [ 9 , 10 , 18 ]. Current LLM-based repair methods predom-inantly treat bug fixing as one-step patch generation from failure evidence [ 7, 8, 11 –13 , 16 , 17 , 19 , 24 , 25 , 27 , 34 , 37 , 41 ]. For kernel de-velopment, this framing is insufficient: a patch that silences a crash may still be rejected for violating subsystem invariants, addressing a symptom rather than the root cause, or introducing regression '18 '19 '20 '21 '22 '23 '24 '25 '26 
+
+Year 
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Avg Replies per Version
+> V1
+> V2
+> V3
+> V4
+> V5
+> V6+
+> Bug Count
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> Number of Bugs
+
+Figure 1: Review effort across patch versions. A quarterly stacked area chart showing the average number of discussion replies per patch version for syzbot-reported bugs. The lower layer (V1) represents initial proposals; upper layers (V2–V6+) represent subsequent revi-sions. The dashed line tracks the quarterly bug count. 
+
+risk. The challenge is generating patches that not only compile and pass tests, but also survive expert review. We posit that patch revision history offers a largely untapped supervision signal for this problem. Unlike bug reports and final commits alone, revision chains and review threads reveal why an initial candidate fell short, what constraints reviewers imposed, and how the repair evolved into an acceptable solution. This makes patch evolution both a lens for understanding kernel repair and a concrete source of training signal for AI-assisted patch generation. To investigate this hypothesis, we reconstruct a dataset of syzbot -linked Linux kernel bug-fix lifecycles [ 31 ], connecting crash evi-dence, reproducer artifacts, mailing-list discussions, revision histo-ries, and merged fixes from multiple public sources. The resulting corpus covers 6,946 fixed bugs, with recovered merged diffs for 5,043 and discussion threads for approximately 5,000. This repre-sentation enables studying repair as an iterative process of proposal, critique, and refinement rather than a static input–output mapping. Our empirical analysis confirms that kernel repair is frequently iterative, non-local, and shaped by reviewer-enforced constraints absent from the original bug report. Accepted changes often occur 
+
+> 1
+> arXiv:2604.03851v1 [cs.SE] 4 Apr 2026
+
+far from the crash site, and review discussion regularly surfaces ad-ditional requirements on concurrency, API usage, and maintainabil-ity. These patterns indicate that modeling kernel repair as one-shot crash-to-patch translation is fundamentally incomplete. Building on these findings, we develop PatchAdvisor , a repair framework that incorporates patch-evolution history via two com-plementary mechanisms: a layered memory that retrieves similar bugs, fix strategies, and review-derived lessons; and a fine-tuned advisor model that predicts likely root-cause directions and re-viewer concerns for a given crash. These components jointly guide a general-purpose coding agent toward patches better aligned with historically accepted fixes. Our evaluation provides initial evidence that evolution-aware guidance improves repair quality. On 100 tem-porally held-out syzbot -related patch series, the memory subsys-tem improves alignment with reviewer-raised revision categories; on recent end-to-end repair cases, the best advisor configuration outperforms both unguided generation and retrieval-only guidance. In summary, this paper makes the following contributions: 
+
+• A large-scale dataset of kernel patch evolution. We recon-struct a syzbot -grounded corpus linking crash reports, reproduc-ers, patch discussions, revision histories, and merged fixes for nearly 7,000 bugs, enabling fine-grained study of Linux kernel repair processes. 
+
+• An empirical characterization of iterative kernel repair. 
+
+We demonstrate that kernel bug fixing is frequently non-local, multi-version, and governed by reviewer-enforced constraints invisible in crash reports alone. 
+
+• A proof-of-concept evolution-aware repair system. We present 
+
+PatchAdvisor , combining retrieval-based memory with a fine-tuned diagnostic advisor. Initial results on held-out syzbot bugs indicate that patch-evolution guidance can improve both refine-ment signal quality and end-to-end repair outcomes. 
+
+## 2 Background and Motivation 
+
+Kernel Bug Fixing. syzbot [ 31 ] is Google’s continuous fuzzing plat-form for the Linux kernel. It systematically exercises upstream kernels [ 29 ], detects crashes, minimizes and preserves reproduc-ers, and publishes bug reports through a public dashboard [ 31 ]. For many bugs, syzbot further tracks their lifecycle by linking reports to the commits that resolve them. This makes syzbot a rich source of real-world kernel bug-fixing data—spanning bug reports, reproducers, and corresponding fixes—with over 7,000 fixed bugs 
+
+recorded to date. Critically, syzbot exposes a bug’s symptoms —crash reports, stack traces, reproducers—rather than its underlying root cause. Bridging this symptom–cause gap still depends heavily on manual diagnosis and developer expertise [20, 33, 38]. In contrast to many user-space projects that rely on pull-request-based development, Linux kernel patches are reviewed primarily through email-based discussions on the Linux kernel mailing list (LKML) [ 3 ] and subsystem-specific mailing lists [ 5]. A developer typically submits an initial patch (v1), receives comments from maintainers and reviewers, and then posts revised versions (v2, v3, . . . ) until the patch is accepted and merged, or rejected. This process naturally produces a sequence of patch revisions together with the corresponding review discussion. Consequently, for Linux kernel bugs, a final fixing commit often reveals only the end result of repair, but not the reasoning that led to it. Earlier patch versions and review feedback capture what was incomplete, incorrect, or unacceptable in an initial fix attempt, as well as the subsystem constraints that shaped later revisions. This revision history therefore provides a richer view of kernel repair than bug reports and final commits alone. 
+
+Motivation. The central insight motivating our work is that patch evolution exposes the gap between a plausible fix and a merge-worthy fix . Reconstructing and analyzing this evolution reveals recurring revision patterns and reviewer constraints, offering a foundation for both understanding and supporting Linux kernel bug repair. 
+
+## 3 Data Collection and Engineering 
+
+Our first goal is to construct a structured dataset that links kernel bug reports to the full evolution of their fixes. The main challenge is that the relevant artifacts (e.g., bug reports, patch revisions, review discussions, and merged commits) are distributed across multiple data sources [ 2, 3, 5 , 30 , 31 ] and often lack explicit linkage. Recov-ering a coherent bug-fix history therefore requires substantial data integration and normalization. To support this effort, we built infrastructure for collecting and parsing a broad kernel developers’ email archive [ 3, 5]. This larger corpus is useful for message lookup, thread recovery, and future expansion beyond a single reporting channel. However, the dataset used in this paper is intentionally narrower. We focus on bugs reported by syzbot [ 31 ], because syzbot provides a reliable bug anchor: each report identifies a concrete failure instance and often exposes crash reports, reproducer artifacts, discussion links, and eventual fixing commits. This bug-centered design makes it possible to connect failure evidence with patch discussions and revision history at a higher precision than archive-wide mining alone. Starting from fixed syzbot reports, we construct the syzbot -grounded dataset through a multi-stage pipeline that integrates data from the syzbot API, git.kernel.org , lore.kernel.org , and 
+
+patchwork.kernel.org . The resulting dataset links four classes of artifacts for each bug: crash evidence, reproducer inputs, patch iterations and discussions, and final merged patch fixes. 
+
+## 3.1 Broader LKML Archive Collection 
+
+As our first step, we collected a large archive of LKML emails span-ning ten years. For each email, we parse metadata such as subject, timestamp, sender, Message-ID , and reply references, together with the message body. This archive gives us an initial understanding of the kernel development process and provides a foundation for email thread lookup and context recovery when direct syzbot links are incomplete. Mining LKML at scale is complicated by the fact that revised patch versions are not always posted as strict replies to earlier sub-missions. Developers frequently resend updated versions as new top-level emails, sometimes with modified subject prefixes or sub-system tags. This makes simple header-following insufficient for reconstructing patch evolution and motivates the need for normal-ization and recovery logic. 
+
+> 2
+
+## 3.2 syzbot-Grounded Dataset Construction 
+
+Although we maintain a broader LKML archive, the analysis in this paper is performed on the subset of repair activity that can be grounded in fixed syzbot bugs. We begin from the syzbot endpoint for upstream bugs marked as fixed. Each syzbot entry serves as the root object in our dataset and provides metadata including the bug title, crash timestamps, discussion links, and fixing commit hashes. For each bug, we additionally retrieve up to several crash-related instances, including the crash report, C reproducer, and syzkaller reproducer program when available. These artifacts provide con-crete failure evidence and help distinguish one bug from another. In total, we collect 6,946 fixed bugs. 
+
+3.2.1 Repair Artifact Recovery. For each bug with an associated fix-ing commit, we retrieve the merged patch diff from git.kernel.org .These diffs represent the final accepted repair state. When a commit is not present in the main torvalds/linux repository, we fall back to subsystem-specific trees such as netdev/net , netdev/net-next ,
+
+bpf/bpf , and bpf/bpf-next . We successfully recover merged diffs for 5,043 bugs. To reconstruct the repair discussion, we follow the discussion links exposed by syzbot and download the correspond-ing threads from lore.kernel.org as mbox archives [ 4]. We parse each thread into individual messages and preserve metadata in-cluding sender, subject, timestamp, Message-ID , and In-Reply-To .These metadata are used to recover the structure of patch submis-sion and review discussions. A primary goal of this stage is to reconstruct patch revision his-tory. We identify version markers such as [PATCH v2] and [PATCH v3 1/3] from subject lines and group related messages by revi-sion. When the links exposed by syzbot are incomplete, we search 
+
+lore.kernel.org by patch title and supplement missing informa-tion from patchwork.kernel.org . This recovery process improves coverage of patch discussions and helps us connect earlier candi-date fixes to the final merged repair. In total, we recover discussion threads for approximately 5,000 bugs. 
+
+3.2.2 Dataset Representation. Each dataset instance is centered on a single syzbot bug and contains linked artifacts from three categories: 
+
+• Bug and crash metadata: bug ID, title, status, crash timestamps, crash reports, and reproducer artifacts. 
+
+• Repair discussion: mailing-list messages, thread structure, and patch revision metadata extracted from submission emails. 
+
+• Merged fix: fixing commit metadata and the final patch diff from the kernel repository. Together, these artifacts provide a bug-centered view of kernel repair that connects the reported failure, the discussion and revision of candidate fixes, and the final accepted patch. 
+
+3.2.3 Analysis Framework. To systematically study syzbot -reported Linux kernel crashes and their corresponding fixes, we built a mod-ular and extensible analysis framework that encodes our measure-ment pipeline as a set of reusable analyzers. Each analyzer captures one dimension of the repair process, for example, bug type, fix pattern, patch revision behavior, or downstream backporting, and produces structured outputs that can be aggregated across the dataset. This design allows us to extend the framework with new analyses without changing the underlying data model, and helps ensure that our empirical results are derived through a uniform and reproducible workflow. At a high level, each analyzer is implemented as a subclass of 
+
+BaseAnalyzer (Listing 1). It consumes a collection of BugEntry ob-jects, where each entry represents a reconstructed bug-fix instance, and returns an AnalysisResult containing aggregate statistics and per-instance records. This abstraction lets us express different analyses in a consistent form while preserving extensibility for future studies.            
+
+> Python
+> class BaseAnalyzer(ABC): @property @abstractmethod
+> def name(self) -> str : ... @abstractmethod
+> def analyze(self, bugs: list [BugEntry]) -> AnalysisResult: ... @dataclass
+> class AnalysisResult: name: str
+> summary: dict [str , Any] details: list [dict [str , Any]] tables: dict [str ,list [dict ]]
+> Listing 1: Common interface for analyzers in our framework.
+
+Table 1 summarizes the analyzers currently implemented in the framework. Although the framework supports a broad range of measurements, this paper focuses on three major themes: bug classification dimensions (§4.1.1), patch evolution dynamics (§4.1.2), and empirical insights and representative case studies drawn from kernel patch evolution (§4.2). Together, these analyzers form the methodological foundation for the empirical results presented in the remainder of the paper. 
+
+Limitations and Scope. Our present dataset is intentionally scoped to bugs that can be anchored to fixed syzbot reports. This choice fa-vors precision over breadth . Compared with mining LKML uniformly, 
+
+syzbot -grounded collection provides clearer bug identities, more reliable failure evidence, and stronger linkage between reports, patch discussions, and merged commits. At the same time, this scope excludes kernel bugs reported through other channels, such as manual testing, code review, or developer-reported regressions outside the syzbot workflow. The complete dataset occupies 13 GB on disk: 11 GB of processed JSON, 1.5 GB of raw crawled data, and 210 MB of training data (used for the fine-tuned patch advisor described in §5.2). 
+
+## 4 Findings from syzbot-Linked Patch Evolution 
+
+We next present empirical findings from jointly analyzing patch revision histories and review discussions. Rather than treating ker-nel repair as a one-shot mapping from crash report to final fix, these findings reveal recurring patterns in how fixes are proposed, revised, and accepted in practice. 
+
+> 3
+
+Phase 1: Dataset Collection 
+
+> Syzbot API
+> git.kernel.org
+> lore.kernel.org
+> patchwork.
+> kernel.org
+> linux-stable.git
+> Data Matching
+> Processed Data
+> （～ 6900 Bugs ）
+> Code Diffs
+> Patch
+> Discussions
+> Syzbot Crash Report & C/Syz
+> Reproducer
+> Memory Output
+> Fix Commit
+
+Phase 4: Fine-tuning 
+
+Dataset Preparation 
+
+12 Analyzers 
+
+Phase 2: Insights Analysis  Phase 3: Memorize 
+
+New Crash 
+
+Processing Pipeline  PatchAdvisor 
+
+(Fine-tuned Advisors) 
+
+Crash Report 
+
+> Memory
+> Builder
+
+Memory 
+
+Exploration  Code Agent  Generated 
+
+Patch 
+
+Layer 1: Instance Memory 
+
+~5000 bug reports 48MB JSO NL
+
+Layer 2: Pattern Memory 
+
+~140 Fix Strategies 
+
+Layer 3: 
+
+Distilled Rules 
+
+~100 Action Rules 
+
+Embedding 
+
+- Bug Type 
+
+- Fix Pattern 
+
+- Fix Locality 
+
+- Difficulty 
+
+- Revision Reasons 
+
+- Discussion Lessons 
+
+- Patch Diff 
+
+- Non-Functional 
+
+- Info Sufficiency 
+
+- Patch Evolution 
+
+- Backport Downstream 
+
+- Case Study Finder 
+
+- Insight Clusters 
+
+Fine-tune Dataset 
+
+Evaluation 
+
+> AI Summary
+
+Figure 2: End-to-end pipeline for building PatchAdvisor from syzbot data: bug reports and patch history are collected and analyzed, compiled into layered memory and training corpora, and then retrieved at inference time to guide LLM-based patch or review generation. Table 1: Analyzers implemented in our analysis framework. 
+
+Analyzer Purpose 
+
+Bug Type Classifies crashes into bug categories based on crash reports and failure signatures Fix Pattern Identifies recurring repair patterns from fixing patches Fix Locality Measures the distance between failure location and fix loca-tion at the function, file, and subsystem levels Difficulty Estimates repair complexity using a composite difficulty score and stratifies bugs into difficulty tiers 
+
+Revision Reasons Categorizes why an initial patch required revision based on review feedback and patch history Discussion Lessons Quantifies reviewer participation, discussion depth, and feedback intensity Patch Diff Characterizes structural differences across patch ver-sions Non-Functional Identifies revisions driven by non-functional concerns such as style, maintainability, or performance 
+
+Info Sufficiency Evaluates whether the available debugging information is sufficient to localize and repair the bug 
+
+Patch Evolution Links reviewer feedback on version 𝑣 𝑁 to structural changes in version 𝑣 𝑁 +1, enabling analysis of revision responsiveness Backport Downstream Tracks whether and how fixes propagate to stable and LTS kernels, including coverage and lag 
+
+Case Study Finder Ranks bug-fix instances by multi-dimensional interestingness for manual inspection 
+
+Insight Clusters Cross-references multiple analytical dimensions to de-rive higher-level empirical insight categories 
+
+## 4.1 A Multi-dimensional View of Kernel Patch and Patch Evolution 
+
+4.1.1 Classification Dimensions. To characterize the structure of kernel bug fixing, we use the analyzers described above to examine five complementary dimensions: bug type, fix pattern, fix locality, repair complexity, and the reasons driving patch revisions. 
+
+Table 2: Top 10 bug types by frequency. 
+
+Bug Type Count % Med. Lines Med. Days 
+
+warning 1,466 21.1 7 28.6 null-ptr-deref 1,007 14.5 8 26.0 use-after-free 993 14.3 9 48.4 info-leak 513 7.4 4 47.8 deadlock 463 6.7 13 34.8 kernel-bug 373 5.4 10 39.7 out-of-bounds-read 348 5.0 9 50.7 memory-leak 257 3.7 6 27.2 task-hung 244 3.5 9 121.4 data-race 209 3.0 17 15.0 
+
+Bug Types. We classify 6,946 bugs into 20 categories by match-ing crash-report signatures with a set of regular-expression rules. Table 2 lists the 10 most frequent categories. Three classes domi-nate the dataset: warning (21.1%), null-pointer dereference (14.5%), and use-after-free (14.3%). The distribution also reveals substantial variation in repair characteristics across bug classes. For example, 
+
+task-hung bugs exhibit the longest median fix time (121.4 days), suggesting that liveness and progress failures are often difficult to diagnose and validate. In contrast, data-race bugs are resolved most quickly (15.0 days median), but their fixes are comparatively large, with a median of 17 modified lines. 
+
+Fix Patterns. We further identify 10 recurring fix patterns by jointly analyzing source-level edit operations and commit-message text. The most common pattern is fix-order (18.9%), which captures repairs that reorder operations to eliminate race windows or restore 
+
+> 4
+
+intended control flow. This is followed by add-init (15.2%) and add-null-check (12.4%). Overall, 58.8% of bugs match at least one fix pattern, with an average of 1.07 matched patterns per bug. These results suggest that while a substantial fraction of fixes exhibit reusable repair idioms, many kernel fixes still resist reduction to a single stereotyped edit template. 
+
+Fix Locality. To understand how far a fix is from the observed failure site, we measure locality at the function, file, directory, and subsystem levels. Among 4,986 analyzable bugs, 77.5% are fixed in the same file as the crash site, 9.6% in the same directory, and 6.1% elsewhere in the same subsystem. However, 3.7% of bugs (183 cases) require edits in a different subsystem entirely. At a finer granularity, same-function repairs account for only 3.1% of cases. This result highlights an important mismatch between failure manifestation and fix location: even when the repair remains file-local, it is rarely confined to the exact function in which the crash is reported. 
+
+Difficulty Stratification. We estimate repair difficulty using a composite score from 0 to 12 based on six observable properties of each fix: patch size, number of modified files, number of patch revisions, locality between the crash site and the patched code, time-to-fix, and whether a C reproducer is available. Each factor contributes a small ordinal penalty; larger, less localized, longer-running, and more iterative fixes receive higher scores, while the presence of a reproducer lowers the score. Among the 5,043 scored bugs, 66.4% fall into the easy tier (0–3), 32.6% into the medium 
+
+tier (4–7), and 1.0% into the hard tier (8–12). Although rare, hard bugs are substantially more demanding: their median fix spans 74 modified lines across 5 files and requires 249.5 days to resolve. This skewed distribution suggests that most syzbot-reported bugs are relatively localized and straightforward to repair, while a small minority impose disproportionately high repair costs. 
+
+Patch Revision Reasons. For the 1,099 bugs with multiple patch versions, we classify revision reasons into 12 categories based on re-viewer comments and inter-version changes. The most frequent re-vision drivers are commit-message issues (27.4%), correctness prob-lems (25.4%), API design concerns (21.8%), race conditions (16.7%), and incomplete fixes (16.5%). Notably, 28.7% of multi-version bugs are revised without intervening external feedback, indicating that self-correction is common, but still subordinate to community-guided refinement. 
+
+4.1.2 Patch Evolution Dynamics. A key feature of our dataset is that it reconstructs the evolutionary chain of a repair: how reviewer feedback on version 𝑣 𝑁 relates to the structural changes introduced in version 𝑣 𝑁 +1. We use this capability to analyze all 1,600 con-secutive 𝑣 𝑁 → 𝑣 𝑁 +1 transitions drawn from the 1,099 bugs with multi-version patch series. Among the 1,600 version transitions, 1,252 (78.3%) contain sub-stantive reviewer feedback after excluding bot messages, stable-backport threads, and trivial tag-only replies. Only 21.7% of tran-sitions occur without such feedback. This result shows that patch refinement in the syzbot ecosystem is primarily a social and col-laborative process rather than a sequence of isolated self-revisions. Table 3 summarizes the 12 feedback categories, ranked by fre-quency, together with their average structural impact, measured as the absolute number of changed lines between adjacent versions. Two findings stand out.   
+
+> Table 3: Patch evolution across 1,600 version transitions. “ Δlines” denotes the average absolute line-count difference between adjacent patch versions when the feedback category is present. “Changelog” denotes the fraction of such transitions in which the category is explicitly acknowledged in the submission notes of 𝑣 𝑁 +1.
+
+Category # Trans. % Avg Δlines Changelog 
+
+correctness 673 42.1 28.6 4.5% commit_message 644 40.2 26.0 20.7% api_design 587 36.7 38.2 14.8% race_condition 462 28.9 48.1 8.4% incomplete_fix 426 26.6 46.3 4.2% documentation 408 25.5 36.2 11.0% config_build 388 24.2 44.2 7.0% style_convention 376 23.5 51.3 12.8% error_handling 348 21.8 46.6 9.2% scope 340 21.2 32.1 4.4% memory_safety 305 19.1 34.5 4.9% performance 206 12.9 52.8 1.9% 
+
+(1) The most frequent feedback is not the most disruptive. 
+
+Correctness-related feedback is the most common category (42.1% of transitions), followed closely by commit-message feed-back (40.2%). However, these categories induce relatively small structural changes, with average impacts of 28.6 and 26.0 lines, respectively. By contrast, performance feedback appears in only 12.9% of transitions but causes the largest average revision foot-print (52.8 lines). Similarly, style/convention , race-condition , and 
+
+error-handling feedback all lead to substantially larger inter-version edits than their frequency alone would suggest. In other words, what reviewers mention most often is not necessarily what forces developers to restructure a patch most extensively. (2) Explicit changelogs capture only a small portion of ac-tual revision behavior. Only 36.4% of transitions include any explicit “Changes since 𝑣 𝑁 ” notes. Moreover, changelog ac-knowledgment is weakly aligned with the actual categories driving structural revision. For example, commit_message is-sues are relatively likely to be documented (20.7%), whereas 
+
+performance feedback is almost never mentioned in changelogs (1.9%) despite producing the largest code changes. The average cross-category responsiveness score is only 0.072, indicating that most revision activity remains implicit : the patch changes substantially from one version to the next, but the developer often does not explicitly record which feedback prompted those changes. Taken together, these results suggest that patch evolution in the Linux kernel cannot be understood solely from final merged fixes or even from explicit changelog annotations. The underlying process is driven by review feedback that varies widely in structural consequence, and much of that consequence is reflected only in the code deltas between patch versions. 
+
+## 4.2 Empirical Insights from Kernel Patch Evolution 
+
+We next distill our quantitative analysis into a small set of em-pirical insights that expose recurring properties of Linux kernel 
+
+> 5
+
+repair. Rather than focusing on isolated statistics, these insights highlight the structural traits that make kernel bug fixing distinct from conventional one-shot repair settings. 
+
+4.2.1 Accepted Fixes Are Often Non-Local. The crash site is often not the true repair site. Among 4,986 analyzable bugs, only 3.1% are fixed in the same function as the crash. While 77.5% are fixed in the same file, a non-trivial fraction require changes outside the immediate crash context, including 3.7% whose fixes reside in a different subsystem entirely. This locality gap suggests that the stack trace often identifies where a failure manifests, but not where the accepted repair must be applied. 
+
+Example: a kcov warning fixed in the NFC subsystem. Bug 
+
+0438378d triggered a warning in kcov_remote_start() , which at first glance appears to implicate the kcov subsystem [ 1]. kcov 
+
+is the kernel’s code-coverage facility, primarily used by fuzzing tools to track which kernel paths have been exercised. As a result, a warning at this site can easily be misread as a defect in kcov itself. In reality, however, the accepted fix was not in kcov , but a one-line change in the NFC receive path: 
+
+net/nfc/nci/core.c  
+
+> diff --git a/net/nfc/nci/core.c b/net/nfc/nci/core.c --- a/net/nfc/nci/core.c +++ b/net/nfc/nci/core.c @@ -1518,6 +1518,7 @@ static void nci_rx_work(...) if (!nci_plen(skb->data)) { kfree_skb(skb); +kcov_remote_stop(); break; }
+
+Listing 2: A warning reported in kcov is fixed by adding cleanup in the NFC subsystem. 
+
+The reported failure occurred in kcov, but the accepted repair restores a missing cleanup step in NFC before control leaves the receive loop (as shown in Listing 2). The bug therefore cannot be understood purely as a local kcov failure. It is instead an interaction bug in which one subsystem leaves another in an inconsistent state. This kind of symptom–fix mismatch is exactly the kind of signal that is lost when only the final fixing commit is retained. 
+
+4.2.2 Small Final Patches Can Take Long Diagnostic Effort. Patch size is a poor proxy for repair difficulty. In our data, many final fixes are very small, yet took months or even years to converge. This is especially important for automated repair: generating a short patch is easy; determining which short patch is acceptable is the hard part. 
+
+Example: a two-line HFS+ fix after years of revision. Bug 
+
+1c8ff72d , associated with a warning in hfsplus_bnode_create() ,eventually converged to a tiny fix, but unexpectedly after 5 patch iterations, 32 review messages, and 1,166 days of discussion. The v1 patch was 76 lines across 3 files; by v2, it had collapsed to 1 line in 1 file. The difficulty was not in writing code but in under-standing the complex HFS+ filesystem bnode allocation logic well enough to identify the correct two-line initialization fix. The final patch is small, but the repair process reflects substantial diagnostic difficulty: 
+
+fs/hfsplus/bnode.c    
+
+> diff --git a/fs/hfsplus/bnode.c b/fs/hfsplus/bnode.c --- a/fs/hfsplus/bnode.c +++ b/fs/hfsplus/bnode.c @@ -... +... @@ -/* missing initialization */ +node->page_offset = 0; +node->tree = tree;
+
+Listing 3: A tiny accepted patch can hide a long and difficult diag-nostic process. 
+
+What makes this case important is not the number of changed lines, but the contrast between the tiny final repair and the lengthy revision history that preceded it. The final accepted patch does not reveal how many alternate diagnoses were considered and discarded before reviewers and developers converged on the right explanation. 
+
+4.2.3 Reviewer Feedback Encodes Hidden Acceptance Constraints. 
+
+Review comments frequently raise issues that are not explicit in the original syzbot report. Across revision transitions, common feedback categories include correctness, API design, race condi-tions, incomplete-fix concerns, error handling, build compatibility, and performance. Moreover, high-impact feedback is not always the most frequent: performance concerns appear less often than cor-rectness comments , yet they trigger some of the largest structural changes across versions .This shows that patch acceptance depends on more than sup-pressing the reported crash. Maintainers evaluate whether a pro-posed change respects subsystem invariants, locking rules, publica-tion order, and interaction protocols with neighboring components. 
+
+Example: locking and publication order in L2TP. Bug 94cc2a66 
+
+was reported as a locking issue in inet_autobind() , but the ac-cepted fix was in net/l2tp/l2tp_core.c , where the tunnel was being published before all socket state had been safely initialized: 
+
+net/l2tp/l2tp_core.c     
+
+> diff --git a/net/l2tp/l2tp_core.c b/net/l2tp/l2tp_core.c --- a/net/l2tp/l2tp_core.c +++ b/net/l2tp/l2tp_core.c @@ -1502,6 +1502,10 @@ int l2tp_tunnel_register(...) +lock_sock(sk); +write_lock_bh(&sk->sk_callback_lock); /* ... initialize socket fields ... */ +write_unlock_bh(&sk->sk_callback_lock); +release_sock(sk); +/* Publish the tunnel -- AFTER initialization */ ...
+
+Listing 4: The accepted fix enforces locking and initialization order before publication. 
+
+> 6
+
+This example illustrates two important points. First, the accepted fix is non-local: the warning surfaced in one place, but the repair changed ordering and synchronization elsewhere. Second, the final patch is shaped by constraints that are only visible through review discussion: the code must not merely avoid the observed warning, but must also satisfy socket-locking discipline and publication-order invariants. Taken together, these findings suggest that kernel repair should not be modeled as a direct mapping from crash report to final patch. In many syzbot-linked LKML threads, the initial candidate patch is revised multiple times, reviewer feedback introduces constraints not stated in the bug report, and the accepted fix may differ sub-stantially from the apparent crash location. Patch evolution history therefore provides a richer supervision signal than final fixes alone: it records not only what was eventually merged, but also what earlier versions got wrong and how maintainers guided the repair toward an acceptable solution. 
+
+## 5 From Patch-Evolution Insights to Actionable Repair Methods 
+
+The analysis in §4 establishes that syzbot crash repair cannot be adequately captured as a direct crash-to-patch mapping. Accepted fixes are often non-local, even small final patches may reflect sub-stantial diagnostic effort, and reviewer feedback frequently imposes acceptance constraints absent from the original crash report. These findings motivate a repair system that goes beyond code generation: it should identify likely root-cause directions, expose subsystem-specific constraints, and steer patch generation toward solutions consistent with historically accepted repairs. Guided by these observations, we design a two-part repair method. First, we build a memory layer that distills our syzbot-linked patch-evolution dataset into retrievable bug instances, fix patterns, and review lessons. Second, we fine-tune a lightweight diagnostic model 
+
+to generate a repair-oriented summary from a new crash report and an initial candidate patch. At inference time, the memory layer provides historical context, while the fine-tuned model synthesizes a compact diagnosis that guides a general-purpose coding agent toward a reviewer-aligned patch. 
+
+## 5.1 Patch Evolution Memory 
+
+The memory component is built directly from the reconstructed syzbot-linked dataset and its analyzer outputs. Its goal is not to memorize coding details, but to expose historically useful repair context at inference time. The memory has three layers. The first layer is instance memory ,where each bug is represented as a structured BugMemoryEntry 
+
+containing: (1) crash evidence such as bug type, stack frames, and implicated files; (2) fix characterization, including repair pattern, locality, and difficulty tier; (3) the final merged diff and commit message; and (4) a compact patch-evolution summary, including revision count, major revision reasons, and key reviewer feedback. The second layer is pattern memory , which aggregates individ-ual bug records into reusable repair knowledge. For each observed 
+
+(bug_type, fix_pattern) pair, we store a FixStrategy record with frequency, median patch size, representative examples, and re-curring pitfalls. We also build ReviewLesson records from revision-reason categories to capture common pre-merge concerns, such as incomplete fix, race-condition handling, API misuse, and error-path cleanup. The third layer is embedding memory . To support semantic retrieval, we map crash reports and patch artifacts into a dense vector space, indexing them for nearest-neighbor search. This layer enables the system to retrieve historically similar bugs even when their textual surface forms, such as variable names or specific error messages, differ significantly. Given a new crash report, the retriever performs four steps: 1. classify the likely bug type from the report text; 2. retrieve semantically similar historical bugs; 3. collect high-frequency fix strategies associated with the pre-dicted bug type and retrieved neighbors; and 4. surface review lessons associated with likely fix patterns and known failure modes. The retrieved result is formatted into a bounded context block for the downstream advisor. In practice, this context includes: similar bugs, likely repair directions, warnings about common traps, and subsystem-specific review concerns. The memory layer directly addresses the non-locality and ac-ceptance constraint problems identified in §4. For example, when a crash is likely to be a misleading symptom of state corruption elsewhere, retrieval can surface historical examples whose accepted fixes occur away from the apparent crash site. Likewise, when a bug pattern frequently triggers review concerns about ordering, cleanup, or synchronization, these lessons can be made explicit before code generation begins. 
+
+## 5.2 Fine-Tuned Diagnostic Patch Advisor 
+
+While memory retrieves relevant precedent, it does not by itself produce a coherent diagnosis for a new bug. We therefore fine-tuned a small advisor model to synthesize a repair-oriented summary that bridges crash evidence, candidate patch content, and retrieved historical context. Raw discussions are valuable but noisy. Instead of training di-rectly on thread text, we derive a cleaner supervision target from patch evolution. For each multi-version patch series, we construct a diagnostic target that summarizes three aspects of the repair pro-cess: the logical gap between the initial candidate patch and the final accepted repair, the maintainer concerns expressed during revision, and the high-level repair strategy that resolves the bug without violating subsystem constraints. This target is intentionally code-free : the advisor is trained to explain what kind of fix is needed, not to emit the final patch. This separation keeps diagnosis focused on architectural and review constraints rather than token-level code imitation. 
+
+5.2.1 Model Objective. Let 𝑋 denote the input context for a train-ing instance, consisting of the crash report, the initial candidate patch, and the retrieved memory context. Let 𝑍 denote the tar-get diagnostic summary. We fine-tune the advisor with a standard conditional language-model objective: 
+
+Ladvisor = − 
+
+> |𝑍 |
+
+∑︁ 
+
+> 𝑘 =1
+
+log 𝑃 (𝑧 𝑘 | 𝑋, 𝑧 <𝑘 ).
+
+> 7
+
+Unlike direct patch-generation training, this objective teaches the model to predict repair guidance rather than final code. In effect, the advisor learns to approximate the kinds of critiques and constraints that maintainers apply during patch refinement. 
+
+5.2.2 Training Setup. We construct the fine-tuning corpus from 6,946 syzbot-fixed bugs, filtering out instances that have only a single patch version or whose fixing commit is missing from the kernel tree. Each remaining multi-version patch series yields one or more input–output training pairs, combining crash reports, initial patches, and memory context as input with diagnostic summaries as targets. We fine-tune two base models—Gemma-3-12B and LLaMA-3.2-11B—using LoRA on a single NVIDIA A100 80 GB GPU. 
+
+5.2.3 Advisor Output Format. For a new crash, the advisor emits a concise diagnostic summary containing four fields: likely root-cause direction , which indicates whether the apparent crash site is likely to be the true repair site; repair constraints , which capture requirements such as locking, lifetime, ordering, cleanup, build compatibility, or API usage; patch strategy , which describes the ex-pected kind of fix, such as reordering operations, restoring missing cleanup, adding initialization, or narrowing the publication win-dow; and pitfalls to avoid , which are distilled from historical review feedback. This representation is compact enough for prompting, but specific enough to constrain the downstream coder. 
+
+5.2.4 Patch Generation with Advisor Guidance. The final patch is generated by a general-purpose coding model, which we treat as a coder . The coder receives a composite context consisting of the crash report, the candidate patch (when available), the retrieved memory context, and the advisor summary. We instruct the coder to treat the advisor output as a repair specification rather than optional prose. To improve syntactic robustness, we wrap generation in a compilation-feedback loop. After a patch is produced, we attempt to apply it and compile the affected subsystem. If compilation fails, the compiler output is appended to the prompt and the coder is asked to revise the patch. This process filters out syntactically invalid candidates before semantic evaluation. 
+
+## 5.3 Evaluation 
+
+We reserve a temporally held-out evaluation set of 100 previously unseen crash cases, excluded from both memory construction and model training. To evaluate memory utility, we provide each crash report and its initial patch (v1) as input and ask the model to suggest improvements likely to be raised during review. Ground-truth labels are derived by mapping human reviewer comments from LKML to the 12 revision categories (Table 3) using the same keyword-matching procedure as dataset construction; the complete keyword lists are included in the accompanying artifact. Enabling memory consistently improves alignment with actual reviewer feedback: F1 increases by 21.8% (0.330 vs. 0.271), with precision up 20.7% 
+
+and recall up 16.7% , suggesting that prior repair history helps the model anticipate the concerns reviewers are likely to raise. We next evaluate end-to-end patch generation quality on recent 
+
+syzbot crash cases under three configurations: (1) Baseline (cod-ing agent receives only the crash report and candidate patch), (2)                                                          
+
+> Table 4: Per-bug fix outcomes on 6 syzbot bugs (February 2026).
+> ✓= compiled & runtime-verified fix; ✓∗= patch equivalent to ground truth under GCC toolchain limitation; ✗= incorrect or non-equivalent fix. All configurations use the same coder (Claude). “Base model” denotes the unfine-tuned advisor.
+> Configuration 48dc 4e2e 56b6 827a d00f f500 Fix Rate
+> Baseline ✗✗✓✗✗✗1/6 Memory-guided ✓✓∗✓✓✗✗4/6
+> Base model Advisor (No Fine-tuning)
+> LLaMA-3.2-11B (Base) ✓✓∗✓✓✗✗4/6 Gemma-3-12B (Base) ✓✓∗✓✓✗✗4/6
+> Advisor-guided ( PatchAdvisor , Fine-tuned)
+> Gemma-3-12B ✓✓∗✓✓✓✗5/6
+> LLaMA-3.2-11B ✓✗✓✓✗✗3/6
+> Note: ∗Bugs 4e2e and f500 ground truth patches are also affected by GCC vs. Clang compilation differences.
+
+Memory-guided (agent additionally receives retrieved memory con-text), and (3) Advisor-guided (agent receives both memory context and the fine-tuned advisor’s diagnostic summary). 
+
+Bug selection criteria. To ensure temporal separation from the fine-tuning data, we restrict the evaluation set to recently fixed bugs that were not included in the advisor training corpus. From the 30 most recently fixed syzbot bugs at the time of evaluation, we apply three selection criteria: (1) a working C reproducer must be available, (2) the patch must have undergone at least two revision iterations on LKML (indicating non-trivial reviewer interaction), and (3) the bug must not appear in the fine-tuning dataset. Only 6 of the 30 candidates satisfy all three conditions. 
+
+Preventing evaluation leakage. Because all six bugs were already fixed upstream, we explicitly prohibit the coding agent from query-ing Linux kernel commits, LKML archives, or the syzbot dashboard via prompt-level instructions, applied uniformly across all configu-rations. We report both diagnostic and end-to-end repair quality in Ta-bles 4 and 5. For diagnosis, Diagnostic Coverage Rate (DCR) mea-sures the proportion of ground-truth revision categories (from sub-sequent human review) covered by the generated summary. For end-to-end repair, we report CodeBERTScore [ 39 , 40 ] (semantic similarity to the reference patch via CodeBERT embeddings), com-pilation success rate, and Avg. Rank (lower is better), computed by presenting all anonymized patches for the same bug to Claude Son-net 4.6 in random order and averaging the resulting quality ranks across bugs. Each patch is applied at the exact bug-introducing com-mit and verified via kernel compilation and 600-second QEMU/KVM reproducer execution on a dual-socket Intel Xeon Platinum 8380 server (80 cores, 125 GB RAM) running Ubuntu 22.04 with QEMU 6.2.0. Tables 4 and 5 show a clear monotonic improvement across con-figurations. The baseline agent succeeds on only 1 of 6 bugs; adding memory retrieval raises this to 4 of 6, indicating that historical repair precedents already provide substantial value. The fine-tuned Gemma-3-12B advisor-guided configuration achieves the best over-all results: 5 of 6 bugs fixed, the highest CodeBERTScore (0.91), 100% 
+
+> 8
+
+Table 5: Aggregate quality metrics across all configurations. DCR = Diagnostic Coverage Rate; CodeBERT = CodeBERTScore; Avg. Rank = mean AI-assessed quality ranking ( ↓ lower is better). Baseline and Memory-guided lack a diagnostic step; DCR is not applicable (–). 
+
+Configuration DCR CodeBERT Compile Avg. Rank ↓
+
+Baseline – 0.42 83.3% 5.2 Memory-guided – 0.74 100.0% 3.2 LLaMA-3.2-11B (Base) 0.62 0.76 100.0% 3.2 Gemma-3-12B (Base) 0.65 0.78 100.0% 3.2 
+
+Gemma-3-12B (FT) 0.88 0.91 100.0% 2.7 
+
+LLaMA-3.2-11B (FT) 0.71 0.68 100.0% 3.7 
+
+compilation rate, and the best average quality rank (2.7). Notably, it is the only configuration to correctly resolve the challenging d00f 
+
+case, whose fix requires cross-function causal reasoning—all other configurations target the wrong code location. In contrast, the fine-tuned LLaMA-3.2-11B advisor achieves only 3/6, below its own base model (4/6), suggesting that fine-tuning on evolutionary traces can overfit to surface patterns when model capacity is limited. This underscores that fine-tuning benefits are model-dependent. Bug f500 (ATM subsystem) remains unsolved by all configurations, as it requires multi-file RCU refactoring beyond current model capa-bilities. Overall, the key benefit comes from making latent repair constraints explicit before generation: memory retrieves precedents, and the advisor converts them into bug-specific guidance. 
+
+## 5.4 Threats to Validity 
+
+External validity. The end-to-end evaluation covers only 6 bugs due to strict selection criteria (working reproducer, multi-version history, temporal separation from training data). While we report per-bug outcomes transparently and use hedged language through-out, this sample size precludes statistical significance testing. We view the end-to-end results as a proof-of-concept demonstration rather than a definitive benchmark; scaling to a larger evaluation set is a priority for future work. The memory evaluation on 100 held-out cases provides broader, though less end-to-end, evidence. 
+
+Internal validity. Evaluation leakage is mitigated via prompt-level instructions that prohibit the agent from querying upstream commits, LKML archives, or the syzbot dashboard. Beyond log inspection, we manually reviewed the agent’s chain-of-thought reasoning for all runs to confirm that no ground-truth patch content was retrieved or reproduced. All six evaluation bugs were fixed after the knowledge cutoff dates of both the coding agent and the advisor base models, so their fixes do not appear in any pre-training corpus. The chain-of-thought analysis further confirmed that the agent’s reasoning derived from the provided crash reports and advisor summaries rather than recalling known patches. 
+
+Construct validity. Avg. Rank relies on an LLM judge (Claude Sonnet 4.6), which may not perfectly align with human expert as-sessment. We mitigate this by presenting patches anonymously in randomized order and prompting for structured ranking criteria. CodeBERTScore may undervalue functionally correct patches that differ structurally from the reference; we therefore report it along-side fix rate and compilation rate rather than as a standalone metric. 
+
+(a) Unguided Coding Agent × Wrong file    
+
+> // net/rose/rose_subr.c <-- wrong subsystem! skb = alloc_skb(len, GFP_ATOMIC); +if (!skb) +return;
+> Hallucinates a fix in net/rose/rose_subr.c , an unrelated subsystem.
+
+(b) PatchAdvisor (Advisor + Coding Agent) ∼ Partial fix  
+
+> // net/atm/lec.c -priv->lecd = NULL; -netif_stop_queue(dev); +netif_tx_disable(dev); +priv->lecd = NULL;
+> Correctly locates net/atm/lec.c ; reorders teardown to shrink the race window.
+
+(c) Ground Truth ✓ Correct           
+
+> // net/atm/lec.c +rcu_read_lock(); +vcc = rcu_dereference(priv->lecd); +if (vcc) { +atm_force_charge(vcc, skb->truesize); +sk = sk_atm(vcc); +skb_queue_tail(&sk->sk_receive_queue, skb); +sk->sk_data_ready(sk); +} +rcu_read_unlock(); // net/atm/lec.h -struct atm_vcc *lecd; +struct atm_vcc __rcu *lecd;
+> Full RCU refactoring across lec.c +lec.h : marks lecd as __rcu , wraps reads with
+> rcu_dereference() .
+
+Figure 3: Patch comparison for KASAN slab-use-after-free in 
+
+sock_def_readable (bug f5007221, ATM LEC subsystem). (a) Without guidance, the coding agent targets the wrong subsystem. (b) With advisor context, it locates the correct file. (c) The official fix requires a full RCU refactoring beyond current model capabilities. 
+
+Our evaluation uses a single coding agent (Claude); results may vary with other code generation models, though our framework is agent-agnostic by design. 
+
+## 6 Related Work 
+
+Bug-fix and vulnerability datasets. A large body of prior work has built datasets for software testing, debugging, and repair. Defects4J established a widely used benchmark of real Java bugs with re-producible faulty and fixed versions plus triggering tests, making controlled APR evaluation practical [ 15 ]. BugsInPy extended this idea to Python, providing real bugs from open-source projects for testing and debugging research [ 32 ]. In the security domain, CVE-fixes links public vulnerability records to source-level fixes [ 6], while MegaVul scales vulnerability mining for C/C++ code and pro-vides richer code representations for learning-based analysis [ 23 ]. Also, the ARVO dataset [ 21 ], which consists of thousands of Docker 
+
+> 9
+
+containerized images, is used to reproduce OSS-Fuzz [ 28 ] vulnera-bilities in C/C++, along with their corresponding fixes. Compared with these datasets, our focus is on Linux kernel bugs reported by syzbot and, more importantly, on capturing the full repair lifecycle —including crash reports, reproducers, patch revisions, and review discussions—rather than only a buggy/fixed snapshot. 
+
+LLM-based automated program repair. Recent work on APR in-creasingly uses large language models as repair engines. ChatRe-pair showed that conversational repair, which iteratively incorpo-rates validation feedback, can substantially improve over one-shot prompting [ 35 ]. RepairAgent further pushed this direction by fram-ing APR as an autonomous agent workflow that gathers informa-tion, invokes tools, and iteratively refines candidate fixes [ 7]. SWE-bench broadened evaluation from synthetic or narrowly scoped bugs to real GitHub issues, showing that realistic software engineer-ing repair remains difficult for contemporary models [ 14 ]. Further-more, APPATCH uses union slicing, assisted by semantic matching, to narrow the scope of vulnerabilities’ code-related context to sup-port the model’s reasoning [ 24 ]. On the other hand, PatchAgent [ 37 ]uses the Language Server Protocol (LSP) [ 22 ] to allow structured code retrieval and analysis within a repository. However, these lines of work mainly target user-space repositories and rely on issue trackers, tests, or validation loops that do not reflect the Linux kernel’s email-driven review process, subsystem structure, concur-rency hazards, and crash-centric debugging workflow. Our work complements them by modeling kernel-native repair artifacts and by exposing supervision for tasks beyond patch generation, including review, revision, and preference learning. 
+
+Kernel-specific repair benchmarks and environments. The closest kernel-specific benchmark is KGym, which introduces an execution platform and benchmark for Linux kernel crash resolution using real bugs, crash traces, reproducers, and developer fixes [ 20 ]. Its baseline results also highlight how poorly current LLMs perform on kernel repair tasks. Our work is complementary to KGym: KGym emphasizes end-to-end evaluation in an executable environment ,whereas our dataset emphasizes large-scale lifecycle mining and 
+
+supervision from patch review and revision histories . In this sense, our dataset can serve as a training and analysis resource, while KGym provides a complementary execution-based evaluation perspective. 
+
+Kernel patch correctness, evolution, and patch ecosystems. Beyond patch generation itself, prior work has shown that kernel patches are often subtle, evolving, and error-prone artifacts. KLAUS studies incorrectly developed Linux kernel patches and proposes a method to evaluate patch correctness, showing that even accepted patches can introduce serious security risks [ 33 ]. At a broader ecosystem level, studies of the Android kernel patch ecosystem show that propagation of upstream kernel patches can be delayed by months or years, underscoring the complexity of patch management and the difficulty of identifying security-critical upstream commits [ 38 ]. Recent work further highlights that security patches do not remain static after their initial landing. Xie et al. [ 36 ] present a systematic study of security patch evolution over 1,046 CVEs and 2,633 patches from open-source projects, including Linux, and show that post-fix evolution is both common and consequential for security analy-sis. These observations align with our motivation, but the focus is different. While prior work studies patch correctness or security patch evolution at a broad ecosystem level, our work centers on the repair lifecycle of syzbot-reported Linux kernel bugs and captures finer-grained supervision signals, including crash reports, reproduc-ers, revision chains, and reviewer feedback. Together, these studies reinforce that, in kernel development, producing a patch is only one step; correctness, revision, review, and downstream impact all matter. Our work contributes a dataset that makes these process signals explicit and learnable. 
+
+Empirical studies of syzbot and continuous kernel fuzzing. Contin-uous fuzzing infrastructure such as syzkaller/syzbot has become a major source of Linux kernel bug discovery. Empirical work on continuous kernel fuzzing observed large numbers of unresolved crashes, characterized common bug types, and found that only a subset of fixes went through substantial review or additional test-ing [ 26 ]. Our work builds on this line of research by moving from aggregate measurement to instance-level repair lifecycle reconstruc-tion , connecting each bug report to reproducers, final fixes, patch iterations, and reviewer feedback. This enables not only empirical analysis of what makes bugs difficult, but also the construction of training tasks tailored to post-training LLMs for kernel repair. 
+
+## 7 Conclusion 
+
+We investigated Linux kernel patch evolution through a large 
+
+syzbot -grounded dataset, confirming that accepted fixes are fre-quently iterative, non-local, and shaped by reviewer-enforced con-straints. Motivated by these findings, we developed PatchAdvisor ,which leverages patch-evolution history to guide AI-assisted repair. Our results indicate that revision history constitutes a valuable supervision signal for kernel repair and that effective automated fixing should model the refinement process rather than treat patch generation as a one-shot task. Future directions include scaling evaluation to a larger bug set, incorporating multi-file architectural reasoning for complex repairs such as RCU refactoring, and integrating stronger verification for concurrency-sensitive patches. 
+
+## References                 
+
+> [1] Accessed: 2026. KCOV: code coverage for fuzzing. https://docs.kernel.org/dev-tools/kcov.html. [2] Accessed: 2026. Kernel.org git repositories. https://git.kernel.org/pub/scm/linux/ kernel/git/stable/linux.git/. [3] Accessed: 2026. Linux Kernel Mailing List (LKML). https://lkml.org/. [4] Accessed: 2026. lore.kernel.org. https://korg.docs.kernel.org/lore.html. [5] Accessed: 2026. public-inbox listing. https://lore.kernel.org/. [6] Guru Bhandari, Amara Naseer, and Leon Moonen. 2021. CVEfixes: Automated Collection of Vulnerabilities and Their Fixes from Open-Source Software. In
+> Proceedings of the 17th International Conference on Predictive Models and Data Analytics in Software Engineering (PROMISE) . doi:10.1145/3475960.3475985 [7] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2025. RepairAgent: An Autonomous, LLM-Based Agent for Program Repair. In 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . 2188–2200. doi:10.1109/ ICSE55347.2025.00157 [8] Zhiyu Fan, Xiang Gao, Martin Mirchev, Abhik Roychoudhury, and Shin Hwei Tan. 2023. Automated Repair of Programs from Large Language Models. In
+> 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) .1469–1481. doi:10.1109/ICSE48619.2023.00128 [9] Luca Gazzola, Daniela Micucci, and Leonardo Mariani. 2018. Automatic software repair: A survey. In Proceedings of the 40th International Conference on Software Engineering . 1219–1219. [10] Xinyi Hou, Yanjie Zhao, Yue Liu, Zhou Yang, Kailong Wang, Li Li, Xiapu Luo, David Lo, John Grundy, and Haoyu Wang. 2024. Large language models for software engineering: A systematic literature review. ACM Transactions on Software Engineering and Methodology 33, 8 (2024), 1–79. [11] Kai Huang, Xiangxin Meng, Jian Zhang, Yang Liu, Wenjie Wang, Shuhao Li, and Yuqing Zhang. 2023. An Empirical Study on Fine-Tuning Large Language Models
+> 10
+
+of Code for Automated Program Repair. In 2023 38th IEEE/ACM International Conference on Automated Software Engineering (ASE) . 1162–1174. doi:10.1109/ ASE56229.2023.00181 [12] Kai Huang, Jian Zhang, Xiangxin Meng, and Yang Liu. 2025. Template-Guided Program Repair in the Era of Large Language Models. In 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . 1895–1907. doi:10.1109/ ICSE55347.2025.00030 [13] Shengbei Jiang, Jiabao Zhang, Wei Chen, Bo Wang, Jianyi Zhou, and Jie Zhang. 2024. Evaluating Fault Localization and Program Repair Capabilities of Existing Closed-Source General-Purpose LLMs. In Proceedings of the 1st International Workshop on Large Language Models for Code (Lisbon, Portugal) (LLM4Code ’24) .Association for Computing Machinery, New York, NY, USA, 75–78. doi:10.1145/ 3643795.3648390 [14] Carlos E. Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Mon-isha S. Ghosh, et al . 2024. SWE-bench: Can Language Models Resolve Real-World GitHub Issues?. In The Twelfth International Conference on Learning Representa-tions (ICLR) .[15] René Just, Darioush Jalali, and Michael D. Ernst. 2014. Defects4J: A Database of Existing Faults to Enable Controlled Testing Studies for Java Programs. In 
+
+Proceedings of the 2014 International Symposium on Software Testing and Analysis (ISSTA) . 437–440. [16] Youngjoon Kim, Sunguk Shin, Hyoungshick Kim, and Jiwon Yoon. 2025. Logs in, patches out: automated vulnerability repair via tree-of-thought LLM analysis .USENIX Association, USA. [17] Jiaolong Kong, Xiaofei Xie, and Shangqing Liu. 2025. Demystifying Memorization in LLM-Based Program Repair via a General Hypothesis Testing Framework. Proc. ACM Softw. Eng. 2, FSE, Article FSE120 (June 2025), 23 pages. doi:10.1145/3729390 [18] Claire Le Goues, ThanhVu Nguyen, Stephanie Forrest, and Westley Weimer. 2011. Genprog: A generic method for automatic software repair. Ieee transactions on software engineering 38, 1 (2011), 54–72. [19] Yingling Li, Muxin Cai, Junjie Chen, Yang Xu, Lei Huang, and Jianping Li. 2025. Context-aware prompting for LLM-based program repair: Context-aware prompt-ing for LLM-based program repair. Automated software engineering 32, 2 (2025), 42–. [20] Alex Mathai, Chenxi Huang, Petros Maniatis, Aleksandr Nogikh, Franjo Ivancic, Junfeng Yang, and Baishakhi Ray. 2024. KGym: A Platform and Dataset to Benchmark Large Language Models on Linux Kernel Crash Resolution. CoRR 
+
+abs/2407.02680 (2024). [21] Xiang Mei, Pulkit Singh Singaria, Jordi Del Castillo, Haoran Xi, Abdeloua-hab, Benchikh, Tiffany Bao, Ruoyu Wang, Yan Shoshitaishvili, Adam Doupé, Hammond Pearce, and Brendan Dolan-Gavitt. 2024. ARVO: Atlas of Repro-ducible Vulnerabilities for Open Source Software. arXiv:2408.02153 [cs.CR] https://arxiv.org/abs/2408.02153 [22] Microsoft. 2026. Language Server Protocol Specification. https://microsoft.github. io/language-server-protocol/specifications/lsp/3.17/specification/. Accessed: 2026-03-26. [23] Chao Ni et al . 2024. MegaVul: A C/C++ Vulnerability Dataset with Comprehen-sive Code Representations. In Proceedings of the 21st International Conference on Mining Software Repositories (MSR) .[24] Yu Nong, Haoran Yang, Long Cheng, Hongxin Hu, and Haipeng Cai. 2025. AP-PATCH: automated adaptive prompting large language models for real-world soft-ware vulnerability patching . USENIX Association, USA. [25] Hammond Pearce, Benjamin Tan, Baleegh Ahmad, Ramesh Karri, and Brendan Dolan-Gavitt. 2023. Examining Zero-Shot Vulnerability Repair with Large Lan-guage Models. In 2023 IEEE Symposium on Security and Privacy (SP) . 2339–2356. doi:10.1109/SP46215.2023.10179324 [26] Jukka Ruohonen and Kalle Rindell. 2019. Empirical Notes on the Interaction Between Continuous Kernel Fuzzing and Development. In 2019 IEEE International Symposium on Software Reliability Engineering Workshops (ISSREW) . doi:10.1109/ ISSREW.2019.00084 [27] Minjae Seo, Wonwoo Choi, Myoungsung You, and Seungwon Shin. 2025. Au-toPatch: Multi-Agent Framework for Patching Real-World CVE Vulnerabilities. arXiv:2505.04195 [cs.CR] https://arxiv.org/abs/2505.04195 [28] Kostya Serebryany. 2017. OSS-Fuzz - Google’s continuous fuzzing service for open source software. USENIX Association, Vancouver, BC. [29] syzkaller: an unsupervised coverage-guided kernel fuzzer. Accessed: 2026. https: //github.com/google/syzkaller. [30] The Linux Kernel Organization. [n. d.]. Patchwork: A web-based patch tracking system. https://patchwork.kernel.org/. [31] Syzbot Linux Upstream. Accessed: 2026. https://syzbot.org/upstream. [32] Ratnadira Widyasari, Sheng Qin Sim, Camellia Lok, Haodi Qi, Jack Phan, Qijin Tay, Constance Tan, Fiona Wee, Jodie Ethelda Tan, Yuheng Yieh, Brian Goh, Ferdian Thung, Hong Jin Kang, Thong Hoang, David Lo, and Eng Lieh Ouh. 2020. BugsInPy: A Database of Existing Bugs in Python Programs to Enable Controlled Testing and Debugging Studies. In Proceedings of the 28th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE) .[33] Yuhang Wu, Zhenpeng Lin, Yueqi Chen, Dang K. Le, Dongliang Mu, and Xinyu Xing. 2023. Mitigating Security Risks in Linux with KLAUS: A Method for Evaluating Patch Correctness. In 32nd USENIX Security Symposium (USENIX Security 23) . USENIX Association, 4247–4264. [34] Chunqiu Steven Xia, Yuxiang Wei, and Lingming Zhang. 2023. Automated Program Repair in the Era of Large Pre-Trained Language Models. In Proceedings of the 45th International Conference on Software Engineering (Melbourne, Victoria, Australia) (ICSE ’23) . IEEE Press, 1482–1494. doi:10.1109/ICSE48619.2023.00129 [35] Chunqiu Steven Xia and Lingming Zhang. 2023. Keep the Conversation Going: Fixing 162 out of 337 Bugs for $0.42 Each Using ChatGPT. CoRR abs/2304.00385 (2023). [36] Zifan Xie, Ming Wen, Zichao Wei, and Hai Jin. 2024. Unveiling the Characteristics and Impact of Security Patch Evolution. In Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering . 1094–1106. [37] Zheng Yu, Ziyi Guo, Yuhang Wu, Jiahao Yu, Meng Xu, Dongliang Mu, Yan Chen, and Xinyu Xing. 2025. PATCHAGENT: a practical program repair agent mimicking human expertise . USENIX Association, USA. [38] Zheng Zhang, Hang Zhang, Zhiyun Qian, and Billy Lau. 2021. An Investigation of the Android Kernel Patch Ecosystem. In 30th USENIX Security Symposium (USENIX Security 21) . USENIX Association, 3649–3666. [39] Shuyan Zhou, Uri Alon, Sumit Agarwal, and Graham Neubig. 2023. Code-bertscore: Evaluating code generation with pretrained models of code. In Proceed-ings of the 2023 Conference on Empirical Methods in Natural Language Processing .13921–13937. [40] Shuyan Zhou, Uri Alon, Sumit Agarwal, and Graham Neubig. Accessed: 2026. CodeBERTScore: an automatic metric for code generation, based on BERTScore. https://github.com/neulab/code-bert-score. [41] Fida Zubair, Maryam Al-Hitmi, and Cagatay Catal. 2025. The use of large language models for program repair. Computer Standards & Interfaces 93 (2025), 103951. doi:10.1016/j.csi.2024.103951
