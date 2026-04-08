@@ -6,79 +6,79 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-07
-- 运行时间：2026-04-07 20:01:26 UTC
+- 最新运行日期：2026-04-08
+- 运行时间：2026-04-08 20:42:11 UTC
 - 运行状态：成功
 - 本次总论文数：19
 - 精读区：8
 - 速读区：11
 
 ### 今日简报（AI）
-探索自动化程序修复与代码生成安全前沿，完成 19 篇论文的阅读。  
-两项满分精读聚焦多智能体与语义演化方法，展现 LLM 引导的修复潜力。  
-建议关注程序可解释性与安全评测体系的后续进展，以跟进大模型工程应用趋势。
-- 详情：[/202604/07/README](/202604/07/README)
+聚焦自动程序修复与语义引导的智能代码改进方向。  
+重点突破在多代理辩论与语义进化技术，显著提升修复效率与准确度。  
+建议读者关注多模型协作与老旧语言代码智能支持的最新进展。
+- 详情：[/202604/08/README](/202604/08/README)
 
 ### 精读区论文标签
-1. [Semantic Evolution over Populations for LLM-Guided Automated Program Repair](/202604/07/2604.02134v1-semantic-evolution-over-populations-for-llm-guided-automated-program-repair)  
+1. [Semantic Evolution over Populations for LLM-Guided Automated Program Repair](/202604/08/2604.02134v1-semantic-evolution-over-populations-for-llm-guided-automated-program-repair)  
    标签：评分：10.0/10、query:apr-oracle
-   evidence：利用语义演化和结构化失败信息的LLM引导自动程序修复
-2. [Runtime Execution Traces Guided Automated Program Repair with Multi-Agent Debate](/202604/07/2604.02647v1-runtime-execution-traces-guided-automated-program-repair-with-multi-agent-debate)  
+   evidence：专注于补丁多样性和语义演化的基于LLM的自动程序修复框架
+2. [Runtime Execution Traces Guided Automated Program Repair with Multi-Agent Debate](/202604/08/2604.02647v1-runtime-execution-traces-guided-automated-program-repair-with-multi-agent-debate)  
    标签：评分：10.0/10、query:apr-oracle
-   evidence：利用运行时执行轨迹进行补丁验证并避免过拟合
-3. [PAFT: Preservation Aware Fine-Tuning for Minimal-Edit Program Repair](/202604/07/2604.03113v2-paft-preservation-aware-fine-tuning-for-minimal-edit-program-repair)  
+   evidence：运行时事实用于补丁验证和防止过拟合
+3. [Beyond Fixed Tests: Repository-Level Issue Resolution as Coevolution of Code and Behavioral Constraints](/202604/08/2604.04580v1-beyond-fixed-tests-repository-level-issue-resolution-as-coevolution-of-code-and-behavioral-constraints)  
    标签：评分：10.0/10、query:apr-oracle
-   evidence：基于学习的程序修复，关注补丁正确性和最小化修改
-4. [Beyond Fixed Tests: Repository-Level Issue Resolution as Coevolution of Code and Behavioral Constraints](/202604/07/2604.04580v1-beyond-fixed-tests-repository-level-issue-resolution-as-coevolution-of-code-and-behavioral-constraints)  
+   evidence：代码与行为约束的协同演化以避免过拟合修复
+4. [On the Role of Fault Localization Context for LLM-Based Program Repair](/202604/08/2604.05481v1-on-the-role-of-fault-localization-context-for-llm-based-program-repair)  
    标签：评分：10.0/10、query:apr-oracle
-   evidence：代码与行为约束的协同演化，以避免基于大模型的修复中的过拟合补丁
-5. [Beyond Localization: Recoverable Headroom and Residual Frontier in Repository-Level RAG-APR](/202604/07/2603.29067v1-beyond-localization-recoverable-headroom-and-residual-frontier-in-repository-level-rag-apr)  
+   evidence：故障定位上下文对基于大模型的程序修复的影响
+5. [QiMeng-PRepair: Precise Code Repair via Edit-Aware Reward Optimization](/202604/08/2604.05963v1-qimeng-prepair-precise-code-repair-via-edit-aware-reward-optimization)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：通过编辑感知奖励优化进行精确代码修复，以减轻过度编辑
+6. [Beyond Localization: Recoverable Headroom and Residual Frontier in Repository-Level RAG-APR](/202604/08/2603.29067v1-beyond-localization-recoverable-headroom-and-residual-frontier-in-repository-level-rag-apr)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：仓库级RAG-APR，包含预言定位和通用包装预言检查
-6. [PAFT: Preservation Aware Fine-Tuning for Minimal-Edit Program Repair](/202604/07/2604.03113v1-paft-preservation-aware-fine-tuning-for-minimal-edit-program-repair)  
+   evidence：仓库级RAG-APR与预言机定位
+7. [PAFT: Preservation Aware Fine-Tuning for Minimal-Edit Program Repair](/202604/08/2604.03113v2-paft-preservation-aware-fine-tuning-for-minimal-edit-program-repair)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：关注最小编辑补丁正确性的学习型程序修复
-7. [DebugHarness: Emulating Human Dynamic Debugging for Autonomous Program Repair](/202604/07/2604.03610v1-debugharness-emulating-human-dynamic-debugging-for-autonomous-program-repair)  
+   evidence：针对最小编辑程序修复的微调
+8. [An End-to-End Approach for Fixing Concurrency Bugs via SHB-Based Context Extractor](/202604/08/2604.05753v1-an-end-to-end-approach-for-fixing-concurrency-bugs-via-shb-based-context-extractor)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：利用动态执行上下文的自主程序修复框架
-8. [Beyond Crash-to-Patch: Patch Evolution for Linux Kernel Repair](/202604/07/2604.03851v1-beyond-crash-to-patch-patch-evolution-for-linux-kernel-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：补丁演化与评审反馈对补丁正确性的影响
+   evidence：用于并发漏洞自动修复的LLM驱动代理
 
 ### 速读区论文标签
-1. [ACES: Who Tests the Tests? Leave-One-Out AUC Consistency for Code Generation](/202604/07/2604.03922v1-aces-who-tests-the-tests-leave-one-out-auc-consistency-for-code-generation)  
+1. [COBOLAssist: Analyzing and Fixing Compilation Errors for LLM-Powered COBOL Code Generation](/202604/08/2604.03978v1-cobolassist-analyzing-and-fixing-compilation-errors-for-llm-powered-cobol-code-generation)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：评估代码生成的测试正确性和可靠性
-2. [COBOLAssist: Analyzing and Fixing Compilation Errors for LLM-Powered COBOL Code Generation](/202604/07/2604.03978v1-cobolassist-analyzing-and-fixing-compilation-errors-for-llm-powered-cobol-code-generation)  
+   evidence：针对大模型生成代码的迭代修复
+2. [An Iterative Test-and-Repair Framework for Competitive Code Generation](/202604/08/2604.05560v1-an-iterative-test-and-repair-framework-for-competitive-code-generation)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：分析并修复LLM生成代码中的编译错误
-3. [Security in LLM-as-a-Judge: A Comprehensive SoK](/202604/07/2603.29403v2-security-in-llm-as-a-judge-a-comprehensive-sok)  
+   evidence：使用生成的测试作为预言的迭代测试与修复框架
+3. [SemLink: A Semantic-Aware Automated Test Oracle for Hyperlink Verification using Siamese Sentence-BERT](/202604/08/2604.05711v1-semlink-a-semantic-aware-automated-test-oracle-for-hyperlink-verification-using-siamese-sentence-bert)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：使用BERT的语义感知自动测试预言机
+4. [Does Pass Rate Tell the Whole Story? Evaluating Design Constraint Compliance in LLM-based Issue Resolution](/202604/08/2604.05955v1-does-pass-rate-tell-the-whole-story-evaluating-design-constraint-compliance-in-llm-based-issue-resolution)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：在测试通过率之外评估补丁正确性
+5. [Scaling Coding Agents via Atomic Skills](/202604/08/2604.05013v1-scaling-coding-agents-via-atomic-skills)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：LLM作为裁判评估生成输出的正确性及可靠性问题
-4. [ProdCodeBench: A Production-Derived Benchmark for Evaluating AI Coding Agents](/202604/07/2604.01527v2-prodcodebench-a-production-derived-benchmark-for-evaluating-ai-coding-agents)  
+   evidence：通过单元测试生成等原子技能扩展用于错误修复的代码智能体
+6. [EffiPair: Improving the Efficiency of LLM-generated Code with Relative Contrastive Feedback](/202604/08/2604.05137v1-effipair-improving-the-efficiency-of-llm-generated-code-with-relative-contrastive-feedback)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：AI 编程智能体的测试相关性验证和可靠评估信号
-5. [Toward Executable Repository-Level Code Generation via Environment Alignment](/202604/07/2604.03622v1-toward-executable-repository-level-code-generation-via-environment-alignment)  
+   evidence：提高代码正确性和效率的迭代优化框架
+7. [CODESTRUCT: Code Agents over Structured Action Spaces](/202604/08/2604.05407v1-codestruct-code-agents-over-structured-action-spaces)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：仓库级代码生成的执行验证
-6. [GBQA: A Game Benchmark for Evaluating LLMs as Quality Assurance Engineers](/202604/07/2604.02648v1-gbqa-a-game-benchmark-for-evaluating-llms-as-quality-assurance-engineers)  
+   evidence：用于有效补丁的语法验证转换
+8. [Beyond Isolated Tasks: A Framework for Evaluating Coding Agents on Sequential Software Evolution](/202604/08/2604.03035v1-beyond-isolated-tasks-a-framework-for-evaluating-coding-agents-on-sequential-software-evolution)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：评估LLM在自主缺陷发现和质量保证中表现的基准测试
-7. [ABTest: Behavior-Driven Testing for AI Coding Agents](/202604/07/2604.03362v1-abtest-behavior-driven-testing-for-ai-coding-agents)  
+   evidence：评估软件演化中编码智能体的框架
+9. [Agentic Code Optimization via Compiler-LLM Cooperation](/202604/08/2604.04238v1-agentic-code-optimization-via-compiler-llm-cooperation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：AI编程智能体的行为驱动测试与验证
-8. [Measuring LLM Trust Allocation Across Conflicting Software Artifacts](/202604/07/2604.03447v1-measuring-llm-trust-allocation-across-conflicting-software-artifacts)  
+   evidence：平衡基于LLM的代码生成与编译器优化的正确性
+10. [StatsClaw: An AI-Collaborative Workflow for Statistical Software Development](/202604/08/2604.04871v1-statsclaw-an-ai-collaborative-workflow-for-statistical-software-development)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：评估代码、文档和测试之间的信任度与一致性
-9. [SecPI: Secure Code Generation with Reasoning Models via Security Reasoning Internalization](/202604/07/2604.03587v1-secpi-secure-code-generation-with-reasoning-models-via-security-reasoning-internalization)  
+   evidence：用于代码生成与验证的多代理架构
+11. [Edit, But Verify: An Empirical Audit of Instructed Code-Editing Benchmarks](/202604/08/2604.05100v1-edit-but-verify-an-empirical-audit-of-instructed-code-editing-benchmarks)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：通过推理内化确保生成代码的功能正确性和安全性
-10. [Persistent Cross-Attempt State Optimization for Repository-Level Code Generation](/202604/07/2604.03632v1-persistent-cross-attempt-state-optimization-for-repository-level-code-generation)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：仓库级代码生成的跨尝试知识优化及失败信号利用
-11. [Software Testing Beyond Closed Worlds: Open-World Games as an Extreme Case](/202604/07/2604.04047v1-software-testing-beyond-closed-worlds-open-world-games-as-an-extreme-case)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：讨论了复杂系统中稳定测试预言的局限性
+   evidence：对基于测试评估的代码编辑基准进行审计
 
 
 <div class="dpr-home-promo-card">
