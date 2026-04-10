@@ -1,0 +1,392 @@
+Title: Towards Counterfactual Explanation and Assertion Inference for CPS Debugging
+
+URL Source: https://arxiv.org/pdf/2604.07679v1
+
+Published Time: Fri, 10 Apr 2026 00:21:50 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Towards Counterfactual Explanation and Assertion Inference for CPS Debugging 
+
+1st Zaid Ghazal ∗
+
+University of Michigan-Dearborn 
+
+Dearborn, MI, USA zghazal@umich.edu 
+
+2nd Hadiza Yusuf ∗
+
+University of Michigan-Dearborn 
+
+Dearborn, MI, USA hyusuf@umich.edu 
+
+3rd Khouloud Gaaloul ∗
+
+University of Michigan-Dearborn 
+
+Dearborn, MI, USA kgaaloul@umich.edu 
+
+Abstract —Verification and validation of cyber-physical systems (CPS) via large-scale simulation often surface failures that are hard to interpret, especially when triggered by interactions between continuous and discrete behaviors at specific events or times. Existing debugging techniques can localize anomalies to specific model components, but they provide little insight into the input-signal values and timing conditions that trigger violations, or the minimal, precisely timed changes that could have prevented the failure. In this article, we introduce De-CaF, a counterfactual-guided explanation and assertion-based characterization framework for CPS debugging. Given a failing test input, DeCaF generates counterfactual changes to the input signals that transform the test from failing to passing. These changes are designed to be minimal, necessary, and sufficient to precisely restore correctness. Then, it infers assertions as logical predicates over inputs that generalize recovery conditions in an interpretable form engineers can reason about, without requiring access to internal model details. Our approach combines three counterfactual generators with two causal models, and infers success assertions. Across three CPS case studies, DeCaF achieves its best success rate with KD-Tree Nearest Neighbors combined with M5 model tree, while Genetic Algorithm combined with Random Forest provides the strongest balance between success and causal precision. 
+
+Index Terms —Debugging, Cyber-Physical Systems, Counter-factual Analysis, Search-based Testing 
+
+I. I NTRODUCTION 
+
+Recent years have seen significant growth in simulation-based testing of cyber-physical systems (CPS) [1], [2], [3], driven by the need to validate increasingly complex systems with both discrete and continuous dynamics. Beyond academic research, industry and government have embraced simulation at scale. For example, the U.S. Air Force’s Model One initia-tive [4] integrates 50 military simulations into a unified digital-twin framework as a strategic tool for testing. Simulation-based testing of CPS often relies on industrial-strength mod-eling environments like MATLAB/Simulink [5], which enable engineers to test system designs in stochastic and dynamic environments. In such conditions, testing frequently surfaces a wide variety of failures that are difficult to interpret or explain 
+
+∗All authors contributed equally to this work. © 2026 IEEE. Personal use of this material is permitted. Permission from IEEE must be obtained for all other uses, in any current or future media, including reprinting/republishing this material for advertising or promotional purposes, creating new collective works, for resale or redistribution to servers or lists, or reuse of any copyrighted component of this work in other works. 
+
+due to continuous-time behaviors and intricate interactions among multiple inputs. Failures may occur only under precise signal values, timing conditions, or rare sequences of state transitions [6]. Several automated methods have been proposed to assist with failure diagnostics [7], including trace moni-toring and diagnostics [8], [9], [10], model-based structural analysis [11], [12], and statistical or causal debugging [13], [14], [15], [16], [17]. These methods can flag anomalous components or trace fault propagation, but they offer little insight into the input conditions that trigger failures. Existing debugging approaches predominantly operate at the level of model structure or internal signals. For example, Bartocci et al. [11], [9] provide explanations that are rooted in model-level properties, by analyzing failing traces and identifying root events and their propagation across model ele-ments, to locate anomalous Simulink components or execution paths responsible for violations. Deng et al. [12] introduce a causal temporal logic that explains fault propagation in Simulink/Simscape models. However, none of these works support input-level explanations of failures. Recent works [15], [14], [13], [16], [17] have explored causal reasoning as a means for fault localization in complex systems and programs. Johnson et al. [14] propose a causal testing method to identify root software defects in Java programs, using counterfactual reasoning to explain failures by showing what changes in the input would prevent them. Yet, this work mainly targets discrete unit-level programs. To the best of our knowledge, no existing approach has applied causal reasoning to CPS with dynamic behaviors, where failures arise only under specific input conditions in terms of signal values and their timing, that capture complex continuous–discrete interactions. The closest effort, CaSTL [18], integrates causal theory with signal temporal logic to generate fault explanations. Debugging CPS requires separating true system bugs from test formulation is-sues, such as violated environment assumptions or an exceeded operational design domain. Whereas methods like CaSTL diagnose component-level faults in a white-box setting, DeCaF acts as a first-line tool for offline fault diagnosis by enabling black-box recovery at the input level. Further, recent studies on assertion-based inference [19], [20], [21], [22], [23], [24] have focused on generating as-sertions that characterize the circumstances under which the system-level behavior satisfies functional requirements. For 
+
+> arXiv:2604.07679v1 [cs.SE] 9 Apr 2026
+
+example, Daikon [25] uses dynamic invariant detection to report properties observed across program executions, while Alhazen [19], [21] relies on grammar mining to predict failures for given inputs and to produce additional failure-inducing inputs. These approaches can support program understand-ing and input prediction, but lack the capacity for causal reasoning, i.e., answering ‘what-if’ questions such as: What specific change in input signals would have prevented this failure? Within which time intervals would altered inputs restore correctness? Gaaloul et al. [23], [26] similarly focus on synthesizing environment assumptions in Simulink models but do not provide input-level counterfactual explanations of CPS failures. In this paper, we introduce DeCaF, a framework that sup-ports debugging of CPS modeled in Simulink by (i) generating counterfactual-guided explanations of failure-inducing inputs, and (ii) inferring assertions that characterize the conditions under which correctness is restored. When a CPS model fails during simulation, debuggers can often trace the problem to internal components but provide limited insight into which input values or timing conditions triggered the violation, or how these inputs (or their characterization as additional pre-conditions to the test) could be adjusted to restore correctness. Figure 1 shows DeCaF on an adaptive cruise control Simulink model [27] with a safe distance requirement, 𝑑 𝑟 𝑒𝑙 ≥ 𝑑 𝑠𝑎 𝑓 𝑒 =
+
+50 , 𝑚 . When a simulation violates the requirement, DeCaF generates a counterfactual input signal that avoids the failure and infers an interpretable success assertion over the input, for example ∀𝑡 ∈ [ 0, 5], , 𝑎 𝑙𝑒𝑎𝑑 (𝑡 ) ≥ − 0.5, helping engineers understand recovery conditions without internal access or extra instrumentation. DeCaF is designed for scenarios where immediate system-level interventions are impractical, due to operational continuity, cost, or lack of internal system-model access. 
+
+Contributions. Our contributions are as follows: (i) We introduce DeCaF, a novel counterfactual-guided ex-planation and characterization framework for debugging CPS modeled in Simulink. Given a failing test case, DeCaF generates interpretable counterfactuals as minimal changes to input signal values or timing intervals that are both necessary and sufficient to restore correctness. (ii) We infer assertion-based characterizations from the gen-erated counterfactuals that generalize the input condi-tions, guaranteeing correct behavior. These assertions can guide requirement refinement in uncontrolled environ-ments and enable recovery reasoning without access to internal system components. (iii) We formalize the problems of counterfactual generation and assertion inference for CPS, and introduce a trans-formation mechanism that maps learned explanations, expressed in terms of control points, into concrete input-signal modifications and formal temporal assertions. (iv) We conduct an empirical evaluation of DeCaF on three CPS case studies covering multiple requirements. We consider six configurations of DeCaF, by combining three counterfactual generation strategies and two ML models. The evaluation measures the success, necessity, and suf-ficiency of DeCaF’s counterfactuals in correcting faulty behaviors, as well as the complexity and generalizability of the inferred assertions. 
+
+Organization. Section II defines the problem of counterfactual-guided explanation and assertion-based characterization for CPS, illustrated by examples. Section III introduces the DeCaF framework and details its four stages. Section IV presents the metrics and experimental evaluation of DeCaF. Section V compares our work with related research. Section VI concludes the article. II. P ROBLEM DEFINITION 
+
+In this section, we formally define the problem of counterfactual-guided explanation and assertion-based charac-terization addressed by DeCaF, illustrating the concepts with examples. We then present the transformation rules that map the generated counterfactuals and inferred success assertions, expressed in terms of control points, into concrete input signals and their corresponding assertions. Figure 1 illustrates the automatic transmission (AT) sys-tem, a representative CPS model that controls gear shifts based on vehicle speed and throttle input. Throttle (Failing )
+
+and Brake (Failing ) denote the failing test inputs, while 
+
+Throttle (Counterfactual ) and Brake (Counterfactual ) denote the corresponding counterfactual inputs generated by DeCaF. The system output EngineRPM refers to the engine speed. Under the original inputs, the output EngineRPM (Failing )
+
+violates the 4750 RPM threshold, whereas the coun-terfactual inputs restore correctness of the system out-put EngineRPM (Counterfactual ) by satisfying the thresh-old. A common CPS testing approach encodes input sig-nals using control points [28], [3], where signals are represented by sequences of values at fixed time inter-vals, interconnected using a piecewise constant interpola-tion. In this example, Throttle is represented with 7 con-trol points, each assigned a value in [0, 100 ], and Brake 
+
+with 3 control points in [0, 325 ]. As shown, the input 
+
+Throttle (Failing ) and Brake (Failing ) trigger a failure since 
+
+engineRPM exceeds 4750 within 10 seconds. DeCaF gener-ates a counterfactual test input (i.e., Throttle (Counterfactual )
+
+and Brake (Counterfactual )) by modifying the first and sixth 
+
+Throttle points and the second Brake point. It further infers an assertion: (∀ 𝑡 ∈ [0, 7.14 ], Throttle (𝑡 ) ≤ 54 .50 ) ∧(∀ 𝑡 ∈ [35 .71 , 42 .46 ], Throttle (𝑡 ) ≤ 59 .30 ) ∧ (∀ 𝑡 ∈[16 .67 , 33 .33 ], Brake (𝑡 ) ≥ 212 .30 ), which characterizes re-covery conditions that turn a failing test input into a passing one. 
+
+Definition 1 ( Control Point-Based Signal ): Let 𝑢 : T →
+
+R be an input signal. We encode 𝑢 using 𝑛 𝑢 control points, i.e., 𝑐 𝑢, 0, 𝑐 𝑢, 1, . . . , 𝑐 𝑢,𝑛 𝑢 −1, equally distributed over the time domain T = [0, 𝑏 ], positioned at a fixed time distance 𝐼 =  
+
+> 𝑏 𝑛 𝑢 −1
+
+. Each control point 𝑐 𝑢,𝑦 contains the value of the signal 
+
+𝑢 at time instant 𝑦 · 𝐼 , for 𝑦 = 0, 1, . . . , 𝑛 𝑢 − 1.
+
+Example. In Figure 1, the Throttle signal (denoted 𝑡ℎ ) and 
+
+Brake signal (denoted 𝑏 ) are represented using 𝑛 𝑡 ℎ = 7 and Fig. 1: Example Illustration of DeCaF and Example signals of counterfactual explanation generated for the AT case-study systems with Throttle and Brake inputs. 
+
+𝑛 𝑏 = 3 control points, respectively (i.e., (𝑐 𝑡 ℎ, 1, . . . , 𝑐 𝑡 ℎ, 7) and 
+
+(𝑐 𝑏, 1, 𝑐 𝑏, 2, 𝑐 𝑏, 3)), where each control point determines the value of the signal in the time domain [0, 50 𝑠 ].The Simulink model 𝑀 of a CPS is encoded using a control-point representation of the form ⟨int 𝑢 , 𝑅 𝑢 , 𝑛 𝑢 ⟩, where int 𝑢 is an interpolation function (e.g., linear, piecewise constant, cubic), 
+
+𝑅 𝑢 ⊆ R is the domain of admissible values, and 𝑛 𝑢 is the number of control points for signal 𝑢 . To generate the signal 
+
+𝑢 (𝑡 ), we place 𝑛 𝑢 control points at uniformly spaced intervals and assign values 𝑐 𝑢, 1, . . . , 𝑐 𝑢,𝑛 𝑢 ∈ 𝑅 𝑢 , interpolating them with int 𝑢 .
+
+Definition 2 ( Test Input and Counterfactual ): Let 𝑀 be a Simulink model, and let 𝜑 be a requirement over its behavior. Let U denote the set of all possible test inputs for 𝑀 , where each test input is a tuple of 𝑚 signals u =
+
+(𝑢 1, 𝑢 2, . . . , 𝑢 𝑚 ), 𝑢 𝑖 : T → R, with each 𝑢 𝑖 encoded as in Definition 1. Assume that u is a failure-inducing input such that 𝑀 (u)̸ | = 𝜑 . A counterfactual u∗ is a modified test input obtained from u that restores satisfaction, i.e., 𝑀 (u∗) | = 𝜑 .
+
+Example. In Figure 1, the signals Throttle (Counterfactual )
+
+and Brake (Counterfactual ) jointly form a counterfactual test input u∗ corresponding to the failing input u with 
+
+Throttle (Failing ) and Brake (Failing ) signals. 
+
+Definition 3 ( Assertion ): An assertion for a system model 
+
+𝑀 is a logical expression of the form condition ⇒ verdict ,where condition is a predicate over the inputs of 𝑀 , and verdict 
+
+denotes the expected execution outcome of 𝑀 on any input 𝑢 
+
+that satisfies condition . An assertion of the form condition ⇒
+
+fail indicates that 𝑀 configured with 𝑢 is expected to fail 𝜑 
+
+if it satisfies condition . Likewise, condition ⇒ pass indicates that 𝑀 configured with 𝑢 is expected to pass 𝜑 if it satisfies 
+
+condition . We refer to assertions with a fail verdict as fail assertions , and those with a pass verdict as success assertions .A success assertion for CF is an assertion satisfied by every counterfactual input u∗ ∈ CF defined by Definition 2. Let 𝐴 be an assertion of the form condition ⇒ verdict .
+
+condition is defined over the control-point inputs and can be represented in a canonical form: 𝑐𝑜𝑛𝑑𝑖𝑡𝑖𝑜𝑛 :: = 𝐶 1 ∨ 𝐶 2 ∨ · · · ∨ 
+
+𝐶 𝑛 , 𝐶 𝑖 ∈ C , where each 𝐶 𝑖 is a conjunction of predicates over control points: 𝐶 𝑖 :: = 𝑃 1 (𝑐 𝑗 1) ∧ 𝑃 2 (𝑐 𝑗 2) ∧ · · · ∧ 𝑃 𝑚 (𝑐 𝑗𝑚 ).Each predicate 𝑃 𝑘 (𝑐 𝑗 𝑘 ) constrains the value assigned to a control point 𝑐 𝑗 𝑘 for an input signal 𝑢 𝑗 .
+
+Example. A success assertion characterizing the recovery conditions for the failing test input in Figure 1 is: (𝑐 𝑡 ℎ, 1 ≤
+
+54 .50 ) ∧ ( 𝑐 𝑡 ℎ, 6 ≤ 59 .30 ) ∧ ( 𝑐 𝑏, 2 ≥ 212 .30 ) ⇒ 𝑝𝑎𝑠𝑠 ,where the predicates are satisfied by the counterfactual sig-nals Throttle (Counterfactual ) and Brake (Counterfactual ) gen-erated by DeCaF. We formulate the counterfactual-guided explanation prob-lem as follows. Let U = {( u1, 𝑦 1), . . . , (u𝑛 , 𝑦 𝑛 )} be a labeled test suite. Each u𝑖 , where 𝑖 ∈ [ 1, 𝑛 ], is a control-point–based test input and 𝑦 𝑖 ∈ { pass , fail } is its verdict with respect to requirement 𝜑 . For each failing input u𝑖 such that 𝑦 𝑖 = fail ,find:  
+
+> •
+
+A set of counterfactuals CF 𝑖 = {u∗
+
+> 𝑖 1
+
+, . . . , u∗ 
+
+> 𝑖𝑚
+
+}. 
+
+> •
+
+A success assertion 𝐴 𝑖 such that 𝐴 𝑖 (u) ⇒ pass for all 
+
+u∗ 
+
+> 𝑖 𝑗
+
+∈ CF 𝑖 .Note that DeCaF operates on control point-based test inputs defined in Definition 1. To enable interpretability of the counterfactual-guided explanation and assertion-based charac-terization, these control points are concretized into the actual signals over the system inputs by applying an interpolation function over the sequence of control points to form a sig-nal [28], [3], [26] and execute the system under test. For example, in Figure 1, the signal Throttle (Failing ) is con-structed as a piecewise constant function over the simulation domain, with each constant segment defined by one of the 7 control points. We assume that system inputs follow piecewise constant interpolation. This is consistent with industrial CPS benchmarks [29], [30], [31], [32] and with the ARCH bench-mark [33], which compares piecewise continuous and constant functions. Results from ARCH-COMP19 [34] show minimal performance differences between the two, indicating that our assumption is not restrictive. Success assertions are generated as conditions that are conjunctions of relational expressions over control points. To translate the assertions derived over control points into concrete assertions over system variables, we follow one trans-lation rule that operates in two steps. First, for each relational expression over a control point 𝑐 𝑢, 𝑗 , we introduce a universal quantifier over the corresponding time interval [ 𝑗 · 𝐼, ( 𝑗 +1) · 𝐼 ],Fig. 2: Overview of DeCaF Framework. replacing 𝑐 𝑢, 𝑗 with the signal value 𝑢 (𝑡 ). Second, we apply logical translation to combine universal quantifiers across conjunctive expressions. For example, the counterfactual in Figure 1 satisfies an assertion in the control-point-level form: 
+
+(𝑐 𝑡 ℎ, 1 ≤ 54 .50 ) ∧ ( 𝑐 𝑡 ℎ, 6 ≤ 59 .30 ) ∧ ( 𝑐 𝑏, 2 ≥ 212 .30 ), which is translated into the signal-level form: (∀ 𝑡 ∈ [0, 7.14 ] :
+
+Throttle (𝑡 ) ≤ 54 .50 ) ∧ (∀ 𝑡 ∈ [ 35 .71 , 42 .46 ] : Throttle (𝑡 ) ≤ 
+
+59 .30 ) ∧ (∀ 𝑡 ∈ [ 16 .67 , 33 .33 ] : Brake (𝑡 ) ≥ 212 .30 ).III. D ECAF A PPROACH 
+
+In this section, we present DeCaF, a counterfactual-guided explanation and assertion-based characterization framework designed to support debugging of CPS. As a prerequisite, the system under test (SUT) is accompanied by a specification document that defines the input variables, their data types, and valid operating ranges. The approach takes as input a Simulink-based model of the SUT, a formalized system requirement, and a set of system-level input variables with value ranges extracted from the specification. Figure 2 shows an overview of DeCaF’s framework. DeCaF first generates training data, then trains causal models, generates counter-factuals, and finally infers success assertions as defined in Definition 3. The output is a report summarizing the failing test inputs, their counterfactuals, and the corresponding success assertions. The framework follows four steps. 
+
+Step 1: Training data generation and transformation 
+
+Algorithm 1 Simulated Annealing for Data Generation (Min-imization)                                                                                              
+
+> Input: 𝑀 : SUT model, 𝜑 : STL specification, 𝑆 : Input ranges
+> Input: 𝑡 > 0: Initial temperature, 𝛼 ∈ ( 0,1): Cooling rate, 𝑁 : Max iterations
+> Output: 𝑢 𝑏𝑒𝑠𝑡 (best input), 𝑣 𝑏𝑒𝑠𝑡 (its verdict)
+> 1: 𝑢 ←RANDOM (𝑆 );𝑟𝑏 ←𝜌 𝜑 (𝑀 (𝑢 ), 𝜑 )//Initialization
+> 2: 𝑢 𝑏𝑒𝑠𝑡 ←𝑢 ;𝑟𝑏 𝑏𝑒𝑠𝑡 ←𝑟𝑏 //best input track
+> 3: for 𝑖 =1to 𝑁 do
+> 4: 𝑢 ′←TWEAK (𝑢 );𝑟𝑏 ′←𝜌 𝜑 (𝑀 (𝑢 ′), 𝜑 )//Generate input
+> 5: if 𝑟𝑏 ′< 𝑟𝑏 or RAND (0,1)< 𝑒 − ( 𝑟 𝑏 ′−𝑟 𝑏 )/ 𝑡 then
+> 6: 𝑢 ←𝑢 ′;𝑟𝑏 ←𝑟𝑏 ′//Probability-based selection
+> 7: end if
+> 8: if 𝑟𝑏 < 𝑟𝑏 𝑏𝑒𝑠𝑡 then 𝑢 𝑏𝑒𝑠𝑡 ←𝑢 ;𝑟𝑏 𝑏𝑒𝑠𝑡 ←𝑟𝑏 //Update best
+> 9: end if
+> 10: 𝑡 ←𝛼 ·𝑡 //Decrease temperature according to cooling rate
+> 11: end for
+> 12: 𝑣 𝑏𝑒𝑠𝑡 ←fail if 𝑟𝑏 𝑏𝑒𝑠𝑡 <0, else pass //Assign verdict
+> 13: return 𝑢 𝑏𝑒𝑠𝑡 , 𝑣 𝑏𝑒𝑠𝑡 //Return best input and its verdict
+
+This step uses Simulated Annealing [35] to generate training inputs for the SUT, as shown in Algorithm 1. Simulated Annealing is a metaheuristic search algorithm that iteratively perturbs candidate inputs and evaluates them against a formal requirement 𝜑 , specified in Signal Temporal Logic (STL), a language for expressing temporal properties of real-valued signals in cyber-physical systems [36]. It occasionally accepts worse candidates with a probability that decreases as the temperature 𝑡 cools, to balance exploration with exploitation. Inputs are represented as control-point encodings, transformed into actual signals over the system inputs, and simulated on the SUT. The algorithm returns (𝑢 𝑏𝑒𝑠𝑡 , 𝑣 𝑏𝑒𝑠𝑡 ), where 𝑢 𝑏𝑒𝑠𝑡 is the input with the minimal robustness 𝑟𝑏 found and 𝑣 𝑏𝑒𝑠𝑡 ∈{pass , fail } is its verdict determined by robustness: fail 
+
+if 𝑟𝑏 < 0 (the requirement 𝜑 is violated), and pass otherwise. By executing the algorithm repeatedly, we obtain a labeled set of inputs data that forms the supervised training dataset ( 𝑇 𝑆 )for causal models. 
+
+Step 2: Causal model learning 
+
+This step trains a causal model ( 𝐶 𝑀 , Line 2) that ap-proximates the behavior of the SUT by learning from the labeled test inputs generated in Step 1. The algorithm starts by transforming the TS generated in Step 1 to reformat each input trace in the dataset into a representation where each input control point forms an input feature for the causal model, and the verdict is the outcome label ( pass or fail ). The model captures correlations between the test input data and their labels. We use the learned model only to guide search and ranking, while every candidate counterfactual is ultimately validated by replaying it in the simulator and checking the requirement robustness, which remains the source of truth. The causal model is trained using the following machine learning (ML) techniques.  
+
+> •
+
+M5 model tree [37], [38] recursively partitions the input space to form a decision tree where each path corresponds to a set of input conditions, and each leaf holds a re-gression function. M5 is particularly characterized by its ability to produce human-readable decision rules where each path in the tree is an interpretable explanation of the assigned verdicts.  
+
+> •
+
+Random Forest [39] builds an ensemble of decision trees trained on bootstrapped subsets of the data. Each tree learns a different perspective of the input-output relation-ships, and the ensemble aggregates their predictions to increase robustness.  
+
+> •
+
+Support Vector Machine (SVM) [40] constructs a hyper-plane or set of hyperplanes in a high-dimensional space to optimally separate passing from failing test inputs. SVM attempts to maximize the margin between verdict classes.  
+
+> •
+
+RIPPER [41] incrementally builds a set of propositional rules to classify test input data. It constructs rules greedily to cover positive examples while avoiding negatives, prunes them for generality, and iteratively refines the rule set to improve accuracy. The output of RIPPER is a compact collection of human-interpretable if-then rules. The technique is set in configuration using a model type specified in configuration 𝐶.𝑚𝑜𝑑𝑒𝑙𝑇 𝑦 𝑝𝑒 (Line 2). The result-ing causal model is then passed to the subsequent step. The algorithm then identifies failing inputs by querying the causal model or labels to extract test inputs violating requirements (Line 3). These become targets for counterfactual generation to discover minimal modifications that yield passing outcomes. 
+
+Algorithm 2 Counterfactual-Guided Explanation and Assertion-Based Inference                                                       
+
+> Input: TS : Training set of labeled control-point inputs, 𝐶 : Configu-ration parameters
+> Output: 𝐶𝐹 : Selected set of best counterfactuals, 𝐴 : Inferred suc-cess assertion
+> 1: D←TRANSFORM (𝑇 𝑆 )
+> 2: CM ←LEARN CAUSAL MODEL (𝐷, 𝐶.𝑚𝑜𝑑𝑒𝑙𝑇 𝑦 𝑝𝑒 )
+> 3: 𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑠 ←IDENTIFY FAILING INPUTS (𝐷, CM )
+> 4: 𝐶𝐹 𝑡 ← ∅
+> 5: for each 𝑥 𝑓 ∈𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑠 do
+> 6: 𝐶𝐹 𝑥 𝑓 ←GENERATE COUNTERFACTUALS (𝑥 𝑓 ,CM , 𝐶 )
+> 7: 𝐶𝐹 𝑥 𝑓 ←EVALUATE CF (𝐶𝐹 𝑥 𝑓 , 𝑜𝑏 𝑗 𝑒𝑐𝑡𝑖𝑣𝑒𝑠 )
+> 8: 𝐶𝐹 𝑡 ←𝐶𝐹 𝑡 ∪𝐶𝐹 𝑥 𝑓
+> 9: end for
+> 10: 𝐶𝐹 ←SELECT COUNTERFACTUALS (𝐶𝐹 𝑡 , 𝐶.𝑠𝑒𝑙𝑒𝑐𝑡𝑖𝑜𝑛𝐶𝑟𝑖𝑡𝑒𝑟𝑖𝑜𝑛 )
+> 11: 𝐴 ←INFER SUCCESS ASSERTION (𝐶𝐹, CM )
+> 12: DEPLOY ASSERTION (𝐴 )
+> 13: return 𝐶𝐹, 𝐴
+
+Step 3: Counterfactual generation 
+
+This step takes as input the trained causal model ( 𝐶 𝑀 ), the set of failing inputs ( 𝐹𝑎𝑖𝑙𝑢𝑟𝑒𝑠 ), and it generates a set of optimal counterfactuals (see Definition 2) that (i) change the verdict from fail to pass , (ii) remain close to the original input (proximity), and (iii) are diverse and plausible. To do so, the framework initializes an empty set to store generated counterfactuals ( 𝐶𝐹 𝑡 ) and iterates through each failing input (Line 5 to Line 9) to generate candidate counterfactuals using one of the three configured strategies: Genetic Algorithm (GA), Random Search (RS), and KD-Tree Nearest Neighbors (KD). Once all failing test inputs are parsed, the algorithm selects the best counterfactuals per failing input (Line 10). This step returns the set of best counterfactuals ( 𝐶𝐹 ). Our approach incorporates the following model-agnostic counter-factual generation (execution in Line 6) strategies:  
+
+> •
+
+Random Search (RS) explores the input space by applying random perturbations to the control points of failing inputs. RS is fully stochastic and allows constraints on which features can be modified, as well as bounds on input ranges.  
+
+> •
+
+A Custom Genetic Algorithm (GA) , known as GeCo [42], is used to evolve candidate counterfactuals by uniquely partitioning its population into feasible and infeasible groups. For the feasible group, candidates that suc-cessfully flip the model’s prediction to pass, the algo-rithm’s primary goal is to minimize the distance from the original input. In parallel, for the infeasible group, the evolutionary operators focus on pushing candidates across the decision boundary to make them valid. This dual-objective strategy allows the algorithm to efficiently balance the search between finding a valid counterfactual and optimizing its cost.  
+
+> •
+
+KD-Tree Nearest Neighbors (KD) leverages the principles of prototype-guided explanations. It constructs a KD-Tree from the training dataset to perform an extremely fast nearest neighbor search. For a given failing input, this method identifies the closest data points that belong to the desired passing class. These neighbors serve as data-driven prototypes and are returned as the top-k candidate counterfactuals [43]. 
+
+Step 4: Success assertion inference 
+
+This step takes as input the selected set of best counterfac-tuals ( 𝐶𝐹 ) generated in Step 3 and infers a success assertion (𝐴 ) (Line 11) that characterizes the input changes that allowed the set of counterfactuals to steer the system from violating to satisfying the requirement. Success assertions are not meant to define passing conditions over the entire input space. Instead, they generalize the behavioral pattern of generated counterfactuals, capturing in a set of interpretable assertions, the input conditions that distinguish them from the failing input. In essence, the assertion provides a concise, human-readable conditions on input variables and time under which the success behavior of the SUT is recovered. To infer these assertions, DeCaF applies the supervised learning algorithm M5 [37], well-suited for high-dimensional continuous input signals of cyber-physical systems. M5 builds a model tree by recursively partitioning the input space to minimize within-node variance, where each root-to-leaf path corresponds to a conjunction of relational expressions over input variables. These paths yield interpretable rules describing how the failing test can be repaired and may later be deployed for runtime monitoring or corrective actions. After constructing the tree, redundant predicates and overlapping intervals are pruned, and identical consequents are merged to produce the assertion as specified in Definition 3. The inferred assertion is then optionally deployed within the SUT for runtime monitoring or automatic repair (Line 12). Finally, the algorithm returns the selected set of best counterfactuals ( 𝐶𝐹 ) together with the success assertion ( 𝐴 ). IV. E VALUATION 
+
+We evaluate DeCaF by answering the following research questions:  
+
+> •
+
+RQ1 – Effectiveness: How effective is DeCaF at gener-ating valid counterfactuals for debugging CPS failures? We evaluate the success of DeCaF in generating valid counterfactuals that resolve system failures across various generation strategies and ML models.  
+
+> •
+
+RQ2 – Goodness: How necessary and sufficient are DECaF’s generated counterfactuals for fixing the faulty system behavior? We evaluate the goodness of DeCaF’s counterfactuals by assessing their necessity and suffi-ciency in restoring the correct system behavior.  
+
+> •
+
+RQ3 – Complexity vs. Generalizability: What is the trade-off between complexity and generalizability in DeCaF’s inferred assertions? We analyze how concise (predicate complexity) and generalizable (input space coverage) the inferred success assertions are. 
+
+A. Study Subjects and Experimental Settings 
+
+We use Simulink models of three case-study systems de-tailed as follows:  
+
+> •
+
+Automatic Transmission (AT). The system is detailed as a motivating example in Section II, consisting of a controller that selects gears from 1 to 4 based on throttle and brake inputs, engine load, engine speed, and vehicle speed. The model was developed by MathWorks [44] and has become a widely used benchmark in CPS verification research.  
+
+> •
+
+Adaptive Cruise Control (ACC). The model of the adaptive cruise control system is published by Math-works [45]. This system simulates an ego car and a lead car operating in a controlled environment, where the goal is to maintain a safe distance between the two vehicles throughout the simulation. The main component of ACC is the controller that adjusts the ego car’s velocity to keep the relative distance above a desired safety threshold.  
+
+> •
+
+Chasing Cars (CC). Adapted from Hu et al. [46], the model of this system simulates five vehicles where only the lead car is directly controlled via throttle and brake inputs, while the others follow using a predefined algo-rithm. The system outputs the positions of all five cars. Our study subjects are specified in Simulink and are asso-ciated with a total of 15 system requirements. These require-ments define the expected behavior of each system model, including the input variables, their data types, and valid value ranges, all extracted from the corresponding specification documents. All our study subjects operate on numeric, time-continuous input signals and produce outputs of the same structure. Step 1 of DeCaF identified violations in 13 out of the 15 total requirements. Since our goal is to generate and characterize explanations for failure scenarios, we retain only the violated requirements for evaluation to answer our research questions. In the remainder of this section, we detail the configuration settings used for each step of the approach described in Section III. For Step 1, we adopt the parameterization used in prior work[47], [48] to generate and simulate the training data. We conduct 30 executions per system-requirement for ACC, and 50 for AT and CC. Each execution is capped at 300 
+
+optimization iterations. Test inputs in the training data are generated using control-point encoding (as detailed in Sec-tion III), evaluated against the requirement using the robust-ness metric [49], and iteratively evolved through search-based optimization. We used Simulated Annealing with Monte Carlo sampling to explore the input space and guide the search toward failure-inducing inputs. We configure the techniques used in Step 2 of DeCaF as follows. For M5 method, we adopt the default implementation from the m5py Python library, using variance reduction as the split criterion to optimize the fit of regression models at the leaves. We limit the minimum number of instances per leaf to 2 to prevent overfitting and apply pruning to simplify the tree. For Random Forests, we use an ensemble of 100 unpruned decision trees, each trained on a bootstrapped sample of the training data with a random subset of input features considered at each split using the square root of the total number of features, following common practice. We evaluate the ensemble using mean squared error (MSE). For Step 3, we configure the counterfactual generation parameters as follows. We set the mutation and crossover probabilities to 0.1 and 0.5, used a population size of 50 over 50 generations, and returned up to 
+
+7 counterfactuals per instance. Candidate selection followed a multi-objective loss, with a diversity weight of 0.1, and we fixed the random seed to 17 for reproducibility, following prior guidance where applicable [50]. The algorithm is evaluated using the three techniques described in Section III. Pre-trained causal models from Step 2 of DeCaF are integrated into the Diverse Counterfactual Explanations (DiCE) framework [50] using the sklearn backend. RS is enabled with the method “random”, the GA with the method “genetic”, and the KD strategy with the method “kdtree”. For Step 4 of DeCaF, we apply the same M5 model tree settings used in Step 2. We execute DeCaF across all case-study systems using the configured techniques and evaluate it by conducting validation experiments to answer the three research questions. The next subsection presents these experiments and analyzes the results, ensuring fair comparisons across models and counterfactual generation strategies. 
+
+B. RQ1 - Effectiveness of DeCaF’s Counterfactuals 
+
+This question evaluates DeCaF’s effectiveness in generating counterfactual-guided explanations for CPS debugging, specif-ically its ability to generate valid counterfactuals that success-fully restore requirement satisfaction for the system under test and its failing inputs. We start by empirically assessing the performance of DeCaF’s causal model learner, comparing four machine learning techniques, namely, M5, RIPPER, SVM, and Random Forest (RF), across all case-study systems. Based on this assessment, we select the best-performing techniques to evaluate the success rate of DeCaF quantifying the ability to generate valid counterfactual-guided explanations that flip the system output’s verdict from a requirement violation to satisfaction. In the following, we analyze the results of both steps and conclude the main insights from our findings. 
+
+1) Performance of Causal Model Learner 
+
+For each system–requirement, we use DeCaF’s Step 1(Section III) to generate a set of test inputs. Each test input is then labeled as pass or fail based on whether it satisfies or violates the corresponding requirement. Table I presents the total number of test inputs (denoted as TS Size ) and the number of failing test inputs (denoted as #Fail ) for each system. Using the four ML models, we train a causal model of system behavior on the labeled test input dataset, as input to DeCaF’s Step 2. For each inferred causal model, we compute and analyze the Accuracy , Recall , and F1 Score metrics. Figure 3 shows the box plots of the distribution of metric M5 RIPPER SVM RF 
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Metric Value
+
+Accuracy     
+
+> M5 RIPPER SVM RF
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+Recall     
+
+> M5 RIPPER SVM RF
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+
+F1 Fig. 3: Distribution of evaluation metrics of the ML techniques across our systems TABLE I: Number of generated counterfactuals ( #CF ) for each system and DeCaF configuration. TS Size denotes the total number of test inputs generated by Step 1, #Fail denotes the number of failing test inputs that violate the system requirement. Percentages denote #CF as a fraction of #Fail .                                  
+
+> Sys.TS Fail GA KD RS M5 RF M5 RF M5 RF
+> AT 300 169 84 (50%) 169 (100%) 166 (98%) 169 (100%) 166 (98%) 167 (99%) CC 250 177 0 (0%) 177 (100%) 126 (71%) 177 (100%) 126 (71%) 174 (98%) ACC 120 56 55 (98%) 56 (100%) 55 (98%) 56 (100%) 55 (98%) 55 (98%)
+> Tot.670 402 139 (35%) 402 (100%) 347 (86%) 402 (100%) 347 (86%) 396 (99%)
+
+values aggregated over 13 system requirements in total. The black circular marker on each box denotes the average value for that model’s metric combination. Results show that among all classifiers, M5 consistently achieves the highest performance across all three metrics, closely followed by RF. Specifically, both models achieve high average accuracy ( 0.90 for M5 and 0.92 for RF) and F1 scores ( 0.79 for M5 and 0.79 for RF). This indicates M5 and RF’s strong performance across our case-study systems. RF shows a tighter interquartile range and lower bottom whisker, indicating greater robustness and fewer performance outliers across system requirements. In contrast, SVM performs the worst overall ( 0.87 accuracy, 0.71 recall, 0.75 F1), while RIPPER exhibits a wide spread across the metrics, which suggest inconsistent classification of failure cases. Based on these results, we select M5 and RF as representative ML models to address the research questions of this paper. 
+
+2) Success Rate of DeCaF’s Counterfactuals 
+
+To evaluate the success of DeCaF at generating valid counterfactual-guided explanations, we considered six config-urations of DeCaF by combining three counterfactual genera-tion strategies, namely RS, GA and KD with two ML models, namely M5 and RF that we selected as representative ML techniques. For each system requirement, the causal models were trained on the labeled test input dataset before passing them to Step 3 of DeCaF. As shown in Table I, the total number of generated test inputs (see Total TS Size ) is 670 , of which 402 are failing tests that violate system requirements (see Total #Fail ). DeCaF’s TABLE II: Success rates and relative success rates of DeCaF’s combinations of counterfactual generation strategies and ML models across our systems.                                                               
+
+> Succ. (#Valid/#Fail) Rel. Succ. (#Valid/#CF) Sys. GA KD RS GA KD RS M5 RF M5 RF M5 RF M5 RF M5 RF M5 RF
+> AT 0.46 0.77 0.93 0.51 0.79 0.67 0.92 0.77 0.95 0.51 0.81 0.68 CC 0.00 0.73 0.59 0.65 0.42 0.26 –0.73 0.83 0.65 0.59 0.26 ACC 0.61 0.61 0.93 0.68 0.43 0.45 0.62 0.61 0.95 0.68 0.44 0.45
+> Avg. 0.36 0.70 0.82 0.61 0.55 0.46 0.77 0.70 0.91 0.61 0.61 0.46
+> Note: “–” indicates configurations where DeCaF failed to generate any counterfactuals.
+
+Step 3 targets these failing inputs to generate counterfactual-guided explanations. To evaluate DeCaF’s applicability, we record the number of generated counterfactuals ( #CF ) for each configuration and report it as a fraction of the total failing inputs. The table summarizes these results across all systems and DeCaF configurations, combining GA, KD, and RS with either the M5 or RF model. Across systems, RF using both GA and KD achieved 100% 
+
+applicability, generating at least one counterfactual for every failing input, followed by RF with RS that scored 99% . In contrast, M5 showed low applicability when paired with GA and scored the lowest applicability with M5, failing to generate any counterfactuals for the CC system and achieving only 
+
+35% on average across all systems. This low performance is attributed to the sensitivity of M5 model trees under evolu-tionary optimization. Specifically, M5 models define piecewise functions with sharp decision boundaries that respond non-smoothly to small perturbations in the input space. Genetic algorithms, which rely on stochastic population-based oper-ations such as mutation and crossover, can struggle to make consistent progress when confronted with such discontinuities, which prevents the algorithm from converging toward valid counterfactuals. Counterfactual generation techniques using the RF model were consistently more robust and achieving near-complete coverage across all the failing test inputs. These results confirm that both the counterfactual generation strategy and the underlying ML model significantly influence DeCaF’s ability to generate valid counterfactual-guided explanations. Table II reports the success rates and relative success rates of DeCaF across various combinations of counterfactual generation strategies (GA, KD, RS) and ML models (M5, RF). The Success Rate metric is defined as the proportion of failing test inputs for which at least one valid counter-factual was generated that satisfies the requirement (#Valid CF / #Fail) . The Relative Success Rate metric captures the success rate achieved by DeCaF when applicable, computed as the proportion of valid counterfactuals among all generated counterfactuals (#Valid CF / #CF) . Each row corresponds to the rate on all aggregated system-requirements of a given system. Average indicates the average rate across all system requirements for each configuration. We consider RS as the baseline counterfactual generation method for DeCaF. Results show that RS performs the worst across both model types, with average success rates of 0.55 for M5 and 0.46 for RF, and relative success rates of 0.61 and 0.46 , respectively. This indicates RS’s susceptibility to local optima and highlights the difficulty of navigating the high-dimensional input space without guided search and the need for better generation strategies to effectively generate valid counterfactuals. Among all configurations, KD combined with M5 achieved the highest average success rate 0.82 and relative success rate 
+
+0.91 , showing that M5 performs well when it is applicable or when inapplicability is minimal. This high effectiveness suggests that KD’s local neighborhood exploration paired with the M5 model offers higher effectiveness in explaining the input space. RF which does not suffer from applicability issues performed reasonably well when paired with GA ( 0.70 ) and KD ( 0.61 ). We conducted a statistical comparison based on the validity of generated counterfactuals across our three case-study sys-tems (AT, CC, ACC). We use the Mann–Whitney U test [51] for statistical significance and report Vargha–Delaney’s ˆ𝐴 12 
+
+as an effect size measure [52], and p-values for each pairwise comparison of RS against GA and KD, both at the individual system level and aggregated across all systems. The statistical analysis shows that RS consistently underperforms both KD and GA across our case-study systems, model types, and the aggregated dataset. On CC and ACC, RS is significantly outperformed by KD and GA ( 𝑝 < 0.0001 ) with medium effect sizes ( ˆ𝐴 12 > 0.66). On AT, the difference with GA is also significant ( 𝑝 = 0.014 ), though with a smaller effect ( ˆ𝐴 12 = 0.538 ). When combining all causal models (M5 and RF) across all systems, RS remains significantly worse than both KD and GA (e.g., 𝑝 < 0.0001 and ˆ𝐴 12 ≈ 0.63 for GA using RF). Although effect sizes are mostly small to medium, their statistical significance and consistency confirm that RS underperforms. As an uninformed baseline, RS is meaningfully outpaced by guided methods like KD and GA. Next, we assess the impact of the counterfactual generation strategy (KD vs GA) and causal model choice (M5 vs RF) on DeCaF’s effectiveness. Comparisons between KD and GA under the same model (e.g., AT) yield non-significant p-values (e.g., 𝑝 = 0.18 ), suggesting no clear winner when the model is fixed. In contrast, model choice has a stronger influence. For most systems, KD performs significantly better with M5 than RF (e.g., 𝑝 < 10 −18 , ˆ𝐴 12 = 0.28 , large), indicating that M5 enhances KD’s effectiveness. GA, however, shows no such sensitivity to model choice, with high p-values and ˆ𝐴 12 values near 0.5, implying consistent behavior across models. Finally, comparing KD-M5 with GA-RF—each method’s best-performing configuration—confirms KD-M5’s superiority, with significant results across all systems and ˆ𝐴 12 
+
+consistently below 0.5 (e.g., 0.33 on ACC, medium effect). 
+
+C. RQ2 - Goodness of DeCaF’s Counterfactual-Guided Ex-planations 
+
+To answer RQ2, we evaluate the goodness of DeCaF’s counterfactual explanations by analyzing how well a counter-factual captures the minimal and causally sufficient conditions for changing a system’s behavior from failure to success. We assess the goodness using two complementary properties: 
+
+necessity and sufficiency . These properties have been used to evaluate counterfactual explanations [53]. We adapt these notions to control-point-level modifications in CPS inputs as follows. The necessity score quantifies how critical the system inputs changes imposed by the generated counterfactuals are, i.e., if removing any of the system input-related change will cause the system to revert to failure. We consider the valid counterfactuals identified in RQ1. For each valid counterfac-tual, we iteratively revert the modified control-point values corresponding to each system input variable —one at a time— back to their original (failing) values, and re-simulate the system. If the requirement is violated again, the input variable changes imposed by the generated counterfactual are deemed necessary. The necessity score is computed as the proportion of valid counterfactuals in which the changes to the system inputs are deemed necessary. A higher score indicates that the changes introduced by DeCaF were more essential for resolving the failure, with fewer unnecessary or redundant modifications. The sufficiency score captures whether the modified inputs alone are adequate to repair the failure. To compute it, for each valid counterfactual, we keep the values of the individually modified control points and generate 50 
+
+random values for the remaining input control-points (within the corresponding input range). Each test of the set of 50 variants is used to simulate the system and observe the test outcome (pass/fail). The sufficiency score is defined as the fraction of these variants that still satisfy the requirement. A higher score indicates that the proposed counterfactual is more sufficient in inducing the desired correct system behavior. Table IV shows the goodness scores of DeCaF’s counter-factuals. Among all configurations, RS consistently achieve the highest average scores, with RS–M5 and RS–RF reaching 
+
+(0.86 , 0.99 ) and (0.89 , 0.99 ), respectively. These results are expected given RS’s tendency to converge to local optima, based on the insights drawn in RQ1 (see Table II), where RS struggles with low success rates. RS produces highly conservative counterfactuals, typically involving very minimal perturbations to a single control point to resolve a failure. This narrow search behavior lead to high necessity and sufficiency scores. However, this comes at the cost of effectiveness and applicability since the generated counterfactuals are not as generalizable across the wider input space, which reduces their usefulness. In contrast, both GA and KD generate counterfac-tuals achieve optimal goodness scores. Although their average goodness scores are moderately lower than those of RS, they were able to generate more impactful interventions and significant gains in success rates. For example, KD–M5, which achieved the highest overall success rate, has a goodness score of (0.55 , 0.88 ). GA–RF offers a well-balanced configuration with a goodness score of (0.72 , 0.90 ), reflecting a good trade-off between goodness and effectiveness, which is important for optimal applicability in the context of CPS debugging, where identifying necessary and sufficient failure counterfactuals effectively can help isolate the root cause of a failure. TABLE III: Statistical comparison of DeCaF configurations. Left: (RS vs KD) and (RS vs GA). Right: impact of the counterfactual generation strategies and ML models (KD vs GA). ˆ𝐴 12 indicates effect size.    
+
+> RS vs KD and GA KD vs GA Sys. Comp.
+
+𝑝 ˆ𝑨 12 ES Sys. Comp. 𝑝 ˆ𝑨 12 ES          
+
+> AT RS vs GA 0.014 0.538 None AT KD-M5 vs GA-M5 0.188 0.485 None CC RS vs KD
+
+< 10 −15 0.661 Med. AT KD-M5 vs KD-RF < 10 −18 0.282 Large CC RS vs GA < 10 −12 0.664 Med. AT KD-M5 vs GA-RF 2.1 × 10 −6 0.412 Small ACC RS vs KD < 10 −8 0.683 Med. CC KD-M5 vs KD-RF 0.0015 0.361 Med. ACC RS vs GA < 10 −8 0.687 Med. CC KD-M5 vs GA-RF 0.025 0.452 None ALL (M5) RS vs KD < 10 −13 0.617 Small ACC KD-M5 vs KD-RF < 10 −8 0.276 Large ALL (RF) RS vs GA < 10 −14 0.632 Small ACC KD-M5 vs GA-RF 1.1 × 10 −5 0.331 Med. Comb. RS vs KD < 10 −12 0.589 Small 
+
+TABLE IV: Goodness of DeCaF configurations: (necessity, sufficiency) scores across systems.                                  
+
+> Sys. GA KD RS M5 RF M5 RF M5 RF
+> AT (.42, .98) (.62, 1.00) (.53, –) (.71, –) (.77, 1.00) (.88, 1.00) CC (–, –) (.54, .93) (.13, .88) (.16, .92) (.81, .96) (.78, .96) ACC (1.00, .93) (1.00, .78) (1.00, –) (1.00, –) (1.00, 1.00) (1.00, 1.00)
+> Avg. (.71, .96) (.72, .90) (.55, .88) (.62, .92) (.86, .99) (.89, .99)
+> Note: “–” indicates configurations where (i) DeCaF failed to generate any counterfactuals for necessity and (ii) all control points of counterfactuals are modified for sufficiency.
+
+Along with each set of counterfactuals, DeCaF generates corresponding natural language explanations that describe, in plain terms, the input changes responsible for restoring the system’s correct behavior. The explanations further specify the exact time intervals encoded by the modified control points, and the associated value changes. For example, a generated explanation may state: “Input throttle at time [50–100s] changed from 0.2 to 0.8.” We manually reviewed the full set of generated explanations and found that all were meaningful, non-vacuous, and aligned with their corresponding formal counterfactuals, confirming their interpretability and correct-ness. 
+
+D. RQ3 - Complexity vs. Generalizability of DeCaF’s Success Assertions 
+
+As described in Section III, the success assertions inferred in Step 4 are derived from the set of valid counterfactuals (the maximum count is 7) generated for the failing test input. We evaluate the complexity versus generalizability trade-off of DeCaF’s success assertions, which is a common dilemma in the assertion-based inference techniques [26], using the following evaluation steps. We assess the syntactic complexity of the inferred success assertions using the number of predicates they contain. A predicate is a Boolean condition involving a variable and a constant, typically expressed as 𝑐 ∼ 𝑟, 𝑤ℎ𝑒𝑟𝑒 ∼∈ { <, ≤, >, ≥
+
+, =, ≠}. For instance, the assertion (𝑐 𝑡 ℎ, 1 ≤ 20 ) ∧ ( 𝑐 𝑏, 1 ≤ 5)
+
+contains two predicates: (𝑐 𝑡 ℎ, 1 ≤ 20 ) and (𝑐 𝑏, 1 ≤ 5).More predicates indicate a more complex assertion. To as-sess generalizability, we define the G_ SCORE metric as the proportion of valid counterfactuals covered by the inferred assertion. A highly generalizable assertion accurately captures TABLE V: Safety measure, average number of predicates, and generalization score of success assertions inferred by DeCaF across configurations.                                                                    
+
+> Safety Avg Pred./G-score Sys. GA KD RS GA KD RS M5 RF M5 RF M5 RF M5 RF M5 RF M5 RF
+> AT 0.75 0.65 0.85 0.87 0.99 0.96 1.75/1.00 2.35/0.99 1.84/1.00 2.54/1.00 2.13/1.00 2.44/1.00 CC –0.77 0.72 0.73 0.82 0.80 –/– 2.39/0.95 1.64/1.00 2.58/1.00 1.32/1.00 2.56/0.96 ACC 0.71 0.66 0.57 0.56 0.85 0.92 1.71/1.00 2.31/0.79 1.50/1.00 2.62/0.89 1.40/0.96 1.95/0.96
+> Avg. 0.73 0.69 0.71 0.72 0.89 0.89 1.73/1.00 2.35/0.91 1.66/1.00 2.58/0.96 1.62/0.99 2.32/0.97
+> Note: “–” indicates configurations where DeCaF failed to generate any counterfactuals or assertions.
+
+all relevant counterfactuals associated with a given failing test input. An important trade-off exists between complexity and generalizability. Simpler assertions with fewer predicates tend to be easier to interpret, understand, and act upon during the debugging process, and they often generalize better across the input space. However, overly simple assertions may risk overfitting to outliers that violate the requirement. Conversely, more complex assertions can provide greater precision and insight into the specific input changes required to restore correctness, but may suffer from reduced interpretability and underfitting to the training data. We evaluate which configuration can balance between these competing factors the best by generating assertions that main-tain a reasonable degree of complexity and informativeness while ensuring sufficient generalizability. Table V reports the average number of predicates in the success assertions inferred from valid counterfactuals for our case-study systems across all DeCaF’s configurations. Configurations using M5 consistently produce simpler (less complex) assertions than those using RF, averaging between 1.6 and 1.7 predicates versus 2.3 to 2.6 predicates for RF. The results of G_ SCORE 
+
+for the success assertions inferred from valid counterfactuals for our systems across all DeCaF’s configurations show that all configurations with M5 achieve the highest G_ SCORE with 
+
+0.996 on average, while configurations with RF follow with 
+
+0.946 . This suggests that M5-based configurations generate success assertions that are syntactically less complex and more generalizable. Notably, KD with M5, which also achieves the highest success rates, yields one of the least complex assertions, which contributes to broader coverage of the input domain and may lead to lower necessity scores, as confirmed in RQ2. In contrast, GA with RF generates some of the most complex assertions, which more tightly constrain the input domain. This added complexity appears to increase sufficiency scores addressed in RQ2, without significantly compromising success rates. In summary, GA with RF achieves a more balanced trade-off across the metrics defined in the evaluation. We further evaluate the capability of the inferred assertions to accurately characterize the region of correct behavior and avoid covering failing behaviors using the safety metric, which measures the proportion of new test inputs sampled within the assertion’s bounds that satisfy the requirement. Specifi-cally, for each failing test input with a valid counterfactual generated by DeCaF using the six configurations, we gen-erate 50 new inputs by perturbing only the changed control points within the bounds of the assertion while holding other inputs fixed. High safety scores indicate that the assertion accurately characterizes the region of correct behavior and avoids covering failing behaviors, thus mitigating overfitting. Lower safety scores do not necessarily invalidate the assertion but suggest limited generalization, prompting engineers to inspect supporting counterfactuals for further insights. As shown in Table V, all DeCaF configurations demonstrate high safety overall. Notably, RS configurations achieve the highest safety scores, which we attribute to their lower number of valid counterfactuals and tendency to converge on conservative (local) regions of the input space. However, this conservative behavior limits effectiveness and goodness, as evidenced in RQ1 and RQ2. In contrast, GA and KD configurations sacrifice roughly 15 –20 % safety compared to RS for significantly higher coverage, success and goodness rates, yielding more robust assertions. 
+
+Threats to Validity. DeCaF uses stochastic procedures so outcomes from a single run can vary due to randomness; we mitigate this by repeating each system requirement experiment multiple times and reporting aggregate results. Performance can also depend on hyperparameter choices for the search procedures and learning models; we relied on default settings in the used libraries or values adopted from established prior work, which provides a consistent baseline but may not be optimal for every system. Regarding generalizability, our eval-uation uses three widely-known Simulink CPS benchmarks with diverse STL requirements that are commonly used in CPS. We recognize the concern of using established ML learners. Our primary contribution is the framework itself; in the evaluation, we instantiate DeCaF with well-understood methods to demonstrate its viability. Finally, inputs are en-coded as piecewise constant [54], which is standard in CPS testing but may require adaptation for different domains. V. R ELATED WORKS 
+
+Simulation-based testing [1], [2], [3] is widely adopted in the model-based design workflows of CPS through simulation tools such as Simulink [5], which support automatic code generation. Prior work on automated failure diagnostics [7] in these environments has largely focused on model- and signal-level fault analysis, including trace monitoring and diagnostics [8], [9]. For example, Bartocci et al. [11] analyze failing traces to identify anomalous Simulink components and fault-propagation paths, while Deng et al. [12] employ causal temporal logic to explain faults in Simulink/Simscape models. However, these techniques do not provide input-level explana-tions that reveal the specific conditions under which a failure is triggered or could be avoided. The closest related effort is CaSTL [18], which integrates causal theory with signal temporal logic to generate fault explanations in Simulink-modeled CPS. CaSTL synthesizes formulas that explain why a failure occurred using both the system model and fault obser-vation traces. While this represents a significant advancement in model-based causal explanation, it does not generate input-level interventions that would restore correctness. In contrast, our work shifts the focus to counterfactual input-level changes, identifying precisely what modifications to test inputs would have prevented the failure. Delta debugging [55] isolates failure inducing circumstances by repeatedly minimizing a failing input while preserving the failure. Statistical debugging and spectrum based fault localization similarly narrow the search by ranking suspicious elements. For Simulink, Liu et al. [10] connect failing tests to model outports and blocks using execution slicing and SBFL, and use supervised learning to cluster related faults. These techniques help localize where failures manifest, but they typically do not identify triggering time intervals, provide causal explanations, or support intervention based reasoning for recovery. In contrast, DeCaF generates simulator validated repaired inputs and summarizes them as an interpretable success region over the system inputs. Assertions inference has also been investigated to charac-terize correctness conditions. Daikon [25] dynamically infers program invariants, while tools such as Alhazen [19], [21] mine grammar-based assertions for predicting failures. Other work derives environment assumptions for CPS [22], [20], [23], [26], [24]. The closest approaches [23], [26] to De-CaF’s step 4 characterize pass/fail conditions directly on time-indexed CPS input signals. Whereas those works evolve predi-cates via genetic programming, we infer them with M5 model trees, for best trade-offs between complexity, generalizability, and safety. Additionally, these works lack causal reasoning as they don’t support counterfactual interventions to restore correctness. VI. C ONCLUSION 
+
+This paper introduced DeCaF, a framework for debugging CPS failures through input level counterfactual explanations. Rather than only localizing faults to internal components, DeCaF identifies minimal and precisely timed input signal changes that are necessary and sufficient to prevent failures, generating counterfactuals via random search, genetic algo-rithms, and KD tree nearest neighbors. Across three automo-tive case studies, DeCaF consistently produced high quality counterfactuals and inferred concise, generalizable, human understandable success assertions that characterize recovery conditions. REFERENCES [1] C. Birchler, S. Khatiri, P. Rani, T. Kehrer, and S. Panichella, “A roadmap for simulation-based testing of autonomous cyber-physical systems: Challenges and future direction,” ACM Trans. Softw. Eng. Methodol. , vol. 34, no. 5, May 2025. [Online]. Available: https://doi.org/10.1145/3711906 [2] S. Khatiri, S. Panichella, and P. Tonella, “Simulation-based test case generation for unmanned aerial vehicles in the neighborhood of real flights,” in 2023 IEEE Conference on Software Testing, Verification and Validation (ICST) . IEEE, 2023, pp. 281–292. [3] A. Arrieta, S. Wang, U. Markiegi, A. Arruabarrena, L. Etxeberria, and G. Sagardui, “Pareto efficient multi-objective black-box test case selec-tion for simulation-based testing,” Information and Software Technology ,2019. [4] S. Woo, “Digital twins could revolutionize planes, cars and hearts,” https://www.wsj.com/articles/digital-twins-could-revolutionize-planes-cars-and-hearts-technology-a8c2bd4e, 2024, wall Street Journal, July 17, 2024. [5] D. K. Chaturvedi, Modeling and simulation of systems using MATLAB® and Simulink® . CRC press, 2017, ISBN: 978-1439806722. [6] S. D. Wehbe and S. Bak, “Finding unknown unknowns using cyber-physical system simulators,” in Proceedings of the 7th Workshop on Design Automation for CPS and IoT , 2025, pp. 1–6. [7] M. Sampath, R. Sengupta, S. Lafortune, K. Sinnamohideen, and D. C. Teneketzis, “Failure diagnosis using discrete-event models,” IEEE trans-actions on control systems technology , vol. 4, no. 2, pp. 105–124, 2002. [8] T. Ferrère, O. Maler, and D. Niˇ ckovi´ c, “Trace diagnostics using temporal implicants,” in International Symposium on Automated Technology for Verification and Analysis . Springer, 2015, pp. 241–258. [9] E. Bartocci, T. Ferrère, N. Manjunath, and D. Niˇ ckovi´ c, “Localizing faults in simulink/stateflow models with stl,” in Proceedings of the 21st international conference on hybrid systems: computation and control (part of cps week) , 2018, pp. 197–206. [10] B. Liu, L. Lucia, S. Nejati, L. C. Briand, and T. Bruckmann, “Simulink fault localization: an iterative statistical debugging approach,” Software Testing, Verification and Reliability , vol. 26, no. 6, pp. 431–459, 2016. [11] E. Bartocci, N. Manjunath, L. Mariani, C. Mateis, and D. Niˇ ckovi´ c, “Cpsdebug: Automatic failure explanation in cps models,” International Journal on Software Tools for Technology Transfer , pp. 1–14, 2021. [12] Z. Deng, S. P. Eshima, J. Nabity, and Z. Kong, “Causal signal temporal logic for the environmental control and life support system’s fault analysis and explanation,” IEEE Access , vol. 11, pp. 26 471–26 482, 2023. [13] A. Podgurski and Y. Küçük, “Counterfault: Value-based fault local-ization by modeling and predicting counterfactual outcomes,” in 2020 IEEE International Conference on Software Maintenance and Evolution (ICSME) . IEEE, 2020, pp. 382–393. [14] B. Johnson, Y. Brun, and A. Meliou, “Causal testing: understanding de-fects’ root causes,” in Proceedings of the ACM/IEEE 42nd international conference on software engineering , 2020, pp. 87–99. [15] P. Chadbourne and N. U. Eisty, “Applications of causality and causal inference in software engineering,” in 2023 IEEE/ACIS 21st Interna-tional Conference on Software Engineering Research, Management and Applications (SERA) . IEEE, 2023, pp. 47–52. [16] S. Chakraborty, S. Shah, K. Soltani, and A. Swigart, “Root cause detection among anomalous time series using temporal state alignment,” in 2019 18th IEEE International Conference On Machine Learning And Applications (ICMLA) . IEEE, 2019, pp. 523–528. [17] Z. Ren, C. Liu, X. Xiao, H. Jiang, and T. Xie, “Root cause localization for unreproducible builds via causality analysis over system call trac-ing,” in 2019 34th IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE, 2019, pp. 527–538. [18] Z. Deng, S. Eshima, J. Nabity, and Z. Kong, “Causal signal temporal logic for the environmental control and life support system’s fault analysis and explanation,” IEEE Access , vol. PP, pp. 1–1, 01 2023. [19] C. G. Kapugama, V.-T. Pham, A. Aleti, and M. Böhme, “Human-in-the-loop oracle learning for semantic bugs in string processing programs,” in Proceedings of the 31st ACM SIGSOFT International Symposium on Software Testing and Analysis , 2022, pp. 215–226. [20] R. Gopinath, A. Kampmann, N. Havrikov, E. O. Soremekun, and A. Zeller, “Abstracting failure-inducing inputs,” in Proceedings of the 29th ACM SIGSOFT international symposium on software testing and analysis , 2020, pp. 237–248. [21] E. Soremekun, E. Pavese, N. Havrikov, L. Grunske, and A. Zeller, “Inputs from hell,” IEEE Transactions on Software Engineering , vol. 48, no. 4, pp. 1138–1153, 2020. [22] A. Kampmann, N. Havrikov, E. O. Soremekun, and A. Zeller, “When does my program do this? learning circumstances of software behavior,” in Proceedings of the 28th ACM joint meeting on european software engineering conference and symposium on the foundations of software engineering , 2020, pp. 1228–1239. [23] K. Gaaloul, C. Menghi, S. Nejati, L. C. Briand, and Y. I. Parache, “Combining genetic programming and model checking to generate environment assumptions,” IEEE Transactions on Software Engineering ,vol. 48, no. 9, pp. 3664–3685, 2021. [24] B. A. Jodat, S. Nejati, M. Sabetzadeh, and P. Saavedra, “Learning non-robustness using simulation-based testing: a network traffic-shaping case study,” in 2023 IEEE Conference on Software Testing, Verification and Validation (ICST) . IEEE, 2023, pp. 386–397. [25] M. D. Ernst, J. H. Perkins, P. J. Guo, S. McCamant, C. Pacheco, M. S. Tschantz, and C. Xiao, “The daikon system for dynamic detection of likely invariants,” Science of computer programming , vol. 69, no. 1-3, pp. 35–45, 2007. [26] K. Gaaloul, C. Menghi, S. Nejati, L. C. Briand, and D. Wolfe, “Min-ing assumptions for software components using machine learning,” in 
+
+Proceedings of the 28th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering , 2020, pp. 159–171. [27] W. Pananurak, S. Thanok, and M. Parnichkun, “Adaptive cruise control for an intelligent vehicle,” in 2008 IEEE International Conference on Robotics and Biomimetics . IEEE, 2009, pp. 1794–1799. [28] C. E. Tuncali, G. Fainekos, D. Prokhorov, H. Ito, and J. Kapinski, “Requirements-driven test generation for autonomous vehicles with ma-chine learning components,” IEEE Transactions on Intelligent Vehicles ,vol. 5, no. 2, pp. 265–280, 2019. [29] (Accessed: September 2025) Cruise control test generation. [Online]. Available: https://www.mathworks.com/help/sldv/ug/cruise-control-test-generation.html [30] (Accessed: September 2025) Building a clutch lock-up model. [Online]. Available: https://www.mathworks.com/help/simulink/slref/building-a-clutch-lock-up-model.html [31] (Accessed: September 2025) Design a guid-ance system in matlab and simulink. [Online]. Available: https://www.mathworks.com/help/simulink/slref/designing-a-guidance-system-in-matlab-and-simulink.html [32] (Accessed: September 2025) Dc motor model simulink model. [Online]. Available: https://www.mathworks.com/matlabcentral/fileexchange/11587-dc-motor-model-simulink [33] T. Khandait, F. Formica, P. Arcaini, S. Chotaliya, G. Fainekos, A. Hekal, A. Kundu, E. Lew, M. Loreti, C. Menghi et al. , “Arch-comp 2024 category report: Falsification,” in Proceedings of the 11th Int. Workshop on Applied , vol. 103, 2024, pp. 122–144. [34] G. Ernst, P. Arcaini, A. Donze, G. Fainekos, L. Mathesen, G. Pedrielli, S. Yaghoubi, Y. Yamagata, and Z. Zhang, “Arch-comp 2019 category report: Falsification.” in ARCH@ CPSIoTWeek , 2019, pp. 129–140. [35] S. Luke, Essentials of Metaheuristics , 2nd ed. Lulu, 2013, available for free at http://cs.gmu.edu/ ∼sean/book/metaheuristics/. [36] O. Maler and D. Nickovic, “Monitoring temporal properties of con-tinuous signals,” in International Symposium on Formal Techniques in Real-Time and Fault-Tolerant Systems . Springer, 2004, pp. 152–166. [37] R. J. Quinlan, “Learning with continuous classes,” in 5th Australian Joint Conference on Artificial Intelligence . Singapore: World Scientific, 1992, pp. 343–348. [38] G. Holmes, M. Hall, and E. Frank, “Generating rule sets from model trees,” in Twelfth Australian Joint Conference on Artificial Intelligence .Springer, 1999, pp. 1–12. [39] G. Biau and E. Scornet, “A random forest guided tour,” Test , vol. 25, no. 2, pp. 197–227, 2016. [40] J. Cervantes, F. Garcia-Lamont, L. Rodríguez-Mazahua, and A. Lopez, “A comprehensive survey on support vector machine classification: Applications, challenges and trends,” 
+
+Neurocomputing , vol. 408, pp. 189–215, 2020. [Online]. Available: https://www.sciencedirect.com/science/article/pii/S0925231220307153 [41] W. W. Cohen et al. , “Fast effective rule induction,” in Proceedings of the twelfth international conference on machine learning , 1995, pp. 115– 123. [42] M. Schleich, Z. Geng, Y. Zhang, and D. Suciu, “Geco: quality counterfactual explanations in real time,” Proc. VLDB Endow. ,vol. 14, no. 9, p. 1681–1693, May 2021. [Online]. Available: https://doi.org/10.14778/3461535.3461555 [43] A. Van Looveren and J. Klaise, “Interpretable counterfactual explana-tions guided by prototypes,” in Machine Learning and Knowledge Dis-covery in Databases. Applied Data Science and Demo Track: European Conference, ECML PKDD 2019, Würzburg, Germany, September 16–20, 2019, Proceedings, Part III . Springer, 2021, pp. 201–217. [44] B. Hoxha, H. Abbas, and G. Fainekos, “Benchmarks for temporal logic requirements for automotive systems.” ARCH@ CPSWeek , vol. 34, pp. 25–30, 2014. [45] MathWorks, “Adaptive cruise control system using model predictive con-trol,” https://www.mathworks.com/help/mpc/ug/adaptive-cruise-control-using-model-predictive-controller.html, 2021, accessed: 2024-09-11. [46] J. Hu, J. Lygeros, and S. Sastry, “Towards a theory of stochastic hybrid systems,” in International Workshop on Hybrid Systems: Computation and Control . Springer, 2000, pp. 160–173. [47] G. Ernst, P. Arcaini, G. Fainekos, F. Formica, J. Inoue, T. Khandait, M. M. Mahboob, C. Menghi, G. Pedrielli, M. Waga, Y. Yamagata, and Z. Zhang, “Arch-comp 2022 category report: Falsification with ubounded resources,” in Proceedings of 9th International Workshop on Applied ,vol. 90, 2022, pp. 204–221. [48] J. Song, D. Lyu, Z. Zhang, Z. Wang, T. Zhang, and L. Ma, “When cyber-physical systems meet ai: a benchmark, an evaluation, and a way forward,” in Proceedings of the 44th International Conference on Software Engineering: Software Engineering in Practice , 2022, pp. 343– 352. [49] H. Abbas, B. Hoxha, G. Fainekos, and K. Ueda, “Robustness-guided temporal logic testing and verification for stochastic cyber-physical systems,” in The 4th Annual IEEE International Conference on Cyber Technology in Automation, Control and Intelligent . IEEE, 2014, pp. 1–6. [50] R. K. Mothilal, A. Sharma, and C. Tan, “Explaining machine learning classifiers through diverse counterfactual explanations,” in Proceedings of the 2020 conference on fairness, accountability, and transparency ,2020, pp. 607–617. [51] H. B. Mann and D. R. Whitney, “On a test of whether one of two random variables is stochastically larger than the other,” The annals of mathematical statistics , pp. 50–60, 1947. [52] A. Vargha and H. D. Delaney, “A critique and improvement of the cl common language effect size statistics of mcgraw and wong,” Journal of Educational and Behavioral Statistics , vol. 25, no. 2, pp. 101–132, 2000. [53] R. Kommiya Mothilal, D. Mahajan, C. Tan, and A. Sharma, “Towards unifying feature attribution and counterfactual explanations: Different means to the same end,” in Proceedings of the 2021 AAAI/ACM Conference on AI, Ethics, and Society , 2021, pp. 652–663. [54] G. Ernst, P. Arcaini, I. Bennani, A. Chandratre, A. Donzé, G. Fainekos, G. Frehse, K. Gaaloul, J. Inoue, T. Khandait et al. , “Arch-comp 2021 category report: Falsification with validation of results.” in ARCH@ ADHS , 2021, pp. 133–152. [55] A. Zeller, “Isolating cause-effect chains from computer programs,” ACM SIGSOFT Software Engineering Notes , vol. 27, no. 6, pp. 1–10, 2002.
