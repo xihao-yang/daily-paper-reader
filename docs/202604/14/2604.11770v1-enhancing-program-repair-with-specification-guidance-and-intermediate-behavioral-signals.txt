@@ -1,0 +1,552 @@
+Title: Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals
+
+URL Source: https://arxiv.org/pdf/2604.11770v1
+
+Published Time: Tue, 14 Apr 2026 02:54:07 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals 
+
+# Minh Le-Anh ∗
+
+FPT Software AI Center Hanoi Univ. of Science and Tech. Hanoi, Vietnam minhla4@fpt.com 
+
+# Cuong Chi Le ∗
+
+University of Texas at Dallas Dallas, Texas, USA cuong.le@utdallas.edu 
+
+# Tien N. Nguyen 
+
+University of Texas at Dallas Dallas, Texas, USA tien.n.nguyen@utdallas.edu 
+
+## Abstract 
+
+Automated Program Repair (APR) has recently benefited from large language models (LLMs). However, most LLM-based APR approaches still rely primarily on coarse end-to-end signals from test-suite outcomes to guide repair, providing limited insight into where a program’s internal logic deviates from its intended behavior. In contrast, human debugging often relies on intermediate reason-ing about program states through localized correctness conditions or assertions. Inspired by this observation, we propose SpecTune , a specification-guided debugging framework that incorporates inter-mediate behavioral reasoning into APR. SpecTune decomposes the repair task into suspicious regions connected by execution check-points and derives localized postconditions representing expected program behaviors at those points. By executing the buggy program and evaluating these postconditions, SpecTune produces micro-level debugging signals that indicate mismatches between observed and intended behaviors, enabling more precise fault localization and targeted patch generation. To address the potential unreliability of LLM-generated postconditions, we introduce two complemen-tary signals: a specification validation signal 𝛼 , which estimates the consistency of generated postconditions using partial passing test cases, and a discriminative signal 𝛽 , which detects violations of validated postconditions during execution. With these signals, 
+
+SpecTune safely leverages automatically generated specifications for APR. Experimental results show that SpecTune improves fault localization and APR effectiveness than the baselines. 
+
+## 1 Introduction 
+
+Automated Program Repair (APR) aims to automatically localize and fix software defects, reducing the manual effort required to de-bug and maintain programs. Over the past decade, APR has evolved through several methodological paradigms. Early work largely fol-lowed the generate-and-validate paradigm, where candidate patches are enumerated and validated against a test suite serving as the correctness oracle. Search-based approaches ( GenProg [21 , 43 ]) ex-plored syntactic edits through evolutionary mutation and selection guided by test outcomes. Template-driven systems ( SPR [ 27 ]) struc-tured the search space using parameterized repair templates, while learning-guided models (e.g., Prophet [ 28 ]) statistically ranked candidate patches using properties of human-written fixes. Subsequent work incorporated semantic reasoning to improve repair correctness. Constraint-based systems (e.g., SemFix [34 ], 
+
+Nopol [47 ], and Angelix [ 31 ]) leveraged symbolic execution and constraint solving to synthesize patches consistent with execution 
+
+> ∗Equal contribution
+
+traces and test cases. Others mined recurring fix patterns from historical patches (e.g., PAR [ 17 ], FixMiner [18 ]) to guide patch generation. Later, neural approaches reframed repair as a transla-tion task from buggy to fixed code. Sequence-to-sequence models (e.g., Seqencer [ 6]) and later ones ( CoCoNuT [29 ], DLFix [ 23 ], and DEAR [24]) learned repair patterns directly from bug-fix corpora. The emergence of large language models (LLMs) has further transformed APR. Modern LLM-based repair systems treat patch generation as conditional code generation with powerful pretrained priors. Empirical studies show that LLMs can outperform many traditional APR systems when combined with prompting and vali-dation workflows [ 9, 44 , 46 ]. Recent approaches further enhance repair through retrieval augmentation (e.g., RAP-Gen [ 41 ]) or agentic frameworks that iteratively localize faults and refine patches using tools such as compilation and testing (e.g., AutoCodeRover [ 50 ], 
+
+RepairAgent [ 3]). Iterative repair strategies such as REx [ 37 ] further formulate repair as a budgeted exploration process that selectively refines promising candidate trajectories. Despite these advances, most existing APR approaches still rely primarily on macro-level debugging signals : they evaluate can-didate repairs using final outcomes such as test-suite pass/fail re-sults. While effective, such signals are coarse-grained. A failing test indicates that the program’s final output is incorrect, but it often provides limited fine-grained information about where the program’s internal logic first deviates from the intended behavior. Consequently, the APR process frequently degenerates into a large search over candidate edits guided only by end-to-end outcomes. This reliance on macro signals does not reflect how developers 
+
+debug programs in practice. Human debugging often proceeds by decomposing the computation into smaller components and reason-ing about intermediate program states at checkpoints . Developers form hypotheses about what the program should satisfy at certain checkpoints and validate these hypotheses through intermediate checks, or partial execution. When the observed behavior violates such expectations, the developer can narrow the fault scope and modify the responsible code region. In essence, human debugging is often guided by intermediate behavioral specifications rather than solely by final program outputs. This suggests a new direction for APR: leveraging intermediate specifications as structured debugging signals. However, enabling such a strategy is challenging. First, buggy programs rarely include explicit intermediate specifications such as postconditions. Second, although LLMs can generate plausible specifications from code and problem descriptions, these generated postconditions are not al-ways reliable and may be inconsistent with the intended behavior.  
+
+> arXiv:2604.11770v1 [cs.SE] 13 Apr 2026 Conference’17, July 2017, Washington, DC, USA Minh Le-Anh, Cuong Chi Le, and Tien N. Nguyen
+
+In this paper, we propose SpecTune , a specification-guided debugging framework for APR that incorporates intermediate be-havioral reasoning into the repair process. It is designed to enhance the reasoning capability of LLMs in APR by introducing micro-level specification signals , enabling more effective fault localiza-tion and patch generation. SpecTune is designed to strengthen single-pass repair performance of LLMs . However, SpecTune is complementary to iterative refinement and agentic frameworks, where it can be integrated to further improve APR. Given a buggy program and its problem description, an LLM is used to decompose the repair task into suspicious regions separated by intermediate checkpoints. For each checkpoint, it derives a local-ized postcondition that captures the expected program behavior at that point. The buggy program is then executed via the given test cases and these postconditions are evaluated against the observed program states. When a specification is violated, the resulting mis-match indicates that the program logic near the corresponding checkpoint may be faulty. These mismatch signals provide structured guidance for fault localization (FL) faults and targeted fix generation .A key aspect of SpecTune is the introduction of two comple-mentary signals that enable safe and effective use of generated specifications. The first is a specification validation signal 𝛼 ,which addresses the potential unreliability of LLM-generated post-conditions. The 𝛼 signal is computed using partial passing test cases obtained from executing the original program and estimates whether a generated postcondition is consistent with the intended behavior supported by available evidence. The second is a micro-level discriminative signal 𝛽 , which measures whether a gener-ated specification is violated during execution. Unlike traditional APR signals that operate only at the final output level, 𝛽 identifies where the internal program behavior diverges from the intended logic. Together, 𝛼 filters unreliable postconditions while 𝛽 converts validated postconditions into actionable debugging guidance. This paper makes the following contributions: (1) We propose SpecTune , a specification-guided APR frame-work that decomposes APR into checkpoint-based reasoning steps and leverages intermediate postconditions to guide repair. (2) We introduce the distinction between macro debugging sig-nals derived from final test outcomes and micro debugging signals 
+
+derived from intermediate specification violations, improving APR. (3) We design a dual-signal algorithm combining specification validation ( 𝛼 ) and behavioral mismatch detection ( 𝛽 ) to keep high-quality LLM-generated specifications in automated program repair. (4) Our empirical evaluation demonstrates that SpecTune can enhance APR performance on top of the baseline approaches. 
+
+## 2 Motivation 
+
+Existing automated program repair (APR) approaches have demon-strated promising effectiveness in fixing software defects. However, most existing approaches primarily rely on macro debugging signals 
+
+such as input–output test outcomes or heuristic search strategies to guide the repair process, while lacking the ability to emulate the structured debugging workflow with more micro signals commonly adopted by human developers . Let us illustrate a typical debugging workflow via an example in Figure 1 to motivate our approach. Firstly, the intended program behavior is given in the problem description ( 4 1). Given the buggy code in the bottom left corner of Figure 1, a developer will start the debugging process by examining the buggy code to infer the overall computation pipeline and the logical relations among variables. Specifically, (s)he identifies one or more critical regions of the program and reason about the expected relations between intermediate variables during execution ( 4 2, 
+
+4 3). For example, in Figure 1, once the developer understands that the task is to reconstruct the array original from the XOR array  
+
+> derived
+
+and count the number of ‘1’s, they inspect the current code. In particular, Region 1 corresponds to the reconstruction step that attempts to recover the original array from the derived array, while Region 2 performs the counting step that computes the number of ‘1’s in the reconstructed array. Instead of attempting repair the entire buggy program at once, (s)he typically validates each code region. For example, (s)he could form a hypothesis at the end of Region 1 ( j4). From the perspective of a model, a formulation of such hypothesis could be expressed as an executable postcondition that captures the expected program state after Region 1 ( j5). In our example, the postcondition is whether the reconstructed array  
+
+> original
+
+satisfies the XOR relationship with the derived array: 
+
+∀𝑖 ∈ [ 0, 𝑛 −1], derived [𝑖 ] = original [𝑖 ]⊕ original [( 𝑖 +1) mod 𝑛 ]
+
+However, when implementing the reconstruction logic, the original 
+
+array is initialized with zeros. During the iterative reconstruction process, the elements of the original array are expected to be com-puted sequentially, where each newly reconstructed value depends on previously computed elements. In particular, when reconstruct-ing the array, the value of original[i+1] should be derived from the already computed element original[i] . However, the buggy code in Figure 1 instead uses original[i+1] when updating original[i] ,which introduces a forward dependency on a value that has not yet been correctly derived. This leads to the bug. The actual/observed behavior of the buggy program is given through the passing/failing test cases, while the intended behavior is formulated as a postcondition at each checkpoint. The mismatch between the two behaviors at a checkpoint indicates that the logic near or leading to that checkpoint might be faulty. Overall, decom-posing a buggy program into suspicious functional regions and validating each region with dedicated postconditions can help a human or an LLM significantly narrow the search space for bug localization and repair. By focusing on localized behavioral con-straints, developers can reason about the correctness of individual regions. Importantly, from the mismatch, the developer could fix the buggy code. In our example, the correct code should instead compute the next element using the already established value: 
+
+original [𝑖 + 1] = derived [𝑖 ] ⊕ original [𝑖 ]
+
+Moreover, repairing earlier regions can help establish correct inter-mediate states that subsequent regions depend on. As illustrated in Figure 1, once the reconstruction logic in Region 1 is corrected and the array original is properly derived, the specification in Region 2 (assert count == sum(original) ) becomes consistent and complete with respect to the intended program semantics. 
+
+## 3 Key Ideas 
+
+We propose several key ideas that form the core of SpecTune :Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals Conference’17, July 2017, Washington, DC, USA ### Problem Description: A 0-indexed array derived with length n is derived by computing the bitwise XOR ( ⊕) of adjacent values in a binary array original of length n. Specifically, for each index i in the range [0, n - 1]: - If i = n - 1, then derived[i] = original[i] ⊕ original[0]. - Otherwise, derived[i] = original[i] ⊕ original[i + 1]. Given an array derived, it is known that there exists a binary array original. Your task is to compute the number of 1-bits in the original array.                                                                                        
+
+> 1: def countOriginalOnes (derived): 2: n=len (derived) 3: original =[0]*n4: 5: for iin range (n): 6: if i== n-1:7: original[i] =derived[i] ^original[ 0]8: else :9: original[i] =derived[i] ^original[i +1]#BUG
+> 10: count =0
+> 11: for xin original: 12: if x== 1:13: count += 1
+> 14: 15: return count
+> Region 1
+> Region 2
+> Human Thinking at Region 1: "I notice that the code attempts to reconstruct the original array from derived using the formula in the problem description. Before proceeding to the next step, we should first verify whether this reconstruction is correct."
+> Postcondition after region 1
+> assert all( derived[i]
+> == original[i] ^original[(i+1) %n]
+> for iin range(n))
+> => Violated specification at Region 1
+> Postcondition after region 2
+> assert count == sum(original)
+> => This specification becomes consistent and complete once the correctness of the code in Region 1is ensured.
+> 1
+> 2
+> 345
+> Human Thinking at Region 2: "Next, I verify whether the computed count correctly reflects the number of 1-bits in the reconstructed original array."
+> Developer
+
+Figure 1: An example illustrating how a developer derive debugging signals from program semantics. Step 1: (S)he first reads the problem description to understand the intended behavior of the program. Step 2: Based on this understanding, the developer inspects different regions of the code and reasons about the expected relationships between variables during execution. Step 3: From this reasoning process, the developer formulates his/her intended hypothesis on program logic, which will be expressed as executable postconditions that capture the expected program state after specific regions. Step 4: By evaluating these postconditions during execution, mismatches between actual and intended behaviors can reveal logical inconsistencies. [Key Idea 1] Specification-guided debugging. In practice, de-velopers typically decompose the overall problem and buggy code into multiple smaller regions, progressively narrowing down the search space to localize and fix bugs. Each region is then validated using local unit checks, such as assertions or intermediate correct-ness conditions. When a violation is observed, developers fix the corresponding code region to restore the expected behavior. 
+
+↩→ Inspired by this debugging strategy, we propose SpecTune ,a specification-guided debugging framework that decomposes the repair problem into a sequence of suspicious regions separated by intermediate checkpoints . For each checkpoint, SpecTune derives a postcondition that aligns with the intended program behavior mentioned in the problem description. By executing the program and evaluating these specifications, SpecTune aims to identify mis-matches between the actual/observed program behavior and the intended specifications. These mismatch signals provide structured guidance for localizing faults and generating code fixes .
+
+[Key Idea 2]. Micro Debugging Signals. Existing APR approaches primarily rely on the final test case outcomes as guidance signals for fixing bugs. We refer to them as macro debugging techniques, as they evaluate correctness at the program-output level. However, test cases only encode the expected outputs and do not explicitly capture the underlying logical behavior required to produce those outputs. In contrast, the intrinsic logic of a program is typically vali-dated through finer-grained checks, such as intermediate assertions or localized correctness conditions. These micro-level tests verify whether individual functions or intermediate states of the program satisfy specific logical properties. By examining such micro-level signals, debugging can more effectively identify where the observed behavior deviates from the intended one. 
+
+↩→ To derive intermediate specifications, we leverage large lan-guage models (LLMs) to infer postconditions at selected execution checkpoints. Given the problem description and the surrounding program context, an LLM generates the checkpoints and postcondi-tions that capture the expected properties and relationships among the relevant variables. These postconditions describe the intended program state after the execution to the corresponding code re-gion. Prior work [ 8] has demonstrated that LLMs can effectively synthesize program specifications—including postconditions and assertions—from textual descriptions or source code, making them suitable for generating intermediate behavioral constraints. For each generated postcondition 𝑝 , we design a discriminative signal 𝛽 , a type of micro-level signal that assesses the quality of the generated postcondition 𝑝 on its ability to distinguish incorrect behavior (in failing test cases) from the intended behavior (via 𝑝 ). The postconditions with high discriminative signals 𝛽 are then treated as potential indicators of faulty logic and are used as contextual guidance for the LLM in the repair process. In Figure 1, the mis-match between the observed program state at the end of Region 1 under failing test executions and the inferred postcondition 1 (right-hand side) constitutes a micro-level debugging signal. In brief, 𝛽 
+
+assesses the discriminative characteristic (also referred to as com-pleteness ) of a generated postcondition. It also helps remove the ‘weak’ postcondition (e.g., ‘true == true’ ) that cannot detect a bug. 
+
+[Key Idea 3] Specification Validation. Directly relying on these specifications from LLMs may lead to incorrect fault localization due to LLMs’ hallucinations or imprecision. To address this issue, we Conference’17, July 2017, Washington, DC, USA Minh Le-Anh, Cuong Chi Le, and Tien N. Nguyen Buggy Program                       
+
+> Problem Description
+> Desired Program Semantics
+> In-scope program variables
+> Passing
+> Traces
+> Failing
+> Traces
+> #LINE 8: assert ... assert ... #LINE 12: assert ... assert ... assert ... #LINE 19: assert ... #LINE 8: assert ... assert ... #LINE 12: assert ... assert ... assert ... #LINE 19: assert ...
+> Consistency Signal α
+> Discriminative Signal β
+> Repair Model Spec Generation Spec Selection Initial Specs S'
+> if ∀s∈S', Trivial(s)
+> Filtered Specs ŜSpec Model
+> Execute Tests
+
+Figure 2: Overview of SpecTune framework. The framework starts with a buggy program and its problem description, from which candidate specifications are generated based on program semantics and in-scope variables. These specifications are then validated using passing and failing test executions to compute the consistency ( 𝛼 ) and discriminative ( 𝛽 ) signals, respectively. After filtering, the refined specification set ˆ𝑆 is used to guide the repair model in localizing and generating corrected programs. 
+
+introduce a correctness validation signal 𝛼 , computed from the partial passing test cases gathered through running original code. This acts as a validation mechanism to quantify the correctness 
+
+of generated postconditions based on their consistency with the program behavior exhibited during the executions of passing tests. 
+
+## 4 SpecTune Approach 4.1 Problem Formulation 
+
+We formulate the specification-driven APR problem as follows. Given a buggy program 𝐶 , a problem description, and a test suite 𝑇 
+
+= {𝑡 1, 𝑡 2, . . . , 𝑡 𝑛 }, where each test case 𝑡 𝑖 = (𝑥 𝑖 , 𝑦 𝑖 ) consists of an input 
+
+𝑥 𝑖 and its expected output 𝑦 𝑖 produced by the canonical program 
+
+𝐶 ∗. By executing the buggy program 𝐶 on each test case in 𝑇 , we partition the test suite into two subsets: 𝑃 = { 𝑡 𝑖 ∈ 𝑇 | 𝐶 (𝑥 𝑖 ) = 𝑦 𝑖 }
+
+and 𝐹 = { 𝑡 𝑗 ∈ 𝑇 | 𝐶 (𝑥 𝑗 ) ≠ 𝑦 𝑗 }, where 𝑃 denotes the set of passing test cases and 𝐹 denotes the set of failing test cases. Our objective is to generate a set of postconditions 𝑆 that are both consistent with and complete with respect to the intended program behavior 
+
+𝐼 , which is specified in the problem description. Ideally, we aim to find an optimal condition set 𝑆 ∗ that maximizes completeness while satisfying a sufficiently high consistency requirement: 
+
+𝑆 ∗ = arg max  
+
+> 𝑆
+
+Completeness (𝑆, 𝐼 ) s.t. Consistency (𝑆, 𝐼 ) ≥ 𝜃 
+
+where Consistency (𝑆, 𝐼 ) measures how well the postconditions 𝑆 
+
+align with the intended behavior 𝐼 , and Completeness (𝑆, 𝐼 ) mea-sures the discriminative ability of 𝑆 to expose abnormal behaviors in incorrect mutated executions rather than remaining trivial. Directly measuring Consistency and Completeness is infeasi-ble in practice, since both depend on the correct program 𝐶 ∗ and its intermediate execution states, which are unavailable in our repair setting. Thus, we introduce 𝛼 -𝛽 algorithm that assesses the quality of generated postconditions using only observable executions of the buggy program. Specifically, the 𝛼 signal leverages the passing test cases 𝑃 to estimate whether a generated postcondition is consistent with the intended behavior, while the 𝛽 signal leverages failing executions to estimate whether the postcondition is sufficiently discriminative, rather than incomplete or trivially satisfied. Using 
+
+𝛼 and 𝛽 as practical surrogates for consistency and completeness, we define the approximated optimal specification set ˆ𝑆 as: 
+
+ˆ𝑆 = arg max 
+
+> 𝑆
+
+ 1 − 𝛽 (𝑆, 𝐼 ) s.t. 𝛼 (𝑆, 𝐼 ) ≥ 𝜃 
+
+The refined specification set ˆ𝑆 is then used to guide the repair model. Let 𝑀 𝜙 denote a LLM parameterized by 𝜙 . The repair process can be formulated as generating a candidate fixed program ˆ𝐶 from the conditional distribution: ˆ𝐶 ∼ 𝑀 𝜙 (· | 𝐶, ˆ𝑆 ), where ˆ𝑆 provides structured behavioral guidance that steers the model toward repairs consistent with the intended program semantics. 
+
+## 4.2 SpecTune Workflow 
+
+As illustrated in Figure 2, SpecTune first leverages an LLM to con-struct candidate postconditions at multiple LLM-suggested check-points based on program semantics and execution context, and then validates them using signals derived from passing and failing test executions. Next, by leveraging specification-based signals, it can capture behavioral inconsistencies between intended behaviors and the behaviors observable from the input-output test outcomes. Then, our 𝛼 -𝛽 algorithm is used to assess the quality of generated postconditions and such inconsistencies. Finally, these structured signals provide guidance for the LLM repair model, facilitating the generation of the fixes that are more consistent with the in-tended semantics. The entire workflow is formally described in Algorithm 1. 
+
+Checkpoints and Postcondition Generation . We leverage the capability of Code LLMs to analyze and reason over program logic to identify a set of intermediate checkpoints 𝑄 = {𝑞 1, 𝑞 2, . . . , 𝑞 𝑛 }
+
+within the buggy program. These checkpoints correspond to critical execution points where the internal program state can reveal poten-tial logical inconsistencies. For each checkpoint 𝑞 𝑗 , a set of candi-date postconditions 𝑆 ′ (𝑞 𝑗 ) = {𝑠 𝑗 0, 𝑠 𝑗 1, . . . , 𝑠 𝑗𝑘 } is associated, where Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals Conference’17, July 2017, Washington, DC, USA 
+
+each specification is expected to hold immediately after execution reaches that checkpoint. To facilitate checkpoint and postcondition generation, we provide the LLM with additional contextual informa-tion, including a failing input-output test case of the buggy program. Conditioned on this information, we obtain a set of candidate post-conditions for each checkpoint, forming the initial specification space used in later filtering and repair: 𝑆 ′ = Ð𝑞 𝑗 ∈𝑄 𝑆 ′ (𝑞 𝑗 ).
+
+Specification Validation and Selection . Although LLMs show promising capability in proposing candidate specifications [ 8], it re-mains necessary to verify whether these generated postconditions are consistent with the intended behavior and sufficiently informative for debugging . Therefore, the initial set 𝑆 ′ of postconditions produced earlier needs to be validated and filtered. To assess their quality, we introduce an 𝛼 -𝛽 algorithm that approximates the consistency and completeness of candidate specifications by leveraging signals derived from existing test cases. Concretely, let 𝑃 = {𝑝 1, 𝑝 2, . . . , 𝑝 𝑚 }
+
+and 𝐹 = {𝑓 1, 𝑓 2, . . . , 𝑓 𝑙 } denote the sets of passing and failing test cases, respectively. Let 𝑄 = {𝑞 1, 𝑞 2, . . . , 𝑞 𝑛 } denote the set of check-points within the buggy program proposed by LLMs. For each checkpoint 𝑞 𝑗 , we have an initial set of candidate LLM-generated postconditions 𝑆 ′ 
+
+> 𝑗
+
+= {𝑠 𝑗 1, 𝑠 𝑗 2, . . . , 𝑠 𝑗𝑘 }. From these, we compute two signals 𝛼 and 𝛽 to assess the quality of candidate conditions: 
+
+Consistency Signal ( 𝛼 ). For each candidate specification 𝑠 𝑗𝑘 
+
+associated with checkpoint 𝑞 𝑗 , we approximate its consistency with the intended program behavior using the 𝛼 signal computed over the passing test cases. The consistency signal 𝛼 of a postcondition 
+
+𝑠 𝑗𝑘 is defined as the probability that the specification holds when a passing test reaches the corresponding checkpoint :
+
+𝛼 (𝑠 𝑗𝑘 ) = |{ 𝑝 𝑖 ∈ 𝑃 | 𝑝 𝑖 reaches 𝑞 𝑗 ∧ 𝑥 𝑖 𝑗 |= 𝑠 𝑗𝑘 }| |{ 𝑝 𝑖 ∈ 𝑃 | 𝑝 𝑖 reaches 𝑞 𝑗 }| (1) where 𝑥 𝑖 𝑗 denotes the program state observed when executing test case 𝑝 𝑖 at checkpoint 𝑞 𝑗 .Based on this signal, we filter out specifications with low 𝛼 
+
+values, as they are likely inconsistent with the intended program behavior. Specifically, we apply a threshold 𝜃 ∈ [ 0, 1] and retain only the specifications whose consistency signals satisfy 𝛼 (𝑠 𝑗𝑘 ) ≥ 
+
+𝜃 . Discriminative Signal ( 𝛽 ). Evaluating consistency alone is insufficient, as some LLM-generated postconditions may be trivially satisfied and fail to capture erroneous behaviors. Thus, we introduce 
+
+the signal 𝛽 to assess whether a postcondition 𝑠 𝑗𝑘 can effectively identify incorrect executions using failing test cases :
+
+𝛽 (𝑠 𝑗𝑘 ) = |{ 𝑓 𝑖 ∈ 𝐹 | 𝑓 𝑖 reaches 𝑞 𝑗 ∧ 𝑦 𝑖 𝑗 |= 𝑠 𝑗𝑘 }| |{ 𝑓 𝑖 ∈ 𝐹 | 𝑓 𝑖 reaches 𝑞 𝑗 }| (2) A higher 𝛽 indicates that the postcondition is frequently satisfied during the executions of failing test cases. This may arise either because the postcondition is incomplete and fails to capture the erroneous behavior, or because the failing execution does not reach the program state where the logical mismatch manifests. In contrast, postconditions with lower 𝛽 signals exhibit stronger discriminative capability, as they are more likely to be violated by failing execu-tions and give more informative signals for exposing incorrect pro-gram behaviors. To remove incomplete or uninformative postcondi-tions for APR, we filter candidates using a threshold 𝛾 ∈ [ 0, 1] and retain only those whose discriminative signals satisfy 𝛽 (𝑠 𝑗𝑘 ) < 𝛾 .
+
+Algorithm 1 SpecTune : Specification-Guided Program Repair 
+
+Require: Buggy program 𝐶 , description 𝐷 , test suite 𝑇 , consis-tency threshold 𝜃 , discriminative threshold 𝛾 
+
+Ensure: Repaired program ˆ𝐶  
+
+> 1:
+
+Partition 𝑇 into passing tests 𝑃 and failing tests 𝐹  
+
+> 2:
+
+𝑄, 𝑆 ′ ← GenerateCheckpointsAndSpecifications (𝐶, 𝐷 ) 
+
+> 3:
+
+ˆ𝑆 ← ∅  
+
+> 4:
+
+for all 𝑞 𝑗 ∈ 𝑄 do  
+
+> 5:
+
+𝐸 𝑞 𝑗  
+
+> 𝑝
+
+← CollectTrace (𝐶, 𝑃, 𝑞 𝑗 ) 
+
+> 6:
+
+𝐸 𝑞 𝑗  
+
+> 𝑓
+
+← CollectTrace (𝐶, 𝐹, 𝑞 𝑗 ) 
+
+> 7:
+
+for all 𝑠 𝑗𝑘 ∈ 𝑆 ′ (𝑞 𝑗 ) do  
+
+> 8:
+
+𝛼 𝑗𝑘 ← ComputeConsistency (𝑠 𝑗𝑘 , 𝐸 𝑞 𝑗  
+
+> 𝑝
+
+) 
+
+> 9:
+
+𝛽 𝑗𝑘 ← ComputeDiscriminative (𝑠 𝑗𝑘 , 𝐸 𝑞 𝑗  
+
+> 𝑓
+
+) 
+
+> 10:
+
+if 𝛼 𝑗𝑘 ≥ 𝜃 and 𝛽 𝑗𝑘 < 𝛾 then  
+
+> 11:
+
+ˆ𝑆 ← ˆ𝑆 ∪ { 𝑠 𝑗𝑘 } 
+
+> 12:
+
+end if  
+
+> 13:
+
+end for  
+
+> 14:
+
+end for  
+
+> 15:
+
+ˆ𝐶 ∼ 𝑀 (· | 𝐶, ˆ𝑆 ) 
+
+> 16:
+
+return ˆ𝐶 
+
+Helper Functions                               
+
+> CollectTrace (𝐶,𝑇 , 𝑞 𝑗 ): Executes program 𝐶 on each test case in 𝑇 and records execution traces at checkpoint 𝑞 𝑗 . Each trace captures the program state upon reaching 𝑞 𝑗 .
+> ComputeConsistency (𝑠 𝑗𝑘 , 𝐸 𝑞 𝑗
+> 𝑝 ): Returns the consistency signal 𝛼 (𝑠 𝑗𝑘 ),defined as the proportion of passing execution traces in 𝐸 𝑞 𝑗
+> 𝑝 that satisfy specification 𝑠 𝑗𝑘 .
+> ComputeDiscriminative (𝑠 𝑗𝑘 , 𝐸 𝑞 𝑗
+> 𝑓 ): Returns the discriminative signal
+> 𝛽 (𝑠 𝑗𝑘 ), defined as the proportion of failing execution traces in 𝐸 𝑞 𝑗
+> 𝑓 that still satisfy specification 𝑠 𝑗𝑘 .
+
+Specification Selection. Overall, we combine the consistency sig-nal and the discriminative signal to filter the initial specification set 
+
+𝑆 ′, ensuring that the resulting postconditions are both consistent with correct executions and capable of exposing erroneous behav-iors. Specifically, we construct the refined specification set ˆ𝑆 by selecting the postconditions that satisfy both filtering conditions: 
+
+ˆ𝑆 = { 𝑠 𝑗𝑘 ∈ 𝑆 ′ | 𝛼 (𝑠 𝑗𝑘 ) ≥ 𝜃 ∧ 𝛽 (𝑠 𝑗𝑘 ) < 𝛾 } (3) The resulting specification set ˆ𝑆 is expected to capture behaviorally meaningful constraints that align with correct program executions while helping reveal incorrect behaviors. These validated specifi-cations can then provide structured guidance for the subsequent repair generation process, which will be explained next. 
+
+## 4.3 SpecTune Algorithm 
+
+Algorithm 1 outlines SpecTune ’s workflow. The algorithm takes as input a buggy program 𝐶 , its functional description 𝐷 , a test suite 𝑇 ,together with the consistency and discriminative thresholds 𝜃 and 𝛾 .We first partition the test suite into passing tests 𝑃 and failing tests 𝐹 (line 1). Next, from the description 𝐷 and the source code, the algorithm generates a set of candidate checkpoints within the program and proposes the corresponding postconditions, i.e., be-havioral specifications (lines 2). These postconditions are intended to capture expected program states that should hold after execution Conference’17, July 2017, Washington, DC, USA Minh Le-Anh, Cuong Chi Le, and Tien N. Nguyen 
+
+reaches the associated checkpoints. The union of all generated con-ditions forms the initial pool 𝑆 ′. To support subsequent evaluation, we execute the program on both passing and failing test cases and collect execution traces at each checkpoint (lines 5-6). These traces record the program states observed at each checkpoint under differ-ent executions. For each postcondition 𝑠 𝑗𝑘 belonging to checkpoint 
+
+𝑞 𝑗 , it computes the consistency signal 𝛼 𝑗𝑘 as the proportion of pass-ing executions that satisfy 𝑠 𝑗𝑘 (line 8), and the discriminative signal 
+
+𝛽 𝑗𝑘 as the proportion of failing executions that still satisfy 𝑠 𝑗𝑘 (line 9). A low 𝛼 𝑗𝑘 indicates that the postcondition is frequently vio-lated even by correct executions, suggesting that it is inconsistent with the intended program semantics. Therefore, we retain only postconditions with 𝛼 𝑗𝑘 ≥ 𝜃 to ensure semantic consistency. We further leverage the discriminative signal 𝛽 𝑗𝑘 to assess whether a postcondition can effectively distinguish failing behaviors. A higher 
+
+𝛽 𝑗𝑘 indicates that the postcondition is often satisfied by failing ex-ecutions, implying that it lacks the ability to capture erroneous behavior. This can occur either when the postcondition is incom-plete or when failing executions do not pass through the program state where the condition is evaluated. In contrast, postconditions with lower 𝛽 𝑗𝑘 are more likely to be violated by failing executions and thus provide stronger signals for exposing incorrect behaviors. Moreover, a lower 𝛽 𝑗𝑘 suggests that the erroneous behavior is more likely to occur before reaching the corresponding checkpoint, mak-ing such specifications more informative for the LLM to reason to narrow down the suspicious region and localizing the fault. Thus, we retain the postconditions with 𝛽 𝑗𝑘 < 𝛾 . The postconditions sat-isfying both the consistency ( 𝛼 𝑗𝑘 ≥ 𝜃 ) and discriminative ( 𝛽 𝑗𝑘 < 𝛾 )criteria are added to the refined specification set ˆ𝑆 , while the oth-ers are discarded (lines 10-12). Finally, the LLM repair model is prompted to generate a candidate fixed program ˆ𝐶 conditioned on the buggy program 𝐶 and the validated specification set ˆ𝑆 (line 15). 
+
+## 5 Empirical Evaluation 
+
+Our evaluation is conducted to investigate the following questions: 
+
+RQ1. [Program Repair Performance] What is SpecTune ’s program repair performance across different repair settings? 
+
+RQ2. [Fault Localization Capability] How does SpecTune 
+
+compare with existing baselines in fault localization capability? 
+
+RQ3. [Effectiveness of 𝛼 -𝛽 Algorithm]. How effective is our algorithm in keeping the high-quality postconditions? 
+
+RQ4. [Ablation Study] What is the individual contribution of each signal in SpecTune? 
+
+RQ5. [Sensitivity Analysis] How sensitive is the performance of SpecTune to the choices of the 𝛼 and 𝛽 thresholds? 
+
+Datasets. Through our experiments on widely used APR bench-marks such as HumanEvalFix [ 33 ], we observed the data leakage phenomenon as modern LLMs can often pass all test cases even under naive prompting. To reduce data leakage, we construct a new dataset following SWE-Synth [ 36 ], a LLM-based bug synthesis methodology. Specifically, we chose LiveCodeBench [ 13 ], which contains recently collected programming problems. For each prob-lem, we generate multiple candidate implementations using Claude 3.5 Sonnet and Haiku, which differ from the LLMs used in our eval-uation, in a 3:1 ratio to obtain solutions with diverse quality levels. These implementations are then executed against the provided test suites, and we retain only partially correct programs that pass a subset of test cases while failing at least one, discarding both fully correct and completely incorrect solutions. This process results in 326 buggy solutions across 120 programming problems. 
+
+Baselines and Settings. SpecTune is designed to enhance the LLMs’ reasoning in single-pass repair capability through specification-guided debugging. Thus, to isolate the effect of SpecTune on repair quality, we first compare the APR performance of each base LLM with and without SpecTune . This controlled setting allows to di-rectly measure SpecTune ’s contribution to the underlying LLM .To further evaluate the generality of SpecTune in iterative re-finement APR , we select two state-of-the-art iterative refinement APR approaches, ChatRepair [ 46 ] and REx [ 37 ]. ChatRepair [ 46 ]leverages conversational feedback to iteratively improve patches based on test results, while REx [ 37 ] formulates repair as a budgeted search problem over candidate trajectories. We integrate SpecTune 
+
+into both approaches and then compare SpecTune +ChatRepair 
+
+against ChatRepair , and SpecTune +REx against REx. These com-parisons allow us to assess whether SpecTune consistently im-proves APR performance beyond the single-pass setting and re-mains effective when combined with iterative repair frameworks. 
+
+Model Backbones. We use kimi-k2-instruct-0905 and deepseek-v3p1 , hosted via Fireworks AI for cost-efficient inference, as the underlying models. We apply nucleus sampling and generate 5 candidate outputs per buggy problem for each approach. 
+
+## 6 Program Repair Performance (RQ1) 
+
+To evaluate SpecTune with specification-guided signals in improv-ing LLMs’ reasoning in APR, we compare each base LLM with and without SpecTune , thereby isolating its effect on repair quality. Moreover, we evaluate the generality of SpecTune used in iterative refinement repair frameworks ChatRepair [46] and REx [37]. 
+
+Settings. Each buggy program is subjected to 5 independent repair attempts . In the pure LLM setting, each attempt generates 5 candidate patches , from which the highest-performing one is selected as the final output. For iterative refinement methods ChatRepair [46 ]and REx [ 37 ], we set the default maximum number of refinement iterations to 21 for each attempt. With SpecTune integrated into them, the number of specification regeneration attempts is limited to 5 when trivial specifications are encountered. 
+
+Metrics. We evaluate APR performance using Pass@k [ 5], where 
+
+𝑘 ∈ { 1, 3, 5}. This metric measures whether at least one of the top-𝑘 
+
+generated, fixed programs successfully passes the entire test suite .We also evaluate cost efficiency by comparing the execution cost (per bug) of each method with and without SpecTune .
+
+Results. Table 1 presents the overall repair performance across two backbone models, Kimi-K2-Instruct and DeepSeek-V3.1. In the pure LLM setting, SpecTune consistently improves over the base models, lifting Pass@1 from 72.78% to 76.82% (+4.04%) on Kimi-K2-Instruct and from 81.90% to 87.73% (+5.83%) on DeepSeek-V3.1 . Moreover, when integrated to iterative refinement frame-works, SpecTune continues to deliver consistent performance im-provements. Regarding ChatRepair , Pass@1 increases from 85.41% 
+
+to 88.19% (+2.78%) on Kimi-K2-Instruct and from 93.08% to 
+
+98.19% (+5.11%) on DeepSeek-V3.1 . Similarly, REx benefits from 
+
+SpecTune integration, with Pass@1 rising from 90.16% to 91.75% (+1.59%) and from 94.26% to 98.35% (+4.09%) , respectively. These consistent improvements across all settings and both backbones Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals Conference’17, July 2017, Washington, DC, USA 
+
+Table 1: APR performance with/without SpecTune in both pure LLM setting and iterative APR frameworks (ChatRepair & REx)                                                                      
+
+> Backbone Model Method Pass@1 (%) Pass@3 (%) Pass@5 (%) Avg. Token Cost ($)
+> Kimi-K2-Instruct
+> Pure LLM 72.78 76.62 78.52 -
+> +SpecTune 76.82 ↑4.04 79.50 ↑2.88 81.29 ↑2.77 +0.012841
+> ChatRepair [46] 85.41 87.83 89.26 -
+> +SpecTune 88.19 ↑2.78 90.22 ↑2.39 91.41 ↑2.15 +0.021926
+> REx [37] 90.16 92.35 93.86 -
+> +SpecTune 91.75 ↑1.59 93.71 ↑1.36 95.09 ↑1.23 +0.020473
+> DeepSeek-V3.1
+> Pure LLM 81.90 85.51 87.73 -
+> +SpecTune 87.73 ↑5.83 91.20 ↑5.69 93.25 ↑5.52 +0.003443
+> ChatRepair [46] 93.08 95.14 96.32 -
+> +SpecTune 98.19 ↑5.11 98.83 ↑3.69 99.08 ↑2.76 +0.005332
+> REx [37] 94.26 95.39 96.01 -
+> +SpecTune 98.35 ↑4.09 98.87 ↑3.48 99.38 ↑3.37 +0.005528
+
+demonstrate that SpecTune is broadly complementary to the un-derlying LLMs and existing iterative refinement approaches. 
+
+Cost Efficiency. We analyze the cost efficiency of SpecTune by examining the additional token cost introduced when integrating it into existing repair frameworks. Under DeepSeek-V3.1, integrat-ing SpecTune introduces a competitive and acceptable overhead, with an additional cost of $0.003443 in the pure LLM setting and approximately $0.005 for refinement-based methods. Under Kimi-K2-Instruct, the execution cost is slightly higher, with the pure LLM setting incurring an increase of $0.012841 and refinement-based methods rising by approximately $0.02. From our observation, Kimi-K2-Instruct tends to require more attempts to generate non-trivial specifications, while also needing more iterations of refinement. 
+
+## 7 Fault Localization (FL) Capability (RQ2) 
+
+One of the key design goals of SpecTune (Key Idea 1 ) is to provide specification-guided signals that improve the reasoning capability of LLMs, enabling them to more effectively narrow the search space and identify error-prone code regions , leading to better locating faulty lines. Therefore, we compare the localization performance of a base LLM with that of its SpecTune -augmented counterpart. 
+
+Settings. Since the dataset does not include explicit ground-truth buggy locations, we evaluate fault localization using an LLM-as-a-judge paradigm. For each bug instance, both the base LLM and the SpecTune -augmented model predict suspicious line(s). These predictions are then provided to a judge LLM, which performs a pairwise comparison and returns a binary preference indicating which prediction better captures the faulty line(s). For the judge model, to improve evaluation robustness and reduce model-specific bias, we use GPT-5.2 and GPT-5.4 , leveraging their strong reasoning capabilities across diverse code-related tasks. To further ensure the reliability of the evaluation, we retain only the subset of instances where all judge models are able to produce a correct repair, indi-cating their capability to accurately reason about the underlying bug. In addition, we also manually inspect a sampled subset of the localization results for human evaluation. To assess the consis-tency between human judgments and LLM-based judgments, we report their inter-rater agreement using Cohen’s 𝜅 (for two raters): 
+
+𝜅 = 𝑝 𝑜 −𝑝 𝑒  
+
+> 1−𝑝 𝑒
+
+, where 𝑝 𝑜 denotes the observed agreement between the two raters, and 𝑝 𝑒 denotes the expected agreement by chance. 
+
+LLM-judge Metrics. Let D denote the set of bug instances where both the base LLM and SpecTune produce valid localization pre-dictions. For each instance 𝑖 ∈ D , let 𝑠 𝑖 and 𝑛 𝑖 denote the sets of predicted faulty lines from SpecTune and the base LLM. We employ an LLM-based judge function Judge (𝑠 𝑖 , 𝑛 𝑖 ), which takes two sets of predicted lines as input and returns a binary out-come: 0 if 𝑠 𝑖 is preferred over 𝑛 𝑖 , and 1 otherwise. We define the following metrics: WinRate (SpecTune ) = | { 𝑖 ∈ D | Judge (𝑠 𝑖 ,𝑛 𝑖 )=0} | | D | ,
+
+WinRate (Base ) = | { 𝑖 ∈ D | Judge (𝑠 𝑖 ,𝑛 𝑖 )=1} | | D | , DrawRate = | { 𝑖 ∈ D | 𝑠 𝑖 =𝑛 𝑖 } | | D | ,where WinRate (SpecTune ) measures the proportion of instances where the judge prefers the result from SpecTune , while WinRate -
+
+(Base ) captures the opposite cases. DrawRate corresponds to in-stances where both methods predict identical sets of buggy lines. 
+
+Results. We conduct the evaluation on 282 tasks and 288 tasks on our dataset for Kimi-K2-Instruct and DeepSeek-V3.1, respectively, where violated specifications are successfully generated by back-bone model under the condition 𝛼 ≥ 0.9 and 𝛽 < 1. Figure 3 presents the overall impact of the generated postconditions on fault local-ization. Overall, SpecTune consistently outperforms the base LLM across all settings, demonstrating that the generated postconditions, guided by the estimated 𝛼 and 𝛽 signals, are effective in improving localization quality. When using GPT-5.2 as the judge, SpecTune 
+
+achieves 149 cases (52.8%) where its predictions are preferred over Kimi-K2-Instruct, compared to 74 cases (26.2%) where the base LLM is preferred, with 59 cases (20.9%) resulting in ties. A similar pat-tern is observed for DeepSeek-V3.1, where SpecTune obtains 164 cases (56.9%) versus 93 cases (32.3%), with 31 cases (10.8%) being ties. Under GPT-5.4 as the judge, the results remain consistent. For Kimi-K2-Instruct, SpecTune is preferred in 129 cases (45.7%), while the base LLM is preferred in 94 cases (33.3%), with 59 cases (20.9%) tied. For DeepSeek-V3.1, SpecTune achieves 138 cases (47.9%) com-pared to 119 cases (41.3%) for the base LLM, with 31 cases (10.8%) resulting in ties. These results consistently show that SpecTune 
+
+yields a higher proportion of preferred predictions than the base LLM, regardless of the underlying model or judge. This confirms 
+
+SpecTune ’s effectiveness in generating high-quality intermediate specifications that meaningfully improve fault localization. 
+
+Human Assessment. To further assess the reliability of the LLM-as-a-judge evaluation, we conduct a human study on a randomly sampled subset of 30 bug instances. For each instance, human are Conference’17, July 2017, Washington, DC, USA Minh Le-Anh, Cuong Chi Le, and Tien N. Nguyen 
+
+Figure 3: Comparison on Fault Localization (RQ2) Table 2: Agreement between human annotators and LLM judges measured by Cohen’s 𝜅 .Metric Human vs GPT-5.2 Human vs GPT-5.4 
+
+Cohen’s 𝜅 0.663*** 0.728***    
+
+> *** 𝑝 <0.001
+
+asked to compare the localization outputs produced by the base LLM and the SpecTune -augmented model, and determine which prediction better captures the faulty region. To quantify the agree-ment between human judgments and LLM-based decisions, we compute Cohen’s 𝜅 between human annotations and each LLM judge (i.e., GPT-5.2 and GPT-5.4). As shown, Cohen’s 𝜅 indicates substantial agreement between humans and GPT-5.2 ( 𝜅 = 0.663 ) and GPT-5.4( 𝜅 = 0.728 ). This further demonstrates the reliability of the LLM-as-a-judge eval-uation, confirming that the judgments produced by the LLM are largely consistent with human assessments. Overall, these results suggest that using specification-guided signals in SpecTune effec-tively helps narrow down the search space for fault localization. This also reinforces the findings of RQ1 (Section 6) and Key Idea 1 
+
+(Section 3). 
+
+## 8 Effectiveness of ( 𝛼 -𝛽 ) Algorithm (RQ3) 
+
+A key design in SpecTune is to use ( 𝛼 -𝛽 ) estimation algorithm to keep high-quality postconditions generated by the LLMs. In the first experiment, we aim to assess the reliability of our estimation algo-rithm on the quality of the generated specifications. We will present our experiment on evaluating on how well our algorithm performs in keeping high-quality specifications next ( Key Ideas 2 and 3 ). 
+
+## 8.1 Reliability of 𝛼 -𝛽 algorithm on Estimating Specification Quality 
+
+Note that SpecTune uses an LLM to generate postconditions at different checkpoints in the buggy code from the problem descrip-tion. This design follows our debugging intuition: the LLM is used to represent the intended or “correct” hypotheses at intermediate checkpoints, analogous to how a human debugger reasons about expected program states. Therefore, to assess the reliability of our algorithm in estimating specification quality, we need access to both the correct/fixed version of each buggy program and the map-ping between checkpoints in the buggy and fixed code. Because 
+
+Figure 4: Distribution of Δ𝛼 = 𝛼 − 𝛼 ∗ across all postconditions from DeepSeek-V3.1 (blue) and Kimi-K2-Instruct (yellow). 
+
+our main dataset does not provide human-written fixes, we use HumanEvalFix [ 33 ], which contains 168 coding problems and sat-isfies both requirements. However, since HumanEvalFix provides only 7.25 test cases per problem on average, which is insufficient to reliably evaluate the correctness of a specification. Therefore, we utilize GPT-4.1-mini to generate additional inputs to maximize branch coverage and execute them on the canonical solution to obtain new test cases, which are then merged with the existing ones. Overall, each task has 102.38 test cases on average. Our evaluation procedure is as follows. Given a buggy program 
+
+𝐶 in HumanEvalFix, we run SpecTune to generate postconditions at several checkpoints. We then map these checkpoints to their corresponding locations in the correct/fixed version 𝐶 ∗ of 𝐶 . Next, we execute the correct version 𝐶 ∗ and measure whether each gen-erated postcondition is satisfied at its mapped checkpoint. Based on these executions on the correct program, we compute the reference signal 𝛼 ∗ for all generated postconditions at all checkpoints. Sepa-rately, we compute the estimated signal 𝛼 using only the executions of the buggy code, as done in SpecTune . By comparing 𝛼 against 
+
+𝛼 ∗, we assess how well our algorithm approximates the true con-sistency property of the generated postconditions. We emphasize that this experiment evaluates the reliability of our estimation pro-cedure, rather than how well our 𝛼 -𝛽 algorithm keeps high-quality postconditions generated by LLMs; the latter is evaluated next. In summary, we first use the buggy program to generate checkpoint-level postconditions and compute their estimated quality signal, 𝛼 
+
+as done in SpecTune . We then use the corresponding fixed program together with its test cases to approximate the reference signal, 𝛼 ∗,which reflect the true consistency of those same postconditions. By comparing 𝛼 against 𝛼 ∗, we evaluate how reliably our algorithm estimates specification quality produced by LLMs. 
+
+Analysis. Figure 5 presents the distribution of Δ𝛼 = 𝛼 − 𝛼 ∗ across all generated postconditions for both DeepSeek-V3.1 and Kimi-K2-Instruct. In our evaluation, we consider a postcondition to be highly consistent with the reference signal if |Δ𝛼 | < 0.1, meaning the esti-mated consistency signal deviates from the true reference by less than 0.1. The plot reveals that the distribution is sharply concen-trated around zero for both models: over 79.88% of postconditions generated by DeepSeek-V3.1 and over 82.66% of those generated by Kimi-K2-Instruct are classified as highly consistent . Furthermore, Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals Conference’17, July 2017, Washington, DC, USA 
+
+Figure 5: Distribution of generated specification quality by DeepSeek-V3.1, estimated using the 𝛼 consistency signal (x-axis) and the 𝛽 discriminative signal (y-axis). 
+
+both models yield near-zero mean and median errors : DeepSeek-V3.1 achieves a mean Δ𝛼 of −0.011 with a median of 0.000 , while Kimi-K2-Instruct achieves a mean of 0.002 and a median of 0.000 . These results show that our estimation algorithm is highly reliable: despite relying solely on executions of the buggy program, 𝛼 accurately reflects the true consistency of the generated postconditions as measured against the correct code. This confirms Key Idea 3 on using 𝛼 to provide a dependable assessment of specification quality. 
+
+## 8.2 Distribution of Postcondition Quality 
+
+This section analyzes the quality distribution of the postconditions generated by the LLM at multiple checkpoints. Having established in Section 8.1 that the estimated signal 𝛼 reliably approximates the consistency quality of generated postconditions, we now apply 
+
+SpecTune to the buggy programs in our dataset and compute the 
+
+𝛼 and 𝛽 values of the generated checkpoint-level postconditions. We then categorize each postcondition into one of three regions: the non-consistent region if 𝛼 (𝑠 ) < 𝜃 ; the trivial region if 
+
+𝛼 (𝑠 ) ≥ 𝜃 and 𝛽 (𝑠 ) ≥ 𝛾 ; and the acceptable region if 𝛼 (𝑠 ) ≥ 𝜃 
+
+and 𝛽 (𝑠 ) < 𝛾 . Each region reflects a different level of specification quality with respect to consistency and the ability to detect incorrect behavior. This experiment is designed to characterize how often LLM-generated postconditions are usable for repair, and to quantify the extent to which inconsistent or trivial specifications must be filtered out before they are used as debugging signals .Figure 5 shows the distribution of generated specification quality by DeepSeek-V3.1, using 𝜃 = 𝛾 = 0.80. The trivial region has the highest density at 45.05% and the non-consistent region accounts for 43.39%, indicating that the model often generates specifications with little practical value. The plot also shows that specifications are highly concentrated around (𝛼, 𝛽 ) = (0, 0), corresponding to inconsistent cases, and (1, 1), corresponding to trivial ones. Only 11.56% of specifications fall into the acceptable region . This con-firms our Key Ideas 2 and 3 on the need for a filtering mechanism to prevent low-quality specifications from being used in code repair. We present the density of each region across multiple threshold values in Table 3.The trivial region has the highest density at 45.1% and the non-consistent region accounts for 43.4%, indicating that 
+
+Table 3: Distribution of generated specification quality by DeepSeek-V3.1 across different 𝜃 and 𝛾 values. Percentages indicate the proportion of specifications in each region.                     
+
+> 𝜃 𝛾 Non-Consist. (%) Trivial (%) Acceptable (%)
+> 0.90 0.90 46.14 41.90 11.96 0.90 1.00 46.14 37.83 16.03 1.00 0.90 50.40 38.69 10.91 1.00 1.00 50.40 36.84 12.76
+
+Table 4: Effect of 𝛼 and 𝛽 signals on SpecTune performance                      
+
+> Setting Pass@1 Pass@3 Pass@5 Full SpecTune 87.73 91.20 93.25
+> w/o Consistency Signal 𝛼 82.97 86.28 88.95 w/o Discriminative Signal 𝛽 84.86 87.91 89.57 w/o 𝛼 and 𝛽 signals 82.04 86.07 88.34
+
+the model often generates specifications with little practical value. Only 11.6% of specifications fall into the acceptable region . This confirms Key Ideas 2 and 3 on the need for a mechanism to filter low-quality specifications from being used in code repair. Table 3 shows the density of each region across multiple thresholds. While the overall yield of acceptable specifications is low, this does not hinder the effectiveness of SpecTune as one high-quality that can detect the fault is needed. From a human debugging per-spective, a programmer does not attempt to generate as many spec-ifications as possible; instead, they brainstorm only a small subset of specifications that capture the most suspicious or informative program states at relevant checkpoints. This targeted reasoning is sufficient to localize and fix a bug. This motivates the design of our (𝛼 -𝛽 ) filtering mechanism, which ensures that only consistent and discriminative specifications are retained for repair. As shown in the ablation study (Table 4), removing the ( 𝛼 -𝛽 ) algorithm significantly degrades performance, as a large number of inconsistent or trivial specifications are introduced into the repair process, misleading the fault localization and reducing the overall bug-fixing effectiveness. 
+
+## 9 Ablation Study (RQ4) 
+
+This section examines the individual contribution of each signal in 
+
+SpecTune . Specifically, we analyze how removing the consistency signal 𝛼 and the discriminative signal 𝛽 affects its APR effectiveness. 
+
+Setup. We conduct an ablation study of under the configuration integrated with BaseLLM from RQ1 (Section 6) by systematically removing each component: (1) removing the consistency signal 
+
+𝛼 (i.e., keeping all specifications that satisfy 𝛽 < 1 regardless of their consistency with passing executions), (2) removing the dis-criminative signal 𝛽 (i.e., retaining all specifications that satisfy 
+
+𝛼 ≥ 0.9 regardless of their ability to detect faulty behaviors), and (3) removing both signals (i.e., using all generated specifications without any filtering). As Kimi-K2-Instruct and DeepSeek-V3.1 ex-hibit consistent trends across all three RQs above, for brevity, we evaluate each ablated variant on DeepSeek-V3.1 only and report Pass@1, Pass@3, and Pass@5. 
+
+Result. Table 4 shows that removing either signal degrades per-formance across all metrics. Removing 𝛼 alone drops Pass@1 by Conference’17, July 2017, Washington, DC, USA Minh Le-Anh, Cuong Chi Le, and Tien N. Nguyen 
+
+4.76%, this suggests that without consistency filtering, inconsistent postconditions are passed to the repair process, misleading the Re-pair Model toward incorrect reasoning about the desired program behavior. Otherwise, removing 𝛽 alone results in a less drop (2.87%) in Pass@1, showing that keeping high-quality specification is cru-cial. This suggests that introducing trivial postconditions into the repair process reduces the LLM’s ability to reason about the root cause of the bug. Finally, we experiment with removing both signals, meaning that all postconditions generated by the LLM are passed directly into the repair process. The results show that this leads to the largest degradation, with a 5.69% drop in Pass@1. Overall, this finding shows that both 𝛼 and 𝛽 are indispensable to SpecTune ’s effectiveness in keeping correct and discriminative signals. 
+
+## 10 Sensitivity Analysis (RQ5) 
+
+This section aims to investigate the sensitivity of SpecTune to its key hyperparameters: the consistency signal 𝛼 and the discrimi-native signal 𝛽 , with respect to its performance. Specifically, we analyze how varying them affects SpecTune ’s APR performance. 
+
+Setup. To ensure both consistency with correct executions and correctness in identifying faults, we consider threshold ranges for the consistency and discriminative signals as 𝜃, 𝛾 ∈ { 0.9, 0.95 , 1.0},where specifications are retained if 𝛼 ≥ 𝜃 and 𝛽 < 𝛾 . Similar to RQ4 (Section 9), we perform this experiment using the SpecTune config-uration integrated with BaseLLM, as established in RQ1 (Section 6) and report only the results for the DeepSeek-V3.1 model. 
+
+Table 5: Sensitivity analysis on consistency and discrimina-tive thresholds.                                
+
+> 𝜃 𝛾 Pass@1 Pass@3 Pass@5
+> 0.9 0.9 86.19 90.12 92.33 0.95 87.42 91.07 92.94 1.0 87.73 91.21 93.25 0.95 0.9 86.12 90.57 92.02 0.95 87.02 90.91 93.86 1.0 87.09 91.14 92.63 1.0 0.9 86.06 90.26 91.71 0.95 86.73 90.84 92.33 1.0 86.89 90.98 93.25
+
+Results. Table 5 presents the sensitivity of SpecTune to the thresholds 𝜃 and 𝛾 on DeepSeek-V3.1. Overall, SpecTune demon-strates robust and consistent performance across all evaluated hy-perparameter combinations, with all variants consistently outper-forming configurations without specification filtering. In our study, the configuration (𝜃, 𝛾 ) = (0.9, 1.0) yields the best overall results. From these observations, we notice that for a fixed 𝜃 , increasing 
+
+𝛾 toward 1.0 - which means we only filter out postconditions that are completely trivial with 𝛽 =1, consistently yields equal or better performance. This indicates that specifications with discriminative signal 𝛽 ∈ [ 0.9, 1.0) still carry useful fault-localizing information. 
+
+## 11 Threats to Validity 
+
+Internal Validity. SpecTune depends on LLM-generated postcondi-tions, whose quality may vary across prompts, models, and check-points. We mitigate this threat through the 𝛼 -𝛽 filtering mechanism. Another threat is the nondeterminism of LLM-based generation; to reduce its impact, we use the same backbones and controlled settings when comparing baseline and augmented variants. 
+
+External Validity. We used synthetic benchmarks and a limited set of models, which may not fully represent real-world scenar-ios. However, it reduces the data leakage issue. Results may not generalize to other languages, large systems, or domain bugs. 
+
+Construct Validity. Test-suite pass rates may not fully capture correctness due to its incompleteness. 
+
+## 12 Related Work 
+
+Traditional APR. Representative approaches include search-based methods such as GenProg and its variants (e.g., jGenProg ) [ 43 ], mutation-based repair (e.g., jMutRepair , PraPR ) [ 11 ], and template-driven systems such as TBar [ 25 ] and AVATAR [26 ]. Semantics-based approaches such as SemFix [34 ], SketchFix [ 12 ], and JAID [ 4 ]further leverage symbolic reasoning, constraint solving, or runtime analysis to synthesize patches. Mining-based APRs ( FixMiner [ 18 ]) exploit recurring fix patterns extracted from historical patches. 
+
+Deep learning-based APR. To expand the repair space beyond handcrafted templates, subsequent work learns repair patterns from bug-fix datasets. CoCoNuT [ 29 ], CURE [ 15 ], Recoder [ 51 ], and 
+
+SelfAPR [ 49 ] formulate APR as a sequence-to-sequence or edit generation. Recent approaches [ 14 , 52 ] incorporate richer structural and semantic representations to improve generation accuracy. 
+
+Non-iterative LLM-based APR. Recent advances in large lan-guage models (LLMs) have transformed APR by enabling powerful zero-shot and few-shot patch generation. Studies such as Fan et al. [ 9] and Xia et al. [ 44 ] show that large pretrained models can generate plausible fixes when prompted with buggy code and con-text. AlphaRepair [45 ] leverages large pretrained code models to generate patches with infilling-style prediction, while Repilot [42 ]integrates LLM-based code completion with patch validation. These approaches primarily use non-iterative prompting strategy .
+
+LLM-based APR with iterative refinement. ChatRepair [ 46 ]leverages conversational feedback to iteratively improve patches based on test results, while REx [ 37 ] formulates repair as a budgeted search problem over candidate trajectories. Retrieval-augmented approaches such as RAP-Gen [ 41 ] incorporate similar bug-fix exemplars into the prompt to improve generation quality. 
+
+Agentic APR frameworks. More recently, agentic frameworks such as AutoCodeRover [50 ] and RepairAgent [3 ] treat APR as an autonomous workflow, where LLMs iteratively localize faults, analyze context, and invoke tools such as compilation and testing. 
+
+Specification generation and test synthesis. Machine learning techniques have been widely explored for generating program spec-ifications and test artifacts, including postcondition inference [ 8 ], test oracle synthesis [ 7, 30 , 39 ], test coverage improvement [ 1, 22 ], and unit test generation [19, 38]. Recent work also explores learning-based inference of program properties. EvoSpex [ 32 ] infers input–output relations, while others generate property-based tests [ 40 ] or candidate properties [ 16 ]. Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals Conference’17, July 2017, Washington, DC, USA 
+
+Machine learning has also been applied to infer specifications, such as program invariants [ 10 , 20 , 35 , 48 ]. NL2Postcond [8] leverages LLMs to infer postconditions from textual descriptions of code. 
+
+## 13 Conclusion 
+
+This paper introduces SpecTune , a specification-guided framework for improving the reasoning capability of code LLMs in automated program repair. By leveraging intermediate specifications and exe-cution signals, SpecTune improves single-pass repair performance and can also enhance existing APR frameworks. Our experiments show consistent gains in repair effectiveness, while further analysis shows that specification-guided signals also improve fault localiza-tion and help capture meaningful behavioral constraints. Overall, the results suggest that specification-guided reasoning is a promis-ing direction for more effective and reliable LLM-based APR. 
+
+## 14 Data Availability Statement 
+
+All data and code are available at [2] 
+
+## References 
+
+[1] Juan Altmayer Pizzorno and Emery D. Berger. 2025. CoverUp: Effective High Coverage Test Generation for Python. Proc. ACM Softw. Eng. 2, FSE, Article FSE128 (June 2025), 23 pages. doi:10.1145/3729398 [2] Anonymous. 2026. Beyond Test Outcomes: Specification-Guided Program Repair via Intermediate Behavioral Signals . doi:10.5281/zenodo.19351492 [3] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2025. RepairAgent: An Autonomous, LLM-Based Agent for Program Repair. In Proceedings of the IEEE/ACM 47th International Conference on Software Engineering (Ottawa, Ontario, Canada) (ICSE ’25) . IEEE Press, 2188–2200. doi:10.1109/ICSE55347.2025.00157 [4] Liushan Chen, Yu Pei, and Carlo A. Furia. 2021. Contract-Based Program Repair Without The Contracts: An Extended Study . IEEE Transactions on Software Engineering 47, 12 (Dec. 2021), 2841–2857. doi:10.1109/TSE.2020.2970009 [5] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian, Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert, Fo-tios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shan-tanu Jain, William Saunders, Christopher Hesse, Andrew N. Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles Brundage, Mira Murati, Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba. 2021. Eval-uating Large Language Models Trained on Code. arXiv:2107.03374 [cs.LG] https://arxiv.org/abs/2107.03374 [6] Zimin Chen, Steve Kommrusch, Michele Tufano, Louis-Noel Pouchet, Denys Poshyvanyk, and Martin Monperrus. 2021. SequenceR: Sequence-to-Sequence Learning for End-to-End Program Repair . IEEE Transactions on Software Engi-neering 47, 09 (Sept. 2021), 1943–1959. doi:10.1109/TSE.2019.2940179 [7] Elizabeth Dinella, Gabriel Ryan, Todd Mytkowicz, and Shuvendu K. Lahiri. 2022. TOGA: a neural method for test oracle generation. In Proceedings of the 44th International Conference on Software Engineering (Pittsburgh, Pennsylvania) (ICSE ’22) . Association for Computing Machinery, New York, NY, USA, 2130–2141. doi:10.1145/3510003.3510141 [8] Madeline Endres, Sarah Fakhoury, Saikat Chakraborty, and Shuvendu K. Lahiri. 2024. Can Large Language Models Transform Natural Language Intent into Formal Method Postconditions? Proc. ACM Softw. Eng. 1, FSE, Article 84 (July 2024), 24 pages. doi:10.1145/3660791 [9] Zhiyu Fan, Xiang Gao, Martin Mirchev, Abhik Roychoudhury, and Shin Hwei Tan. 2023. Automated Repair of Programs from Large Language Models. In Proceedings of the 45th International Conference on Software Engineering (Melbourne, Victoria, Australia) (ICSE ’23) . IEEE Press, 1469–1481. doi:10.1109/ICSE48619.2023.00128 [10] Pranav Garg, Daniel Neider, P. Madhusudan, and Dan Roth. 2016. Learning invariants using decision trees and implication counterexamples. In Proceedings of the 43rd Annual ACM SIGPLAN-SIGACT Symposium on Principles of Programming Languages (St. Petersburg, FL, USA) (POPL ’16) . Association for Computing Machinery, New York, NY, USA, 499–512. doi:10.1145/2837614.2837664 [11] Ali Ghanbari, Samuel Benton, and Lingming Zhang. 2019. Practical program repair via bytecode mutation. In Proceedings of the 28th ACM SIGSOFT In-ternational Symposium on Software Testing and Analysis (Beijing, China) (IS-STA 2019) . Association for Computing Machinery, New York, NY, USA, 19–30. doi:10.1145/3293882.3330559 [12] Jinru Hua, Mengshi Zhang, Kaiyuan Wang, and Sarfraz Khurshid. 2018. SketchFix: a tool for automated program repair approach using lazy candidate generation. In 
+
+Proceedings of the 2018 26th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (Lake Buena Vista, FL, USA) (ESEC/FSE 2018) . Association for Computing Machinery, New York, NY, USA, 888–891. doi:10.1145/3236024.3264600 [13] Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. 2025. Live-CodeBench: Holistic and Contamination Free Evaluation of Large Language Models for Code. In The Thirteenth International Conference on Learning Repre-sentations . https://openreview.net/forum?id=chfJJYC3iL [14] Nan Jiang, Thibaud Lutellier, Yiling Lou, Lin Tan, Dan Goldwasser, and Xiangyu Zhang. 2023. KNOD: Domain Knowledge Distilled Tree Decoder for Automated Program Repair. In 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) . 1251–1263. doi:10.1109/ICSE48619.2023.00111 [15] Nan Jiang, Thibaud Lutellier, and Lin Tan. 2021. CURE: Code-Aware Neural Machine Translation for Automatic Program Repair. In 2021 IEEE/ACM 43rd International Conference on Software Engineering (ICSE) . 1161–1173. doi:10.1109/ ICSE43902.2021.00107 [16] Darren Key, Wen-Ding Li, and Kevin Ellis. 2022. I Speak, You Verify: Toward Trust-worthy Neural Program Synthesis. CoRR abs/2210.00848 (2022). arXiv:2210.00848 doi:10.48550/ARXIV.2210.00848 Conference’17, July 2017, Washington, DC, USA Minh Le-Anh, Cuong Chi Le, and Tien N. Nguyen 
+
+[17] Dongsun Kim, Jaechang Nam, Jaewoo Song, and Sunghun Kim. 2013. Automatic patch generation learned from human-written patches. In 2013 35th Interna-tional Conference on Software Engineering (ICSE) . 802–811. doi:10.1109/ICSE.2013. 6606626 [18] Anil Koyuncu, Kui Liu, Tegawendé F. Bissyandé, Dongsun Kim, Jacques Klein, Martin Monperrus, and Yves Le Traon. 2020. FixMiner: Mining relevant fix patterns for automated program repair. Empirical Softw. Engg. 25, 3 (May 2020), 1980–2024. doi:10.1007/s10664-019-09780-z [19] Shuvendu K. Lahiri, Sarah Fakhoury, Aaditya Naik, Georgios Sakkas, Saikat Chakraborty, Madanlal Musuvathi, Piali Choudhury, Curtis von Veh, Jee-vana Priya Inala, Chenglong Wang, and Jianfeng Gao. 2023. Interactive Code Generation via Test-Driven User-Intent Formalization. arXiv:2208.05950 [cs.SE] https://arxiv.org/abs/2208.05950 [20] Larissa Laich, Pavol Bielik, and Martin Vechev. 2020. Guiding Program Synthe-sis by Learning to Generate Examples. In International Conference on Learning Representations . https://openreview.net/forum?id=BJl07ySKvS [21] Claire Le Goues, ThanhVu Nguyen, Stephanie Forrest, and Westley Weimer. 2012. GenProg: A Generic Method for Automatic Software Repair. IEEE Transactions on Software Engineering 38, 1 (Jan 2012), 54–72. doi:10.1109/TSE.2011.104 [22] Caroline Lemieux, Jeevana Priya Inala, Shuvendu K. Lahiri, and Siddhartha Sen. 2023. CodaMosa: Escaping Coverage Plateaus in Test Generation with Pre-Trained Large Language Models. In Proceedings of the 45th International Conference on Software Engineering (Melbourne, Victoria, Australia) (ICSE ’23) .IEEE Press, 919–931. doi:10.1109/ICSE48619.2023.00085 [23] Yi Li, Shaohua Wang, and Tien N. Nguyen. 2020. DLFix: context-based code transformation learning for automated program repair. In Proceedings of the ACM/IEEE 42nd International Conference on Software Engineering (Seoul, South Korea) (ICSE ’20) . Association for Computing Machinery, New York, NY, USA, 602–614. doi:10.1145/3377811.3380345 [24] Yi Li, Shaohua Wang, and Tien N. Nguyen. 2022. DEAR: a novel deep learning-based approach for automated program repair. In Proceedings of the 44th Inter-national Conference on Software Engineering (Pittsburgh, Pennsylvania) (ICSE ’22) . Association for Computing Machinery, New York, NY, USA, 511–523. doi:10.1145/3510003.3510177 [25] Kui Liu, Anil Koyuncu, Dongsun Kim, and Tegawendé F. Bissyandé. 2019. TBar: revisiting template-based automated program repair. In Proceedings of the 28th ACM SIGSOFT International Symposium on Software Testing and Analysis (Beijing, China) (ISSTA 2019) . Association for Computing Machinery, New York, NY, USA, 31–42. doi:10.1145/3293882.3330577 [26] Kui Liu, Anil Koyuncu, Dongsun Kim, and Tegawende F. Bissyandè. 2019. AVATAR: Fixing Semantic Bugs with Fix Patterns of Static Analysis Violations. In 2019 IEEE 26th International Conference on Software Analysis, Evolution and Reengineering (SANER) . 1–12. doi:10.1109/SANER.2019.8667970 [27] Fan Long and Martin Rinard. 2015. Staged program repair with condition syn-thesis. In Proceedings of the 2015 10th Joint Meeting on Foundations of Software Engineering (Bergamo, Italy) (ESEC/FSE 2015) . Association for Computing Ma-chinery, New York, NY, USA, 166–178. doi:10.1145/2786805.2786811 [28] Fan Long and Martin Rinard. 2016. Automatic patch generation by learning correct code. In Proceedings of the 43rd Annual ACM SIGPLAN-SIGACT Symposium on Principles of Programming Languages (St. Petersburg, FL, USA) (POPL ’16) .Association for Computing Machinery, New York, NY, USA, 298–312. doi:10. 1145/2837614.2837617 [29] Thibaud Lutellier, Hung Viet Pham, Lawrence Pang, Yitong Li, Moshi Wei, and Lin Tan. 2020. CoCoNuT: combining context-aware neural translation models using ensemble for program repair. In Proceedings of the 29th ACM SIGSOFT International Symposium on Software Testing and Analysis (Virtual Event, USA) 
+
+(ISSTA 2020) . Association for Computing Machinery, New York, NY, USA, 101–114. doi:10.1145/3395363.3397369 [30] Antonio Mastropaolo, Nathan Cooper, David Nader Palacio, Simone Scalabrino, Denys Poshyvanyk, Rocco Oliveto, and Gabriele Bavota. 2023. Using Transfer Learning for Code-Related Tasks. IEEE Transactions on Software Engineering 49, 4 (2023), 1580–1598. doi:10.1109/TSE.2022.3183297 [31] Sergey Mechtaev, Jooyong Yi, and Abhik Roychoudhury. 2016. Angelix: scalable multiline program patch synthesis via symbolic analysis. In Proceedings of the 38th International Conference on Software Engineering (Austin, Texas) (ICSE ’16) .Association for Computing Machinery, New York, NY, USA, 691–701. doi:10. 1145/2884781.2884807 [32] Facundo Molina, Pablo Ponzio, Nazareno Aguirre, and Marcelo Frias. 2021. EvoSpex: An Evolutionary Algorithm for Learning Postconditions. In Proceedings of the 43rd International Conference on Software Engineering (Madrid, Spain) (ICSE ’21) . IEEE Press, 1223–1235. doi:10.1109/ICSE43902.2021.00112 [33] Niklas Muennighoff, Qian Liu, Armel Zebaze, Qinkai Zheng, Binyuan Hui, Terry Yue Zhuo, Swayam Singh, Xiangru Tang, Leandro von Werra, and Shayne Longpre. 2024. OctoPack: Instruction Tuning Code Large Language Models. arXiv:2308.07124 [cs.CL] https://arxiv.org/abs/2308.07124 [34] Hoang Duong Thien Nguyen, Dawei Qi, Abhik Roychoudhury, and Satish Chan-dra. 2013. SemFix: Program repair via semantic analysis. In 2013 35th Interna-tional Conference on Software Engineering (ICSE) . 772–781. doi:10.1109/ICSE.2013. 6606623 [35] Kexin Pei, David Bieber, Kensen Shi, Charles Sutton, and Pengcheng Yin. 2023. Can Large Language Models Reason about Program Invariants?. In Proceedings of the 40th International Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 202) , Andreas Krause, Emma Brunskill, Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett (Eds.). PMLR, 27496– 27520. https://proceedings.mlr.press/v202/pei23a.html [36] Minh V. T. Pham, Huy N. Phan, Nhat Hoang Phan, Cuong Chi Le, Tien N. Nguyen, and Nghi Bui. 2026. Synthetic Repo-level Bug Dataset for Training Automated Program Repair Models. In Proceedings of the 48th International Conference on Software Engineering (ICSE ’26 (To Appear)) . ACM Press. [37] Hao Tang, Keya Hu, Jin Peng Zhou, Si Cheng Zhong, Wei-Long Zheng, Xujie Si, and Kevin Ellis. 2024. Code Repair with LLMs gives an Exploration-Exploitation Tradeoff. In The Thirty-eighth Annual Conference on Neural Information Processing Systems . https://openreview.net/forum?id=o863gX6DxA [38] Michele Tufano, Dawn Drain, Alexey Svyatkovskiy, Shao Kun Deng, and Neel Sundaresan. 2021. Unit Test Case Generation with Transformers and Focal Context. arXiv:2009.05617 [cs.SE] https://arxiv.org/abs/2009.05617 [39] Michele Tufano, Dawn Drain, Alexey Svyatkovskiy, and Neel Sundaresan. 2022. Generating accurate assert statements for unit test cases using pretrained trans-formers. In Proceedings of the 3rd ACM/IEEE International Conference on Au-tomation of Software Test (Pittsburgh, Pennsylvania) (AST ’22) . Association for Computing Machinery, New York, NY, USA, 54–64. doi:10.1145/3524481.3527220 [40] Vasudev Vikram, Caroline Lemieux, Joshua Sunshine, and Rohan Padhye. 2024. Can Large Language Models Write Good Property-Based Tests? arXiv:2307.04346 [cs.SE] https://arxiv.org/abs/2307.04346 [41] Weishi Wang, Yue Wang, Shafiq Joty, and Steven C.H. Hoi. 2023. RAP-Gen: Retrieval-Augmented Patch Generation with CodeT5 for Automatic Program Repair. In Proceedings of the 31st ACM Joint European Software Engineering Con-ference and Symposium on the Foundations of Software Engineering (San Francisco, CA, USA) (ESEC/FSE 2023) . Association for Computing Machinery, New York, NY, USA, 146–158. doi:10.1145/3611643.3616256 [42] Yuxiang Wei, Chunqiu Steven Xia, and Lingming Zhang. 2023. Copiloting the Copilots: Fusing Large Language Models with Completion Engines for Auto-mated Program Repair. In Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering 
+
+(San Francisco, CA, USA) (ESEC/FSE 2023) . Association for Computing Machinery, New York, NY, USA, 172–184. doi:10.1145/3611643.3616271 [43] Westley Weimer, ThanhVu Nguyen, Claire Le Goues, and Stephanie Forrest. 2009. Automatically finding patches using genetic programming. In 2009 IEEE 31st International Conference on Software Engineering . 364–374. doi:10.1109/ICSE.2009. 5070536 [44] Chunqiu Steven Xia, Yuxiang Wei, and Lingming Zhang. 2023. Automated Program Repair in the Era of Large Pre-Trained Language Models. In Proceedings of the 45th International Conference on Software Engineering (Melbourne, Victoria, Australia) (ICSE ’23) . IEEE Press, 1482–1494. doi:10.1109/ICSE48619.2023.00129 [45] Chunqiu Steven Xia and Lingming Zhang. 2022. Less training, more repairing please: revisiting automated program repair via zero-shot learning. In Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering (Singapore, Singapore) (ESEC/FSE 2022) . Association for Computing Machinery, New York, NY, USA, 959–971. doi:10.1145/3540250.3549101 [46] Chunqiu Steven Xia and Lingming Zhang. 2024. Automated Program Repair via Conversation: Fixing 162 out of 337 Bugs for $0.42 Each using ChatGPT. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis (Vienna, Austria) (ISSTA 2024) . Association for Computing Machinery, New York, NY, USA, 819–831. doi:10.1145/3650212.3680323 [47] Jifeng Xuan, Matias Martinez, Favio DeMarco, Maxime Clement, Sebastian Lame-las Marcote, Thomas Durieux, Daniel Le Berre, and Martin Monperrus. 2017. Nopol: Automatic Repair of Conditional Statement Bugs in Java Programs. IEEE Trans. Softw. Eng. 43, 1 (Jan. 2017), 34–55. doi:10.1109/TSE.2016.2560811 [48] Jianan Yao, Gabriel Ryan, Justin Wong, Suman Jana, and Ronghui Gu. 2020. Learning nonlinear loop invariants with gated continuous logic networks. In 
+
+Proceedings of the 41st ACM SIGPLAN Conference on Programming Language Design and Implementation (London, UK) (PLDI 2020) . Association for Computing Machinery, New York, NY, USA, 106–120. doi:10.1145/3385412.3385986 [49] He Ye, Matias Martinez, Xiapu Luo, Tao Zhang, and Martin Monperrus. 2023. SelfAPR: Self-supervised Program Repair with Test Execution Diagnostics. In 
+
+Proceedings of the 37th IEEE/ACM International Conference on Automated Software Engineering (Rochester, MI, USA) (ASE ’22) . Association for Computing Machin-ery, New York, NY, USA, Article 92, 13 pages. doi:10.1145/3551349.3556926 [50] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Au-toCodeRover: Autonomous Program Improvement. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis (Vienna, Austria) (ISSTA 2024) . Association for Computing Machinery, New York, NY, USA, 1592–1604. doi:10.1145/3650212.3680384 [51] Qihao Zhu, Zeyu Sun, Yuan-an Xiao, Wenjie Zhang, Kang Yuan, Yingfei Xiong, and Lu Zhang. 2021. A syntax-guided edit decoder for neural program repair. Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals Conference’17, July 2017, Washington, DC, USA 
+
+In Proceedings of the 29th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (Athens, Greece) (ESEC/FSE 2021) . Association for Computing Machinery, New York, NY, USA, 341–353. doi:10.1145/3468264.3468544 [52] Qihao Zhu, Zeyu Sun, Wenjie Zhang, Yingfei Xiong, and Lu Zhang. 2023. Tare: Type-Aware Neural Program Repair. In Proceedings of the 45th International Conference on Software Engineering (Melbourne, Victoria, Australia) (ICSE ’23) .IEEE Press, 1443–1445. doi:10.1109/ICSE48619.2023.00126

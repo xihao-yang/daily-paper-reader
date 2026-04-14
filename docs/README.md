@@ -6,52 +6,70 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-13
-- 运行时间：2026-04-13 20:48:13 UTC
+- 最新运行日期：2026-04-14
+- 运行时间：2026-04-14 20:53:44 UTC
 - 运行状态：成功
-- 本次总论文数：10
-- 精读区：3
-- 速读区：7
+- 本次总论文数：16
+- 精读区：6
+- 速读区：10
 
 ### 今日简报（AI）
-聚焦代码智能修复与软件智能评估，今日共研读 10 篇论文。  
-重点成果在于 QiMeng-PRepair 精准代码修复方法与 ORACLE-SWE 对开发智能体信号贡献的量化分析。  
-建议继续跟进代码生成可靠性与智能体评测标准化方向的发展。
-- 详情：[/202604/13/README](/202604/13/README)
+聚焦程序自动修复与代码生成可靠性，今日完成16篇论文阅读。  
+两篇精读论文展示了基于奖励优化和行为信号的精准代码修复新方法。  
+建议普通读者关注代码自我修复在开发工具中的应用潜力。
+- 详情：[/202604/14/README](/202604/14/README)
 
 ### 精读区论文标签
-1. [QiMeng-PRepair: Precise Code Repair via Edit-Aware Reward Optimization](/202604/13/2604.05963v1-qimeng-prepair-precise-code-repair-via-edit-aware-reward-optimization)  
+1. [QiMeng-PRepair: Precise Code Repair via Edit-Aware Reward Optimization](/202604/14/2604.05963v1-qimeng-prepair-precise-code-repair-via-edit-aware-reward-optimization)  
    标签：评分：10.0/10、query:apr-oracle
-   evidence：精确代码修复、编辑感知奖励优化以及减轻过度编辑
-2. [ORACLE-SWE: Quantifying the Contribution of Oracle Information Signals on SWE Agents](/202604/13/2604.07789v1-oracle-swe-quantifying-the-contribution-of-oracle-information-signals-on-swe-agents)  
+   evidence：通过编辑感知奖励优化实现精确代码修复，减少过度编辑
+2. [Enhancing Program Repair with Specification Guidance and Intermediate Behavioral Signals](/202604/14/2604.11770v1-enhancing-program-repair-with-specification-guidance-and-intermediate-behavioral-signals)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：将中间行为推理引入自动程序修复的规范引导调试框架
+3. [MR-Coupler: Automated Metamorphic Test Generation via Functional Coupling Analysis](/202604/14/2604.10126v1-mr-coupler-automated-metamorphic-test-generation-via-functional-coupling-analysis)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：量化预言信息信号对软件工程智能体的贡献
-3. [Systematic API Testing Through Model Checking and Executable Contracts](/202604/13/2604.08633v1-systematic-api-testing-through-model-checking-and-executable-contracts)  
+   evidence：通过蜕变测试生成缓解测试预言问题
+4. [Verify Before You Fix: Agentic Execution Grounding for Trustworthy Cross-Language Code Analysis](/202604/14/2604.10800v1-verify-before-you-fix-agentic-execution-grounding-for-trustworthy-cross-language-code-analysis)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：验证感知的迭代修复和基于执行的验证
+5. [PatchRecall: Patch-Driven Retrieval for Automated Program Repair](/202604/14/2604.10481v1-patchrecall-patch-driven-retrieval-for-automated-program-repair)  
+   标签：评分：8.5/10、query:apr-oracle
+   evidence：为自动程序修复检索正确的文件
+6. [SWE-Shepherd: Advancing PRMs for Reinforcing Code Agents](/202604/14/2604.10493v1-swe-shepherd-advancing-prms-for-reinforcing-code-agents)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：利用模型检测解决API测试中的测试预言问题
+   evidence：用于代码智能体步骤级监督和决策反馈的过程奖励模型 (PRM)
 
 ### 速读区论文标签
-1. [An Empirical Analysis of Static Analysis Methods for Detection and Mitigation of Code Library Hallucinations](/202604/13/2604.07755v1-an-empirical-analysis-of-static-analysis-methods-for-detection-and-mitigation-of-code-library-hallucinations)  
+1. [From Helpful to Trustworthy: LLM Agents for Pair Programming](/202604/14/2604.10300v1-from-helpful-to-trustworthy-llm-agents-for-pair-programming)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：侧重于在大模型修复中使用自动反馈进行迭代验证并完善测试与实现。
+2. [How Many Tries Does It Take? Iterative Self-Repair in LLM Code Generation Across Model Scales and Benchmarks](/202604/14/2604.10508v1-how-many-tries-does-it-take-iterative-self-repair-in-llm-code-generation-across-model-scales-and-benchmarks)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：大语言模型代码生成中的迭代自我修复
+3. [DuET: Dual Execution for Test Output Prediction with Generated Code and Pseudocode](/202604/14/2604.11514v1-duet-dual-execution-for-test-output-prediction-with-generated-code-and-pseudocode)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：通过双重执行提高预测测试输出的可靠性
+4. [CoverAssert: Iterative LLM Assertion Generation Driven by Functional Coverage via Syntax-Semantic Representations](/202604/14/2604.06607v2-coverassert-iterative-llm-assertion-generation-driven-by-functional-coverage-via-syntax-semantic-representations)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：使用静态分析检测AI生成代码中的库调用幻觉
-2. [MIRAGE: Online LLM Simulation for Microservice Dependency Testing](/202604/13/2604.04806v2-mirage-online-llm-simulation-for-microservice-dependency-testing)  
+   evidence：由功能覆盖率反馈驱动的迭代式大模型断言生成，作为测试预言使用。
+5. [Intent-aligned Formal Specification Synthesis via Traceable Refinement](/202604/14/2604.10392v1-intent-aligned-formal-specification-synthesis-via-traceable-refinement)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：局部修复和针对需求的测试用于规范验证
+6. [Improving Dynamic Specification Inference with LLM-Generated Counterexamples](/202604/14/2604.10761v1-improving-dynamic-specification-inference-with-llm-generated-counterexamples)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：利用LLM生成的反例改进动态规范推断，用于程序验证
+7. [E2E-REME: Towards End-to-End Microservices Auto-Remediation via Experience-Simulation Reinforcement Fine-Tuning](/202604/14/2604.11094v1-e2e-reme-towards-end-to-end-microservices-auto-remediation-via-experience-simulation-reinforcement-fine-tuning)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：通过强化微调自动修复微服务故障
+8. [FLARE: Agentic Coverage-Guided Fuzzing for LLM-Based Multi-Agent Systems](/202604/14/2604.05289v1-flare-agentic-coverage-guided-fuzzing-for-llm-based-multi-agent-systems)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：基于大模型的微服务依赖模拟作为运行时测试预言机
-3. [An Empirical Analysis of Static Analysis Methods for Detection and Mitigation of Code Library Hallucinations](/202604/13/2604.07755v2-an-empirical-analysis-of-static-analysis-methods-for-detection-and-mitigation-of-code-library-hallucinations)  
+   evidence：针对LLM系统的基于语义的正确性判断和规范提取
+9. [CodeComp: Structural KV Cache Compression for Agentic Coding](/202604/14/2604.10235v1-codecomp-structural-kv-cache-compression-for-agentic-coding)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：静态分析用于检测和缓解LLM生成代码中的代码幻觉
-4. [Choose, Don't Label: Multiple-Choice Query Synthesis for Program Disambiguation](/202604/13/2604.08792v1-choose-dont-label-multiple-choice-query-synthesis-for-program-disambiguation)  
+   evidence：用于补丁生成和缺陷定位的结构化KV缓存压缩
+10. [Automated SVA Generation with LLMs](/202604/14/2604.11044v1-automated-sva-generation-with-llms)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：该论文利用主动学习和霍尔三元组来消除程序意图的歧义，这有助于提高程序合成或修复中预言判定的准确性。
-5. [From Indiscriminate to Targeted: Efficient RTL Verification via Functionally Key Signal-Driven LLM Assertion Generation](/202604/13/2604.08932v1-from-indiscriminate-to-targeted-efficient-rtl-verification-via-functionally-key-signal-driven-llm-assertion-generation)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：基于LLM的断言生成，用于功能验证和错误传播
-6. [CIR+CVN: Bridging LLM Semantic Understanding and Petri-Net Verification for Concurrent Programs](/202604/13/2604.09318v1-circvn-bridging-llm-semantic-understanding-and-petri-net-verification-for-concurrent-programs)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：LLM 辅助并发程序构建的规范驱动验证架构
-7. [The AI Codebase Maturity Model: From Assisted Coding to Self-Sustaining Systems](/202604/13/2604.09388v1-the-ai-codebase-maturity-model-from-assisted-coding-to-self-sustaining-systems)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：具有自动缺陷修复反馈循环的自维持系统
+   evidence：将自然语言描述转换为可执行的 SystemVerilog 断言
 
 
 <div class="dpr-home-promo-card">
