@@ -6,67 +6,61 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-16
-- 运行时间：2026-04-16 20:02:45 UTC
+- 最新运行日期：2026-04-17
+- 运行时间：2026-04-17 19:52:07 UTC
 - 运行状态：成功
-- 本次总论文数：15
-- 精读区：6
+- 本次总论文数：13
+- 精读区：4
 - 速读区：9
 
 ### 今日简报（AI）
-探索智能体与代码分析的前沿进展，今日共阅读 15 篇论文。  
-重点关注跨语言代码可信分析与自动化漏洞验证生成，这两类方法在提升开发安全与效率上表现突出。  
-建议持续关注结合执行验证的多智能体框架及实际测试生成方向。
-- 详情：[/202604/16/README](/202604/16/README)
+今日聚焦智能代码审核与代理任务执行，阅读共13篇论文。  
+最值得关注的是自动无人工代码验证可行性与智能体计划执行准确性的实证研究。  
+建议继续关注代码安全与生成质量的结合实践，观察工具落地进展。
+- 详情：[/202604/17/README](/202604/17/README)
 
 ### 精读区论文标签
-1. [Verify Before You Fix: Agentic Execution Grounding for Trustworthy Cross-Language Code Analysis](/202604/16/2604.10800v1-verify-before-you-fix-agentic-execution-grounding-for-trustworthy-cross-language-code-analysis)  
-   标签：评分：10.0/10、query:apr-oracle
-   evidence：基于执行确认的验证感知迭代修复
-2. [AnyPoC: Universal Proof-of-Concept Test Generation for Scalable LLM-Based Bug Detection](/202604/16/2604.11950v1-anypoc-universal-proof-of-concept-test-generation-for-scalable-llm-based-bug-detection)  
+1. [Vibe-Coding: Feedback-Based Automated Verification with no Human Code Inspection, a Feasibility Study](/202604/17/2604.14867v1-vibe-coding-feedback-based-automated-verification-with-no-human-code-inspection-a-feasibility-study)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：自动化PoC生成作为可扩展的验证预言机
-3. [LogicEval: A Systematic Framework for Evaluating Automated Repair Techniques for Logical Vulnerabilities in Real-World Software](/202604/16/2604.12994v1-logiceval-a-systematic-framework-for-evaluating-automated-repair-techniques-for-logical-vulnerabilities-in-real-world-software)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：评估逻辑漏洞的自动修复技术
-4. [From Exploration to Specification: LLM-Based Property Generation for Mobile App Testing](/202604/16/2604.13463v1-from-exploration-to-specification-llm-based-property-generation-for-mobile-app-testing)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：基于LLM的移动应用测试预言属性生成
-5. [CodeSpecBench: Benchmarking LLMs for Executable Behavioral Specification Generation](/202604/16/2604.12268v1-codespecbench-benchmarking-llms-for-executable-behavioral-specification-generation)  
+   evidence：基于反馈的代码修复自动验证与故障检测
+2. [From Plan to Action: How Well Do Agents Follow the Plan?](/202604/17/2604.12147v1-from-plan-to-action-how-well-do-agents-follow-the-plan)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：基准测试可执行行为规范生成，作为评估程序行为的手段
-6. [Beyond Output Correctness: Benchmarking and Evaluating Large Language Model Reasoning in Coding Tasks](/202604/16/2604.12379v1-beyond-output-correctness-benchmarking-and-evaluating-large-language-model-reasoning-in-coding-tasks)  
+   evidence：分析代理是否通过正确的推理或对基准测试的过拟合来解决软件问题
+3. [HWE-Bench: Benchmarking LLM Agents on Real-World Hardware Bug Repair Tasks](/202604/17/2604.14709v1-hwe-bench-benchmarking-llm-agents-on-real-world-hardware-bug-repair-tasks)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：在编程任务中评估除输出正确性之外的推理质量
+   evidence：在真实硬件缺陷修复任务上评估大模型代理
+4. [SWE-TRACE: Optimizing Long-Horizon SWE Agents Through Rubric Process Reward Models and Heuristic Test-Time Scaling](/202604/17/2604.14820v1-swe-trace-optimizing-long-horizon-swe-agents-through-rubric-process-reward-models-and-heuristic-test-time-scaling)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：逐步预言验证以提取SWE智能体的SFT语料库
 
 ### 速读区论文标签
-1. [From Plan to Action: How Well Do Agents Follow the Plan?](/202604/16/2604.12147v1-from-plan-to-action-how-well-do-agents-follow-the-plan)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：评估解决方案是通过推理还是通过对基准测试的过拟合达到的
-2. [The Code Whisperer: LLM and Graph-Based AI for Smell and Vulnerability Resolution](/202604/16/2604.13114v1-the-code-whisperer-llm-and-graph-based-ai-for-smell-and-vulnerability-resolution)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：检测并修复漏洞的混合框架
-3. [AgentForge: Execution-Grounded Multi-Agent LLM Framework for Autonomous Software Engineering](/202604/16/2604.13120v1-agentforge-execution-grounded-multi-agent-llm-framework-for-autonomous-software-engineering)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：多智能体系统中代码变更的基于执行的验证
-4. [From Helpful to Trustworthy: LLM Agents for Pair Programming](/202604/16/2604.10300v1-from-helpful-to-trustworthy-llm-agents-for-pair-programming)  
+1. [VulWeaver: Weaving Broken Semantics for Grounded Vulnerability Detection](/202604/17/2604.10767v1-vulweaver-weaving-broken-semantics-for-grounded-vulnerability-detection)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：使用开发工具进行迭代验证并改进测试和实现
-5. [LLM-Based Automated Diagnosis Of Integration Test Failures At Google](/202604/16/2604.12108v1-llm-based-automated-diagnosis-of-integration-test-failures-at-google)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：使用大模型分析日志以自动诊断测试失败
-6. [Learning Project-wise Subsequent Code Edits via Interleaving Neural-based Induction and Tool-based Deduction](/202604/16/2604.12220v1-learning-project-wise-subsequent-code-edits-via-interleaving-neural-based-induction-and-tool-based-deduction)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：学习包括错误修复在内的项目级代码编辑
-7. [CollabCoder: Plan-Code Co-Evolution via Collaborative Decision-Making for Efficient Code Generation](/202604/16/2604.13946v1-collabcoder-plan-code-co-evolution-via-collaborative-decision-making-for-efficient-code-generation)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：用于调试和代码质量的协作决策
-8. [CodeComp: Structural KV Cache Compression for Agentic Coding](/202604/16/2604.10235v1-codecomp-structural-kv-cache-compression-for-agentic-coding)  
+   evidence：基于LLM的语义推理和依赖图用于代码表示
+2. [DiffHLS: Differential Learning for High-Level Synthesis QoR Prediction with GNNs and LLM Code Embeddings](/202604/17/2604.09240v1-diffhls-differential-learning-for-high-level-synthesis-qor-prediction-with-gnns-and-llm-code-embeddings)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于缺陷定位和补丁生成的代码表示
-9. [WebMAC: A Multi-Agent Collaborative Framework for Scenario Testing of Web Systems](/202604/16/2604.13559v1-webmac-a-multi-agent-collaborative-framework-for-scenario-testing-of-web-systems)  
+   evidence：GNN和LLM代码嵌入用于评估代码变体
+3. [Structured Safety Auditing for Balancing Code Correctness and Content Safety in LLM-Generated Code](/202604/17/2604.12088v1-structured-safety-auditing-for-balancing-code-correctness-and-content-safety-in-llm-generated-code)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：解决测试充分性标准和用于错误检测的场景测试
+   evidence：平衡大模型生成代码的正确性与安全性
+4. [CoDe-R: Refining Decompiler Output with LLMs via Rationale Guidance and Adaptive Inference](/202604/17/2604.12913v1-code-r-refining-decompiler-output-with-llms-via-rationale-guidance-and-adaptive-inference)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：通过基本原理引导利用LLM优化反编译器输出以确保可重新执行
+5. [Presynthesis: Towards Scaling Up Program Synthesis with Finer-Grained Abstract Semantics](/202604/17/2604.13290v2-presynthesis-towards-scaling-up-program-synthesis-with-finer-grained-abstract-semantics)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：在程序合成中使用抽象语义剪枝错误程序
+6. [Learned or Memorized ? Quantifying Memorization Advantage in Code LLMs](/202604/17/2604.13997v1-learned-or-memorized--quantifying-memorization-advantage-in-code-llms)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：量化代码大模型在修复任务中是基于学习还是记忆
+7. [LLMs taking shortcuts in test generation: A study with SAP HANA and LevelDB](/202604/17/2604.14437v1-llms-taking-shortcuts-in-test-generation-a-study-with-sap-hana-and-leveldb)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：研究LLM在自动测试生成中的行为和对捷径的依赖
+8. [Feedback-Driven Execution for LLM-Based Binary Analysis](/202604/17/2604.15136v1-feedback-driven-execution-for-llm-based-binary-analysis)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：基于反馈的执行和证据构建用于程序推理
+9. [Enhancing Large Language Models with Retrieval Augmented Generation for Software Testing and Inspection Automation](/202604/17/2604.15270v1-enhancing-large-language-models-with-retrieval-augmented-generation-for-software-testing-and-inspection-automation)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：自动化测试用例生成与软件检查
 
 
 <div class="dpr-home-promo-card">
