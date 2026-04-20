@@ -6,46 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-19
-- 运行时间：2026-04-19 19:49:26 UTC
+- 最新运行日期：2026-04-20
+- 运行时间：2026-04-20 20:21:00 UTC
 - 运行状态：成功
-- 本次总论文数：8
+- 本次总论文数：5
 - 精读区：1
-- 速读区：7
+- 速读区：4
 
 ### 今日简报（AI）
-今天聚焦智能体与形式化验证交叉领域，共精读 1 篇、速读 7 篇前沿论文。  
-最值得关注的是 LLM 推动形式化方法在大型系统中的推理能力提升，以及智能体在电网分析与代码修正中的实用探索。  
-建议读者重点了解智能体在自动验证与工程系统自动化中的落地潜力。
-- 详情：[/202604/19/README](/202604/19/README)
+聚焦代码生成与验证，今日共精读 1 篇、速读 3 篇论文。重点关注多数投票在代码生成中的提升效果，以及代码模型记忆与学习的区分。建议读者继续关注代码 LLM 的泛化机制与训练外验证策略。
+- 详情：[/202604/20/README](/202604/20/README)
 
 ### 精读区论文标签
-1. [FM-Agent: Scaling Formal Methods to Large Systems via LLM-Based Hoare-Style Reasoning](/202604/19/2604.11556v1-fm-agent-scaling-formal-methods-to-large-systems-via-llm-based-hoare-style-reasoning)  
+1. [Majority Voting for Code Generation](/202604/20/2604.15618v1-majority-voting-for-code-generation)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：通过基于 LLM 的霍尔逻辑推理和形式化规范增强生成代码的正确性。
+   evidence：利用运行时执行特征的函数多数投票法来识别正确代码
 
 ### 速读区论文标签
-1. [Agentic Application in Power Grid Static Analysis: Automatic Code Generation and Error Correction](/202604/19/2604.09995v1-agentic-application-in-power-grid-static-analysis-automatic-code-generation-and-error-correction)  
+1. [Learned or Memorized ? Quantifying Memorization Advantage in Code LLMs](/202604/20/2604.13997v1-learned-or-memorized--quantifying-memorization-advantage-in-code-llms)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：代码生成的自动错误纠正和语义验证器
-2. [ROSE: An Intent-Centered Evaluation Metric for NL2SQL](/202604/19/2604.12988v1-rose-an-intent-centered-evaluation-metric-for-nl2sql)  
+   evidence：在修复缺陷和泛化行为方面评估代码大模型
+2. [DPC: Training-Free Text-to-SQL Candidate Selection via Dual-Paradigm Consistency](/202604/20/2604.15163v2-dpc-training-free-text-to-sql-candidate-selection-via-dual-paradigm-consistency)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：以意图为中心的评估指标和对抗式证明器用于语义正确性校验
-3. [Graph-Based ECO and Patch Generation for High-Level Synthesis](/202604/19/2604.14248v1-graph-based-eco-and-patch-generation-for-high-level-synthesis)  
+   evidence：通过双范式一致性在无执行预言的情况下自我评估正确性
+3. [Verification Modulo Tested Library Contracts](/202604/20/2604.15533v1-verification-modulo-tested-library-contracts)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：在高级综合中引入补丁生成与应用，同时保持语义正确性
-4. [Short Version of VERIFAI2026 Paper -- Learning Infused Formal Reasoning: Contract Synthesis, Artefact Reuse and Semantic Foundations](/202604/19/2604.12747v1-short-version-of-verifai2026-paper----learning-infused-formal-reasoning-contract-synthesis-artefact-reuse-and-semantic-foundations)  
+   evidence：合成足以证明客户端正确并能通过测试引擎审查的模块化合约
+4. [Bridging the Gap between User Intent and LLM: A Requirement Alignment Approach for Code Generation](/202604/20/2604.16198v1-bridging-the-gap-between-user-intent-and-llm-a-requirement-alignment-approach-for-code-generation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：将机器学习与形式化验证相结合，用于合约综合和系统验证。
-5. [Presynthesis: Towards Scaling Up Program Synthesis with Finer-Grained Abstract Semantics](/202604/19/2604.13290v1-presynthesis-towards-scaling-up-program-synthesis-with-finer-grained-abstract-semantics)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：在程序合成中使用抽象语义剪枝错误程序
-6. [Zero-shot Evaluation of Deep Learning for Java Code Clone Detection](/202604/19/2604.13783v1-zero-shot-evaluation-of-deep-learning-for-java-code-clone-detection)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：用于语义代码克隆检测的神经代码表示模型
-7. [Feedback-Driven Execution for LLM-Based Binary Analysis](/202604/19/2604.15136v1-feedback-driven-execution-for-llm-based-binary-analysis)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：基于反馈驱动的执行，用于程序行为推理
+   evidence：通过需求对齐增强生成代码的正确性
 
 
 <div class="dpr-home-promo-card">
