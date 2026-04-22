@@ -6,71 +6,70 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-21
-- 运行时间：2026-04-21 20:45:06 UTC
+- 最新运行日期：2026-04-22
+- 运行时间：2026-04-22 20:24:50 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：16
+- 精读区：5
 - 速读区：11
 
 ### 今日简报（AI）
-聚焦于大模型代码修复与评审机制的研究，共精读 6 篇、速读 11 篇论文。重点看《Project Prometheus》和 LLM 审计偏差方向，揭示智能修复与评判可靠性的关键突破。建议读者关注模型在安全代码生成与调试精度上的真实表现与改进机制。
-- 详情：[/202604/21/README](/202604/21/README)
+探索智能代码修复与语言模型漏洞检测的前沿研究。  
+两篇高分论文聚焦自调试与神经符号融合修复方法，展示程序修复精度的显著提升。  
+建议读者重点关注LLM在代码一致性与记忆化问题上的最新评估进展。
+- 详情：[/202604/22/README](/202604/22/README)
 
 ### 精读区论文标签
-1. [Project Prometheus: Bridging the Intent Gap in Agentic Program Repair via Reverse-Engineered Executable Specifications](/202604/21/2604.17464v1-project-prometheus-bridging-the-intent-gap-in-agentic-program-repair-via-reverse-engineered-executable-specifications)  
-   标签：评分：10.0/10、query:apr-oracle
-   evidence：通过逆向工程可执行规范来弥合代理程序修复中的意图差距
-2. [Bias in the Loop: Auditing LLM-as-a-Judge for Software Engineering](/202604/21/2604.16790v1-bias-in-the-loop-auditing-llm-as-a-judge-for-software-engineering)  
+1. [SynthFix: Adaptive Neuro-Symbolic Code Vulnerability Repair](/202604/22/2604.17184v1-synthfix-adaptive-neuro-symbolic-code-vulnerability-repair)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：LLM作为评判者用于补丁选择和代码修复可靠性
-3. [HELO-APR: Enhancing Low-Resource Program Repair through Cross-Lingual Knowledge Transfer](/202604/21/2604.17016v1-helo-apr-enhancing-low-resource-program-repair-through-cross-lingual-knowledge-transfer)  
+   evidence：结合符号奖励的漏洞修复神经符号混合框架
+2. [DebugRepair: Enhancing LLM-Based Automated Program Repair via Self-Directed Debugging](/202604/22/2604.19305v1-debugrepair-enhancing-llm-based-automated-program-repair-via-self-directed-debugging)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：通过知识迁移实现低资源语言的神经程序修复
-4. [SynthFix: Adaptive Neuro-Symbolic Code Vulnerability Repair](/202604/21/2604.17184v1-synthfix-adaptive-neuro-symbolic-code-vulnerability-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：结合符号奖励进行细化的神经符号代码漏洞修复
-5. [Clover: A Neural-Symbolic Agentic Harness with Stochastic Tree-of-Thoughts for Verified RTL Repair](/202604/21/2604.17288v1-clover-a-neural-symbolic-agentic-harness-with-stochastic-tree-of-thoughts-for-verified-rtl-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：用于经验证的RTL程序修复和验证解决方案的神经符号智能体框架
-6. [SelfHeal: Empirical Fix Pattern Analysis and Bug Repair in LLM Agents](/202604/21/2604.17699v1-selfheal-empirical-fix-pattern-analysis-and-bug-repair-in-llm-agents)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：对大模型智能体中的错误修复模式和修复方法进行实证研究，并提出新基准数据集
+   evidence：利用中间运行时状态增强补丁细化，进行根本原因分析
+3. [False Security Confidence in Benign LLM Code Generation](/202604/22/2604.17014v2-false-security-confidence-in-benign-llm-code-generation)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：评估传统功能评估是否能可靠地检测补丁中的安全失效
+4. [Clover: A Neural-Symbolic Agentic Harness with Stochastic Tree-of-Thoughts for Verified RTL Repair](/202604/22/2604.17288v1-clover-a-neural-symbolic-agentic-harness-with-stochastic-tree-of-thoughts-for-verified-rtl-repair)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：用于经验证的RTL修复的神经符号代理框架
+5. [WebCompass: Towards Multimodal Web Coding Evaluation for Code Language Models](/202604/22/2604.18224v1-webcompass-towards-multimodal-web-coding-evaluation-for-code-language-models)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：包含修复任务和正确性指标的Web编码基准
 
 ### 速读区论文标签
-1. [Surgical Repair of Insecure Code Generation in LLMs](/202604/21/2604.16697v1-surgical-repair-of-insecure-code-generation-in-llms)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：对LLM生成的不安全代码进行手术式修复
-2. [False Security Confidence in Benign LLM Code Generation](/202604/21/2604.17014v1-false-security-confidence-in-benign-llm-code-generation)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：研究功能正确代码中的安全失效以及功能评估的局限性
-3. [Precise Debugging Benchmark: Is Your Model Debugging or Regenerating?](/202604/21/2604.17338v1-precise-debugging-benchmark-is-your-model-debugging-or-regenerating)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：针对调试和修复Bug的精度感知评估
-4. [VerilogCL: A Contrastive Learning Framework for Robust LLM-Based Verilog Generation](/202604/21/2604.18162v1-verilogcl-a-contrastive-learning-framework-for-robust-llm-based-verilog-generation)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：通过对比学习学习正确与错误代码之间的界限
-5. [AdaExplore: Failure-Driven Adaptation and Diversity-Preserving Search for Efficient Kernel Generation](/202604/21/2604.16625v1-adaexplore-failure-driven-adaptation-and-diversity-preserving-search-for-efficient-kernel-generation)  
+1. [Learned or Memorized ? Quantifying Memorization Advantage in Code LLMs](/202604/22/2604.13997v1-learned-or-memorized--quantifying-memorization-advantage-in-code-llms)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：利用执行反馈进行测试时自适应和代码生成的自我改进
-6. [AIRA: AI-Induced Risk Audit: A Structured Inspection Framework for AI-Generated Code](/202604/21/2604.17587v1-aira-ai-induced-risk-audit-a-structured-inspection-framework-for-ai-generated-code)  
+   evidence：在补丁修复和代码生成中量化记忆与泛化
+2. [SPREG: Structured Plan Repair with Entropy-Guided Test-Time Intervention for Large Language Model Reasoning](/202604/22/2604.17884v1-spreg-structured-plan-repair-with-entropy-guided-test-time-intervention-for-large-language-model-reasoning)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于检测AI生成代码中失效不真实模式的检查框架
-7. [SPREG: Structured Plan Repair with Entropy-Guided Test-Time Intervention for Large Language Model Reasoning](/202604/21/2604.17884v1-spreg-structured-plan-repair-with-entropy-guided-test-time-intervention-for-large-language-model-reasoning)  
+   evidence：推理过程中用于精确错误纠正的推理时框架
+3. [MUCOCO: Automated Consistency Testing of Code LLMs](/202604/22/2604.19086v1-mucoco-automated-consistency-testing-of-code-llms)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：LLM推理中的结构化计划修复与实时错误纠正
-8. [RAVEN: Retrieval-Augmented Vulnerability Exploration Network for Memory Corruption Analysis in User Code and Binary Programs](/202604/21/2604.17948v1-raven-retrieval-augmented-vulnerability-exploration-network-for-memory-corruption-analysis-in-user-code-and-binary-programs)  
+   evidence：自动一致性测试与语义保持变异
+4. [Improving LLM-Driven Test Generation by Learning from Mocking Information](/202604/22/2604.19315v1-improving-llm-driven-test-generation-by-learning-from-mocking-information)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于漏洞分类、检测和补丁生成的LLM智能体
-9. [CollabCoder: Plan-Code Co-Evolution via Collaborative Decision-Making for Efficient Code Generation](/202604/21/2604.13946v2-collabcoder-plan-code-co-evolution-via-collaborative-decision-making-for-efficient-code-generation)  
+   evidence：LLM驱动的测试生成与迭代修复过程
+5. [CASCADE: Detecting Inconsistencies between Code and Documentation with Automatic Test Generation](/202604/22/2604.19400v1-cascade-detecting-inconsistencies-between-code-and-documentation-with-automatic-test-generation)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：自动测试生成以检测代码与文档的不一致性
+6. [Cascaded Code Editing: Large-Small Model Collaboration for Effective and Efficient Code Editing](/202604/22/2604.19201v1-cascaded-code-editing-large-small-model-collaboration-for-effective-and-efficient-code-editing)  
+   标签：评分：6.5/10、query:apr-oracle
+   evidence：基于需求修改代码库的神经代码编辑
+7. [Spec2Cov: An Agentic Framework for Code Coverage Closure of Digital Hardware Designs](/202604/22/2604.15606v1-spec2cov-an-agentic-framework-for-code-coverage-closure-of-digital-hardware-designs)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于调试和代码生成的协作决策
-10. [VeriCWEty: Embedding enabled Line-Level CWE Detection in Verilog](/202604/21/2604.15375v1-vericwety-embedding-enabled-line-level-cwe-detection-in-verilog)  
+   evidence：用于代码覆盖率和硬件验证的代理框架
+8. [Program Structure-aware Language Models: Targeted Software Testing beyond Textual Semantics](/202604/22/2604.17715v1-program-structure-aware-language-models-targeted-software-testing-beyond-textual-semantics)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：Verilog中基于嵌入的错误检测与分类
-11. [Treating Run-time Execution History as a First-Class Citizen: Co-Versioning Run-time Behavior alongside Code](/202604/21/2604.16933v1-treating-run-time-execution-history-as-a-first-class-citizen-co-versioning-run-time-behavior-alongside-code)  
+   evidence：针对性测试用例生成以提高分支覆盖率并发现漏洞
+9. [Raven: Rethinking Automated Assessment for Scratch Programs via Video-Grounded Evaluation](/202604/22/2604.17820v1-raven-rethinking-automated-assessment-for-scratch-programs-via-video-grounded-evaluation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：解决部分测试预言和运行时行为演变问题
+   evidence：自动化评估框架，用视频生成规则取代脆弱的断言
+10. [TitanCA: Lessons from Orchestrating LLM Agents to Discover 100+ CVEs](/202604/22/2604.17860v1-titanca-lessons-from-orchestrating-llm-agents-to-discover-100-cves)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：通过过滤和检查减少漏洞发现中的误报
+11. [From Program Slices to Causal Clarity: Evaluating Faithful, Actionable LLM-Generated Failure Explanations via Context Partitioning and LLM-as-a-Judge](/202604/22/2604.18309v1-from-program-slices-to-causal-clarity-evaluating-faithful-actionable-llm-generated-failure-explanations-via-context-partitioning-and-llm-as-a-judge)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：调试和修复流程中LLM生成的故障解释质量评估
 
 
 <div class="dpr-home-promo-card">
