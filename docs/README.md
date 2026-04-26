@@ -6,40 +6,64 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-23
-- 运行时间：2026-04-23 20:01:39 UTC
+- 最新运行日期：2026-04-26
+- 运行时间：2026-04-26 20:05:53 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：1
-- 速读区：5
+- 本次总论文数：14
+- 精读区：3
+- 速读区：11
 
 ### 今日简报（AI）
-聚焦代码生成与安全检测，今日共速读五篇并精读一篇前沿论文。  
-最值得关注的是通过“具体执行”提升代码 LLM 可控性，以及多代理合约在无训练场景下的漏洞发现潜力。  
-建议继续跟进代码模型可解释性与网络场景评测方向，观察其在真实开发环境中的应用表现。
-- 详情：[/202604/23/README](/202604/23/README)
+继续深耕代码安全与生成可靠性研究，今日共阅 14 篇论文。  
+重点关注残余风险分析模型与基于 metamorphic testing 的大模型记忆诊断，这两方向技术成熟度显著提升。  
+建议读者关注多模型语义相似度评估与程序修复中的可解释安全机制，为后续实测提供思路。
+- 详情：[/202604/26/README](/202604/26/README)
 
 ### 精读区论文标签
-1. [SolidCoder: Bridging the Mental-Reality Gap in LLM Code Generation through Concrete Execution](/202604/23/2604.19825v1-solidcoder-bridging-the-mental-reality-gap-in-llm-code-generation-through-concrete-execution)  
+1. [Residual Risk Analysis in Benign Code: How Far Are We? A Multi-Model Semantic and Structural Similarity Approach](/202604/26/2604.21051v1-residual-risk-analysis-in-benign-code-how-far-are-we-a-multi-model-semantic-and-structural-similarity-approach)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：利用语义和结构相似性评估补丁是否完全消除了风险
+2. [A Metamorphic Testing Approach to Diagnosing Memorization in LLM-Based Program Repair](/202604/26/2604.21579v1-a-metamorphic-testing-approach-to-diagnosing-memorization-in-llm-based-program-repair)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：使用基于属性的预言机将想象的追踪替换为沙盒执行
+   evidence：使用蜕变测试诊断大模型程序修复中的记忆问题，以确保评估的有效性。
+3. [DryRUN: On the Role of Public Tests in LLM-Driven Code Generation](/202604/26/2604.21598v1-dryrun-on-the-role-of-public-tests-in-llm-driven-code-generation)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：公共测试在代码生成的调试和模拟中的作用
 
 ### 速读区论文标签
-1. [Learned or Memorized ? Quantifying Memorization Advantage in Code LLMs](/202604/23/2604.13997v1-learned-or-memorized--quantifying-memorization-advantage-in-code-llms)  
+1. [Augmenting unit test suites from integration tests](/202604/26/2604.17508v1-augmenting-unit-test-suites-from-integration-tests)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：增强单元测试集以改进故障定位和覆盖率
+2. [WebCompass: Towards Multimodal Web Coding Evaluation for Code Language Models](/202604/26/2604.18224v1-webcompass-towards-multimodal-web-coding-evaluation-for-code-language-models)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：评估网页编码（包括修复任务和视觉保真度）的多模态基准。
+3. [Structural Verification for Reliable EDA Code Generation without Tool-in-the-Loop Debugging](/202604/26/2604.18834v1-structural-verification-for-reliable-eda-code-generation-without-tool-in-the-loop-debugging)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：无需工具在环调试的结构化验证，用于可靠的代码生成
+4. [Refute-or-Promote: An Adversarial Stage-Gated Multi-Agent Review Methodology for High-Precision LLM-Assisted Defect Discovery](/202604/26/2604.19049v1-refute-or-promote-an-adversarial-stage-gated-multi-agent-review-methodology-for-high-precision-llm-assisted-defect-discovery)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：用于高精度缺陷发现和报告验证的多智能体评审
+5. [Revisiting Code Debloating with Ground Truth-based Evaluation](/202604/26/2604.17717v1-revisiting-code-debloating-with-ground-truth-based-evaluation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：量化代码大模型在修复任务中的记忆优势
-2. [WebCompass: Towards Multimodal Web Coding Evaluation for Code Language Models](/202604/23/2604.18224v1-webcompass-towards-multimodal-web-coding-evaluation-for-code-language-models)  
+   evidence：代码瘦身中基于测试用例的正确性评估
+6. [PlayCoder: Making LLM-Generated GUI Code Playable](/202604/26/2604.19742v1-playcoder-making-llm-generated-gui-code-playable)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：包含修复任务的多模态Web编程基准测试
-3. [Security Is Relative: Training-Free Vulnerability Detection via Multi-Agent Behavioral Contract Synthesis](/202604/23/2604.19012v1-security-is-relative-training-free-vulnerability-detection-via-multi-agent-behavioral-contract-synthesis)  
+   evidence：通过交互流而非简单的通过/失败测试用例来评估正确性
+7. [ViBR: Automated Bug Replay from Video-based Reports using Vision-Language Models](/202604/26/2604.19905v1-vibr-automated-bug-replay-from-video-based-reports-using-vision-language-models)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：解决漏洞检测中的语义歧义
-4. [iCoRe: An Iterative Correlation-Aware Retriever for Bug Reproduction Test Generation](/202604/23/2604.19224v1-icore-an-iterative-correlation-aware-retriever-for-bug-reproduction-test-generation)  
+   evidence：从视频报告中自动重现错误，以辅助修复和调试过程。
+8. [Taint-Style Vulnerability Detection and Confirmation for Node.js Packages Using LLM Agent Reasoning](/202604/26/2604.20179v1-taint-style-vulnerability-detection-and-confirmation-for-nodejs-packages-using-llm-agent-reasoning)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：从问题描述中生成错误复现测试
-5. [Hallucination Inspector: A Fact-Checking Judge for API Migration](/202604/23/2604.20202v1-hallucination-inspector-a-fact-checking-judge-for-api-migration)  
+   evidence：使用LLM智能体推理进行漏洞检测与确认
+9. [Learning Reasoning World Models for Parallel Code](/202604/26/2604.20926v1-learning-reasoning-world-models-for-parallel-code)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于检测大模型生成代码中幻觉的静态分析工具
+   evidence：预测工具结果和执行轨迹，以改进并行代码的推理
+10. [Strategic Heterogeneous Multi-Agent Architecture for Cost-Effective Code Vulnerability Detection](/202604/26/2604.21282v1-strategic-heterogeneous-multi-agent-architecture-for-cost-effective-code-vulnerability-detection)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：用于代码漏洞检测的对抗性验证与校验器
+11. [SpecSyn: LLM-based Synthesis and Refinement of Formal Specifications for Real-world Program Verification](/202604/26/2604.21570v1-specsyn-llm-based-synthesis-and-refinement-of-formal-specifications-for-real-world-program-verification)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：基于大语言模型的程序验证形式化规范合成
 
 
 <div class="dpr-home-promo-card">

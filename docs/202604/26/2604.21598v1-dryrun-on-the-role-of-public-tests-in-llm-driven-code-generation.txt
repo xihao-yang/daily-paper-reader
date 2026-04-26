@@ -1,0 +1,340 @@
+Title: DryRUN: On the Role of Public Tests in LLM-Driven Code Generation
+
+URL Source: https://arxiv.org/pdf/2604.21598v1
+
+Published Time: Fri, 24 Apr 2026 00:50:01 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# DryRUN: On the Role of Public Tests in LLM-Driven Code Generation 
+
+# Kaushitha Silva 
+
+WSO2 Santa Clara, CA, USA kaushitha@wso2.com 
+
+# Srinath Perera 
+
+WSO2 Santa Clara, CA, USA srinath@wso2.com 
+
+Standard Paradigm (e.g., CodeSIM)     
+
+> Problem Spec +Public Tests
+> Plan & Gener-ate Initial Code External Execution Sandbox Final Code
+> Mental Trace on Failed Public Test Higher Overconfidence Gap
+> Passes Public Tests
+> Fails Public Tests
+
+DryRUN Paradigm (Ours)    
+
+> Standardized Spec
+> (Zero Examples)
+> Plan & Gener-ate Initial Code
+> Autonomously Synthesize Input Final Code
+> Mental Trace & Re-fine (No Execution) Lower Overconfidence Gap
+> Start Loop
+> 𝑁 iterations completed
+
+Figure 1: State-of-the-art Code Generation methods (top) rely heavily on sample examples provided in the problem specifi-cation, passing code to an external sandbox and exclusively tracing code that fails public tests. As demonstrated later in our Overconfidence Gap analysis, this heavy reliance on trivial public tests often induces algorithmic overconfidence, leading to overfitting and subsequent failure on hidden private suites. In contrast, DryRUN (bottom) operates under strictly zero-example constraints. It shifts the burden of verification entirely inward, utilizing the LLM’s ability to plan, autonomously synthesize inputs and simulate mental traces, eliminating the need for external oracles. 
+
+## Abstract 
+
+Multi-agent frameworks are widely used in autonomous code gen-eration and have applications in complex algorithmic problem-solving. Recent work has addressed the challenge of generating functionally correct code by incorporating simulation-driven plan-ning and debugging, where language models trace execution steps to verify logic. However, these approaches depend on human-provided public test cases to ground the debugging and simulation loop. Manually authoring comprehensive input-output examples is a labor-intensive bottleneck in the software development lifecycle. Because ground-truth input-output examples are rarely available prior to implementation in real-world software engineering, this dependency restricts methods to curated competitive programming benchmarks. Furthermore, we identify that reliance on these public tests induces an “overconfidence gap,” causing frameworks to over-fit to simplistic examples and fail on hidden evaluations. In contrast, we observe that external sample inputs are not strictly necessary for code generation. We demonstrate that large language models can au-tonomously generate valid inputs and simulate execution traces to 
+
+> arXiv,
+> 2026. ACM ISBN 978-x-xxxx-xxxx-x/YYYY/MM https://doi.org/10.1145/nnnnnnn.nnnnnnn
+
+self-correct. Consequently, we develop DryRUN, a framework that eliminates the need for ground-truth samples by allowing the LLM to iteratively plan, autonomously generate its own inputs and simu-late execution, mitigating algorithmic overconfidence. Evaluations on the LiveCodeBench v6 dataset (post-March 2025) demonstrate that DryRUN matches performance against CodeSIM, a state-of-the-art and public-test-dependent framework, while operating entirely without public test cases or external execution feedback while re-ducing output token consumption. 
+
+## Keywords 
+
+Large language models, Software engineering, Software testing, Program synthesis 
+
+## 1 Introduction 
+
+Program synthesis from natural language specifications represents a core objective in modern software engineering. Large language models (LLMs) have demonstrated remarkable proficiency in this domain, a capability primarily evaluated on standardized program-ming benchmarks such as HumanEval [ 3] and LiveCodeBench [ 9]. However, the problem specifications within these benchmarks in-herently embed human-authored sample input-output examples.  
+
+> arXiv:2604.21598v1 [cs.SE] 23 Apr 2026 arXiv, 2026, Kaushitha Silva and Srinath Perera
+
+Consequently, most code generation methods rely on these public samples for fundamental problem comprehension Beyond this implicit reliance, recent state-of-the-art methods actively and explicitly exploit these public tests to drive their per-formance. This exploitation typically occurs across two distinct phases. During pre-generation reasoning, frameworks such as Al-phaCodium [ 17 ] force the model to explicitly reason about how the provided public inputs map to their outputs to anchor the logic be-fore writing any code. During post-generation debugging, methods utilize these public tests to obtain execution feedback. Furthermore, frameworks like CodeSIM [ 8 ] rely specifically on failed public test cases, prompting the model to mentally simulate an execution trace on that exact failed input to diagnose logical flaws. This deep dependency on public tests can create a massive dis-connect from reality. In real-world software engineering contexts, ground-truth input-output examples are rarely available before the code is actually implemented. Furthermore, heavily relying on these tests introduces critical vulnerabilities. As observed by Liu et al. [ 14 ] and Liu et al. [ 15 ], public test cases in standard benchmarks are often too trivial to catch complex edge cases. When models depend on signals from these simplistic tests, they frequently be-come overconfident in flawed solutions; passing the public tests but failing the hidden private suites. We formalize this disparity as the Overconfidence Gap , which is illustrated in Figure 1 and an-alyzed extensively in Section 5. Conversely, manually authoring detailed public test cases that comprehensively cover edge cases is a tedious, labor-intensive process that places an unreasonable burden on developers. 
+
+These challenges force us to ask, are public test cases the only way? 
+
+Despite this ubiquitous implicit and explicit reliance on public tests, to the best of our knowledge, no prior studies have systematically evaluated how models perform when these sample examples are completely redacted from the prompt. Based on results we encountered while improving the planning for code generation, we hypothesize that this reliance on public tests is a crutch rather than a necessity. In this work, we first argue that removing human-authored examples from standard bench-marks yields negligible performance drops, indicating that modern LLMs do not strictly require them. Building on this insight, we intro-duce DryRUN (Debugging and Refinement Under Non-execution), a framework that completely replaces the need for public tests. DryRUN prompts the LLM to autonomously synthesize its own valid, hypothetical inputs and mentally simulate execution traces, allowing it to self-correct logical errors without relying on external examples or sandbox execution. To rigorously evaluate our framework and mitigate the risk of data contamination, we conduct our experiments on the Live-CodeBench v6 dataset, strictly restricting our evaluation to prob-lems published after March 2025. Because this benchmark natively includes public test cases, it provides an ideal testbed for a direct empirical comparison between standard public-test-dependent gen-eration and our zero-example approach. We validate DryRUN’s efficacy across two LLMs: gpt-5-mini , gemini-3-flash .Our key contribution is questioning the role of public test cases as a major driver in correctness in code generation problems, exploring alternative approaches, and empirically demonstrating that the role of public test cases is much smaller than the community believes. 
+
+Algorithm 1 The DryRUN Framework 
+
+Input: P (Standardized problem specification), 𝑁 𝑝𝑙𝑎𝑛 , 𝑁 𝑠𝑖𝑚 ,
+
+𝑁 𝑟𝑒 𝑓 𝑖𝑛𝑒 , LLM 
+
+Output: 𝐶𝑜𝑑𝑒  
+
+> 1:
+
+𝑃𝑙𝑎𝑛 ← GeneratePlan (LLM , P)  
+
+> 2:
+
+for 𝑖 = 1 to 𝑁 𝑝𝑙𝑎𝑛 do  
+
+> 3:
+
+𝑃𝑙𝑎𝑛 ← RefinePlan (LLM , P, 𝑃𝑙𝑎𝑛 ) 
+
+> 4:
+
+end for  
+
+> 5:
+
+𝐶𝑜𝑑𝑒 ← SynthesizeCode (LLM , P, 𝑃𝑙𝑎𝑛 ) 
+
+> 6:
+
+for 𝑗 = 1 to 𝑁 𝑠𝑖𝑚 do  
+
+> 7:
+
+𝑇𝑟𝑎𝑐𝑒 ← SimulateExecution (LLM , P, 𝐶𝑜𝑑𝑒 ) 
+
+> 8:
+
+𝑃𝑙𝑎𝑛 ← TraceDrivenRefine (LLM , P, 𝑃𝑙𝑎𝑛,𝑇𝑟𝑎𝑐𝑒 ) 
+
+> 9:
+
+𝐶𝑜𝑑𝑒 ← SynthesizeCode (LLM , P, 𝑃𝑙𝑎𝑛 ) 
+
+> 10:
+
+end for  
+
+> 11:
+
+𝐶𝑜𝑑𝑒 ← PolishCode (LLM , P, 𝑃𝑙𝑎𝑛, 𝐶𝑜𝑑𝑒 ) 
+
+> 12:
+
+return 𝐶𝑜𝑑𝑒 
+
+Specifically, our main findings demonstrate that DryRUN matches the performance of CodeSIM, while operating under strictly zero-example constraints, no code execution, and consuming fewer to-kens. Crucially, as depicted in Figure 1, DryRUN substantially mit-igates the Overconfidence Gap by forcing the model to validate logic against its own non-trivial inputs rather than overfitting to trivial public oracles. 
+
+## 2 Related Work 2.1 Coding Benchmarks 
+
+With the advent of Large Language Models (LLMs), the transla-tion of natural language specifications into functional code has shown remarkable progress. Early evaluations relied heavily on static benchmarks such as HumanEval [ 3], MBPP [ 4 ]. Current con-temporary models achieve pass@1 rates exceeding 90% on these datasets. However, such metrics are increasingly suspect due to data contamination. To mitigate this, for a more accurate evaluation, re-cent benchmarks like LiveCodeBench [ 9], LiveCodeBench-Pro [ 9], SWE-Bench-Live [ 22 ], and LiveBench [ 21 ] evaluate models exclu-sively on problems released after their respective training cutoffs. Experiments reveal that state-of-the-art models exhibit substan-tial performance degradation on these uncontaminated datasets, indicating that zero-shot inference remains insufficient to guar-antee correctness on novel tasks. A key aspect of these coding benchmarks is that they provide a small set of ground-truth sample input-output pairs to clarify the problem scope and expected format-ting. In LiveCodeBench, these examples appear both in the problem specification, often with some explanation, and as public test cases which can be used for test execution against the synthesized code. 
+
+## 2.2 LLM-Driven Code Generation Techniques 
+
+Despite the remarkable zero-shot capabilities of LLMs, direct gen-eration often yields subtle syntactic or logical flaws. Initial efforts to rectify these issues focused solely on prompting strategies, such as Chain-of-Thought (CoT) [ 20 ] Structured CoT (SCoT) [ 13 ], and self-planning [ 10 ], which demonstrated that intermediate reason-ing improves generation quality. While these methods improved DryRUN: On the Role of Public Tests in LLM-Driven Code Generation arXiv, 2026,          
+
+> @@ -1,14 +1,12 @@
+> You are given two positive integers, l and r. A positive integer is called beautiful if the product of its digits is divisible by the sum of its digits.
+> Return the count of beautiful numbers between l and r, inclusive.
+> - Example 1:
+> - Input: l = 10, r = 20
+> - Output: 2
+> - Explanation: The beautiful numbers in the range are 10 and 20.
+> - Example 2:
+> - Input: l = 1, r = 15
+> - Output: 10
+> - Explanation: The beautiful numbers in the range are 1, 2, 3, 4, 5, 6, 7, 8, 9, and 10.
+> + Input Format:
+> + - Two space-separated integers l and r.
+> + Output Format:
+> + - A single integer: the count of beautiful numbers x such that l ≤x≤r.
+> Constraints:
+> 1≤l≤r < 10 9
+
+Figure 2: LLM is prompted to remove the concrete sample examples (highlighted in red) and synthesize generalized input and output format descriptions (highlighted in green) to construct the zero-example problem specification P.
+
+performance, they did not explicitly utilize execution environments or sample examples. Consequently, closed-loop methods emerged, utilizing execution feedback to iteratively debug generated code. Early self-debugging approaches extracted the few provided public sample examples to execute and refine the code. Recognizing that two or three examples are rarely comprehensive, subsequent frameworks like AgentCoder [ 6], Reflexion [ 18 ], ThinkCoder [ 23 ], DebateCoder [ 2], CodeCoR [ 16 ], and CodeT [ 1 ] prompted LLMs to generate extensive autonomous test suites. CodeT, for example, uses a dual-agreement between generated test cases and code to select a solution out of many. Similarly, S* [ 12 ] generates several candidate solutions and compares them as pairs, using differential inputs to select the best candidate based on execution behavior. However, as noted by the authors of AgentCoder themselves, these LLM-generated test cases are frequently flawed, leading to false-positive acceptance or misdirected repairing of the gen-erated code. To address this unreliability, frameworks like Al-phaCodium [ 17 ] introduced an anchoring mechanism, explicitly grounding the generated test cases by utilizing the human-authored sample input-output pairs. 
+
+## 2.3 Dependency on Public Test Cases 
+
+To circumvent the inherent unreliability of LLM-generated tests, the most recent generation of state-of-the-art frameworks, such as MapCoder [ 7] and CodeSIM [ 8 ], has largely abandoned autonomous test generation. Instead, they rely almost exclusively on the sample I/O (public test cases) provided within the problem specification. CodeSIM, in particular, simulates the execution trace of the gener-ated program, specifically when it fails these public tests, grounding the LLM’s debugging logic in its own mental simulation of the fail-ure. Once the public test cases pass, these frameworks accept the code as the final solution. Furthermore, an ablation study within CodeSIM demonstrates that the performance increases with the number of public test cases. However, as discussed in the introduction, this heavy reliance on public tests introduces critical vulnerabilities. As observed by Liu et al.[1], the public test cases in standard benchmarks are often trivial and fail to cover complex edge cases. When models depend on signals from these simplistic tests, they frequently become over-confident in flawed solutions. Furthermore, creating detailed public test cases that adequately capture edge cases is a tedious, labor-intensive process that places an unreasonable burden on developers. Most importantly, relying on these examples creates a stark discon-nect from real-world software engineering, where comprehensive input-output examples are rarely available prior to implementation. DryRUN explores an alternative to this critical dependency by leveraging the internal simulation capabilities of modern Large Language Models (LLMs). Existing methods typically require either unverified generated tests or human-provided public tests to guide refinement. In contrast, we investigate whether this requirement can be relaxed. By prompting the model to synthesize hypotheti-cal inputs and simulate corresponding execution traces, DryRUN enables trace-driven refinement in a zero-example setting. 
+
+## 3 The DryRUN Framework 
+
+The DryRUN framework operates through a multi-phase loop com-prising initial planning, iterative plan refinement, code synthesis, trace-driven refinement via mental simulation, and final polishing, as depicted by Algorithm 1. 
+
+## 3.1 Phase 1: Initial Implementation Planning 
+
+Drawing upon established literature, we initially prompt the LLM to formulate a step-by-step implementation plan derived directly from arXiv, 2026, Kaushitha Silva and Srinath Perera 
+
+the problem specification P. Rather than immediately generating code, we subject this initial plan to 𝑁 𝑝𝑙𝑎𝑛 iterations of autonomous refinement without any external feedback. As demonstrated in our ablation studies (Section 4.3) this isolated plan refinement loop systematically eliminates preliminary logical oversights and inde-pendently improves overall code generation performance. 
+
+## 3.2 Phase 2: Mental Simulation and Trace-Driven Refinement 
+
+After synthesizing an initial code draft from the refined plan, the core simulation loop executes for 𝑁 𝑠𝑖𝑚 iterations. In each iteration, the LLM performs a mental dry run by autonomously synthesiz-ing a valid, non-trivial sample input based purely on the problem constraints defined in P. The model subsequently simulates the execution of the current code line-by-line against this generated input, tracking variable states to expose hidden logical flaws. The re-sulting execution trace is fed back into the planning module, which explicitly updates the implementation plan to resolve the identified bugs. Finally, the code is regenerated to reflect these trace-driven corrections. Crucially, in contrast to recent trace-based methods such as CodeSIM, DryRUN provides neither human-authored sam-ple I/O nor sandbox execution feedback; the LLM relies entirely on its intrinsic capacity to formulate inputs and mentally simulate their execution paths. 
+
+3.2.1 Phase 3: Final Code Polishing. To conclude the generation process, the framework executes a final polishing stage. The LLM reviews the finalized plan alongside the latest code iteration to resolve any syntax anomalies, improve stylistic clarity, and ensure absolute alignment with the plan. This phase produces the final, self-corrected solution. As detailed in our ablation studies (Section 4.3), this final pass on the code serves as an effective mechanism for rec-tifying any errors that may have been introduced while correcting the code. 
+
+## 3.3 DryRUN vs CodeSIM 
+
+Although both DryRUN and CodeSIM follow a similar simulation phase, there are key fundamental differences that separates the two approaches. 
+
+• Autonomous Plan Refinement: DryRUN consists of a plan refinement phase with no external feedback. The plan is refined by prompting the LLM to improve the logic, add more details steps and consider more edge cases. 
+
+• Execution-Free Refinement: DryRUN strictly omits ex-ternal code execution, the generated code is never executed against any input. 
+
+• Self-generated Inputs: DryRUN does the mental simu-lation of a non-trivial input that the LLM comes up with its own, whereas in CodeSIM, the input is chosen from the failed public test cases. 
+
+• Simulation is preceded by plan refinement: DryRUN always refines the plan and then generates the code. In com-parison CodeSIM prompts the LLM to either repair the code or the plan. 
+
+• Final Code Refinement: DryRUN finally polishes the re-fined code, this is to compensate for the lack of execution where there may have been syntax or logic errors introduced in the refining stage. 
+
+## 4 Experiments and Results 4.1 Experimental Setup 
+
+4.1.1 Models. We evaluate our framework using two recent large language models: gpt-5-mini and gemini-3-flash , both configured to use “minimal” reasoning effort. For gemini-3-flash , we set the temperature to its default value of 1.0. However, the temperature of the gpt-5-mini model is not configurable, hence it is left to its default. We also conducted experiments with an open-weight Small Lan-guage Model (SLM), qwen2.5-coder:7b . DryRUN failed many prob-lems, passing none of the hard problems. Analyzing the SLM re-sponses revealed that it was unable to follow complex prompts, and the generated code contained frequent syntax anomalies. Hence, we did not conduct further tests on SLMs. 
+
+4.1.2 Dataset Selection. To accurately evaluate code generation, we needed a contamination-free benchmark that is published af-ter the model’s data cutoff. Furthermore, to test the specific im-pact of public test cases, the dataset must include human-authored sample inputs and outputs. Based on these criteria, we select the LiveCodeBench-v6 [ 9 ] dataset, strictly limiting our evaluation to problems published after March 2025. This cutoff ensures a contamination-free evaluation, as the most recent training cutoff among our evaluated models ( gemini-3-flash ) is reported as Janu-ary 2025. This filtering yields a final set of 80 problems, consisting of 37 hard, 25 medium, and 18 easy problems. We exclude other recent live benchmarks, such as SWELive [ 22 ], because they do not provide human-authored sample input-output pairs. 
+
+4.1.3 Removal of Examples of the Problem Specification. Problem descriptions in code generation benchmarks typically include input-output examples and sometimes reasoning steps. We prompt an LLM to replace these elements with descriptions of the expected in-put and output formats. We manually verified the dataset to ensure no examples or ground-truth data remain. This process yields the standardized, example-free problem specification P used through-out our experiments (see Figure 2 for a representative example). 
+
+4.1.4 DryRUN Configuration. For our primary results, we config-ure the DryRUN framework with 𝑁 𝑝𝑙𝑎𝑛 = 2 planning iterations and 
+
+𝑁 𝑠𝑖𝑚 = 2 simulation iterations. All ablation studies are conducted exclusively using gpt-5-mini .
+
+4.1.5 Baselines. We first compare DryRUN against standard direct (zero-shot) generation in two settings: with and without the inclu-sion of public test cases in the prompt. Additionally, we benchmark against CodeSIM, the current state-of-the-art multi-agent frame-work that utilizes execution simulation as per Islam et al. [ 8 ]. We execute three independent runs for each problem and report the average pass@1 success rate. 
+
+## 4.2 Results 
+
+As indicated in Table 1, DryRUN and CodeSIM achieve compara-ble overall performance. DryRUN outperforms CodeSIM by 3.3% 
+
+utilizing gpt-5-mini , whereas CodeSIM exhibits a 5.0% advantage DryRUN: On the Role of Public Tests in LLM-Driven Code Generation arXiv, 2026, 
+
+Table 1: Comparison of Pass@1 (%) performance on LiveCodeBench V6 (Post-March 2025) averaged across 3 independent runs. Values are reported as mean ± standard deviation.                                                                                                          
+
+> gpt-5-mini gemini-3-flash Method Easy Med Hard Overall Easy Med Hard Overall Direct (w/ Public) 83.3 ±5.6 40.0 ±4.0 20.7 ±4.1 40.8 ±1.9 92.6 ±3.2 65.3 ±2.3 41.4 ±4.1 60.4 ±1.9 Direct (w/o Public) 75.9 ±3.2 52.0 ±10.6 27.9 ±3.1 46.3 ±4.5 98.2 ±3.2 69.3 ±2.3 41.4 ±3.1 62.9 ±0.7 CodeSIM 92.6 ±3.2 77.3 ±8.3 41.4 ±9.5 64.2 ±7.5 100.0 ±0.0 81.3 ±2.3 57.7 ±4.1 74.6 ±1.9
+> DryRUN (Ours) 90.7 ±3.2 72.0 ±6.9 53.2 ±5.6 67.5 ±2.5 100.0 ±0.0 77.3 ±8.3 49.6 ±1.6 69.6 ±3.1
+
+Table 2: Comparison of average token consumption per prob-lem. Values represent the mean token counts consumed.             
+
+> Method Input Output Total
+> Direct 573 896 1469 CodeSIM 18,922 22,054 40,976
+> DryRUN (Ours) 17,897 10,670 28,567
+
+with gemini-3-flash , with both performance margins falling within overlapping standard deviations. However, since DryRUN operates without public test cases, this performance parity strongly supports our core hypothesis: planning and simulation can effectively com-pensate for the absence of public tests. This empirical evidence suggests that the fundamental reliance on human-authored public tests is much smaller than conventionally assumed by the commu-nity. Furthermore, excising public tests from the zero-shot baseline (Direct w/o Public) slightly improved baseline accuracy, further reinforcing that models do not strictly require these examples for task comprehension. As expected, the pass@1 performance decreases with problem difficulty, accompanied by an increase in variance. This increase in variance is likely attributable to the increase in complexity of execution simulation on harder problems, where the impact of the model’s probabilistic nature during mental tracing becomes more pronounced. Across all configurations, gemini-3-flash consistently demonstrated superior code generation capabilities compared to 
+
+gpt-5-mini .Regarding computational overhead indicated in Table 2, both simulation-driven frameworks consume more compute than zero-shot generation. While DryRUN and CodeSIM are approximately 
+
+19 × and 27 × more token-intensive than the Direct baseline, re-spectively, DryRUN is notably more efficient. DryRUN consumes only 70% of CodeSIM’s total tokens, and merely 50% of the output tokens, which are typically the primary bottleneck for inference latency and cost. A likely explanation for this is that CodeSIM’s default configuration permits up to 5 simulations for planning and an additional 5 for code repair, meaning a difficult problem could trigger up to 25 nested simulations. In contrast, DryRUN strictly enforces a maximum of two simulation rounds ( 𝑁 𝑠𝑖𝑚 = 2). Overall, these results demonstrate that even without public test cases, DryRUN achieves competitive performance while maintain-ing a consuming fewer tokens. 
+
+## 4.3 Ablation Studies 
+
+To systematically isolate the contribution of each algorithmic com-ponent within the DryRUN framework, we conduct a rigorous ablation study. The first ablation switches from zero-shot genera-tion to a structured base planning, while the second and third add planning refinement steps. Fourth and fifth ablations add mental simulation. The final ablation is the Full DryRUN configuration including the final code polishing stage. Table 3 depicts the results. All ablations are performed using the gpt-5-mini model evaluated exclusively on the Hard subset of LiveCodeBench V6 ( 𝑁 = 37 ). To account for variance, we report the mean Pass@1 rate and standard deviation across three independent runs. 
+
+Table 3: Ablation study of the DryRUN framework on the LiveCodeBench Hard subset using gpt-5-mini. Results are av-eraged across 3 runs. The nomenclature denotes the number of plan refinement iterations ( 𝑁 𝑝𝑙𝑎𝑛 ) and mental simulation iterations ( 𝑁 𝑠𝑖𝑚 ).                                       
+
+> Framework Configuration Pass@1 (%) ±SD
+> Direct (Zero-Shot Baseline) 27.93 ±3.12 Base Planning 43.24 ±4.68 + Plan Refinement ( 𝑁 𝑝𝑙𝑎𝑛 =1)45.95 ±5.41 + Plan Refinement ( 𝑁 𝑝𝑙𝑎𝑛 =2)48.65 ±2.70 + Mental Simulation ( 𝑁 𝑝𝑙𝑎𝑛 =2,𝑁 𝑠𝑖𝑚 =1)47.75 ±1.56 + Mental Simulation ( 𝑁 𝑝𝑙𝑎𝑛 =2,𝑁 𝑠𝑖𝑚 =2)49.55 ±1.56
+> + Final Polish (Full DryRUN) 53.15 ±5.63
+
+## 4.4 The Impact of Isolated Planning 
+
+The transition from direct, zero-shot generation to a structured base planning phase yields a baseline improvement of +15 .31% . This aligns with established literature indicating that large language models require intermediate reasoning steps to effectively manage the logic of complex algorithms [ 5, 10 , 13 , 20 ]. Iterating on this plan without external feedback demonstrates consistent empirical gains. Advancing from a single planning step to two refinement iterations (𝑁 𝑝𝑙𝑎𝑛 = 2) increases the Pass@1 rate to 48 .65% while halving the standard deviation (from 5.41 to 2.70 ). This suggests that isolated plan refinement likely helps stabilize the model’s logic and mitigate preliminary algorithmic oversights prior to code synthesis. arXiv, 2026, Kaushitha Silva and Srinath Perera 
+
+## 4.5 Mental Simulation 
+
+A single iteration of mental simulation ( 𝑁 𝑝𝑙𝑎𝑛 = 2, 𝑁 𝑠𝑖𝑚 = 1) results in a marginal regression in mean accuracy compared to the purely planning-based approach. This likely stems from the inherent diffi-culty of autonomous patching: when the model attempts to correct complex logic based on its initial mental trace, it can occasion-ally introduce syntactic or logical regressions. However, allowing the simulation loop to execute for a second iteration ( 𝑁 𝑝𝑙𝑎𝑛 = 2,
+
+𝑁 𝑠𝑖𝑚 = 2) helps the model stabilize these patches. This recovers the mean performance to 49.55% while critically suppressing the variance to a highly consistent ± 1.56. This leads us to hypothe-size that while the first simulation iteration helps expose hidden flaws, a subsequent iteration provides a valuable verification step to stabilize the applied fixes. 
+
+## 4.6 The Necessity of Compensatory Polishing 
+
+The addition of the final code polishing stage triggers a +3.60% 
+
+performance spike, achieving the peak Pass@1 rate of 53 .15% . We hypothesize that, while the mental simulation phase is highly ef-fective at identifying logical edge cases, the process of explicitly updating the plan and regenerating code without a live compiler can introduce syntactic and logical anomalies. It appears the final polishing step acts as a compensatory analytical pass, helping to smooth out these minor syntactic and logical deviations. 
+
+## 5 Discussion  
+
+> Direct (Public)
+> Direct (No Pub)
+> CodeSIM DryRUN (Ours)
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+> Number of Problems
+> Actually Solved (Private Passed)
+> Overconfidence Gap (Public Only)
+
+Figure 3: Analysis of the Overconfidence Gap (gpt-5-mini, Hard Subset, 𝑁 = 37 ). The red stack indicates problems that pass public tests but fail the hidden private suite. CodeSIM displays a large, highly volatile gap ( ±4.36 ), indicating over-fitting to trivial oracles.  
+
+> Direct (Public)
+> Direct (No Pub)
+> CodeSIM DryRUN (Ours)
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+> Number of Problems
+> Actually Solved (Private Passed)
+> Overconfidence Gap (Failed Private)
+
+Figure 4: Analysis of the Overconfidence Gap (gemini-3-flash, Hard Subset, 𝑁 = 37 ). The red stack indicates problems that pass public tests but fail the hidden private suite. Similar to the gpt-5-mini results, CodeSIM displays an inflated overcon-fidence gap, whereas DryRUN maintains a lower gap ( ±2.08 ), even though the pass@1 performance is lower. 
+
+## 5.1 What could explain the results? 
+
+To understand how DryRUN matches CodeSIM’s performance with-out relying on public test cases, we must contrast their underly-ing refinement mechanisms. During the initial planning phase, CodeSIM conditionally validates its plan via simulation, refining it only if the simulation exposes a logical flaw. In contrast, DryRUN employs a proactive approach, unconditionally refining its plan 
+
+𝑁 𝑝𝑙𝑎𝑛 = 2 times without any simulation. During the code gen-eration phase, CodeSIM relies on a reactive, external execution based workflow: it executes the generated code against the pub-lic test suite and accepts the solution if the public tests pass. If they fail, it mentally traces a failing public test to attempt a repair. Conversely, DryRUN never executes the code against an external sandbox. Instead, it unconditionally performs 𝑁 𝑠𝑖𝑚 = 2 rounds of mental simulation using autonomously synthesized inputs, contin-uously updating the plan and regenerating the code regardless of successful or failed simulation. This divergence leads to distinct outcomes. If the provided public test cases are trivial or fail to cover complex edge cases, CodeSIM is adversely affected; because it relies exclusively on these public tests for validation, it risks becoming overconfident in flawed solu-tions. Instances where the generated code passes the public tests but fails the hidden private suite are indicative of this behavior. We term this phenomenon as the Overconfidence Gap . As shown in Figures 3 and 4, which illustrate this gap for Hard problems, CodeSIM exhibits a larger overconfidence gap than all other meth-ods (including DryRUN) across both LLMs. Therefore, we believe this algorithmic overconfidence is a plausible explanation for the performance differences. In contrast, DryRUN maintains a distinct DryRUN: On the Role of Public Tests in LLM-Driven Code Generation arXiv, 2026, 
+
+advantage by unconditionally simulating the code against its own synthesized inputs, thereby mitigating the risk of overfitting. On the other hand, when public test cases contain complex edge cases, CodeSIM’s reactive simulation provides a distinct advantage. If the generated code passes these tests, it is highly likely that the correct solution is achieved. In failure cases, CodeSIM will reactively try to simulate these edge case inputs. Again, if it is capable of simulating and mentally tracing the edge case, it is likely to produce the correct solution. However, we noticed two key observations which suggested otherwise. 
+
+• When the input is complex, the LLM struggles to mentally trace the output. This was commonly seen in math heavy problems. (e.g: arc195_e : algorithm contains a large modular division) and with larger inputs (e.g: arc194_c - 3rd public test case) 
+
+• Since the prompt contains the error log from the public test execution, the LLM already knows the output. We noticed cases where it did not simulate but simply concluded that the code was incorrect, instead of tracing step-by-step as instructed. (e.g: arc195_e : see Figure 5) 
+
+> [... CodeSIM Simulation Excerpt ...] Take the provided failing test case input: 9 6 765689282 93267307 563699854 951829154 801512848 389123318 924504746 596035433 3 8 2 5 5 8 2 9 8 9 5 7 Run through the code step by step: 1. Parse N=9, Q=6. 2. Read A[2..9] modulo MOD: A[2]=765689282, A[3]=93267307, A[4]=563699854, A[5]=951829154, A[6]=801512848, A[7]=389123318, A[8]=924504746, A[9]=596035433. 3. Compute fact = (N-1)! = 8! modulo MOD. 4. Precompute inv[i] = pow(i, MOD-2, MOD) for i=1..N. 5. Build prefix S[i] = sum_{j=2..i} A_j * inv[j-1] (mod MOD). 6. For each query (u,v) compute val = (S[v] - S[u]) % MOD and ans = fact * val % MOD. When running this, the produced outputs differ from the expected outputs (they were reported as failing). So the code produced incorrect answers for that test case. [... Log Truncated ...]
+
+Figure 5: Example of a failure case of CodeSIM’s Simula-tion. An excerpt from a generated simulation log on a com-plex, math-heavy problem ( arc195_e ). When confronted with large integer arrays and modular arithmetic, the LLM suc-cessfully outlines the high-level algorithmic steps but fails to perform the step-by-step trace and reach an output. Biased by the explicit error signal provided in the prompt, it halts the simulation (highlighted in red) and concludes the code is incorrect without pinpointing the actual logical flaw. 
+
+In contrast as shown in Figure 6, DryRUN forces the LLM to autonomously synthesize its own non-trivial inputs. We observed a crucial phenomenon, while the model generates valid edge cases, it     
+
+> [... DryRUN Simulation Excerpt ...] 1) Choose a concrete sample input We must obey constraints (2 ≤N≤2e5, Q up to 2e5). To be non-trivial but small enough to trace manually, pick: - N = 5 - Q = 4 - A = (A2..A5) = [2, 3, 5, 7] - Queries: (1,2), (1,5), (2,4), (3,5) So input (as lines) is: 5 4 2 3 5 7 1 2 1 5 2 4 3 5 2) Parse input and initial setup data sequence: [5, 4, 2, 3, 5, 7, 1, 2, 1, 5, 2, 4, 3, 5] N = next(it) = 5 Q = next(it) = 4 [... Step-by-step arithmetic trace ...] Query4: (3,5) u=3, v=5 part1: x in 2..u-1 => 2..2 => S1 = B1[2]=24; S12 = B12[2]=8; diff=16; part1 = 2*16=32 part2: BFT[3] - B1[3] = 72 - 24 = 48 part3: x in 4..4 => B1[4] = 30 part4: BFT[5] = 168 ans = 32 + 48 + 30 + 168 = 278 So outputs lines: 48 246 168 278 [... Log Truncated ...]
+
+Figure 6: Example of Simulation of DryRUN An excerpt from DryRUN’s simulation for the same problem ( arc195_e ). The LLM generates a non-trivial but traceable input. This self-calibration ensures the subsequent step-by-step arithmetic trace remains well within its intrinsic simulation capacity, allowing it to successfully compute the final outputs. 
+
+inherently avoids synthesizing inputs that are too massive or com-plicated for it to mentally trace. We hypothesize that the LLM nat-urally calibrates the complexity of the generated inputs to strictly align with its intrinsic simulation capacity. This self-regulating behavior ensures that DryRUN consistently executes stable, pro-ductive mental traces without becoming overwhelmed, further explaining its competitive performance. We hypothesize that these contrasting advantages: DryRUN’s proactive refinements based on non-trivial but simpler inputs versus CodeSIM’s ability to leverage public tests with edge cases, counter-balance one another in our experiments, resulting in the observed performance parity. We intend to explore this dynamic further in future work. 
+
+## 5.2 DryRUN and SLMs 
+
+DryRUN did not do well with SLMs. With ( qwen2.5-coder:7b ), it only passed 6/18 of the easy problems and was far inferior to CodeSIM, which passed 13/18 problems. Inspecting the execution traces showed that the model frequently produced syntax errors and did not follow complex multi-step instructions (e.g., although instructions ask only to plan, not to create code, it often produced arXiv, 2026, Kaushitha Silva and Srinath Perera 
+
+code in the first step. So they often failed one of many complex steps. This is likely because of the gap between the reasoning ca-pabilities of SLMs and LLMs. Recent work has pointed out that SLMs in focused domains can reason much better than their size suggests [ 19 ]. As future work, we would like to explore how to tweak SLMs to provide good results with DryRUN. 
+
+## 5.3 Should we drop public tests from benchmarks? 
+
+Furthermore, these results bring into question whether we should include public test cases in the benchmarks. As we discussed, provid-ing public test cases is tedious, and weak public test cases may lead to overconfidence in code generation frameworks, leading to fail-ures. The availability of public test cases will bias code-generation solutions toward their availability. However, in real world scenario, it is likely that many developers will only provide trivial public ex-amples, which can lead to reduced performance in the field. While we do not believe our results are sufficient to conclude that we should remove public test cases from the benchmarks, it raises the question. 
+
+## 5.4 Future Work 
+
+Future research encompasses three primary directions. First, adapt-ing mental trace-driven refinement for Small Language Models (SLMs) remains an open challenge. Initial experiments indicate that current SLMs struggle with the multi-step reasoning required for mental simulation, and inability to follow complex commands (e.g: writing code when simulating, writing plans when prompted to refine the code), and frequently introducing syntax errors when generating the code. Second, while DryRUN strictly omits external execution, the framework inherently yields autonomously syn-thesized inputs and mentally predicted outputs. Reintroducing an execution sandbox purely to verify the accuracy of these mental simulations presents a promising diagnostic mechanism. Discrep-ancies between the model’s mental trace and the deterministic sandbox execution would yield a high-fidelity feedback signal, ex-plicitly highlighting flaws in the model’s comprehension of the problem specification. Finally, scaling the DryRUN framework to repository-level tasks (e.g., SWE-bench [ 11 ]) represents a necessary evolution. Because real-world repositories inherently lack compre-hensive input-output oracles, applying mental simulation to resolve cross-file dependencies serves as a rigorous testbed for the practical applicability of zero-example code generation. 
+
+## 6 Conclusion 
+
+Current code generation frameworks heavily depend on human-provided public tests, creating a disconnect from real-world soft-ware engineering where comprehensive input-output examples are often unavailable. We argued that relying on these simplistic tests frequently can cause the model to become overconfident in flawed solutions that fail to cover complex edge cases. To address this, DryRUN operates under strictly zero-example constraints by itera-tively planning, autonomously synthesizing valid inputs and men-tally simulating execution traces, eliminating the need for external sandboxes. Empirical evaluations based on LCB against state-of-the-art solutions and baselines demonstrate that the role of public test cases in driving correctness is much smaller than the commu-nity believes by matching the SOTA performance without using public test cases. While standard methods like CodeSIM exhibit an inflated overconfidence gap due to their reliance on trivial testing oracles, DryRUN maintains a much lower gap while maintaining comparable performance, proving the efficacy of execution-free self-correction. Ultimately, these findings challenge standard eval-uation practices and raise the critical question of whether public test cases should be removed from coding benchmarks entirely to prevent biased, overconfident models in the field. 
+
+## Data Availability 
+
+The source code and datasets supporting the findings of this study are available at the following Zenodo repository: https://zenodo.org/records/19348029. DryRUN: On the Role of Public Tests in LLM-Driven Code Generation arXiv, 2026, 
+
+## References 
+
+[1] Bei Chen, Fengji Zhang, Anh Nguyen, Daoguang Zan, Zeqi Lin, Jian-Guang Lou, and Weizhu Chen. 2022. CodeT: Code Generation with Generated Tests. doi:10.48550/arXiv.2207.10397 arXiv:2207.10397 [cs]. [2] Jizheng Chen, Kounianhua Du, Xinyi Dai, Weiming Zhang, Xihuai Wang, Yasheng Wang, Ruiming Tang, Weinan Zhang, and Yong Yu. 2025. DebateCoder: Towards Collective Intelligence of LLMs via Test Case Driven LLM Debate for Code Genera-tion. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and Mohammad Taher Pilehvar (Eds.). Association for Computational Linguistics, Vienna, Austria, 12055–12065. doi:10.18653/v1/2025.acl-long.589 [3] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian, Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert, Fotios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain, William Saunders, Christopher Hesse, Andrew N. Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles Brundage, Mira Murati, Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba. 2021. Evaluating Large Lan-guage Models Trained on Code. doi:10.48550/arXiv.2107.03374 arXiv:2107.03374 [cs]. [4] Aditya Desai, Sumit Gulwani, Vineet Hingorani, Nidhi Jain, Amey Karkare, Mark Marron, Sailesh R, and Subhajit Roy. 2015. Program Synthesis using Natural Language. doi:10.48550/arXiv.1509.00413 arXiv:1509.00413 [cs]. [5] Dong Huang, Qingwen Bu, Yuhao Qing, and Heming Cui. 2024. CodeCoT: Tackling Code Syntax Errors in CoT Reasoning for Code Generation. doi:10. 48550/arXiv.2308.08784 arXiv:2308.08784 [cs]. [6] Dong Huang, Jie M. Zhang, Michael Luck, Qingwen Bu, Yuhao Qing, and Heming Cui. 2024. AgentCoder: Multi-Agent-based Code Generation with Iterative Testing and Optimisation. doi:10.48550/arXiv.2312.13010 arXiv:2312.13010 [cs]. [7] Md Ashraful Islam, Mohammed Eunus Ali, and Md Rizwan Parvez. 2024. MapCoder: Multi-Agent Code Generation for Competitive Problem Solving. doi:10.48550/arXiv.2405.11403 arXiv:2405.11403 [cs]. [8] Md Ashraful Islam, Mohammed Eunus Ali, and Md Rizwan Parvez. 2025. CODESIM: Multi-Agent Code Generation and Problem Solving through Simulation-Driven Planning and Debugging. doi:10.48550/arXiv.2502.05664 arXiv:2502.05664 [cs]. [9] Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. 2024. Live-CodeBench: Holistic and Contamination Free Evaluation of Large Language Models for Code. doi:10.48550/arXiv.2403.07974 arXiv:2403.07974 [cs]. [10] Xue Jiang, Yihong Dong, Lecheng Wang, Zheng Fang, Qiwei Shang, Ge Li, Zhi Jin, and Wenpin Jiao. 2024. Self-planning Code Generation with Large Language Models. doi:10.48550/arXiv.2303.06689 arXiv:2303.06689 [cs]. [11] Carlos E. Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik Narasimhan. 2024. SWE-bench: Can Language Models Resolve Real-World GitHub Issues? doi:10.48550/arXiv.2310.06770 arXiv:2310.06770 [cs]. [12] Dacheng Li, Shiyi Cao, Chengkun Cao, Xiuyu Li, Shangyin Tan, Kurt Keutzer, Jiarong Xing, Joseph E. Gonzalez, and Ion Stoica. 2025. S*: Test Time Scaling for Code Generation. doi:10.48550/arXiv.2502.14382 arXiv:2502.14382 [cs]. [13] Jia Li, Ge Li, Yongmin Li, and Zhi Jin. 2023. Structured Chain-of-Thought Prompt-ing for Code Generation. doi:10.48550/arXiv.2305.06599 arXiv:2305.06599 [cs]. [14] Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. 2023. Is Your Code Generated by ChatGPT Really Correct? Rigorous Evaluation of Large Language Models for Code Generation. doi:10.48550/arXiv.2305.01210 arXiv:2305.01210 [cs]. [15] Yifei Liu, Li Lyna Zhang, Yi Zhu, Bingcheng Dong, Xudong Zhou, Ning Shang, Fan Yang, and Mao Yang. 2025. rStar-Coder: Scaling Competitive Code Reasoning with a Large-Scale Verified Dataset. doi:10.48550/arXiv.2505.21297 arXiv:2505.21297 [cs]. [16] Ruwei Pan, Hongyu Zhang, and Chao Liu. 2025. CodeCoR: An LLM-Based Self-Reflective Multi-Agent Framework for Code Generation. doi:10.48550/arXiv.2501. 07811 arXiv:2501.07811 [cs]. [17] Tal Ridnik, Dedy Kredo, and Itamar Friedman. 2024. Code Generation with AlphaCodium: From Prompt Engineering to Flow Engineering. doi:10.48550/ arXiv.2401.08500 arXiv:2401.08500 [cs]. [18] Noah Shinn, Federico Cassano, Edward Berman, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao. 2023. Reflexion: Language Agents with Verbal Reinforcement Learning. doi:10.48550/arXiv.2303.11366 arXiv:2303.11366 [cs]. [19] Liyuan Wang, Xingxing Zhang, Hang Su, and Jun Zhu. 2024. A Comprehensive Survey of Continual Learning: Theory, Method and Application. doi:10.48550/ arXiv.2302.00487 arXiv:2302.00487 [cs]. [20] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed Chi, Quoc Le, and Denny Zhou. 2023. Chain-of-Thought Prompting Elicits Reasoning in Large Language Models. doi:10.48550/arXiv.2201.11903 arXiv:2201.11903 [cs]. [21] Colin White, Samuel Dooley, Manley Roberts, Arka Pal, Ben Feuer, Siddhartha Jain, Ravid Shwartz-Ziv, Neel Jain, Khalid Saifullah, Sreemanti Dey, Shubh-Agrawal, Sandeep Singh Sandha, Siddartha Naidu, Chinmay Hegde, Yann LeCun, Tom Goldstein, Willie Neiswanger, and Micah Goldblum. 2025. LiveBench: A Chal-lenging, Contamination-Limited LLM Benchmark. doi:10.48550/arXiv.2406.19314 arXiv:2406.19314 [cs]. [22] Linghao Zhang, Shilin He, Chaoyun Zhang, Yu Kang, Bowen Li, Chengxing Xie, Junhao Wang, Maoquan Wang, Yufan Huang, Shengyu Fu, Elsie Nallipogu, Qingwei Lin, Yingnong Dang, Saravan Rajmohan, and Dongmei Zhang. 2025. SWE-bench Goes Live! doi:10.48550/arXiv.2505.23419 arXiv:2505.23419 [cs]. [23] Xiaoqing Zhang, Yuhan Liu, Flood Sung, Xiuying Chen, Shuo Shang, and Rui Yan. 2025. Thinking Before Running! Efficient Code Generation with Thorough Explo-ration and Optimal Refinement. doi:10.48550/arXiv.2502.17442 arXiv:2502.17442 [cs].
