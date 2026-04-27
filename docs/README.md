@@ -6,64 +6,58 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-26
-- 运行时间：2026-04-26 20:05:53 UTC
+- 最新运行日期：2026-04-27
+- 运行时间：2026-04-27 20:11:56 UTC
 - 运行状态：成功
-- 本次总论文数：14
-- 精读区：3
-- 速读区：11
+- 本次总论文数：12
+- 精读区：4
+- 速读区：8
 
 ### 今日简报（AI）
-继续深耕代码安全与生成可靠性研究，今日共阅 14 篇论文。  
-重点关注残余风险分析模型与基于 metamorphic testing 的大模型记忆诊断，这两方向技术成熟度显著提升。  
-建议读者关注多模型语义相似度评估与程序修复中的可解释安全机制，为后续实测提供思路。
-- 详情：[/202604/26/README](/202604/26/README)
+聚焦代码调试与模型记忆诊断，今日共研读 12 篇论文。  
+重点发现模型在程序修复中易“再生成”而非真正调试，执行反馈较架构更关键。  
+建议普通读者关注小模型在代码生成与调试中的反馈利用能力。
+- 详情：[/202604/27/README](/202604/27/README)
 
 ### 精读区论文标签
-1. [Residual Risk Analysis in Benign Code: How Far Are We? A Multi-Model Semantic and Structural Similarity Approach](/202604/26/2604.21051v1-residual-risk-analysis-in-benign-code-how-far-are-we-a-multi-model-semantic-and-structural-similarity-approach)  
+1. [Precise Debugging Benchmark: Is Your Model Debugging or Regenerating?](/202604/27/2604.17338v2-precise-debugging-benchmark-is-your-model-debugging-or-regenerating)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：利用语义和结构相似性评估补丁是否完全消除了风险
-2. [A Metamorphic Testing Approach to Diagnosing Memorization in LLM-Based Program Repair](/202604/26/2604.21579v1-a-metamorphic-testing-approach-to-diagnosing-memorization-in-llm-based-program-repair)  
+   evidence：对调试和过度编辑解决方案的精度感知评估
+2. [A Metamorphic Testing Approach to Diagnosing Memorization in LLM-Based Program Repair](/202604/27/2604.21579v1-a-metamorphic-testing-approach-to-diagnosing-memorization-in-llm-based-program-repair)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：使用蜕变测试诊断大模型修复中的记忆化问题
+3. [FlyCatcher: Neural Inference of Runtime Checkers from Tests](/202604/27/2604.22028v1-flycatcher-neural-inference-of-runtime-checkers-from-tests)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：从现有测试中神经推理运行时检查器
+4. [From Natural Language to Verified Code: Toward AI Assisted Problem-to-Code Generation with Dafny-Based Formal Verification](/202604/27/2604.22601v1-from-natural-language-to-verified-code-toward-ai-assisted-problem-to-code-generation-with-dafny-based-formal-verification)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：使用蜕变测试诊断大模型程序修复中的记忆问题，以确保评估的有效性。
-3. [DryRUN: On the Role of Public Tests in LLM-Driven Code Generation](/202604/26/2604.21598v1-dryrun-on-the-role-of-public-tests-in-llm-driven-code-generation)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：公共测试在代码生成的调试和模拟中的作用
+   evidence：形式化验证以确保代码生成的正确性并增强模型诚实性
 
 ### 速读区论文标签
-1. [Augmenting unit test suites from integration tests](/202604/26/2604.17508v1-augmenting-unit-test-suites-from-integration-tests)  
+1. [Feedback Over Form: Why Execution Feedback Matters More Than Pipeline Topology in 1-3B Code Generation](/202604/27/2604.21950v1-feedback-over-form-why-execution-feedback-matters-more-than-pipeline-topology-in-1-3b-code-generation)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：增强单元测试集以改进故障定位和覆盖率
-2. [WebCompass: Towards Multimodal Web Coding Evaluation for Code Language Models](/202604/26/2604.18224v1-webcompass-towards-multimodal-web-coding-evaluation-for-code-language-models)  
+   evidence：执行反馈用于代码生成的自我完善和修复运行时错误
+2. [Call-Chain-Aware LLM-Based Test Generation for Java Projects](/202604/27/2604.22046v1-call-chain-aware-llm-based-test-generation-for-java-projects)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估网页编码（包括修复任务和视觉保真度）的多模态基准。
-3. [Structural Verification for Reliable EDA Code Generation without Tool-in-the-Loop Debugging](/202604/26/2604.18834v1-structural-verification-for-reliable-eda-code-generation-without-tool-in-the-loop-debugging)  
+   evidence：基于LLM的测试生成，以创建可执行且语义有效的测试上下文
+3. [Benchmarking LLM-Driven Network Configuration Repair](/202604/27/2604.22513v1-benchmarking-llm-driven-network-configuration-repair)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：无需工具在环调试的结构化验证，用于可靠的代码生成
-4. [Refute-or-Promote: An Adversarial Stage-Gated Multi-Agent Review Methodology for High-Precision LLM-Assisted Defect Discovery](/202604/26/2604.19049v1-refute-or-promote-an-adversarial-stage-gated-multi-agent-review-methodology-for-high-precision-llm-assisted-defect-discovery)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：用于高精度缺陷发现和报告验证的多智能体评审
-5. [Revisiting Code Debloating with Ground Truth-based Evaluation](/202604/26/2604.17717v1-revisiting-code-debloating-with-ground-truth-based-evaluation)  
+   evidence：LLM驱动的网络配置修复基准测试与功能评估
+4. [Co-Located Tests, Better AI Code: How Test Syntax Structure Affects Foundation Model Code Generation](/202604/27/2604.19826v1-co-located-tests-better-ai-code-how-test-syntax-structure-affects-foundation-model-code-generation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：代码瘦身中基于测试用例的正确性评估
-6. [PlayCoder: Making LLM-Generated GUI Code Playable](/202604/26/2604.19742v1-playcoder-making-llm-generated-gui-code-playable)  
+   evidence：使用测试语法评估AI生成代码的正确性和保留性
+5. [The Path Not Taken: Duality in Reasoning about Program Execution](/202604/27/2604.20917v1-the-path-not-taken-duality-in-reasoning-about-program-execution)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：通过交互流而非简单的通过/失败测试用例来评估正确性
-7. [ViBR: Automated Bug Replay from Video-based Reports using Vision-Language Models](/202604/26/2604.19905v1-vibr-automated-bug-replay-from-video-based-reports-using-vision-language-models)  
+   evidence：预测程序行为并推断针对行为目标的输入变异
+6. [Generalizing Test Cases for Comprehensive Test Scenario Coverage](/202604/27/2604.21771v1-generalizing-test-cases-for-comprehensive-test-scenario-coverage)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：从视频报告中自动重现错误，以辅助修复和调试过程。
-8. [Taint-Style Vulnerability Detection and Confirmation for Node.js Packages Using LLM Agent Reasoning](/202604/26/2604.20179v1-taint-style-vulnerability-detection-and-confirmation-for-nodejs-packages-using-llm-agent-reasoning)  
+   evidence：泛化测试用例以实现全面的场景覆盖
+7. [Train in Vain: Functionality-Preserving Poisoning to Prevent Unauthorized Use of Code Datasets](/202604/27/2604.22291v1-train-in-vain-functionality-preserving-poisoning-to-prevent-unauthorized-use-of-code-datasets)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：使用LLM智能体推理进行漏洞检测与确认
-9. [Learning Reasoning World Models for Parallel Code](/202604/26/2604.20926v1-learning-reasoning-world-models-for-parallel-code)  
+   evidence：功能保留代码片段的自动修复和安全性检查
+8. [Test Design and Review Argumentation in AI-Assisted Test Generation](/202604/27/2604.22473v1-test-design-and-review-argumentation-in-ai-assisted-test-generation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：预测工具结果和执行轨迹，以改进并行代码的推理
-10. [Strategic Heterogeneous Multi-Agent Architecture for Cost-Effective Code Vulnerability Detection](/202604/26/2604.21282v1-strategic-heterogeneous-multi-agent-architecture-for-cost-effective-code-vulnerability-detection)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：用于代码漏洞检测的对抗性验证与校验器
-11. [SpecSyn: LLM-based Synthesis and Refinement of Formal Specifications for Real-world Program Verification](/202604/26/2604.21570v1-specsyn-llm-based-synthesis-and-refinement-of-formal-specifications-for-real-world-program-verification)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：基于大语言模型的程序验证形式化规范合成
+   evidence：AI辅助测试生成和评审论证的分类法
 
 
 <div class="dpr-home-promo-card">

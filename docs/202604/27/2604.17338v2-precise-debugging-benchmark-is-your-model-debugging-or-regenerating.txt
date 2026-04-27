@@ -1,0 +1,2339 @@
+Title: Precise Debugging Benchmark: Is Your Model Debugging or Regenerating?
+
+URL Source: https://arxiv.org/pdf/2604.17338v2
+
+Published Time: Mon, 27 Apr 2026 00:17:36 GMT
+
+Number of Pages: 37
+
+Markdown Content:
+## Precise Debugging Benchmark: Is Your Model Debugging or Regenerating? 
+
+Wang Bill Zhu ∗ ♠ Miaosen Chai ∗ ♠ Shangshang Wang ♠ Yejia Liu † ♣ 
+
+Song Bian ♡ Honghua Dong ♢ Willie Neiswanger ♠ Robin Jia ♠♠University of Southern California ♣Microsoft 
+
+♡University of Wisconsin–Madison ♢University of Toronto 
+
+Dataset Webpage Code Leaderboard Abstract 
+
+Unlike code completion, debugging requires localizing faults and applying targeted edits. We observe that frontier LLMs often regen-erate correct but over-edited solutions during debugging. To evaluate how far LLMs are from precise debugging, we introduce the PRE -
+
+CISE DEBUGGING BENCHMARKING (PDB) 
+
+framework, which automatically converts any coding dataset into a debugging benchmark with precision-aware evaluation. PDB gen-erates buggy programs by synthesizing ver-ified atomic bugs and composing them into multi-bug programs. We define two novel metrics, edit-level precision and bug-level re-call , which measures how many necessary ed-its are made and how many bugs are resolved. We release two evaluation benchmarks: PDB-SINGLE -H ARD on single-line bugs, and PDB-MULTI on multi-line bugs. Experiments show that frontier models, such as GPT-5.1-Codex and DeepSeek-V3.2-Thinking, achieve unit-test pass rates above 76% but exhibit precision below 45% , even when explicitly instructed to perform minimal debugging. Finally, we show that iterative and agentic debugging strategies do not substantially improve precision or recall, highlighting the need to rethink post-training pipelines for coding models. 
+
+1 Introduction 
+
+Large Language Models (LLMs) have reshaped the programming landscape through their remarkable capabilities in code generation (Chen et al., 2021; Li et al., 2022a). From synthesizing complex algo-rithms from natural language prompts to translating entire codebases, modern LLMs excel at producing code from scratch. However, real-world software development is dominated not by generation but by  
+
+> ∗
+
+Equal contribution.  
+
+> †
+
+Work done before joining Microsoft. Task: (Binary Search)                                                                     
+
+> Given alist of integers sorted in ascending order and a target value, write a function that finds the target in O(log n) time. Return its index if found; otherwise, return None.
+> Task Description
+> Buggy Code
+> 1.def fc(n, target): 2. R=len(n) 3. L=14. while L<R: 5. mid = (R + L) // 26. if n[mid] > target: 7. R = mid 8. else: 9. L = mid + 1 10. return mid if not n[mid] === target else None
+> Debug my code
+> return mid if n[mid] == target else None
+> Debugged Code
+> 1.def fc(n, target): 2. L= 0 3. R = len(n) -14. while L <= R: 5. mid =(L +R) // 26. if n[mid] == target: 7. return mid 8. elif n[mid] >target: 9. R=mid -110. else: 11. L = mid + 1 12. return None
+> Here is the correction
+> Rewrite Entirely
+
+⚠
+
+> Low Precision
+> Precise Debugging
+
+Figure 1: Real example from GPT-5.2 debugging a binary search program, where the model rewrites the entire solution. Green lines mark precise edits; gray lines highlight over-edits. 
+
+debugging and maintenance (Glass, 2002). When applied to debugging tasks, we observe that frontier LLMs often default to regeneration, i.e ., rewriting large portions, or even the entirety, of a program when presented with buggy code (Figure 1). While often effective at passing tests, this brute-force strat-egy is poorly suited for realistic codebases, where large-scale rewrites are costly, risky, and difficult to review (Sobania et al., 2023). In contrast, tar-geted debugging requires precise fault localization and minimal, intent-preserving edits. This raises a fundamental question: How far are LLMs from precise debugging, rather than merely reverting to their strength in code regeneration? 
+
+Existing debugging benchmarks focus on unit-test only evaluation and fail to evaluate these ca-pabilities. Under such evaluation, models are re-warded equally for regenerating a full solution, hard-coding outputs, or performing a minimal tar-geted fix. Moreover, unit-test evaluation obscures 
+
+> arXiv:2604.17338v2 [cs.SE] 24 Apr 2026
+
+incremental progress: a model that correctly repairs only one defect in a multi-bug program receives the same score as a model that fixes none. This misalignment with real-world debugging practice limits our ability to understand how LLMs reason about bugs and code edits. To address this gap, we introduce the P RECISE 
+
+DEBUGGING BENCHMARKING (PDB) framework, an automatic pipeline that rigorously evaluates LLM debugging behavior independently of code generation. PDB provides a plug-and-play frame-work that converts existing coding datasets into debugging benchmarks through two steps: (1) syn-thesizing verified atomic bugs to produce ground-truth edit scripts, and (2) composing these bugs into multi-bug programs while preserving bug in-dependence ( i.e ., avoiding compounding interac-tions). Beyond binary test outcomes, PDB evalu-ates model patches using novel edit-level precision 
+
+and bug-level recall , explicitly rewarding targeted fixes and penalizing unnecessary modifications. We constructed a 5,751-example PDB-S INGLE -HARD and a 256-example PDB-M ULTI evalua-tion benchmarks with the PDB framework, from BigCodeBench (Zhuo et al., 2024) and Live-CodeBench (Zhu et al., 2024). Experiments on PDB-S INGLE -H ARD reveal behaviors that unit tests fail to capture. First, frontier models ex-hibit strikingly different rankings under edit-level evaluation . Models such as GPT-5.1-Codex (OpenAI, 2025a) and DeepSeek-V3.2-Thinking (Liu et al., 2025) achieve high unit-test pass rates (>76% ) but low edit precision ( ≤45% ), while Qwen3-Coder-480B (Qwen, 2025) attains compar-atively lower unit-test pass rates ( 70% ) yet substan-tially higher precision ( 66% ). This ranking inver-sion persists on the multi-line benchmark PDB-MULTI , indicating that the precision gap reflects a consistent tendency toward regeneration. Addi-tionally, we show that though iterative and agentic debugging strategies can improve unit-test perfor-mance, they do not meaningfully improve preci-sion or recall. Our findings demonstrate the neces-sity of PDB for revealing true debugging capabili-ties beyond surface-level correctness, and highlight a fundamental limitation in current post-training pipelines for coding LLMs. 
+
+2 Precise Debugging Setup 
+
+We begin by formally defining the components of the automated debugging task. An automated de-bugging system M, takes the initial buggy pro-gram Cb and a natural language task description 
+
+x as input, and returns the predicted program re-vision ˆC = M(Cb, x ). The conventional debug-ging pipeline evaluates the system’s final output purely on its functional correctness, using a bi-nary evaluation function FU (C) → { 0, 1}, where 
+
+U = {u1, u 2, . . . , u n} is a suite of designed unit tests. The evaluation function FU returns 1 if the program C passes all tests in U, and 0 otherwise. While straightforward, this method cannot penal-ize unnecessary edits or wholesale rewrites when the final program merely passes the test, nor can it distinguish between partially correct solutions and entirely incorrect ones. The precise debugging setup shifts the evaluation from program-level to the specific set of edits proposed by the model. 
+
+Minimal corrections. We denote a line-edit on line l as el, and a set of line-edits as E. For a buggy program Cb, we denote the set of minimal corrections by 
+
+ECb = arg min 
+
+> E
+
+|E| s.t. FU (apply( E, C b)) = 1 ,
+
+where the apply function applies line-edits on Cb.Similarly, we can apply reverse edits ¯E on ground-truth program Cgt to derive buggy program Cb.
+
+Atomicity. We define the bug in a buggy program 
+
+Cb as atomic when a minimal correction consists of edits on a contiguous sequence of lines. Formally, 
+
+∃E ∈ E Cb such that E = {ei, e i+1 , . . . , e i+n}.
+
+Independence. Intuitively, independence means that fixing one bug neither introduces nor removes edits required to fix the other. For two edit sets 
+
+E1 ∈ E Cb1 and E2 ∈ E Cb2 corresponding to the same ground-truth program Cgt , we can construct a composed buggy program Cb3 = apply( ¯E1 ∪
+
+¯E2, C gt ). If the set of minimal corrections is the pairwise union of corrections from ECb1 and ECb2 ,we consider bugs in Cb1 and Cb2 to be independent .
+
+Semantic correctness. Consider a buggy pro-gram Cb containing k atomic and independent bugs, and a revision ˆC = apply( ˆE, C b), where ˆE is the predicted edits. We define bug-level semantic cor-rectness as follows. Let Egt ∈ E Cb be the set of ground-truth edits, which can be decomposed as Egt = E1 ∪ E2 ∪· · · ∪ Ek, where E1, . . . , E k are contiguous and non-overlapping. We employ a function, denoted Unit-test Score: Failed 
+
+(a) Data Collection (b) PDB Generation 
+
+Ground Truth Line Edits                                            
+
+> 1.def fc(n, target): 2. R= len(n) 3. L= 0 4. while L <= R: 󰍹
+> 5. mid = (R +L) // 26. if n[mid] > target: 7. R = mid 8. else: 9. L = mid + 110. return L - 1 if n[L -1] === target else None 󰍽
+> Line 4: "while L <= R:" ---> "while L <R:" Line 10: "return L - 1 if n[L -1]== target else None" ---> "return L - 1 if L >0 and n[L -1]== target else None"
+
+Generate multiple one-line bugs 
+
+Edit-based bug composition 
+
+Task and GT solution 
+
+Buggy Program 
+
+Existing Coding Benchmark                          
+
+> 1.def fc(n, target): 2. R= len(n) 3. L= 0 4. while L < R: 5. mid = (R +L) // 26. if n[mid] > target: 7. R = mid 8. else: 9. L = mid + 110. return L - 1 if L >0 and n[L -1] == target else None
+
+Ground Truth Solution     
+
+> Task: (Binary Search)
+> Given a list of integers sorted in ascending order and a target value, write a function that finds the target in O(log n). Return its index if found; otherwise, return None.
+> Example:
+> List = [-1,0,3,5,9,12] target = 9, Output: 4
+
+Task Description 
+
+Verify bugs with unit tests 
+
+Buggy program with line edits 
+
+(c) PDB Evaluation 
+
+Predicted Line Edits                  
+
+> Block 1 (Line 2): "R = len(n)" ---> "R = len(n) -1" Block 2 (Line 4): "while L <= R:" ---> "while L < R:" Block 3 (Line 7-12): "R = mid" ---> "R = (mid - 1)", "else:" "elif n[mid] < target:", ...
+
+Paired edits 
+
+Semantic check 
+
+Precise Debugging Benchmark 
+
+Debugged Program                                 
+
+> 1.def fc(n, target): 2. R= len(n) - 1 󰍹 New bug
+> 3. L=04. while L < R: 󰍽 Exact match
+> 5. mid = (R + L) // 2 6. if n[mid] > target: 7. R = (mid - 1) 8. elif n[mid] < target: 9. L = (mid + 1) 10. if n[mid] == target: 11. return mid 12. return None 󰍼 Semantically correct but redundant
+> Block 2 → {Line 4} Block 3 → {Line 10}
+
+Redundancy check  
+
+> Block 3
+
+Unit tests 
+
+Exact match   
+
+> Block 3
+> Block 2
+> Block 3 (3/6)
+
+Precision: 4/8 Recall: 2/2 Figure 2: PDB pipeline. Generation: LLMs first synthesize and verify single-line bugs from existing coding datasets, which are then composed into multi-bug programs. Evaluation: Automated debugging systems are evaluated on these programs using both unit-test accuracy and edit-level precision and bug-level recall. 
+
+as map , which pairs each Ei with the closest ed-its in ˆE. For each bug i, we construct a pseudo-revision ˆCi = apply(( Egt \ Ei) ∪ map( Ei), C b),which replaces the ground-truth edits Ei with the predicted edits map( Ei). We define a candidate 
+
+ˆCi as semantically correct for bug i if FU ( ˆCi) = 1 .Figure 2 (Block 3) is such an example. Based on this, we define precision and recall as: precision = 1
+
+| ˆE|
+
+kX
+
+i=1 
+
+FU ( ˆCi) · | Ei|, (1) recall = 1
+
+k
+
+kX
+
+i=1 
+
+FU ( ˆCi). (2) We note that precision functions as an edit-level metric by averaging over the edits | ˆE|, while recall is a bug-level metric averaged over the k bugs. 
+
+ϵ-relaxed essential edits. Since our objective is to discourage solution regeneration rather than to enforce strictly minimal edits, we relax the preci-sion metric in Eq. (1) by introducing a tolerance parameter ϵ, which allows up to |Ei| + ϵ edited lines for each bug i.Moreover, even when a candidate revision ˆCi
+
+is semantically correct for bug i, the predicted ed-its map( Ei) may still contain regeneration, as il-lustrated in Figure 2 (Block 3). To remove such redundancy, we introduce a unit-test–based func-tion essential U , which searches over subsets of 
+
+map( Ei) to recover the minimal essential edits re-quired to resolve bug i while preserving semantic correctness. Formally, we define the ϵ-relaxed es-sential edit size for bug i as 
+
+(| ˆEi|)ϵ = min( | essential U (map( Ei)) |, |Ei| + ϵ).
+
+Accordingly, the ϵ-relaxed precision is defined as precision ϵ = 1
+
+| ˆE|
+
+kX
+
+i=1 
+
+FU ( ˆCi) · (| ˆEi|)ϵ. (3) We provide full details of the map and essential U
+
+procedures in Appendix C. 
+
+3 Generation and Evaluation Pipeline 
+
+As illustrated in Figure 2, PDB consists of two stages: generation and evaluation . During the PDB generation stage, we first use LLMs to syn-thesize atomic bugs from existing coding datasets. After verifying buggy programs with unit tests, we record the corresponding edit sets and compose them to construct multi-bug programs. During the PDB evaluation stage, we prompt an automated de-bugging system M to revise the buggy programs, and evaluate its performance using both traditional unit-test accuracy and our proposed edit-level pre-cision and bug-level recall metrics. All prompt templates are provided in Appendix E. 
+
+3.1 PDB generation 
+
+Starting from an existing coding benchmark, for each task description x and ground-truth program 
+
+Cgt , we generate buggy programs across five Or-thogonal Defect Classification (ODC; Chillarege et al., 1992) categories: Assignment , Checking , Al-gorithm , Build/Package/Merge , and Timing/Seri-alization . Each category further contains several subcategories, listed in Table 7. 
+
+Atomic bug generation. Single-line bug can en-sure atomicity, as the minimal correction satisfies 
+
+|E| = 1 . We consider three types of line-level op-erations: insertion , deletion , and substitution . We first apply a rule-based filter to identify lines that are not safely deletable ( e.g ., causing indentation errors) or not editable ( e.g ., function headers). To promote diversity, we then randomly select (i) one operation type, (ii) one bug category, and (iii) a subset of editable lines compatible with the cho-sen operation. An LLM from a generator pool is prompted to modify one of the selected lines to pro-duce a single-line buggy program. We repeat this process m1 times per (x, C gt ) pair and retain only programs that fail unit tests, ensuring the validity of injected bugs. 
+
+Multiline bug generation. To extend the pipeline to multi-line bugs, we apply the same editing procedure to contiguous blocks of code. Specifically, we randomly select (i) a block size 
+
+B ∈ [2 , B max ], (ii) one primary and two auxiliary bug categories, and (iii) a valid range from which to sample a contiguous block of lines. Because multi-line edits — even within a contiguous block — do not inherently guarantee atomicity, we explicitly filter out violations. We implement an atomicity filter by enumerating all partial fixes that revert a strict subset of the modified lines back to Cgt ,and retain a bug instance only if all such partial fixes still fail unit tests. This procedure removes non-atomic cases where fixing a subset of edits is sufficient to pass the tests, which would otherwise inflate both precision and recall. BigCodeBench BigCodeBench BigCodeBench BigCodeBench BigCodeBench 
+
+> (2,525) (2,525) (2,525) (2,525) (2,525)
+> LiveCodeBench LiveCodeBench LiveCodeBench LiveCodeBench LiveCodeBench
+> (3,226) (3,226) (3,226) (3,226) (3,226)
+> 1 bug 1 bug 1 bug 1 bug 1 bug
+> (1,599) (1,599) (1,599) (1,599) (1,599)
+> 2 bugs 2 bugs 2 bugs 2 bugs 2 bugs
+> (1,729) (1,729) (1,729) (1,729) (1,729)
+> 3 bugs 3 bugs 3 bugs 3 bugs 3 bugs
+> (1,553) (1,553) (1,553) (1,553) (1,553)
+> 4 bugs 4 bugs 4 bugs 4 bugs 4 bugs
+> (870) (870) (870) (870) (870)
+> Algorithm Algorithm Algorithm Algorithm Algorithm
+> (5,312) (5,312) (5,312) (5,312) (5,312)
+> Assignment Assignment Assignment Assignment Assignment
+> (1,359) (1,359) (1,359) (1,359) (1,359)
+> Build/Package/Merge Build/Package/Merge Build/Package/Merge Build/Package/Merge Build/Package/Merge
+> (3,103) (3,103) (3,103) (3,103) (3,103)
+> Checking Checking Checking Checking Checking
+> (2,371) (2,371) (2,371) (2,371) (2,371)
+> Timing/Serialization Timing/Serialization Timing/Serialization Timing/Serialization Timing/Serialization
+> (1,052) (1,052) (1,052) (1,052) (1,052)
+
+Figure 3: Data distribution of PDB-S INGLE -H ARD .
+
+Bug composition. To create more challenging debugging scenarios, we compose multiple atomic bugs into a single program. For each (x, C gt ) pair and a target bug count k, we randomly sample k
+
+distinct block edits from the generated bugs. To encourage independence between bugs, we enforce a stride constraint, requiring any two selected edits to be at least s lines apart. For each bug count k ∈{2, . . . , k max }, we repeat this process m2 times per (x, C gt ) pair and record all composed multi-bug programs that satisfy the constraint. 
+
+Subsampling. To avoid over-representation of 
+
+(x, C gt ) pairs with many successful generations, we subsample the data by randomly selecting at most 
+
+m3 buggy programs per bug count per (x, C gt ) pair. 
+
+3.2 PDB evaluation 
+
+During evaluation, debugging systems, either single-pass LLMs or LLM-based agents, are in-structed to debug a buggy program Cb, given the task description x and, optionally, access to unit tests U and unit-test error feedback. We use the precision, recall equations as in Eq. (2, 3), and report the unit-test score at Pass@1 (Kulal et al., 2019). Finally, although subsampling reduces imbalance, the dataset may still be skewed toward certain bug counts. We therefore report 
+
+micro-averaged on all metrics by first averaging over examples with the same bug count and then across different bug counts. 
+
+4 Evaluation Sets 
+
+Using the PDB generation pipeline, we release two evaluation sets. PDB-S INGLE -H ARD tar-gets single-line bugs, and PDB-M ULTI extends the pipeline to contiguous multi-line bug blocks under a relaxed atomicity regime. We source tasks from two existing coding benchmarks, Big-CodeBench (Zhuo et al., 2024), which focuses on API usage, and LiveCodeBench (Zhu et al., 2024), which emphasizes algorithmic reasoning. Our bug-generation pool consists of three frontier LLMs: GPT-5.1-Codex (OpenAI, 2025a), Claude-4.5-Sonnet (Anthropic, 2025), and Gemini-2.5-Pro (Comanici et al., 2025). 
+
+PDB-S INGLE -H ARD . For each ground-truth task we generate m1 = 20 single-line bugs, com-pose up to m2 = 100 multi-bug variants with at most kmax = 4 independent bugs per program, and subsample m3 = 5 buggy programs per bug count per task. A stride of s = 3 lines is en-forced between composed blocks. This yields the initial PDB-S INGLE set of 7,591 examples (see Appendix B.2 for details). We evaluate PDB-S INGLE on 9 models, in-cluding thinking models: GPT-5.1-Codex, Claude-4.5-Sonnet, Gemini-2.5-Pro, Grok-Code-Fast (xAI, 2025), DeepSeek-V3.2-Thinking, and Kimi-K2-Thinking (Kimi et al., 2025); and non-thinking models: Qwen3-Coder-480B, DeepSeek-V3.2, and Kimi-K2-Instruct (Kimi et al., 2025). All models are prompted to produce minimal code edits . We use a maximum output length of 32,000 tokens for thinking models and 8,000 tokens for non-thinking models, with a temperature of 1.0 throughout. We then apply model-based filtering to identify easy examples. We use a tolerance ϵ = 2 for preci-sion evaluation with Eq. (3) An example is labeled easy if it achieves perfect precision, recall, and unit-test score for at least 7 out of the 9 evaluated models. Applying this criterion removes 1,840 ex-amples, resulting in the final PDB-S INGLE -H ARD 
+
+benchmark of 5,751 challenging examples. 
+
+PDB-M ULTI . Since multi-line bugs require larger stride and longer contexts to maintain in-dependence, we first select programs from Big-CodeBench and LiveCodeBench that exceed 35 lines. Each generator is assigned a disjoint subset of these tasks. We set the maximum block size to 
+
+Bmax = 4 lines, use a larger stride s = 5 while keeping the same m1, m 2, m 3, and compose up to kmax = 3 blocks per program. The resulting PDB-M ULTI dataset contains 256 examples. As multi-line blocks cannot strictly guarantee atomic-ity, we adopt a tolerance of ϵ = 1 in this setting.                               
+
+> Model Precision Recall Unit (%)
+> Claude-Sonnet-4.5 71.8 ±0.9 81.4 ±0.8 75.7 ±1.1 Gemini-2.5-Pro 71.4 ±0.9 83.5 ±0.7 78.1 ±1.0 Qwen3-Coder-480B 65.8 ±0.9 77.2 ±0.9 70.3 ±1.2 Kimi-K2-Instruct 56.6 ±1.0 72.7 ±0.9 64.8 ±1.2 Grok-Code-Fast 54.6 ±1.0 66.5 ±1.0 58.3 ±1.3 Kimi-K2-Thinking 51.7 ±0.9 75.6 ±0.9 74.0 ±1.1 DeepSeek-V3.2 48.4 ±1.0 70.0 ±1.0 71.4 ±1.2 DeepSeek-V3.2-Thinking 45.0 ±0.9 71.2 ±1.0 79.0 ±1.0
+> GPT-5.1-Codex 39.7 ±0.8 71.7 ±0.9 76.1 ±1.1
+
+Table 1: Precision, recall, and unit score on the PDB-SINGLE -H ARD set. Blue indicates better performance, while red indicates worse. 
+
+5 Experiment Results 
+
+By evaluating and analyzing both LLMs and LLM-based agents on PDB-S INGLE -H ARD and PDB-MULTI , we show that current systems remain far from achieving precise, edit-aware debugging. 
+
+5.1 PDB-S INGLE -H ARD overview Divergence in model debugging behaviors. 
+
+Even among top-performing models such as Claude-Sonnet-4.5 and Gemini-2.5-Pro, perfor-mance can only be characterized as relatively pre-cise and faithful: no frontier model exceeds 72% 
+
+precision, even when explicitly instructed to per-form minimal debugging. Table 1 shows that unlike unit-test pass rates, edit-level precision and bug-level recall reveals four different types of model debugging strategies: • Pass with precision : Claude-Sonnet-4.5 and Gemini-2.5-Pro debug correctly ( >75% ) with the highest precision ( >71% ) and recall ( >81% ). • Weak but precise : Qwen3-Coder-480B, though only achieves 70% unit score, has moderately high precision ( 66% ) and recall ( 77% ). • Weak, imprecise, but identifying : Kimi-K2-Instruct, Kimi-K2-Thinking, and Grok-Code-Fast reliably identify buggy regions but struggle to produce correct and precise fixes, with preci-sion below 57% .• Pass-oriented : DeepSeek-V3.2, DeepSeek-V3.2-Thinking, and GPT-5.1-Codex exhibit substan-tially lower precision ( ≤ 48% ), with recall below unit test scores, indicating a regeneration-heavy strategy that relies on broad rewrites. These results highlight the necessity of edit-level evaluation for distinguishing targeted debugging behavior from superficial pass-driven regeneration. 0.5 0.6 0.7 0.8            
+
+> Unit Score
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Precision  1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 34
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 34
+> 0.5 0.6 0.7 0.8
+> Unit Score
+> 0.675
+> 0.700
+> 0.725
+> 0.750
+> 0.775
+> 0.800
+> 0.825
+> 0.850
+> Recall
+> 1
+> 2
+> 34
+> 1
+> 2
+> 34
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 340.4 0.6 0.8
+> Unit Score
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> Precision
+> 1
+> 234
+> 1
+> 23
+> 4
+> 1
+> 23
+> 4
+> 1
+> 234
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 0.4 0.6 0.8
+> Unit Score
+> 0.55
+> 0.60
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> 0.95
+> Recall
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 34
+> 1
+> 2
+> 341
+> 2
+> 3
+> 41
+> 2
+> 3
+> 4
+> 12
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> Claude-Sonnet-4.5
+> Gemini-2.5-Pro
+> Qwen3-Coder-480B
+> Kimi-K2-Instruct
+> Grok-Code-Fast
+> DeepSeek-V3.2
+> GPT-5.1-Codex
+
+Figure 4: Correlation between precision, recall, and unit-test score across bug counts. Results are shown on subsets of PDB-S INGLE -H ARD from BigCodeBench (left) and LiveCodeBench (right), with bug counts indicated by numbers. As the number of bugs increases, precision generally exhibits a negative correlation with unit-test score, while recall displays dataset-dependent behavior. 
+
+Negative correlation between unit score and pre-cision. We further analyze model performance as the number of injected bugs increases ( k ∈{1, 2, 3, 4}), corresponding to increasing problem complexity. As shown in Figure 4, unit-test scores consistently decrease across all models as the num-ber of bugs increases. At the same time, we observe an inverse trend for edit-level precision. Because models tend to over-edit, increasing the number of bugs raises the likelihood that a model modi-fies at least one necessary line, but also increases the amount of unnecessary edits, leading to lower precision overall. This trend is further supported by our analysis in Appendix B, which shows that precision degrades as buggy code length increases. In contrast, recall primarily reflects debugging difficulty per bug, as it measures the fraction of bugs successfully addressed. Consistent with this interpretation, recall exhibits dataset-dependent behavior. On the API-focused BigCodeBench benchmark, where the difficulty of fixing individ-ual bugs remains relatively stable, recall varies by less than 5% across bug counts from 1 to 4. On the algorithm-focused LiveCodeBench benchmark, where debugging difficulty increases with the num-ber of injected bugs, recall shows a clear positive correlation with unit-test scores. 
+
+5.2 Iterative and agentic debugging 
+
+Next, we evaluate model behavior under iterative 
+
+and agentic debugging settings. In iterative debug-ging , models produce an initial single-shot solution and are then allowed up to three revision attempts per problem. The process terminates early if a re-vision passes all unit tests. Models have access to their previous failed outputs, approximating an interactive debugging workflow commonly used by human programmers. In the agentic setting, mod-els are likewise permitted up to three attempts, but additionally receive unit tests and execution error feedback at each step, resembling a simple agen-tic debugging pipeline with explicit external feed-back. We evaluate on 500 instances randomly sam-ple from PDB-S INGLE -H ARD , BigCodeBench sourced subset, as LiveCodeBench does not pro-vide unit tests. 
+
+Functional gains without precision improve-ments. As shown in Figure 5, both iterative and agentic settings consistently improve unit-test scores and recall, indicating a higher likelihood of eventually producing functionally correct programs and resolving a larger fraction of bugs. However, these gains do not translate into improved edit-level precision. In most cases, precision remains un-changed or degrades relative to single-shot debug-ging. This pattern suggests that iterative interaction primarily improves correctness by expanding the scope of code modifications, rather than by refining or localizing edits toward minimal repairs. 
+
+Ineffective use of feedback in agentic debugging. 
+
+Despite direct access to unit tests and execution feedback, most models fail to leverage this infor-mation to improve edit-level behavior in the agentic setting (Figure 5). In particular, agentic debugging often underperforms iterative debugging in preci-sion, suggesting that additional feedback may ex-acerbate regeneration-oriented strategies. Rather than supporting fault localization, test outcomes and error messages are frequently treated as coarse success signals that trigger further broad rewrites. These results indicate that access to feedback alone is insufficient to induce edit-aware debugging. Claude-Sonnet-4.5 
+
+> Gemini-2.5-Pro
+> Qwen3-Coder-480B
+> DeepSeek-V3.2
+> Kimi-K2-Instruct
+> Grok-Code-Fast
+> GPT-5.1-Codex
+> Claude-Code
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> Score
+> Precision-Single
+> Precision-Iterative
+> Precision-Agentic
+> Recall-Single
+> Recall-Iterative
+> Recall-Agentic
+> Unit Score-Single
+> Unit Score-Iterative
+> Unit Score-Agentic
+
+Figure 5: Both iterative and agentic setups on PDB-S INGLE -H ARD improve unit-test pass rates and recall over single-shot debugging, indicating higher functional success. However, edit-level precision does not improve and sometimes degrades. Notably, even Claude-Code with access to unit-test and execution feedback exhibits only 50% 
+
+precision.             
+
+> Model Precision Recall Unit (%)
+> Claude-Sonnet-4.5 65.9 73.9 64.8 Gemini-2.5-Pro 57.8 73.2 72.7 GPT-5.1-Codex 27.9 59.4 77.0
+
+Table 2: Performance on PDB-M ULTI , with the multi-line tolerance default ( ϵ = 1 ). The same precision gap persists under multi-line bug blocks. 
+
+Regeneration persists even in Claude-Code. 
+
+We observe similar trends in Claude-Code, which achieves the highest precision among agentic meth-ods but still attains only approximately 50% pre-cision. As shown in Figure 5, this result indicates that even more sophisticated, end-to-end agentic systems largely rely on regeneration rather than precise editing, reinforcing the conclusion that cur-rent debugging agents lack robust mechanisms for localized, minimal code repair. 
+
+5.3 Multi-line bug extension 
+
+To test whether the precision gap we observe on PDB-S INGLE -H ARD generalizes to multi-line bugs, we evaluate the three generator models on PDB-M ULTI . Table 2 summarizes the re-sults: PDB-M ULTI is generally harder than PDB-SINGLE -H ARD , but enlarging the bug granular-ity does not close the precision gap between models . The ranking is preserved: Claude-Sonnet-4.5 and Gemini-2.5-Pro again exhibit relatively precise-debugger behavior with precision above 
+
+57% , while GPT-5.1-Codex achieves the highest unit-test pass rate ( 77% ) but its precision is less than half that of Claude-Sonnet-4.5. 
+
+5.4 Real-world debugging evaluation on PDB 
+
+We apply PDB to the human-validated D EBUG -BENCH (Tian et al., 2024) to evaluate precision on real-world debugging tasks . Since D EBUG -BENCH does not provide explicit bug counts, we approximate them by filtering examples whose ground-truth fixes form contiguous edit blocks (with stride s = 5 , as in PDB-M ULTI ) and treating the number of blocks as the bug count, yielding 40 examples. Even in this setting, where D EBUG -BENCH is the easiest subset, the same qualitative pattern persists: high unit-test pass rates do not imply high edit precision. See detailed results in the Appendix B.3. 
+
+5.5 Analysis of prompting & data generation 
+
+For ablation study, we randomly sample 500 exam-ples from PDB-S INGLE , BigCodeBench sourced subset, to analyze how prompting and data genera-tion strategies affect model debugging behavior. 
+
+Freeform vs. minimal debugging. In our main experiments, models are explicitly instructed to perform debugging with minimal edits. To assess the impact of this constraint, we conduct an ab-lation in which models are instead prompted to debug freely, without any restriction on edit scope (see Appendix E for prompts). Figure 6 compares freeform to minimal-debug prompts. Across all evaluated models, freeform prompt-ing results in a substantial drop in edit-level pre-cision and bug-level recall. Even the strongest models, including Claude-Sonnet-4.5 and Qwen3-Coder-480B, achieve less than 60% precision un-der freeform prompting. Gemini-2.5-Pro exhibits a 
+
+40% absolute drop in precision, indicating that its apparent debugging precision largely stems from in-struction following rather than intrinsic edit aware-ness. GPT-5.1-Codex performs particularly poorly under freeform prompts, failing to reach 20% pre-cision. These results reinforce the regeneration behavior discussed in the introduction and demon-Claude-Sonnet-4.5      
+
+> Gemini-2.5-Pro
+> Qwen3-Coder-480B
+> Grok-Code-Fast
+> Kimi-K2-Instruct
+> DeepSeek-V3.2
+> GPT-5.1-Codex
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Score
+> Precision-Free Precision-Minimal Recall-Free Recall-Minimal Unit Score-Free Unit Score-Minimal
+
+Figure 6: Comparison of model performance under minimal-debug and freeform prompting on a subset of PDB-SINGLE . Freeform prompting leads to substantial drops in precision and recall across all models, indicating prompt-level constraints are necessary to increase debugging precision.             
+
+> Data Precision Recall Unit (%)
+> Raw 73.0 83.1 76.2 Rewrite-Same-Gen 76.5 86.6 76.4
+> Rewrite-Different-Gen 75.8 86.8 74.8
+
+Table 3: Rewriting ground truth data always makes it easier for models to debug more precisely on the buggy data, but only with different generators the model is harder to debug successfully on the buggy data. 
+
+strate that prompt-level constraints are necessary but insufficient : while minimal-debug prompts reduce over-editing, they do not fundamentally change underlying model behavior. 
+
+Regeneration vs. contamination. Although re-generation dominates model behavior on PDB, an open question is whether this tendency is driven by data contamination, i.e ., overlap between bench-mark solutions and model pretraining data. To dis-entangle these effects, we conduct two controlled analyses. First, we rewrite ground-truth solutions using rewriter models (Claude-Sonnet-4.5 or GPT-5.1-Codex), producing semantically equivalent but surface-diverse references. Second, we generate buggy programs using either the same model as the rewriter or a different generator model. As shown in Table 3, rewriting ground-truth solu-tions consistently makes debugging slightly easier, improving edit-level precision by 2.8-3.5% on aver-age. This suggests that increased surface diversity reduces incidental overlap and modestly improves precise debugging. In contrast, when buggy pro-grams are generated by a different model from the rewriter, performance degrades, with unit-test pass rates dropping by up to 1.4% . This indicates that cross-model generation introduces additional vari-ability that is more difficult for models to resolve. Taken together, these results suggest that while 
+
+data contamination may marginally influence de-bugging performance, it does not account for the pervasive regeneration behavior observed on PDB. 
+
+5.6 Metric verification and error analysis 
+
+We conduct a qualitative error analysis by manu-ally inspecting two categories of failures: (1) cases passing unit tests with imperfect precision or recall, and (2) cases failing unit tests despite containing partially correct edits. This analysis assesses the robustness of our precision and recall metrics. We randomly selected 240 examples from these cate-gories and derived the taxonomy described below; detailed examples are provided in Appendix D. 
+
+Passing unit tests with imperfect precision or recall. In this category, models successfully re-solve the intended bug but introduce extraneous modifications. In 83.5% of cases where unit tests pass, the recall score is also 1. 
+
+Precision Analysis: In scenarios where unit tests pass but precision <1, we observe that 9.8% of edits add redundant guard checks, 66.8% modify correct code blocks, 13.7% apply correct but non-minimal edits, and 7.8% fully regenerate the solution. No-tably, the remaining 1.9% of patches have low pre-cision because they fix bugs that were missing from the ground-truth solutions. Thus, our edit-level pre-cision accurately captures unnecessary edits. 
+
+Recall Analysis: Conversely, 16.5% of passing ex-amples exhibit imperfect recall. In this scenario, we find that 70% of examples are functionally cor-rect but evade recall detection due to over-editing or structural rewrites. Furthermore, 10% involve com-pounding bugs (approximately 1.65% of all cases), where an injected bug alters program logic such that other bugs change context, and another 20% arise because a single bug allows for multiple mini-mal correct fixes. This indicates that, provided bug independence is maintained during dataset creation, our bug-level recall is accurate for over 97.5% of BugGen Model Count Precision Recall Unit (%)             
+
+> GPT-5.1-Codex 1809 61.5 83.1 78.8 Gemini-2.5-Pro 1937 58.1 75.7 71.0 Claude-Sonnet-4.5 1988 49.9 67.6 67.8
+
+Table 4: Precision, recall, and unit score comparison across source bug generation models for PDB-S INGLE -HARD , averaged over debug models. Assignment 
+
+> Build/Package/Merge Algorithm
+> Checking
+> Timing/Serialization
+> 50%
+> 60%
+> 70%
+> Gemini-2.5-Pro
+> Claude-Sonnet-4.5
+> Qwen3-Coder-480B
+> Kimi-K2-Instruct
+> DeepSeek-V3.2
+
+Figure 7: Recall distribution over bug categories. 
+
+all the data. 
+
+Failing unit tests with partially correct edits. 
+
+In this category, models apply some correct edits but fail to fully resolve existing bugs or introduce new ones. We classify these failures into three types: (1) Under-repair (recall <1, precision =1 ): The model fixes some bugs without unnecessary ed-its but fails to apply all fixes (31.4%). (2) Imprecise repair (recall <1, precision <1): The model both misses fixes and introduces unnecessary or harmful edits (29.4%). (3) Regressive repair (recall =1 ): The model fixes all original bugs but introduces new errors that cause unit tests to fail; this accounts for the majority (39.2%). This gap highlights a silent reasoning challenge unique to debugging: models must understand program structure and pre-serve intent while restoring functional correctness, rather than merely generating working code. 
+
+5.7 Categorical analysis 
+
+We first analyze model debugging behavior across bug generation sources and defect categories. Ta-ble 4 reveals that bugs generated by GPT-5.1-Codex are consistently the easiest to debug, while those generated by Claude-Sonnet-4.5 are the hardest. This ordering is consistent across all evaluated met-rics. We further examine bug-level recall across de-fect categories (Figure 7). With the exception of Gemini-2.5-Pro, which exhibits relatively uniform recall of ∼70% across all categories, other models show markedly higher recall on the Build/Pack-age/Merge category. We hypothesize that this ad-vantage arises from the higher prevalence of such defects in model pretraining data, making them easier for models to recognize and repair. 
+
+6 Related Works 
+
+Debugging is a critical yet time-consuming stage of the software development lifecycle (Glass, 2002), making it a natural target for automation with LLMs. Recent systems increasingly emulate real-world debugging workflows, achieving improved performance through hierarchical multi-agent ar-chitectures (Han et al., 2024; Bouzenia et al., 2024) and agent-based data synthesis with explicit com-munication (Yang et al., 2024b). To evaluate such approaches, several general-purpose debugging benchmarks have been introduced, including those mined from historical bug-fixing commits (Tian et al., 2024; Siddiq et al., 2024) and those expand-ing coverage across programming languages (Ma et al., 2023). Other benchmarks focus on spe-cific dimensions of debugging, such as code edit-ing (Guo et al., 2024), systematic analyses of auto-mated bug fixing (Sobania et al., 2023), or broader coverage of debugging scenarios (Yuan et al., 2025; Huang et al., 2025; Chai et al., 2024). However, existing benchmarks predominantly rely on unit-test–based evaluation, which rewards models equally for rewriting large portions of code and for making minimal, targeted fixes. In contrast, PDB introduces edit-level precision and bug-level recall, exposing fundamental shortcomings in cur-rent debugging systems and aligning evaluation more closely with real-world practices. 
+
+7 Discussion 
+
+We show that while frontier LLMs often succeed at passing unit tests, they remain far from precise debugging, frequently relying on solution regen-eration rather than targeted edits. By introducing PDB and edit-level precision and bug-level recall, we expose behaviors that unit-test–only evaluation fails to capture, revealing substantial gaps between functional correctness and genuine debugging. Re-sults on PDB-S INGLE -H ARD demonstrate that im-proving debugging performance requires rethink-ing both evaluation and post-training objectives, with an explicit focus on fault localization and edit minimality. Limitation 
+
+First, PDB assumes bug independence when com-posing multi-bug programs, which can be difficult to guarantee in realistic software systems where bugs may interact. While such interactions are possible, we empirically observe that violations of this assumption constitute only a small frac-tion of cases (approximately 1.65% in our manual analysis) when data are generated using the PDB framework. Nonetheless, handling interacting or compounding bugs remains an open challenge. Second, our current prompts and data genera-tion procedures target Python programs. While this choice reflects the prevalence of Python in existing coding benchmarks, it may limit immediate appli-cability to other programming languages. That said, the underlying Orthogonal Defect Classification (ODC) categories are language-agnostic, and adapt-ing PDB to new languages primarily requires mod-ifying in-context examples and language-specific sub-categories, rather than redesigning the frame-work. Finally, although our edit-level precision and bug-level recall metrics provide a more accurate characterization of debugging behavior than unit-test–only evaluation, they may still fail to capture certain correct but semantically equivalent fixes. Incorporating more flexible semantic evaluation mechanisms, such as LLM-as-a-judge, may help address these edge cases. More broadly, reliably evaluating semantic correctness of code edits re-mains an open problem. 
+
+Acknowledgment 
+
+We thank Yuqing Yang, Johnny Tian-Zheng Wei, Deqing Fu, Ting-Yun Chang, and Muru Zhang for reviewing early drafts of this work. We also thank Haozhe Lu for valuable discussions and brainstorm-ing. WN was supported in part by the National Sci-ence Foundation under Grant No. CMMI-2427856. RJ was supported in part by the National Science Foundation under Grant No. IIS-2403436. Any opinions, findings, and conclusions or recommen-dations expressed in this material are those of the author(s) and do not necessarily reflect the views of the National Science Foundation. 
+
+References 
+
+Loubna Ben Allal, Raymond Li, Denis Kocetkov, Chenghao Mou, Efrat Bitton, Yacine Nako, Shang-Wen Lo, Thomas Wolf, Colin Raffel, Róger Gontijo-Lopes, and 1 others. 2023. SantaCoder: don’t reach for the stars! arXiv preprint arXiv:2301.03988 .Anthropic. 2025. Claude sonnet 4.5. https://www.anthropic.com/news/claude-sonnet-4-5. Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2024. Repairagent: An autonomous, llm-based agent for program repair. arXiv preprint arXiv:2403.17134 .Linzheng Chai, Shukai Liu, Jian Yang, Yuwei Yin, Ke Jin, Jiaheng Liu, Tao Sun, Ge Zhang, Changyu Ren, Hongcheng Guo, and 1 others. 2024. Mce-val: Massively multilingual code evaluation. arXiv preprint arXiv:2406.07436 .Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde De Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, and 1 others. 2021. Evaluating large language models trained on code. arXiv preprint arXiv:2107.03374 .Zhaoyang Chen, Yiling Liu, Haoyu Wang, Zhaoxue Liu, and Yuming Sun. 2023. Large language models for test-free fault localization. In Proceedings of the 38th IEEE/ACM International Conference on Automated Software Engineering , pages 680–692. Ram Chillarege, Inderpal S. Bhandari, Jarir K. Chaar, Michael J. Halliday, Diane S. Moebus, Bonnie K. Ray, and Man-Yuen Wong. 1992. Orthogonal defect classification-a concept for in-process measurements. 
+
+IEEE Trans. Softw. Eng. , 18(11):943–956. Gheorghe Comanici, Eric Bieber, Mike Schaekermann, Ice Pasupat, Noveen Sachdeva, Inderjit Dhillon, Mar-cel Blistein, Ori Ram, Dan Zhang, Evan Rosen, and 1 others. 2025. Gemini 2.5: Pushing the frontier with advanced reasoning, multimodality, long context, and next generation agentic capabilities. arXiv preprint arXiv:2507.06261 .Yiling Fan and Xin Xia. 2024. Copiloting the copilots: Fusing large language models with completion en-gines for automated program repair. In Proceedings of the 46th IEEE/ACM International Conference on Software Engineering , pages 63–75. Jialun Fu, Jingyi Chen, Binglei Li, and Siyuan Liu. 2023. A study on robustness and reliability of large language model code generation. arXiv preprint arXiv:2308.13888 .Robert L Glass. 2002. Facts and fallacies of software engineering . Addison-Wesley Professional. Jiawei Guo, Ziming Li, Xueling Liu, Kaijing Ma, Tianyu Zheng, Zhouliang Yu, Ding Pan, Yizhi Li, Ruibo Liu, Yue Wang, and 1 others. 2024. Codeedi-torbench: Evaluating code editing capability of large language models. arXiv preprint arXiv:2404.03543 .Don-Yeong Han, Minki Kang, Seong-Hyeon Kim, and Geon-Woo Lee. 2024. Fixagent: Hierarchical multi-agent framework for unified software debugging. In 
+
+Proceedings of the 46th IEEE/ACM International Conference on Software Engineering , pages 49–62. Dan Hendrycks, Steven Basart, Saurav Kadavath, Man-tas Mazeika, Akul Arora, Ethan Guo, Collin Burns, Samir Puranik, Horace He, Dawn Song, and 1 others. 2021. Measuring coding challenge competence with apps. arXiv preprint arXiv:2105.09938 .Jinyang Huang, Xiachong Feng, Qiguang Chen, Hanjie Zhao, Zihui Cheng, Jiesong Bai, Jingxuan Zhou, Min Li, and Libo Qin. 2025. Mldebugging: Towards benchmarking code debugging across multi-library scenarios. arXiv preprint arXiv:2506.13824 .Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Dayiheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang, Bowen Yu, Keming Lu, and 1 others. 2024. Qwen2. 5-coder technical report. arXiv preprint arXiv:2409.12186 .Nafis Tanveer Islam, Joseph Khoury, Andrew Seong, Mohammad Bahrami Karkevandi, Gonzalo De La Torre Parra, Elias Bou-Harb, and Peyman Na-jafirad. 2024. Llm-powered code vulnerability repair with reinforcement learning and semantic reward. 
+
+arXiv preprint arXiv:2401.03374 .Wanjun Jin, Itai Bar-Touv, Shaked Gersten, Stav Segal, and Shai Ben-David. 2023. Inferfix: End-to-end program repair with LLMs. In 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) , pages 1675–1687. IEEE. René Just, Darioush Jalali, and Michael D Ernst. 2014. Defects4j: A database of existing faults to enable controlled testing studies for java programs. In Pro-ceedings of the 2014 international symposium on software testing and analysis , pages 437–440. Kimi, Yifan Bai, Yiping Bao, Guanduo Chen, Jiahao Chen, Ningxin Chen, Ruijue Chen, Yanru Chen, Yuankun Chen, Yutian Chen, and 1 others. 2025. Kimi k2: Open agentic intelligence. arXiv preprint arXiv:2507.20534 .Sumith Kulal, Panupong Pasupat, Kartik Chandra, Mina Lee, Oded Padon, Alex Aiken, and Percy S Liang. 2019. Spoc: Search-based pseudocode to code. Ad-vances in Neural Information Processing Systems ,32. Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas Muennighoff, Denis Kocetkov, Chenghao Mou, Marc Marone, Christopher Akiki, Jia Li, Jenny Chim, and 1 others. 2023. Starcoder: may the source be with you! arXiv preprint arXiv:2305.06161 .Yujia Li, David Choi, Junyoung Chung, Nate Kushman, Julian Schrittwieser, Rémi Leblond, Tom Eccles, James Keeling, Felix Gimeno, Agustin Dal Lago, and 1 others. 2022a. Competition-level code generation with alphacode. Science , 378(6624):1092–1097. Yujia Li, David Choi, Junyoung Chung, Nate Kush-man, Julian Schrittwieser, Rémi Leblond, Tom Ec-cles, James Keeling, Felix Gimeno, Agustin Dal Lago, Thomas Hubert, Peter Choy, Cyprien de Mas-son d’Autume, Igor Babuschkin, Xinyun Chen, Po-Sen Huang, Johannes Welbl, Sven Gowal, Alexey Cherepanov, and 7 others. 2022b. Competition-level code generation with alphacode. Science ,378(6624):1092–1097. Aixin Liu, Aoxue Mei, Bangcai Lin, Bing Xue, Bingx-uan Wang, Bingzheng Xu, Bochao Wu, Bowei Zhang, Chaofan Lin, Chen Dong, and 1 others. 2025. Deepseek-v3. 2: Pushing the frontier of open large language models. arXiv preprint arXiv:2512.02556 .Fang Liu, Yang Liu, Lin Shi, Houkun Huang, Ruifeng Wang, Zhen Yang, Li Zhang, Zhongqi Li, and Yuchi Ma. 2024. Exploring and evaluating hallucinations in llm-powered code generation. arXiv preprint arXiv:2404.00971 .Yiqing Ma, Tri Le, Linyuan Dao, Buu Nguyen, Hieu Nguyen, Van-Anh Nguyen, Vu Le-Hong, and Hieu Pham Nguyen. 2023. Mdeval: A massively mul-tilingual code debugging benchmark. arXiv preprint arXiv:2309.16885 .Ahmad Mohsin, Helge Janicke, Adrian Wood, Iqbal H Sarker, Leandros Maglaras, and Naeem Janjua. 2024. Can we trust large language models generated code? a framework for in-context learning, security pat-terns, and code evaluations across diverse llms. arXiv preprint arXiv:2406.12513 .Christopher JC Ni, Jiacheng Wang, John Hewitt, Jackie Cheung, and James L Priestley. 2022. Lever: Learn-ing to verify language-to-code generation with exe-cution. In Proceedings of the 44th International Con-ference on Software Engineering , pages 863–875. Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan Wang, Yingbo Lin, Nazneen Rajani, Sergey Levine, Yi Zhou, and Silvio Savarese. 2023. CodeGen: An open large language model for code with multi-turn program synthesis. In The Eleventh International Conference on Learning Representations .OpenAI. 2025a. Gpt-5.1 codex. https://openai.com/index/gpt-5-1-for-developers/. OpenAI. 2025b. Gpt-5.2 codex. https://openai.com/index/introducing-gpt-5-2-codex/. Long Phan, Hieu Tran, Daniel Le, Hieu Nguyen, James Anibal, Alec Peltekian, and Yanfang Ye. 2021. Co-text: Multi-task learning with code-text transformer. 
+
+arXiv preprint arXiv:2105.08645 .Qwen. 2025. Qwen3 technical report. Preprint ,arXiv:2505.09388. Baptiste Roziere, Jonas Gehring, Fabian Gloeckle, Sten Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi, Jingyu Liu, Romain Sauvestre, Tal Remez, and 1 others. 2023. Code llama: Open foundation models for code. arXiv preprint arXiv:2308.12950 .Merlijn Sevenhuijsen, Khashayar Etemadi, and Mattias Nyberg. 2025. Vecogen: Automating generation of formally verified c code with large language models. 
+
+Preprint , arXiv:2411.19275. M. Ammar Siddiq, Islem Kaboré, Mojtaba Komeili, Homa Firooz, Abhinav Shrivastava, and Chitta Baral. 2024. Debugbench: Evaluating debugging capability of large language models. In Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision , pages 8647–8657. Manav Singhal, Tushar Aggarwal, Abhijeet Awasthi, Nagarajan Natarajan, and Aditya Kanade. 2024. No-funeval: Funny how code lms falter on require-ments beyond functional correctness. arXiv preprint arXiv:2401.15963 .Dominik Sobania, Martin Briesch, Carol Hanna, and Justyna Petke. 2023. An analysis of the auto-matic bug fixing performance of chatgpt. In 2023 IEEE/ACM International Workshop on Automated Program Repair (APR) , pages 23–30. IEEE. Florian Tambon, Arghavan Moradi-Dakhel, Amin Nikanjam, Foutse Khomh, Michel C Desmarais, and Giuliano Antoniol. 2025. Bugs in large language models generated code: An empirical study. Empiri-cal Software Engineering , 30(3):65. Runchu Tian, Yining Ye, Yujia Qin, Xin Cong, Yankai Lin, Yinxu Pan, Yesai Wu, Haotian Hui, Weichuan Liu, Zhiyuan Liu, and 1 others. 2024. Debugbench: Evaluating debugging capability of large language models. arXiv preprint arXiv:2401.04621 .Yue Wang, Zhe Wang, Dale Schuurmans, Hieu Le, Vincent Y Liu, Matt J Kusner, David Wang, Yiqin Li, Dusan Mandi´ c, Yekun Shi, and 1 others. 2023. CodeT5+: Open code large language models for code understanding and generation. arXiv preprint arXiv:2305.07922 .xAI. 2025. Grok code fast 1. https://x.ai/news/grok-code-fast-1. Xin Xia and Yixuan Zhang. 2023. Automated pro-gram repair via conversation: Fixing 162 out of 337 bugs for $0.42 each using chatgpt. arXiv preprint arXiv:2304.00385 .John Yang, Carlos E Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik R Narasimhan, and Ofir Press. 2024a. SWE-agent: Agent-computer inter-faces enable automated software engineering. In The Thirty-eighth Annual Conference on Neural Informa-tion Processing Systems .Weiqing Yang, Hanbin Wang, Zhenghao Liu, Xinze Li, Yukun Yan, Shuo Wang, Yu Gu, Minghe Yu, Zhiyuan Liu, and Ge Yu. 2024b. Coast: Enhancing the code debugging ability of llms through commu-nicative agent based data synthesis. arXiv preprint arXiv:2408.05006 .Michihiro Yasunaga and Percy Liang. 2021. Break-it-fix-it: Unsupervised learning for program repair. In 
+
+International conference on machine learning , pages 11941–11952. PMLR. Pengcheng Yin, Bowen Deng, Edgar Chen, Bogdan Vasilescu, and Graham Neubig. 2018. Learning to mine aligned code and natural language pairs from stack overflow. In 2018 IEEE/ACM 15th interna-tional conference on mining software repositories (MSR) , pages 476–486. IEEE. Xingdi Yuan, Morgane M Moss, Charbel El Feghali, Chinmay Singh, Darya Moldavskaya, Drew MacPhee, Lucas Caccia, Matheus Pereira, Minseon Kim, Alessandro Sordoni, and 1 others. 2025. debug-gym: A text-based environment for interactive de-bugging. arXiv preprint arXiv:2503.21557 .Lizhen Zhang, Wentao Chen, Li Zhong, Letian Peng, Zilong Wang, and Jingbo Shang. 2025. Memorize or generalize? evaluating llm code generation with code rewriting. arXiv preprint 2503.02296 .Quanjun Zhang, Tongke Zhang, Juan Zhai, Chun-rong Fang, Bowen Yu, Weisong Sun, and Zhenyu Chen. 2024. A critical review of large language model on software engineering: An example from chatgpt and automated program repair. Preprint ,arXiv:2310.08879. Li Zhong, Zilong Wang, and Jingbo Shang. 2024. De-bug like a human: A large language model debugger via verifying runtime execution step-by-step. arXiv preprint arXiv:2402.16906 .Ming Zhong, Xiang Zhou, Ting-Yun Chang, Qingze Wang, Nan Xu, Xiance Si, Dan Garrette, Shyam Upadhyay, Jeremiah Liu, Jiawei Han, and 1 others. 2025. Vibe checker: Aligning code evaluation with human preference. arXiv preprint arXiv:2510.07315 .Yixuan Zhu, Zhitong Zeng, Zhaoxue Liu, Yixing Feng, Yuming Sun, Zhaoyang Chen, Yiling Liu, and Haoyu Wang. 2024. Livecodebench: Holistic and contami-nation free evaluation of large language models for code. In Proceedings of the 12th International Con-ference on Learning Representations (ICLR) .Terry Yue Zhuo, Minh Chien Vu, Jenny Chim, Han Hu, Wenhao Yu, Ratnadira Widyasari, Imam Nur Bani Yusuf, Haolan Zhan, Junda He, Indraneil Paul, and 1 others. 2024. Bigcodebench: Benchmarking code generation with diverse function calls and complex instructions. arXiv preprint arXiv:2406.15877 .Appendix 
+
+A Additional Related Works 13 B Additional Experiments 14 
+
+B.1 Additional results on PDB-SINGLE -H ARD . . . . . . . . . . 14 B.2 Additional results on PDB-S INGLE 14 B.3 DebugBench PDB evaluation results 14 
+
+C Algorithm on Precision and Recall 14 D Examples of Debugging Categories 15 E Prompt templates 15 F Checklist Information 15 
+
+A Additional Related Works 
+
+We discuss additional related work in the broader context of code generation and debugging. 
+
+Code Generation. The capability of LLMs in code generation has been transforming both academia and industry. Beginning with seminal models like Codex (Chen et al., 2021), the field has rapidly advanced with the introduction of dozens of powerful code-centric models including Code Llama (Roziere et al., 2023), StarCoder (Li et al., 2023; Allal et al., 2023), CodeGen (Nijkamp et al., 2023), CodeT5+ (Wang et al., 2023), Qwen Coder Series (Hui et al., 2024; Qwen, 2025), and more recent GPT-5.1 and 5.2 codex (OpenAI, 2025a,b). These models, trained on vast web-scale datasets of code, excel at synthesizing end-to-end programs from natural language prompts. To evaluate their capabilities, numerous benchmarks have been es-tablished, ranging from function-level synthesis tasks like HumanEval (Chen et al., 2021) and CoNaLa (Yin et al., 2018), to more complex chal-lenges including APPS (Hendrycks et al., 2021), CodeContests (Li et al., 2022b), SPOC (Kulal et al., 2019), and BigCodeBench (Zhuo et al., 2024). Beyond functional correctness, works like Vibe Checker (Zhong et al., 2025) and NoFu-nEval (Singhal et al., 2024) target the evaluation of models’ non-functional instruction-following abilities. Recent agent-based systems like SWE-Agent (Yang et al., 2024a) and AutoGen (Seven-huijsen et al., 2025) demonstrate the potential of LLMs in autonomous development workflows. Re-cently, Zhang et al. (2025) examined memorization effects in LLM-based code generation. We eval-uated this hypothesis through targeted rewriting experiments (Table 3) and found that memorization is not the root cause of regenerator-style behavior in debugging. 
+
+Debugging Frameworks. As a critical and of-ten time-consuming task, debugging has naturally emerged as another target for automation using LLMs. This need is further magnified by the fact that code generation models themselves are a sig-nificant source of buggy and potentially vulner-able code (Ni et al., 2022; Fu et al., 2023; Jin et al., 2023; Mohsin et al., 2024; Tambon et al., 2025; Liu et al., 2024). Consequently, a spec-trum of approaches have been proposed to leverage these models for program repair. Early work like Break-It-Fix-It (Yasunaga and Liang, 2021) intro-duced unsupervised learning for program repair, while CoText (Phan et al., 2021) explored multi-task learning with code-text transformers. Recent systems emulate real-world debugging workflows through sophisticated agent architectures: FixA-gent (Han et al., 2024) employs hierarchical multi-agent frameworks, RepairAgent (Bouzenia et al., 2024) demonstrates autonomous repair capabilities, and COAST (Yang et al., 2024b) enhances debug-ging through communicative agent-based data syn-thesis. These approaches utilize techniques ranging from zero-shot prompting to multi-turn conversa-tional agents (Chen et al., 2023; Fan and Xia, 2024; Xia and Zhang, 2023; Zhong et al., 2024; Islam et al., 2024). 
+
+Debugging Evaluation To evaluate the perfor-mance of these LLM debugging approaches, a handful of benchmarks have been established. Early work like Defects4J (Just et al., 2014) pro-vided curated bug datasets from real-world Java projects, while recent benchmarks have adapted to the LLM era. (Tian et al., 2024; Siddiq et al., 2024) create debugging scenarios by mining historical bug-fixing commits. (Ma et al., 2023) curates multi-lingual code repair tasks spanning Python, Java, and JavaScript, while (Zhu et al., 2024) mitigates data contamination by using live programming contests. Specialized benchmarks like CodeEdi-torBench (Guo et al., 2024) focus on code edit-ing capabilities, and analyses like (Sobania et al., 2023) examine automatic bug fixing performance on existing datasets. A common limitation of these benchmarks, however, is their reliance on a sim-ple, binary pass/fail metric on test cases (Zhang Model Precision Recall Unit (%)                            
+
+> Claude-Sonnet-4.5 78.1 ±0.7 85.7 ±0.6 81.9 ±0.9 Gemini-2.5-Pro 77.9 ±0.7 87.5 ±0.6 83.8 ±0.8 Qwen3-Coder-480B 73.5 ±0.8 82.4 ±0.7 77.4 ±0.9 Kimi-K2-Instruct 65.8 ±0.8 78.8 ±0.7 73.0 ±1.0 Grok-Code-Fast 63.8 ±0.9 73.2 ±0.8 67.1 ±1.1 Kimi-K2-Thinking 61.3 ±0.8 81.2 ±0.7 80.8 ±0.9 DeepSeek-V3.2 58.6 ±0.9 76.2 ±0.8 78.2 ±0.9 DeepSeek-V3.2-Thinking 56.0 ±0.9 77.5 ±0.8 84.7 ±0.8
+> GPT-5.1-Codex 50.3 ±0.8 77.8 ±0.8 82.0 ±0.9
+
+Table 5: Precision, recall, and unit score on the PDB-SINGLE set. Blue indicates better performance, while red indicates worse. 
+
+et al., 2024). Such coarse-grained evaluation is insufficient, as it cannot distinguish between a min-imal, targeted fix and a complete code regeneration that merely passes the tests—a distinction crucial for understanding whether models truly compre-hend debugging or simply regenerate working so-lutions. In contrast, our proposed PDB disentan-gles debugging from code generation, introducing fine-grained evaluation metrics that assess not only functional correctness but also the precision, mini-mality, and human-like nature of code repairs, bet-ter reflecting real-world debugging practices where understanding and fixing the root cause is valued over wholesale replacement. 
+
+B Additional Experiments 
+
+We report additional experimental results on PDB-SINGLE -H ARD and PDB-S INGLE in this section. 
+
+B.1 Additional results on PDB-S INGLE -H ARD 
+
+We list the rewriting figure in Figure 8, which shares a similar but breakdown finding as Table 3. Moreover, we show the model-averaged perfor-mance on PDB-S INGLE -H ARD over the distribu-tion of buggy code length. All metrics have a sim-ilar performance drop, suggesting that increasing code length improves code completion difficulty and makes it harder for models to hit the necessary edits at the same time. 
+
+B.2 Additional results on PDB-S INGLE 
+
+We list model performance on three metrics on PDB-S INGLE in Table 5, which are 4-8% higher than the results in Table 1 on PDB-S INGLE -H ARD ,under the same ranking. The negative correlation or precision and unit score over bug counts, and the positive correlation             
+
+> Model Precision Recall Unit (%)
+> Claude-Sonnet-4.5 78.4 87.3 87.5 Gemini-2.5-Pro 79.4 89.4 85.0 GPT-5.1-Codex 61.9 74.0 90.0
+
+Table 6: Model performance on DebugBench, evalu-ated with the PDB framework. The qualitative pattern observed on PDB-S INGLE -H ARD and PDB-M ULTI 
+
+persists: high unit-test pass rates coexist with substan-tially lower edit-level precision. 
+
+or recall and unit score over bug counts, are both clearer in the PDB-S INGLE set as described in Figure 10. 
+
+B.3 DebugBench PDB evaluation results 
+
+We extend the PDB evaluation framework to D E-
+
+> BUG
+
+BENCH (Tian et al., 2024), a human-validated benchmark of real-world debugging tasks, to as-sess whether our precision–recall findings transfer beyond synthetic bugs. Because D EBUG BENCH does not provide ex-plicit bug counts, we approximate them using edit structure. We filter for examples whose ground-truth fixes form contiguous edit blocks satisfying the same stride constraint ( s = 5 ) used in PDB-MULTI , and treat the number of such blocks as the bug count, which is 1 in DebugBench. This yields a subset of 40 examples, sampled uniformly at random. We evaluate three representative frontier models under the same protocol and report results in Ta-ble 6. Although D EBUG BENCH appears easier than PDB-S INGLE -H ARD and PDB-M ULTI under all metrics, the same qualitative trend persists: models that achieve high unit-test pass rates can still ex-hibit substantially lower edit precision, reflecting a tendency toward over-editing even on real-world tasks. 
+
+C Algorithm on Precision and Recall 
+
+Following the definitions in §2, we formalize the block matching functions map and map ϵ in Algo-rithm 1 and Algorithm 2, respectively. The function map performs edit alignment be-tween ground-truth and predicted patches by first identifying exact line-level matches and then re-solving block-level correspondences using struc-tural containment, local contextual similarity, and content equality. For cases where ϵ relaxation is used, we have to verify redundant editing over ϵ, map ϵ extends this Claude-Sonnet-4.5 
+
+> Gemini-2.5-Pro
+> Qwen3-Coder-480B
+> Grok-Code-Fast
+> Kimi-K2-Instruct
+> DeepSeek-V3.2
+> GPT-5.1-Codex
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> Score
+> Precision-Rewrite-Diff
+> Precision-Rewrite-Same
+> Precision-Raw
+> Recall-Rewrite-Diff
+> Recall-Rewrite-Same
+> Recall-Raw
+> Unit Score-Rewrite-Diff
+> Unit Score-Rewrite-Same
+> Unit Score-Raw
+
+Figure 8: Model breakdown performance on PDB-S INGLE -H ARD rewriting with the same generator, or a different generator. 
+
+ODC Category Sub-category Brief Description Assignment 
+
+Mutability Trap Mutable default arguments cause unintended shared state across calls. Late Binding in Closures Loop variables captured by reference, yielding unexpected final values. List Multiplication Surprise List multiplication creates multiple references to the same inner object. Built-in Shadowing Assigning to names like list or sum hides built-ins. Variable Shadowing Inner-scope variables obscure outer-scope references. Name Error Variable is used before being assigned or defined. 
+
+Checking 
+
+Off-by-One Error Boundary condition is shifted by exactly one element or unit. Negation Error Boolean condition is logically inverted. Missing or Incomplete Checks Absent validation leads to runtime errors (e.g., KeyError, TypeError). Overwriting Built-in Names Built-in identifiers are reassigned, breaking later function calls. Variable Shadowing Confusing variable scope leads to incorrect condition evaluation. Chained Boolean Comparison Logic Misparsed chained comparisons yield unintended logic. Implicit Boolean Conversion Empty collections and None are conflated in boolean context. Membership Logic Flaws Misunderstanding how membership tests behave for data types. 
+
+Algorithm 
+
+Wrong Math Expression Mathematical formula or operands are incorrectly specified. Modifying While Iterating Collection is altered during iteration, skipping or misprocessing elements. Function Algorithm Misunderstanding Function behavior is misunderstood (e.g., substring vs. set semantics). Function Argument Misunderstanding Incorrect interpretation of function arguments or defaults. Infinite Loop / Recursion Termination condition is missing or unreachable. Other Logical Errors Deeper algorithmic invariants are violated during execution. 
+
+Build/Package/Merge Invalid API Call Method is invoked on an unsupported data type or abstraction. Dependency Version Conflicts Code relies on APIs removed or changed across library versions. 
+
+Timing/Serialization Serialization Issue Non-serializable objects are passed to pickle or JSON encoders. Async Blocking Blocking calls inside async code stall the event loop. 
+
+Table 7: ODC-style taxonomy of common programming defects with summarized descriptions. These are used as in-context examples. 
+
+procedure by incorporating semantic verification through unit-test evaluation, allowing a bounded tolerance of up to ϵ additional edits. By explicitly validating semantic equivalence and minimizing effective edit scope within this tolerance, map ϵ
+
+yields a robust matching that supports relaxed pre-cision evaluation while remaining faithful to tar-geted debugging behavior, which is also examined qualitatively in §5.6. 
+
+D Examples of Debugging Categories 
+
+We show different categories of debugging with examples from Figure 11-19. 
+
+E Prompt templates 
+
+We provide the prompt templates used in our ex-periments, ranging from bug injection and solution rewriting to minimal and free-form debugging with optional unit tests and execution feedback, shown in Figures 20–31. 
+
+F Checklist Information 
+
+Risks of malicious use of PDB pipeline. PDB provides a systematic procedure for producing realistic buggy programs from existing code by prompting deliberate fault introduction. Hence, the same pipeline that supports controlled debugging evaluation could be repurposed for malicious bug-injection at scale, enabling automated generation Algorithm 1: map : mapping predicted edits to ground-truth edits 
+
+Input: Buggy program Cb; Predicted edits ∆pred ; GT edits ∆gt 
+
+Output: Matched blocks MM ← ∅ , ∆rem gt ← ∆gt , ∆rem pred ← ∆pred // each element in ∆ has fields: line, edit 
+
+Ball gt ← PARSE TOBLOCKS (∆ rem gt )
+
+Brem gt ← PARSE TOBLOCKS (∆ rem gt ) // each block in B has fields: start, end and ∆
+
+Pass 1: Exact line-level matches (EM). foreach predicted edit (ℓ, v ) ∈ ∆rem pred in descending ℓ do if ℓ ∈ ∆rem gt and EQUAL (v, ∆rem gt [ℓ]) then 
+
+M ← M ∪ { MAKE MATCH (v, v, none )} // No need to test for exact match 
+
+remove ℓ from ∆rem gt and remove ℓ from ∆rem pred 
+
+remove the GT block starting at ℓ from Brem gt 
+
+Brem pred ← PARSE TOBLOCKS (∆ rem pred )
+
+Pass 2: Block-level matching. for j ← 1 to |B rem pred | do 
+
+Bpred ← B rem pred [j]
+
+G ← ∅ // matched GT blocks for this predicted block 
+
+(2.1) Wrap match: predicted block covers GT block start. foreach Bgt ∈ B rem gt do if Bpred .start ≤ Bgt .start ≤ Bpred .end then 
+
+G ← G ∪ { Bgt }
+
+(2.2) Near match: context-line overlap before and after. if G = ∅ then 
+
+S− 
+
+> pred
+
+← CONTEXT BEFORE (Cb, B pred , Brem pred )
+
+S+ 
+
+> pred
+
+← CONTEXT AFTER (Cb, B pred , Brem pred )
+
+foreach Bgt ∈ B rem gt do 
+
+S− 
+
+> gt
+
+← STRIDE CONTEXT BEFORE (Cb, B gt )
+
+S+ 
+
+> gt
+
+← STRIDE CONTEXT AFTER (Cb, B gt )
+
+if LINE SET MATCH (S−
+
+> pred
+
+, S − 
+
+> gt
+
+) and LINE SET MATCH (S+
+
+> pred
+
+, S + 
+
+> gt
+
+) then 
+
+G ← { Bgt }
+
+break (2.3) Distant-but-identical: single-line equality. if G = ∅ and |Bpred .∆| = 1 then foreach Bgt ∈ B rem gt do if EQUAL (Bpred .∆.edit , B gt .∆.edit ) then 
+
+G ← { Bgt }
+
+break if G̸ = ∅ then 
+
+Btest ← MERGE BLOCKS (Ball gt \ G ∪ { Bpred })
+
+Ctest ← APPLY (Btest .∆, C b)
+
+M ← M ∪ { MAKE MATCH (Bpred , G, C test )} // Use Ctest to test matched pairs 
+
+remove all blocks in G from Brem gt 
+
+return MAlgorithm 2: essential U : finding ϵ-relaxed essential edits for each matching in M
+
+Input: Buggy program Cb; GT blocks Bgt ; Predicted and GT edits ∆pred , ∆gt ; Tolerance ϵ; Unit tests FU (·)
+
+Output: Final matching Mϵ with two more additional fields success and essential_size 
+
+Step 1: Candidate matching via map .
+
+M ← map( Cb, ∆gt , ∆pred )
+
+// M contains a pred_block Bpred , gt_blocks G, and a tester Ctest built by replacing matched GT blocks with predicted blocks. 
+
+ϵ ← ϵ + 1 
+
+// Redefine ϵ as allowed lines per bug instead of the additional lines 
+
+Step 2: Semantic equivalence verification using FU .foreach match record r ∈ M do if r. tester = none or FU (r. tester ) = 1 then 
+
+r. success ← True 
+
+Bpred ← r. pred_block 
+
+G ← r. gt_blocks 
+
+r. essential_size ← min ( |G| · ϵ, |Bpred .∆|)
+
+else 
+
+r. success ← False 
+
+r. essential_size ← 0
+
+Step 3: Deep redundancy check to realize ϵ-relaxed essential edits. foreach match record r ∈ M with r. success = True do 
+
+S ← ∅ // candidate sub-blocks 
+
+Bpred ← r. pred_block 
+
+G ← r. gt_blocks // Enumerate smaller contiguous sub-edits within the predicted block. 
+
+let (Bpred .∆) = [( ℓ1, v 1), . . . , (ℓm, v m)] ordered by ℓ
+
+for τ ← 0 to |G| · ϵ − 1 do for line ← 1 to m − τ do 
+
+Bsub ← SUB BLOCK (Bpred , line, line + τ )
+
+Btest ← MERGE BLOCKS (Bgt \ G ∪ { Bsub })
+
+Csub ← APPLY (Btest .∆, C b)
+
+S ← S ∪ { (τ + 1 , C sub )}
+
+// Find the smallest τ that still passes FU .
+
+τ ⋆ ← +∞
+
+foreach (τ, C sub ) ∈ S do if FU (Csub ) = 1 and τ < τ ⋆ then 
+
+τ ⋆ ← τ
+
+if τ ⋆ < +∞ then 
+
+r. essential_size ← τ ⋆;
+
+Mϵ ← M 
+
+return Mϵ5-9 15-19 25-29 35-39 45-49 50+     
+
+> Buggy Code Length
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Score
+> Precision
+> Recall
+> Unit Score
+> Sample Count
+> 0
+> 1000
+> 2000
+> 3000
+> Sample Count
+> 290
+> 1329 1428
+> 1171
+> 600
+> 363
+> 205 85 92 171
+
+Figure 9: Model averaged performance on PDB-SINGLE -H ARD over distribution of buggy code length. All metrics show a similar performance drop. 
+
+of large quantities of plausible faulty code with minimal surface changes. Such capability may be misused to degrade software reliability in collab-orative development settings, increase the review burden on maintainers, or seed low-quality code into shared repositories. Another risk concern is potential data poisoning and model capability shaping. Because PDB con-verts coding data into structured buggy program and solution pairs, it can lower the cost of creat-ing large synthetic corpora that contain intentional buggy programs with minimal-edit transformations. If used outside the intended research context, these data could be silently employed to bias training to-ward behaviors that facilitate code degradation, or to contaminate downstream datasets used for model deployment and benchmarking. Even when the im-mediate artifacts are non-sensitive, the potential, silent shift in model behavior raises concerns. 
+
+Risks of malicious use of PDB-S INGLE -H ARD .
+
+PDB-S INGLE -H ARD concentrates challenging de-bugging instances derived from benchmark-style programming tasks (LiveCodeBench and Big-CodeBench). Using such data to train code-editing or debugging models is a natural extension of its intended role, which includes training models that can both repair and introduce faults under different objectives. The potential risk arises from how this capability is used and framed: if the PDB-S INGLE -HARD (or derivatives) is used to optimize for fault insertion or to condition models toward producing plausible bugs with localized edits, it could support misuse in settings where code integrity matters. 
+
+Licensing landscape of evaluated models. The governance of the evaluated LLMs and benchmarks reveals a sharp dichotomy between proprietary services and open-weight ecosystems. The pro-prietary tier includes GPT-5.1-Codex (OpenAI), Claude-Sonnet-4.5 (Anthropic), Gemini-2.5-Pro (Google DeepMind), and Grok-Code-Fast (xAI), all of which are accessible exclusively via commer-cial APIs. These systems are governed by restric-tive Terms of Service that prohibit model weight extraction, reverse engineering, and competitive distillation, serving to protect their respective archi-tectural innovations and agentic harnesses. In con-trast, the open-weight landscape is characterized by permissive licensing designed to commoditize rea-soning capabilities: DeepSeek-V3.2 and its reason-ing variant DeepSeek-V3.2-Thinking are released under the MIT License, while Qwen3-Coder-480B utilizes the Apache License 2.0, which includes an explicit patent grant. A hybrid governance model is observed in Kimi-K2-Thinking and Kimi-K2-Instruct, which operate under a Modified MIT Li-cense; this variant permits general commercial use but mandates strictly visible attribution for entities exceeding 100 million monthly active users or $20 million in monthly revenue. 
+
+Licensing landscape of datasets. Regarding evaluation frameworks, BigCodeBench is gov-erned by the Apache License 2.0, whereas Live-CodeBench adopts a split licensing model with its codebase under the MIT License and its dataset artifacts available under the Creative Commons Attribution 4.0 International License (CC-BY 4.0). 
+
+Use of LLM. We use LLMs to generate buggy programs and debug buggy programs in our experi-ments, and to improve writing fluency and correct grammatical errors. 0.6 0.7 0.8 
+
+Unit Score 
+
+0.50 
+
+0.55 
+
+0.60 
+
+0.65 
+
+0.70 
+
+0.75 
+
+0.80 
+
+0.85  
+
+> Precision
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 34
+> 1
+> 2
+> 34
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 23
+> 4
+
+0.6 0.7 0.8 
+
+Unit Score 
+
+0.78 
+
+0.80 
+
+0.82 
+
+0.84 
+
+0.86 
+
+0.88 
+
+0.90 
+
+> Recall
+> 1
+> 2
+> 34
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 34
+> 1
+> 2
+> 3
+> 4
+> 12
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+
+0.6 0.7 0.8 
+
+Unit Score 
+
+0.50 
+
+0.55 
+
+0.60 
+
+0.65 
+
+0.70 
+
+0.75 
+
+0.80 
+
+0.85  
+
+> Precision
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 34
+> 1
+> 2
+> 34
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 23
+> 4
+
+0.6 0.7 0.8 
+
+Unit Score 
+
+0.78 
+
+0.80 
+
+0.82 
+
+0.84 
+
+0.86 
+
+0.88 
+
+0.90 
+
+> Recall
+> 1
+> 2
+> 34
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 34
+> 1
+> 2
+> 3
+> 4
+> 12
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> 1
+> 2
+> 3
+> 4
+> Claude-Sonnet-4.5
+> GPT-5.1-Codex
+> Gemini-2.5-Pro
+> Grok-Code-Fast
+> Kimi-K2-Instruct
+> Qwen3-Coder-480B
+> DeepSeek-V3.2
+
+Figure 10: Correlation between precision, recall, and unit-test score across bug counts. Results are shown on subsets of PDB-S INGLE from BigCodeBench (left) and LiveCodeBench (right), with bug counts indicated by numbers. As the number of bugs increases, precision generally exhibits a negative correlation with unit-test score, while recall displays dataset-dependent behavior. 📋  Task Description 
+
+Archive a specified project directory into a ZIP file based on the configuration specified in a config file. This function reads a configuration file to determine the project directory and archives this directory into a ZIP file. The ZIP file's name will be the project directory's basename, stored in the specified archive directory. Configuration File Format: [Project] directory=path_to_project_directory 
+
+Exceptions: 
+
+FileNotFoundError: If the `config_file_path` does not exist or the specified project directory does not exist. Exception: If the ZIP archive cannot be created. 
+
+Outputs: 
+
+bool: True if the ZIP archive is successfully created, otherwise an exception is raised. 
+
+Buggy Code 
+
+1.  import configparser 
+
+2.  import os 
+
+3.  import shutil 
+
+4.  def task_func(config_file_path, archieve_dir ='/home/user/arch ive'): 
+
+5. 
+
+6.  config = configparser.ConfigParser() 
+
+7.  config.read(config_file_path) 
+
+8. 
+
+9.  project_dir = config.get('Project', 'directory') 
+
+10. 
+
+11.  if not os.path.isdir(project_dir): 
+
+12.  raise FileNotFoundError(f'Directory {project_dir} does not exist.') 
+
+13. 
+
+14.  archive_file = f'{archieve_dir}/{project_dir}.z ip' 
+
+A (Modify) 
+
+15. 
+
+16.  # Using shutil to create the zip archive 
+
+17.  shutil.make_archive(base_name=os.path.splitext(archive_fil e)[0], format='zip', root_dir=project_dir) 
+
+18. 
+
+19.  if not os.path.isfile(archive_file): 
+
+20.  raise Exception(f"Failed to create archive {archive_fi le}") 
+
+21. 
+
+22.  return True 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  gpt-5.1-codex 
+
+Model Generated Solution 
+
+1.  import configparser 
+
+2.  import os 
+
+3.  import shutil 
+
+4.  def task_func(config_file_path, archieve_dir ='/home/user/arch ive'): 
+
+5. 
+
+6.  if not os.path.isfile(config_file_path): 
+
+7.  raise FileNotFoundError(f"Config file {config_file_pat h} does not exist.") 
+
+8. 
+
+9.  config = configparser.ConfigParser() 
+
+10.  config.read(config_file_path) 
+
+11. 
+
+12.  project_dir = config.get('Project', 'directory') 
+
+13. 
+
+14.  if not os.path.isdir(project_dir): 
+
+15.  raise FileNotFoundError(f'Directory {project_dir} does not exist.') 
+
+16. 
+
+17.  archive_file = f'{archieve_dir}/{os.path.basename(proj ect_dir)}.zip' 
+
+A
+
+18. 
+
+19.  # Using shutil to create the zip archive 
+
+20.  shutil.make_archive(base_name=os.path.splitext(archive_fil e)[0], format='zip', root_dir=project_dir) 
+
+21. 
+
+22.  if not os.path.isfile(archive_file): 
+
+23.  raise Exception(f"Failed to create archive {archive_fi le}") 
+
+24. 
+
+25.  return True 
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  gemini-2.5-pro 
+
+Figure 11: Redundant guard checks (9.8%): The model adds unnecessary defensive checks that don’t affect correctness. 📋  Task Description 
+
+Draw a circle with a given radius on the polar chart 'ax' and set radial ticks. This function manipulates plot data using matplotlib. 
+
+Note:  If the radius is negative this function will raise ValueError. If 'ax' is not a polar plot this function will raise TypeError. 
+
+Outputs: 
+
+matplotlib.axes._axes.Axes: The modified Axes object with the circle plotted. 
+
+Buggy Code 
+
+1.  import matplotlib.pyplot as plt 
+
+2.  import numpy as np 
+
+3.  def task_func(ax, radius): 
+
+4. 
+
+5.  if radius < 0: 
+
+6.  raise ValueError('Radius must be non-negative') 
+
+7.  if not isinstance(ax, plt.PolarAxes): 
+
+8.  raise TypeError('ax must be a polar plot') 
+
+9. 
+
+10.  theta = np.linspace(0, 2 * np.pi, 1000) 
+
+11.  ax.plot(theta, radius * np.ones_like(theta)) 
+
+12.  ax.set_rlabel_position(radius * 45) 
+
+13.  ax.draw()  A (Add) 
+
+14.  return ax 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  claude-sonnet-4.5 
+
+Model Generated Solution 
+
+1.  import matplotlib.pyplot as plt 
+
+2.  import numpy as np 
+
+3.  def task_func(ax, radius): 
+
+4. 
+
+5.  if radius < 0: 
+
+6.  raise ValueError('Radius must be non-negative') 
+
+7.  if ax.name != 'polar': 
+
+8.  raise TypeError('ax must be a polar plot') 
+
+9. 
+
+10.  theta = np.linspace(0, 2 * np.pi, 1000) 
+
+11.  ax.plot(theta, radius * np.ones_like(theta)) 
+
+12.  ax.set_rlabel_position(45) 
+
+—
+
+ax.draw() 
+
+13.  return ax 
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  Kimi-K2-Thinking Figure 12: Additional modifications (66.8%): The model makes additional modifications to correct code blocks beyond what is required to fix the bug. 📋  Task Description 
+
+Organize files in a directory based on the first text that is not enclosed in square brackets. Move the files to subdirectories named after this text. If no matching text is found, the file is not moved. 
+
+Outputs: 
+
+tuple: str: The directory path with organized files. dict: A dictionary where keys are the created subdirectories and values are lists of files moved to them. 
+
+Buggy Code 
+
+1.  import re 
+
+2.  import os 
+
+3.  import shutil 
+
+4.  from datetime import datetime 
+
+5.  def task_func(directory): 
+
+6. 
+
+7.  DATE_FORMAT = '%Y%m%d%H%M%S' 
+
+8.  moved_files = {} 
+
+9.  for filename in os.listdir(directory): 
+
+10.  with open(os.path.join(directory, filename), 'r') as file: 
+
+11.  content = file.read() 
+
+12.  match = re.search('(.*?)\[.*?\]', content) 
+
+13.  if match: 
+
+14.  subdirectory = match.group(1).strip() 
+
+15. 
+
+16.  if not os.path.exists(os.path.join(directory, subdirectory)): 
+
+17.  os.makedirs(os.path.join(directory, subdir ectory)) 
+
+18. 
+
+19.  new_filename = f"{filename.split('.')[0]}_{dat etime.now().strftime(DATE_FORMAT)}.{filename.split('.')[1]}" 
+
+20.  shutil.move(os.path.join(directory, filename), os.path.join(directory, subdirectory, new_filename)) 
+
+21. 
+
+22.  if subdirectory not in moved_files: 
+
+23.  moved_files[subdirectory] = [] 
+
+24.  moved_files[subdirectory].append(new_filename) 
+
+25. 
+
+26.  return directory.resolve(), moved_files  A (Modify) 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  claude-sonnet-4.5 
+
+Model Generated Solution 
+
+1.  import re 
+
+2.  import os 
+
+3.  import shutil 
+
+4.  from datetime import datetime 
+
+5.  def task_func(directory): 
+
+6. 
+
+7.  DATE_FORMAT = '%Y%m%d%H%M%S' 
+
+8.  moved_files = {} 
+
+9.  for filename in os.listdir(directory): 
+
+10.  filepath = os.path.join(directory, filename) 
+
+11.  if os.path.isfile(filepath): 
+
+12.  with open(filepath, 'r') as file: 
+
+13.  content = file.read() 
+
+14.  match = re.search(r'^(.*?)\[(.*?)\](.*)$', con tent, re.DOTALL) 
+
+15.  if not match: 
+
+16.  match = re.search(r'\[(.*?)\](.*)$', conte nt, re.DOTALL) 
+
+17.  if match: 
+
+18.  before_brackets = content[:match.start ()] 
+
+19.  first_non_bracket_text = before_bracke ts.split()[-1] if before_brackets.split() else "" 
+
+20.  subdirectory = first_non_bracket_text 
+
+21.  else: 
+
+22.  continue 
+
+23.  else: 
+
+24.  before_first_bracket = match.group(1) 
+
+25.  parts = before_first_bracket.strip().split () 
+
+26.  subdirectory = parts[-1] if parts else "" 
+
+27. 
+
+28.  if not subdirectory: 
+
+29.  continue 
+
+30. 
+
+31.  if not os.path.exists(os.path.join(directory, subdirectory)): 
+
+32.  os.makedirs(os.path.join(directory, subdir ectory)) 
+
+33. 
+
+34.  name_part, ext_part = os.path.splitext(filenam e) 
+
+35.  new_filename = f"{name_part}_{datetime.now().s trftime(DATE_FORMAT)}{ext_part}" 
+
+36.  shutil.move(filepath, os.path.join(directory, subdirectory, new_filename)) 
+
+37. 
+
+38.  if subdirectory not in moved_files: 
+
+39.  moved_files[subdirectory] = [] 
+
+40.  moved_files[subdirectory].append(new_filename) 
+
+41. 
+
+42.  return os.path.abspath(directory), moved_files  A
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  Qwen3-Coder-480B-A35B-Instruct-FP8 Figure 13: Complete rewrite (7.8%): The model completely regenerates the solution rather than making minimal targeted fixes. 📋  Task Description 
+
+Unzip a list of objects and their 3D coordinates, run PCA to reduce the dimensionality to 2D, and depending on the value of save_plot parameter, either save the plot to the provided path and return the 2D coordinates or return the 2D coordinates and the plot's Axes. 
+
+Exceptions: 
+
+ValueError: If save_plot is True but plot_path is not provided. 
+
+Outputs: 
+
+coordinates_2d (numpy.ndarray): The 2D coordinates after applying PCA. ax (matplotlib.axes._axes.Axes, optional): The plot's Axes if save_plot is True. 
+
+Buggy Code 
+
+1.  import numpy as np 
+
+2.  from sklearn.decomposition import PCA 
+
+3.  import matplotlib.pyplot as plt 
+
+4.  def task_func(data, save_plot=False, plot_path=None): 
+
+5. 
+
+6.  items, x_values, y_values, z_values = zip(*data) 
+
+7.  coordinates = np.array(list(zip(x_values, y_values, z_valu es))) 
+
+8. 
+
+9.  pca = PCA(n_components=2) 
+
+10.  coordinates_2d = pca.fit_transform(coordinates) 
+
+11. 
+
+12.  # Initialize a fresh plot 
+
+13.  plt.figure() 
+
+14.  fig, ax = plt.subplots() 
+
+15.  ax.scatter(*zip(*coordinates_2d)) 
+
+16. 
+
+17.  if save_plot: 
+
+18.  if plot_path is not None == True:  A (Modify) 
+
+19.  plt.savefig(plot_path) 
+
+20.  plt.close(fig) 
+
+21.  return coordinates_2d, ax 
+
+22.  else: 
+
+23.  raise ValueError("plot_path is required if save_pl ot is True") 
+
+24.  else: 
+
+25.  return coordinates_2d 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  claude-sonnet-4.5 
+
+Model Generated Solution 
+
+1.  import numpy as np 
+
+2.  from sklearn.decomposition import PCA 
+
+3.  import matplotlib.pyplot as plt 
+
+4.  def task_func(data, save_plot=False, plot_path=None): 
+
+5. 
+
+6.  items, x_values, y_values, z_values = zip(*data) 
+
+7.  coordinates = np.array(list(zip(x_values, y_values, z_valu es))) 
+
+8. 
+
+9.  pca = PCA(n_components=2) 
+
+10.  coordinates_2d = pca.fit_transform(coordinates) 
+
+11. 
+
+12.  # Initialize a fresh plot 
+
+13.  plt.figure() 
+
+14.  fig, ax = plt.subplots() 
+
+15.  ax.scatter(*zip(*coordinates_2d)) 
+
+16. 
+
+17.  if save_plot: 
+
+18.  if plot_path is not None:  A
+
+19.  plt.savefig(plot_path) 
+
+20.  plt.close(fig) 
+
+21.  return coordinates_2d, ax 
+
+22.  else: 
+
+23.  raise ValueError("plot_path is required if save_pl ot is True") 
+
+24.  else: 
+
+25.  plt.close(fig) 
+
+26.  return coordinates_2d 
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  Qwen3-Coder-480B-A35B-Instruct-FP8 Figure 14: Discovering bugs missed by ground-truth (1.9%): The model identifies and fixes bugs that were overlooked in the ground-truth solutions of the seed benchmark. 📋  Task Description 
+
+Analyzes a given DataFrame containing article titles and content to identify articles with titles that include the words "how" or "what". It calculates the TF-IDF scores for the words in the content of these articles and visualizes these scores in a bar plot. 
+
+Note:  If the DataFrame does not contain 'Title' and 'Content' columns, the function returns an empty plot. If no articles have titles containing "how" or "what," the function also returns an empty plot. Set the name of the y-axis to 'TF-IDF Score'. Set xticks to display the feature names vertically. 
+
+Outputs: 
+
+Axes: A matplotlib Axes object displaying a bar plot of the TF-IDF scores. 
+
+Buggy Code 
+
+1.  import re 
+
+2.  import matplotlib.pyplot as plt 
+
+3.  from sklearn.feature_extraction.text import TfidfVectorizer 
+
+4.  import numpy as np 
+
+5.  def task_func(df): 
+
+6. 
+
+7.  pattern = re.compile(r'(how|what)', re.IGNORECASE) 
+
+8. 
+
+9.  # Check if the DataFrame has the required columns 
+
+10.  if not set(['Title', 'Content']).issubset(df.columns): 
+
+11.  fig, ax = plt.subplots() 
+
+12.  return ax 
+
+13. 
+
+14.  interesting_articles = df[df['Title'].apply(lambda x: bool (pattern.search(x)))] 
+
+15. 
+
+16.  fig, ax = plt.subplots() 
+
+17. 
+
+18.  # If there are no interesting articles, return an empty pl ot 
+
+19.  if interesting_articles is None:  A (Modify) 
+
+20.  return ax 
+
+21. 
+
+22.  vectorizer = TfidfVectorizer() 
+
+23.  X = vectorizer.transform(interesting_articles ['Content']) 
+
+B (Modify) 
+
+24.  tfidf_scores = np.array(X.sum(axis=0))[0] 
+
+25. 
+
+—
+
+ax.bar(vectorizer.get_feature_names_out(), tfidf _scores) 
+
+C (Delete) 
+
+26.  ax.set_ylabel('TF-IDF Score') 
+
+27.  plt.xticks(rotation='vertical') 
+
+28. 
+
+29.  return ax 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  gemini-2.5-pro 
+
+Model Generated Solution 
+
+1.  import re 
+
+2.  import matplotlib.pyplot as plt 
+
+3.  from sklearn.feature_extraction.text import TfidfVectorizer 
+
+4.  import numpy as np 
+
+5.  def task_func(df): 
+
+6. 
+
+7.  pattern = re.compile(r'(how|what)', re.IGNORECASE) 
+
+8. 
+
+—
+
+# Check if the DataFrame has the required columns 
+
+9.  if not set(['Title', 'Content']).issubset(df.columns): 
+
+10.  fig, ax = plt.subplots() 
+
+11.  return ax 
+
+12. 
+
+13.  interesting_articles = df[df['Title'].apply(lambda x: bool (pattern.search(x)))] 
+
+14. 
+
+15.  fig, ax = plt.subplots() 
+
+16. 
+
+17.  if interesting_articles.empty:  A
+
+—
+
+if interesting_articles is None:  A
+
+18.  return ax 
+
+19. 
+
+20.  vectorizer = TfidfVectorizer() 
+
+21.  X = vectorizer.fit_transform(interesting_articles['Con tent']) 
+
+B
+
+22.  tfidf_scores = np.array(X.sum(axis=0))[0] 
+
+23.  feature_names = vectorizer.get_feature_names_out() 
+
+24. 
+
+25.  ax.bar(feature_names, tfidf_scores)  C
+
+26.  ax.set_ylabel('TF-IDF Score') 
+
+27.  ax.set_xticks(range(len(feature_names))) 
+
+28.  ax.set_xticklabels(feature_names, rotation='vertical') 
+
+29. 
+
+30.  return ax 
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  gpt-5.1-codex Figure 15: Functionally correct but undetected (70% of recall <1 cases): The model’s fix is functionally correct but not detected due to over-edits and structural rewrites. 📋  Task Description 
+
+Perform a linear regression between "age" and "score" in the DataFrame, excluding rows with duplicate names. Plot the regression line and the scatter plot of the data. 
+
+Note:  The function use "Linear Regression" for the plot title. The function use "Age" and "Score" as the xlabel and ylabel respectively. 
+
+Exceptions: 
+
+The function will raise a ValueError is input df is not a DataFrame. 
+
+Outputs: 
+
+tuple: A tuple containing the matplotlib.pyplot object and the axes object. 
+
+Buggy Code 
+
+1.  import pandas as pd 
+
+2.  from scipy import stats 
+
+3.  import matplotlib.pyplot as plt 
+
+4.  def task_func(df): 
+
+5. 
+
+6.  if not isinstance(df, pd.DataFrame): 
+
+7.  raise ValueError("The input df is not a DataFrame") 
+
+8. 
+
+9.  df = df.drop_duplicates(subset='Name') 
+
+10. 
+
+11.  slope, intercept, r_value, _, _ = stats.linregress(df['Ag e'], df['Score']) 
+
+12. 
+
+—
+
+df['Age_up'] = intercept + slope * df['Age']  A (Delete) 
+
+13.  fig = plt.figure(figsize=(8, 6)) 
+
+14.  ax = fig.add_subplot(111) 
+
+15.  plt.scatter(df['Age'], df['Score'], label='Data') 
+
+—
+
+plt.plot(df['Age'].values, df['Age_up'].values, 'r', label='Fitted line') 
+
+B (Delete) 
+
+16.  plt.xlabel('Age') 
+
+17.  plt.ylabel('Score') 
+
+18.  plt.title('Linear Regression') 
+
+19.  plt.legend() 
+
+20.  return plt, ax 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  claude-sonnet-4.5 
+
+Model Generated Solution 
+
+1.  import pandas as pd 
+
+2.  from scipy import stats 
+
+3.  import matplotlib.pyplot as plt 
+
+4.  def task_func(df): 
+
+5. 
+
+6.  if not isinstance(df, pd.DataFrame): 
+
+7.  raise ValueError("The input df is not a DataFrame") 
+
+8. 
+
+9.  df = df.drop_duplicates(subset='Name') 
+
+10. 
+
+11.  slope, intercept, r_value, _, _ = stats.linregress(df['Ag e'], df['Score']) 
+
+12. 
+
+13.  fig = plt.figure(figsize=(8, 6)) 
+
+14.  ax = fig.add_subplot(111) 
+
+15.  plt.scatter(df['Age'], df['Score'], label='Data') 
+
+16.  plt.plot(df['Age'], slope * df['Age'] + intercept, col or='red', label='Regression Line') 
+
+B
+
+17.  plt.xlabel('Age') 
+
+18.  plt.ylabel('Score') 
+
+19.  plt.title('Linear Regression') 
+
+20.  plt.legend() 
+
+21.  return plt, ax 
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  grok-code-fast-1 Figure 16: Multiple minimal fixes (20% of recall <1 cases): A single bug can have multiple minimal correct fixes, and the model chose a different valid fix than the ground-truth. 📋  Task Description 
+
+Count the frequency of each letter in a list of lists. If a list is empty, fill it with a random sample from the alphabet, and then count the letters. 
+
+Outputs: 
+
+Counter: A Counter object with the frequency of each letter. 
+
+Buggy Code 
+
+1.  from collections import Counter 
+
+2.  import itertools 
+
+3.  import random 
+
+4.  # Constants 
+
+5.  ALPHABET = 'abcdefghijklmnopqrstuvwxyz' 
+
+6.  def task_func(list_of_lists, seed=0): 
+
+7. 
+
+8.  random.seed(seed) 
+
+—
+
+flattened_list = list(itertools.chain(*list_of_l ists)) 
+
+A (Delete) 
+
+9. 
+
+10.  for list_item in list_of_lists: 
+
+11.  if list_item == []: 
+
+12.  flattened_list += random.sample(ALPHABET, 10) 
+
+13. 
+
+14.  counter = Counter(list_item)  B (Modify) 
+
+15. 
+
+16.  return counter 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  claude-sonnet-4.5 
+
+Model Generated Solution 
+
+1.  from collections import Counter 
+
+2.  import itertools 
+
+3.  import random 
+
+4.  # Constants 
+
+5.  ALPHABET = 'abcdefghijklmnopqrstuvwxyz' 
+
+6.  def task_func(list_of_lists, seed=0): 
+
+7. 
+
+8.  random.seed(seed) 
+
+9. 
+
+10.  for list_item in list_of_lists: 
+
+11.  if list_item == []: 
+
+12.  list_item.extend(random.sample(ALPHABET, 10))  A
+
+13. 
+
+14.  flattened_list = list(itertools.chain.from_iterable(li st_of_lists)) 
+
+B
+
+15. 
+
+16.  counter = Counter(flattened_list)  B
+
+17. 
+
+18.  return counter 
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  Kimi-K2-Instruct Figure 17: Bug composition issue (10% of recall <1 cases): Compounding bugs introduced during bug-composition stage where one injected bug changes program logic affecting other bugs. 📋  Task Description 
+
+Convert elements in 'T1' to integers and create a list of random integers where the number of integers is determined by the sum of the integers in `T1`. Random integers are generated between 0 and `RANGE` (default is 100). Count the occurrences of each number in the generated list using a Counter. 
+
+Outputs: 
+
+Counter: A Counter object representing the count of each number appearing in the list of generated random integers. 
+
+Buggy Code 
+
+1.  from collections import Counter 
+
+2.  import itertools 
+
+3.  from random import randint 
+
+4.  def task_func(T1, RANGE=100): 
+
+5. 
+
+6.  int_list = [list(map(int, x)) for x in T1] 
+
+7.  int_list = int_list[:1]  A (Add) 
+
+8.  flattened_list = list(itertools.chain(*int_list)) 
+
+9.  total_nums = sum(flattened_list) 
+
+10. 
+
+11.  random_nums = [randint.random(0, RANGE) for _ i n range(total_nums)] 
+
+B (Modify) 
+
+12.  counts = Counter(random_nums) 
+
+13. 
+
+14.  return counts if total_nums else None  C (Modify) 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  gpt-5.1-codex 
+
+Model Generated Solution 
+
+1.  from collections import Counter 
+
+2.  import itertools 
+
+3.  from random import randint 
+
+4.  def task_func(T1, RANGE=100): 
+
+5. 
+
+6.  int_list = [list(map(int, x)) for x in T1] 
+
+—
+
+int_list = int_list[:1] 
+
+7.  flattened_list = list(itertools.chain(*int_list)) 
+
+8.  total_nums = sum(flattened_list) 
+
+9. 
+
+10.  random_nums = [randint(0, RANGE) for _ in range(total_ nums)] 
+
+B
+
+11.  counts = Counter(random_nums) 
+
+12. 
+
+13.  return counts if total_nums else None 
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  claude-sonnet-4-5-20250929 Figure 18: Under-repair (31.4%): The model fixes some bugs without introducing unnecessary edits but fails to apply all required fixes (recall <1, precision =1). 📋  Task Description 
+
+Create a numeric array from the "original" list, calculate Fast Fourier Transform (FFT) and record the original and FFT data. Additionally, plot the histogram of the magnitude of the FFT data and return the axes object of the plot. For an empty list, return an empty array for the FFT data and None for the axes object. 
+
+Outputs: 
+
+np.array: A numpy array for the original data. np.array: FFT data. plt.Axes: The axes object of the plot. 
+
+Buggy Code 
+
+1.  import numpy as np 
+
+2.  from scipy.fft import fft 
+
+3.  from matplotlib import pyplot as plt 
+
+4.  def task_func(original): 
+
+5. 
+
+6.  arr = np.array([b for (_, b) in original]) 
+
+7. 
+
+8.  if arr.shape == 0:  A (Modify) 
+
+9.  fft_data = np.array([]) 
+
+10.  return arr, fft_data, None 
+
+11. 
+
+12.  fft_data = fft(arr, n=len(arr)*2)  B (Modify) 
+
+13.  _, ax = plt.subplots() 
+
+14.  ax.hist(np.abs(fft_data)) 
+
+15. 
+
+16.  return arr, fft_data, ax 
+
+Add: Line added to inject bug  Delete: Line removed to inject bug 
+
+Modify: Line changed to inject bug 
+
+Bug Injection:  claude-sonnet-4.5 
+
+Model Generated Solution 
+
+1.  import numpy as np 
+
+2.  from scipy.fft import fft 
+
+3.  from matplotlib import pyplot as plt 
+
+4.  def task_func(original): 
+
+5. 
+
+6.  arr = np.array(original) 
+
+7. 
+
+8.  if arr.size == 0:  A
+
+9.  fft_data = np.array([]) 
+
+10.  return arr, fft_data, None 
+
+11. 
+
+12.  fft_data = fft(arr)  B
+
+13.  _, ax = plt.subplots() 
+
+14.  ax.hist(np.abs(fft_data)) 
+
+15. 
+
+16.  return arr, fft_data, ax 
+
+Fixed bug  Extra edit  Introduced bug 
+
+Debug Model:  Kimi-K2-Thinking Figure 19: Regressive repair (39.2%): The model fixes all original bugs (recall =1) but introduces new bugs that cause unit tests to fail. Your task is to perform a deep analysis of a code snippet and intentionally introduce ONE bug. You will be given two major components: PART 1: A task description outlining the intended functionality. PART 2: A solution to the task. First, carefully read and understand both the task description and the provided solution. Then, modify the solution by injecting a realistic programming error. You will be asked to introduce one of the following bug types into the code: Assignment, Checking, Algorithm, Build/Package/Merge or Timing/Serialization. You will be asked to perform exactly one action: Add one line, Delete one line or Modify one line. Instructions for modifying the code: - ONLY modify ONE selected line to induce a HARD bug to the task. - Keep the other lines of the code solution EXACTLY the SAME. - Do NOT add any new comments to the modified line. - DO NOT introduce easy bugs such as referencing variable names before declaration, adding typos or commas. You should output two things: - The subtype of the introduced bug. - A buggy code snippet with only a ONE line difference with the original code solution, and no comments on that modified line. ---task_prompt:  {task_prompt} 
+
+correct_solution:  {correct_solution} 
+
+bug_type:  {bug_type} 
+
+action_on_lines:  {action_on_lines} 
+
+task_prompt 
+
+The programming task description for context 
+
+correct_solution 
+
+A correct Python code solution 
+
+bug_type 
+
+The type of bug to add 
+
+action_on_lines 
+
+The action and the lines to choose from Figure 20: Bug injection prompt for benchmark construction. Debug the given Python code that contains errors. ONLY fix the bugs. Make minimal edits. Do NOT generate a new solution based on the problem description. Do NOT reformat lines that are already correct. Do NOT edit or add any comments. The input consists of two parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. Your response should include: - A self-contained, corrected Python implementation, with minimal edits. ---problem_description:  {problem_description} 
+
+buggy_solution:  {buggy_solution} 
+
+problem_description 
+
+The problem description 
+
+buggy_solution 
+
+The buggy solution Figure 21: Minimal debugging prompt with problem description and buggy code. Debug the given Python code that contains errors. ONLY fix the bugs. Make minimal edits. Do NOT generate a new solution based on the problem description. Do NOT reformat lines that are already correct. Do NOT edit or add any comments. The input consists of three parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. - A set of unit tests for the problem. Your response should include: - A self-contained, corrected Python implementation, only making minimal edits on the buggy code. ---problem_description:  {problem_description} 
+
+buggy_solution:  {buggy_solution} 
+
+unit_tests:  {unit_tests} 
+
+problem_description 
+
+The problem description 
+
+buggy_solution 
+
+The buggy solution 
+
+unit_tests 
+
+The unit tests Figure 22: Minimal debugging prompt with unit tests. Debug the given Python code that contains errors. ONLY fix the bugs. Make minimal edits. Do NOT generate a new solution based on the problem description. Do NOT reformat lines that are already correct. Do NOT edit or add any comments. The input consists of three parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. - Previously failed attempts and optionally error feedback. Your response should include: - A self-contained, corrected Python implementation, only making minimal edits on the buggy code. ---problem_description:  {problem_description} 
+
+buggy_solution:  {buggy_solution} 
+
+failed_attempts:  {failed_attempts} 
+
+problem_description 
+
+The problem description 
+
+buggy_solution 
+
+The buggy solution 
+
+failed_attempts 
+
+Previous attempts that failed unit tests, AVOID THEM! Figure 23: Minimal debugging prompt with execution feedback. Debug the given Python code that contains errors. ONLY fix the bugs. Make minimal edits. Do NOT generate a new solution based on the problem description. Do NOT reformat lines that are already correct. Do NOT edit or add any comments. The input consists of four parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. - A set of unit tests for the problem. - Previously failed attempts and optionally error feedback. Your response should include: - A self-contained, corrected Python implementation, only making minimal edits on the buggy code. ---problem_description:  {problem_description} 
+
+buggy_solution:  {buggy_solution} 
+
+unit_tests:  {unit_tests} 
+
+failed_attempts:  {failed_attempts} 
+
+problem_description 
+
+The problem description 
+
+buggy_solution 
+
+The buggy solution 
+
+unit_tests 
+
+The unit tests 
+
+failed_attempts 
+
+Previous attempts that failed unit tests, AVOID THEM! Figure 24: Minimal debugging prompt with unit tests and execution feedback. Debug the given Python code that contains errors. Do NOT add any comments. The input consists of two parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. Your response should include: - A self-contained, corrected Python implementation. ---problem_description:  {problem_description} 
+
+buggy_solution:  {buggy_solution} 
+
+problem_description 
+
+The problem description 
+
+buggy_solution 
+
+The buggy solution 
+
+Figure 25: Free-form debugging prompt without minimal edit constraint. Debug the given Python code that contains errors. Do NOT add any comments. The input consists of three parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. - A set of unit tests for the problem. Your response should include: - A self-contained, corrected Python implementation. ---problem_description:  {problem_description} 
+
+buggy_solution:  {buggy_solution} 
+
+unit_tests:  {unit_tests} 
+
+problem_description 
+
+The problem description 
+
+buggy_solution 
+
+The buggy solution 
+
+unit_tests 
+
+The unit tests Figure 26: Free-form debugging prompt with unit tests. Debug the given Python code that contains errors. Do NOT add any comments. The input consists of three parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. - Previously failed attempts and optionally error feedback. Your response should include: - A self-contained, corrected Python implementation. ---problem_description:  {problem_description} 
+
+buggy_solution:  {buggy_solution} 
+
+failed_attempts:  {failed_attempts} 
+
+problem_description 
+
+The problem description 
+
+buggy_solution 
+
+The buggy solution 
+
+failed_attempts 
+
+Previous attempts that failed unit tests, AVOID THEM! 
+
+Figure 27: Free-form debugging prompt with execution feedback. Debug the given Python code that contains errors. Do NOT add any comments. The input consists of four parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. - A set of unit tests for the problem. - Previously failed attempts and optionally error feedback. Your response should include: - A self-contained, corrected Python implementation. ---problem_description:  {problem_description} 
+
+buggy_solution:  {buggy_solution} 
+
+unit_tests:  {unit_tests} 
+
+failed_attempts:  {failed_attempts} 
+
+problem_description 
+
+The problem description 
+
+buggy_solution 
+
+The buggy solution 
+
+unit_tests 
+
+The unit tests 
+
+failed_attempts 
+
+Previous attempts that failed unit tests, AVOID THEM! Figure 28: Free-form debugging prompt with unit tests and execution feedback. Debug the given Python code that contains errors. ONLY fix the bugs. Make minimal edits. Do NOT generate a new solution based on the problem description. Do NOT reformat lines that are already correct. Do NOT edit or add any comments. The input consists of three parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. - A set of unit tests for the problem. Your response should include: - A self-contained, corrected Python implementation, only making minimal edits on the buggy code. PART 1: Problem Description ```text 
+
+{task_prompt} 
+
+``` PART 2: Buggy Code ```python 
+
+{buggy_code} 
+
+``` PART 3: Unit Tests (context only) ```python 
+
+{unit_tests_code} 
+
+``` Output format (follow *exactly*): ```python [Corrected code here] ``` Corrected Code Output (use the format above): 
+
+task_prompt 
+
+Problem description text 
+
+buggy_code 
+
+Python code with bugs 
+
+unit_tests_code 
+
+Unit test code Figure 29: External API template for minimal debugging. Debug the given Python code that contains errors. Do NOT add any comments. The input consists of three parts: - A problem description outlining the intended functionality. - A buggy code that needs to be fixed. - A set of unit tests for the problem. Your response should include: - A self-contained, corrected Python implementation. PART 1: Problem Description ```text 
+
+{task_prompt} 
+
+``` PART 2: Buggy Code ```python 
+
+{buggy_code} 
+
+``` PART 3: Unit Tests (context only) ```python 
+
+{unit_tests_code} 
+
+``` Output format (follow *exactly*): ```python [Corrected code here] ``` Corrected Code Output (use the format above): 
+
+task_prompt 
+
+Problem description text 
+
+buggy_code 
+
+Python code with bugs 
+
+unit_tests_code 
+
+Unit test code Figure 30: External API template for free-form debugging. Your task is to rewrite the solution code of a task with structural and stylistic perturbations. You will be given two parts: PART 1: A task description outlining the intended functionality. PART 2: A correct solution to the task. First, read both the task description and the provided solution to understand what the code is supposed to do. Then, your task is to perform a deep rewriting (perturbation) of the solution code WITHOUT changing its functionality. Strictly adhere to the following rules: - Do NOT change the starter code as given in the task description. - Do NOT add any new comments. - Do NOT make shallow redundancy edits, such as a = 1 + 2 - 1. - Do NOT condense the code to very short format. - NEVER rename variables to very short names (e.g., sum_production -> p), but you can give variables wrong names. - The rewritten code should resemble what human will write and should NOT be hard for human to read. - The rewritten code should be different enough from the original code. You can probably use the following hints: - Change loop syntax (e.g., for to while or vice versa, if applicable) - Convert recursion to iteration or vice versa (if functionally equivalent) - Invert control flow where logical structure remains the same (e.g., replace `if not ...` with an inverted block) - Merge or flatten adjacent or nested if blocks. Your response should ONLY contain the rewritten Python code, which is a different but correct solution to the task. ---task_description:  {task_description} 
+
+original_solution:  {original_solution} 
+
+task_description 
+
+The programming task description. 
+
+original_solution 
+
+The original Python code solution. Figure 31: Solution rewriting prompt for benchmark construction.
