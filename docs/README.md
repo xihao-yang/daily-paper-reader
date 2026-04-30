@@ -6,41 +6,64 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-29
-- 运行时间：2026-04-29 21:03:18 UTC
+- 最新运行日期：2026-04-30
+- 运行时间：2026-04-30 21:07:15 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：1
-- 速读区：6
+- 本次总论文数：14
+- 精读区：3
+- 速读区：11
 
 ### 今日简报（AI）
-聚焦代码可靠性与自动形式化，深度探讨多智能体分解在指令式代码编辑中的表现。重点关注多代理协作提升稳定性、以及自动化验证在代码测试生成中的潜力。建议读者关注智能代码编辑与测试基准的演进，了解其对未来软件开发质量的影响。
-- 详情：[/202604/29/README](/202604/29/README)
+聚焦自动化程序修复与LLM在软件测试中的实用性探索。  
+重点发现：程序修复复现难度高，LLM在黑盒测试与缺陷生成中展现潜力。  
+建议关注大模型驱动的工程测试框架与复现标准化趋势。
+- 详情：[/202604/30/README](/202604/30/README)
 
 ### 精读区论文标签
-1. [SAFEdit: Does Multi-Agent Decomposition Resolve the Reliability Challenges of Instructed Code Editing?](/202604/29/2604.25737v1-safedit-does-multi-agent-decomposition-resolve-the-reliability-challenges-of-instructed-code-editing)  
+1. [Reproducible Automated Program Repair Is Hard -- Experiences With the Defects4J Dataset](/202604/30/2604.26674v1-reproducible-automated-program-repair-is-hard----experiences-with-the-defects4j-dataset)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：自动程序修复基准测试中的挑战及基于证据的比较
+2. [Using Large Language Models for Black-Box Testing of FMU-Based Simulations](/202604/30/2604.25650v1-using-large-language-models-for-black-box-testing-of-fmu-based-simulations)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：多智能体代码编辑框架，包含验证智能体通过测试执行确保补丁正确性。
+   evidence：LLM生成的仿真测试断言预言
+3. [TDD Governance for Multi-Agent Code Generation via Prompt Engineering](/202604/30/2604.26615v1-tdd-governance-for-multi-agent-code-generation-via-prompt-engineering)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：用于多智能体代码生成和修复的TDD框架
 
 ### 速读区论文标签
-1. [Faithful Autoformalization via Roundtrip Verification and Repair](/202604/29/2604.25031v1-faithful-autoformalization-via-roundtrip-verification-and-repair)  
+1. [LLM-Guided Issue Generation from Uncovered Code Segments](/202604/30/2604.26118v1-llm-guided-issue-generation-from-uncovered-code-segments)  
+   标签：评分：7.5/10、query:apr-oracle
+   evidence：基于LLM的缺陷识别和修复建议
+2. [You Don't Need Public Tests to Generate Correct Code](/202604/30/2604.21598v2-you-dont-need-public-tests-to-generate-correct-code)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：该论文提出了一个往返验证和修复框架，以确保大模型生成的正式代码的正确性。
-2. [RESTestBench: A Benchmark for Evaluating the Effectiveness of LLM-Generated REST API Test Cases from NL Requirements](/202604/29/2604.25862v1-restestbench-a-benchmark-for-evaluating-the-effectiveness-of-llm-generated-rest-api-test-cases-from-nl-requirements)  
+   evidence：模拟引导的规划和调试，以生成功能正确的程序
+3. [Evaluation of LLM-Based Software Engineering Tools: Practices, Challenges, and Future Directions](/202604/30/2604.24621v1-evaluation-of-llm-based-software-engineering-tools-practices-challenges-and-future-directions)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估根据需求生成的LLM测试用例
-3. [PLMGH: What Matters in PLM-GNN Hybrids for Code Classification and Vulnerability Detection](/202604/29/2604.25599v1-plmgh-what-matters-in-plm-gnn-hybrids-for-code-classification-and-vulnerability-detection)  
+   evidence：评估包括代码生成和审查在内的基于LLM的软件工程工具
+4. [FGDM: Reasoning Aware Multi-Agentic Framework for Software Bug Detection using Chain of Thought and Tree of Thought Prompting](/202604/30/2604.24831v1-fgdm-reasoning-aware-multi-agentic-framework-for-software-bug-detection-using-chain-of-thought-and-tree-of-thought-prompting)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：用于软件缺陷检测与修复的多智能体框架
+5. [SWE-Bench 5G: Benchmarking AI Coding Agents on Telecom Network Engineering Tasks](/202604/30/2604.26278v1-swe-bench-5g-benchmarking-ai-coding-agents-on-telecom-network-engineering-tasks)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：评估AI编码代理解决真实世界缺陷的能力
+6. [Will It Break in Production? Metric-Driven Prediction of Residual Defects in Python Systems](/202604/30/2604.26667v1-will-it-break-in-production-metric-driven-prediction-of-residual-defects-in-python-systems)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：使用机器学习进行度量驱动的残余缺陷预测
+7. [Hot Fixing in the Wild](/202604/30/2604.26892v1-hot-fixing-in-the-wild)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：研究人类与AI代理编写的热修复补丁之间的差异
+8. [Shift-Up: A Framework for Software Engineering Guardrails in AI-native Software Development -- Initial Findings](/202604/30/2604.20436v1-shift-up-a-framework-for-software-engineering-guardrails-in-ai-native-software-development----initial-findings)  
    标签：评分：6.5/10、query:apr-oracle
-   evidence：用于代码分类和漏洞检测的神经或代码表示模型
-4. [The Path Not Taken: Duality in Reasoning about Program Execution](/202604/29/2604.20917v1-the-path-not-taken-duality-in-reasoning-about-program-execution)  
+   evidence：AI原生开发验证的结构化护栏
+9. [No Test Cases, No Problem: Distillation-Driven Code Generation for Scientific Workflows](/202604/30/2604.23106v1-no-test-cases-no-problem-distillation-driven-code-generation-for-scientific-workflows)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：预测程序行为并推断针对行为目标的变异
-5. [Learning Reasoning World Models for Parallel Code](/202604/29/2604.20926v2-learning-reasoning-world-models-for-parallel-code)  
+   evidence：无需I/O测试用例的代码生成，采用蒸馏驱动的接地技术
+10. [Can Code Evaluation Metrics Detect Code Plagiarism?](/202604/30/2604.25778v1-can-code-evaluation-metrics-detect-code-plagiarism)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：从源代码预测工具输出和执行结果
-6. [CoRE: A Fine-Grained Code Reasoning Benchmark Beyond Output Prediction](/202604/29/2604.25399v1-core-a-fine-grained-code-reasoning-benchmark-beyond-output-prediction)  
+   evidence：评估CodeBERTScore等代码表示模型在代码评估中的表现
+11. [Graph Construction and Matching for Imperative Programs using Neural and Structural Methods](/202604/30/2604.26578v1-graph-construction-and-matching-for-imperative-programs-using-neural-and-structural-methods)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：通过实现不变性和输出正确性评估代码推理能力
+   evidence：用于程序和规范匹配的神经与结构方法
 
 
 <div class="dpr-home-promo-card">
