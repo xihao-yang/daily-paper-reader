@@ -1,0 +1,308 @@
+Title: When Corrective Hints Hurt: Prompt Design in Reasoner-Guided Repair of LLM Overcaution on Entailed Negations under OWL~2~DL
+
+URL Source: https://arxiv.org/pdf/2604.23398v1
+
+Published Time: Tue, 28 Apr 2026 00:42:42 GMT
+
+Number of Pages: 6
+
+Markdown Content:
+# When Corrective Hints Hurt: Prompt Design in Reasoner-Guided Repair of LLM Overcaution on Entailed Negations under OWL 2 DL 
+
+Yijiashun Qi *
+
+University of Michigan 
+
+Ann Arbor, MI, USA elijahqi@umich.edu 
+
+Xiang Xu 
+
+ByteDance Inc. 
+
+San Jose, CA, USA xuxiang.victor@bytedance.com 
+
+Yuxuan Li 
+
+University of Pennsylvania 
+
+Philadelphia, PA, USA yuxuanli@alumni.upenn.edu 
+
+Abstract —We report a reproducible error pattern in GPT-5.4 on OWL 2 DL compliance queries: the model frequently answers “unknown” when the reasoner-entailed answer is “no” under FunctionalProperty closure or class disjointness . Using 180 reasoner-audited queries from a procedural expansion of the observed pattern plus 18 hand-authored held-out queries in two unrelated domains (insurance and clinical), we compare four interaction modes under matched query budget: single-shot, three rounds of generic “you-are-wrong” retry, three rounds of reasoner-verdict repair with an open-world-assumption (OWA) hint, and the same repair without the hint. Direct faithfulness is 43.9 % (Wilson 95 % CI [36 .8, 51 .2] ); generic retry reaches 81.7 % ( [75 .4, 86 .6] ); the verdict-with-hint variant is worse at 67.2 % ([60 .1, 73 .7] ); the verdict-only variant reaches 97.8 % ([94 .4, 99 .1] ). All pairwise comparisons remain significant under McNemar’s exact test with Bonferroni correction ( α = 0 .01 ; all 
+
+p < 10 −5). The same fingerprint accounts for 4/4 errors on the held-out queries. Our interpretation is bounded: prompt framing can matter more than corrective content, and reasoner-guided wrappers should be ablated explicitly. 
+
+Index Terms —neuro-symbolic AI, OWL 2 DL, large language models, faithfulness, auditability, counterexample-driven repair, prompt design. 
+
+I. I NTRODUCTION 
+
+LLMs are increasingly deployed alongside formal ontolo-gies for compliance-sensitive decision making. In such set-tings, one-shot accuracy is not enough: we also need to know whether an initially incorrect answer can be corrected under bounded verifier feedback. We operationalise this second axis — auditability — as the conditional probability that a wrong answer becomes right after ≤ k rounds of feedback, and we treat it as distinct from single-shot faithfulness. This paper presents a controlled empirical study of one specific failure mode of GPT-5.4 on OWL 2 DL queries, and of three feedback regimes designed to repair it. Three findings drive our contribution. (1) GPT-5.4 systematically returns “unknown” rather than the entailed “no” when the proof requires FunctionalProperty closure or class disjoint-ness ; 99 /100 direct-mode errors on our 180-query benchmark share this fingerprint, and the same fingerprint explains 4/4
+
+errors on two hand-authored held-out scenarios in different 
+
+> *
+
+Corresponding author. 
+
+domains. (2) Three rounds of generic retry (“your answer is wrong, try again”) raise faithfulness from 43 .9% to 81 .7% 
+
+(p < 10 −20 ), while three rounds of reasoner-verdict repair with no semantic hint reach 97 .8% . (3) A reasoner-verdict template that additionally includes the logically-correct hint “consider OWA — missing triples are not negations” is 14 .4 pp 
+
+worse than generic retry ( p = 1.3 × 10 −5). The hint is associated with more “unknown” responses, consistent with over-application of OWA cues by the model. The resulting methodological point is the paper’s main contribution: in reasoner–LLM hybrids, prompt framing can matter more than the corrective content it carries. 
+
+II. B ACKGROUND AND RELATED WORK 
+
+Two OWL 2 features create entailed negations under an oth-erwise open-world semantics: (i) FunctionalProperty , which fixes the asserted value as the unique value of the property and closes the world for that property, and (ii) class disjointness .Combined with equivalent-class definitions, these let a sound reasoner derive x / ∈ C without any axiom directly asserting the negation. Recent benchmarks evaluate LLMs on description-logic and ontology-grounded tasks at varying scale: Wang et al. [1] on DL-Lite; DL-ReasonSuite [2] at the 4k-task scale; On-toURL [3] with tens of thousands of questions; Yang et al. [4] on natural-language proofs. Systematic LLM benchmarking has also spread across modalities and domains, e.g. Qi et al. [8] on domain-specific image classification, Qi et al. [11] on sim-ulating firm-level economic behaviour, and Yang et al. [10] on distilling semantic knowledge into smaller language models. Complementing these, Xing et al. [9] study structured memory mechanisms for stable context representation in LLMs at ICAIDE 2025; we build on that line of work by focusing on a specific reasoning failure rather than general context stability. Knowledge structures also interact with LLMs on the retrieval side: Qi et al. [12] instantiate a web–knowledge–web pipeline for domain discovery, and graph neural networks have been applied to structured business-data reasoning in [13], [14]. Compared to these, our work is a targeted stress test : we trade scale for tight per-query auditing and a focused study 
+
+> arXiv:2604.23398v1 [cs.AI] 25 Apr 2026
+
+Algorithm 1 Consistency-based trial insertion for three-valued entailment. 
+
+Require: Ontology O, query x ∈ C
+
+Ensure: Answer ∈ { yes , no , unknown } 
+
+> 1:
+
+O+ ← O ∪ { C(x)} 
+
+> 2:
+
+O− ← O ∪ {¬ C(x)} 
+
+> 3:
+
+pos ← CONSISTENT (O+) 
+
+> 4:
+
+neg ← CONSISTENT (O−) 
+
+> 5:
+
+if pos ∧ ¬ neg then return yes  
+
+> 6:
+
+else if ¬pos ∧ neg then return no  
+
+> 7:
+
+else if pos ∧ neg then return unknown  
+
+> 8:
+
+else return error (KB already inconsistent)  
+
+> 9:
+
+end if 
+
+of one structural failure pattern. Within the reasoner–LLM hybrid literature, Explanation-Refiner [5] uses verifier-derived feedback to iteratively refine LLM outputs. Chain-of-thought prompting [15] shows that surface cues in the prompt can alter the reasoning path a model traverses; the phenomenon we report can be read as a failure mode of that same mechanism. We isolate a previously unreported prompt-wrapping effect inside this class of systems. III. M ETHOD 
+
+A. Scenarios 
+
+We use three sets. The development set comprises 10 hand-authored mini-ontologies (subsumption, numeric bound-aries, OWA traps, one mixed-compliance case; 38 queries). The expansion set consists of 30 procedurally generated variants of the mixed-compliance template, parameterised over a Cartesian grid of spend buckets (below threshold, at strict boundary, above) and class memberships (active, blacklisted, none); 180 queries. The held-out set contains two further hand-authored ontologies in insurance and clin-ical domains with disjoint vocabularies; 18 queries. List-ing 1 shows one representative generated variant. The sce-nario combines a FunctionalProperty (hasSpend ), an equivalent-class definition (VIPCustomer ), disjoint classes ( ActiveCustomer /Blacklisted ), and a second equivalent-class definition chaining the two ( ActiveVIP ). A query such as “Is c_a an ActiveVIP ?” has the reasoner-entailed answer “no” because the asserted functional value 
+
+500 ̸ > 1000 ; yet GPT-5.4 in direct mode returns “unknown”. 
+
+B. Ground truth 
+
+Every query’s gold answer is computed by a sound rea-soner (HermiT [6] by default; Pellet [7] when JDK ≥ 21 is configured) via the consistency-based trial-insertion protocol of Algorithm 1. The procedure distinguishes entailed negation from open-world unknown by running the reasoner twice — once on the KB augmented with the positive claim, once on the KB augmented with the negated claim — and interpreting any resulting inconsistency as entailment of the opposite. Every authored answer matches the reasoner’s verdict.                                                               
+
+> TABLE I GPT-5.4 ON THE 180-QUERY EXPANSION SET : W ILSON 95 % CI S AND PAIRWISE MCNEMAR TESTS (B ONFERRONI -CORRECTED α= 0 .01 ).
+> Mode Faithfulness 95 % CI direct 79/180 = 43.9 % [36 .8,51 .2]
+> na¨ ıve repair 147/180 = 81.7 % [75 .4,86 .6]
+> cx repair (hint) 121/180 = 67.2 % [60 .1,73 .7]
+> cx repair (verdict-only) 176/180 = 97.8 % [94 .4,99 .1]
+> Pairwise McNemar, paired
+> direct →na¨ ıve ∆ = +37 .8pp p= 6 .8×10 −21
+> direct →cx v3 ∆ = +53 .9pp p= 1 .3×10 −29
+> na¨ ıve →cx v1 (hint) ∆ = −14 .4pp p= 1 .3×10 −5
+> na¨ ıve →cx v3 ∆ = +16 .1pp p= 1 .3×10 −7
+> cx v1 →cx v3 ∆ = +30 .6pp p= 8 .0×10 −16
+
+C. Models and modes 
+
+The repair-design analysis focuses on GPT-5.4, accessed via the OpenAI Responses-protocol endpoint of an internal API gateway during April 2026 at default decoding settings. We compare four modes under a matched budget (one prompt + up to three follow-ups): direct (single-shot JSON an-swer); na¨ ıve repair (“Your answer is incorrect. Reconsider.”); 
+
+cx repair v1 (same, plus the reasoner’s verdict and the hint “consider OWA: missing triples are not negations”); cx repair v3 (reasoner’s verdict only, no hint). For cross-model context only, we also evaluate GLM-5, Kimi-k2.5 and Minimax-2.7 on the development set via the same gateway (Anthropic-style protocol); these are descriptive, not controlled. 
+
+D. Metrics 
+
+Faithfulness is the fraction of queries whose final answer matches the reasoner verdict. Confidence intervals use Wil-son’s score interval ( α = 0 .05 ). Pairwise mode comparisons use McNemar’s exact two-sided test on discordant pairs. We apply Bonferroni correction for five tests (family-wise 
+
+α = 0 .01 ); all five reported tests remain significant ( p ≤
+
+1.3 × 10 −5). IV. R ESULTS 
+
+A. Main result: 180-query expansion set 
+
+Table I gives GPT-5.4’s faithfulness across the four modes. Figure 1 visualises per-category performance on the develop-ment set, directly and after repair. 
+
+B. Worked example: one query, two wrappers 
+
+Listing 2 juxtaposes the verdict-only and verdict-with-hint 
+
+follow-up prompts applied to the same failing query on the scenario of Listing 1. The two prompts deliver the same truth (“the correct answer is no”) with different surface phrasing. Under the verdict-only prompt, GPT-5.4 revises to “no” within two rounds; under the hint-bearing prompt, it re-emits “un-known” and cites OWA as justification — reproducing the failure the reasoner has just flagged. This anecdotal reproduc-tion of the aggregate effect helps explain why the hint may be pulling the model toward “unknown” rather than away from it. :hasSpend a owl:FunctionalProperty, owl:DatatypeProperty ;rdfs:range xsd:decimal .:VIPCustomer owl:equivalentClass [a owl:Class ;owl:intersectionOf (:Customer [ owl:onProperty :hasSpend ;owl:someValuesFrom [a rdfs:Datatype ;owl:onDatatype xsd:decimal ;owl:withRestrictions ( [ xsd:minExclusive 1000 ] ) ] ] ) ] .:ActiveVIP owl:equivalentClass [ owl:intersectionOf ( :VIPCustomer :ActiveCustomer ) ] .[ a owl:AllDisjointClasses ; owl:members ( :ActiveCustomer :Blacklisted ) ] .:c_a a :Customer ; :hasSpend 500 ; a :ActiveCustomer .:c_b a :Customer ; :hasSpend 1500 ; a :ActiveCustomer .                                                                   
+
+> Listing 1. A representative generated scenario (abridged Turtle). The correct answer to “Is c_a an ActiveVIP ?” is “no” via FunctionalProperty closure; GPT-5.4 in direct mode returns “unknown”.
+> --VERDICT-ONLY WRAPPER --[system] The OWL 2DL reasoner verified the correct answer is "no", not "unknown". [GPT-5.4] {"answer":"no","reason":"hasSpend is Functional and its value 500 is not >1000, so VIPCustomer is not satisfied, hence not ActiveVIP."} --VERDICT-WITH-HINT WRAPPER --[system] The OWL 2DL reasoner verified the correct answer is "no", not "unknown". Consider OWA: missing triples are not negations. [GPT-5.4] {"answer":"unknown","reason":"Under OWA we cannot conclude the negation of ActiveVIP from the absence of atriple."}
+> Listing 2. Follow-up prompts (shortened) after a wrong “unknown” answer, and the next-round GPT-5.4 response. Only the wrapper differs.
+
+C. Failure-mode characterisation 
+
+Of the 101 errors GPT-5.4 makes in direct mode on the expansion set, 99 share the exact pattern “expected = no, got = unknown”. Every one of these errors involves either FunctionalProperty closure (the asserted value provably sat-isfies a strict numeric relation against the threshold) or class disjointness. No errors are inversions (yes →no or no →yes); only one is malformed JSON. The failure is therefore not ran-dom hallucination but structural overcaution against entailed negation .
+
+D. Held-out and cross-model context 
+
+On the 18 held-out queries (two hand-authored on-tologies in insurance and clinical domains), direct mode reaches 14/18 (77.8 %); the four errors are all “expected = no, got = unknown”, confirming that the failure pattern is not a procedural-template artefact. Both repair variants reach 18/18 on the held-out set, but n = 18 is too small to separate them. On the development set, three other frontier models from the same gateway — GLM-5, Kimi-k2.5, Minimax-2.7 — do not exhibit the overcaution pattern in direct mode (38/38, 36/38, 29/30 semantic faithfulness respectively). We report these only to rule out a trivial “all LLMs share this overcaution” explanation; because the four models differ in protocol and default decoding, the comparison is not controlled. V. D ISCUSSION 
+
+A. Why the OWA hint backfires: a qualitative analysis 
+
+The hint we added to cx repair v1 — “consider OWA: missing triples are not negations” — is logically correct and is exactly the kind of guidance a human ontology engineer would give a learner confusing closed- and open-world reasoning. Yet on this failure mode (entailed negation via closure) the hint coincides with a measurable shift toward “unknown” precisely where the correct answer is “no”. To probe how the hint redirects the model, we inspected the 59 errors cx v1 makes on the expansion set against the 4 errors cx v3 makes on the same queries. Of the 59 cx v1 errors, 56 share the exact “expected = no, got = unknown” fin-gerprint despite three rounds of feedback stating the reasoner-verified correct answer is “no”; the remaining 3 are malformed JSON. We read the transcripts round-by-round and observed a consistent pathway: after receiving the OWA hint, the model frequently emits reasoning that acknowledges FunctionalProp-erty closure (“ hasSpend is functional, so c_a can have at most one spend value”) yet still concludes “unknown”. One representative trace on gen24.c_a_24.vip reads: 
+
+“Since hasSpend is functional and c_a has hasSpend 500.0 , c_a cannot also have a different spend value 
+
+> 1000 .0; thus c_a cannot satisfy the existential re-striction for VIPCustomer . Therefore c_a is not a 
+
+VIPCustomer .” 
+
+— and then the model still outputs "unknown" . The chain of reasoning points to a definite negation while the final label does not follow. Our interpretation is cue over-application : the OWA hint activates a surface hedging heuristic that dominates the model’s own closure-based proof, consistent with chain-of-thought work showing that surface cues can override the mixed                         
+
+> numeric_builtin
+> owa_trap
+> subsumption
+> glm-5
+> gpt-5.4
+> kimi-k2.5
+> minimax-2.7
+> 100% 100% 100% 100%
+> 50% 45% 80% 100%
+> 100% 100% 90% 91%
+> 67% 55% 80% 100%
+> Faithfulness by model × category (direct)
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Faithfulness % mixed
+> numeric_builtin
+> owa_trap
+> subsumption
+> glm-5
+> gpt-5.4
+> kimi-k2.5
+> minimax-2.7
+> 100% 100% 100% 100%
+> 83% 100% 100% 100%
+> 100% 100% 100% 100%
+> 67% 91% 90% 100%
+> Faithfulness by model × category (repair)
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Faithfulness %
+
+Fig. 1. Per-category faithfulness on the development set. Top: single-shot direct mode — GPT-5.4’s deficit concentrates in mixed (FunctionalProperty closure + disjointness) and numeric builtin . Bottom: after counterexample-driven repair — GPT-5.4 closes most of the gap; residual errors concentrate in the mixed category. 
+
+reasoning content [15]. We present this as a plausible mech-anism rather than a proven one: with only API access we cannot inspect the hidden state; a direct-weights experiment would be needed to confirm the pathway. The verdict-only template, which omits the OWA cue, avoids this shift in all but 4 cases. 
+
+B. Computational cost and latency 
+
+Table II reports per-query latency and total wall-clock time for each mode on the 180-query expansion set. All modes ran through the same gateway under identical network conditions, so the numbers are directly comparable within this study (absolute latencies on a direct provider API may differ). Two observations follow. First, the repair modes roughly double the wall-clock cost of single-shot prompting, so the 1 2 3 never 
+
+> Rounds until correct
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> # queries
+> Repair-loop convergence per model
+> glm-5
+> gpt-5.4
+> kimi-k2.5
+> minimax-2.7
+
+Fig. 2. Rounds-until-correct per model on the development set under counterexample repair (max 3 rounds). GPT-5.4 requires more rounds than the other three models; the “never” bar marks queries still wrong after the three-round budget. glm-5 gpt-5.4 kimi-k2.5 minimax-2.7 
+
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> # queries
+> 38
+> 27
+> 36
+> 29
+> 11
+> 1
+> 1
+> 1
+> 8
+
+Error taxonomy per model mode=direct  
+
+> correct
+> overcautious
+> overconfident malformed
+
+Fig. 3. Direct-mode error taxonomy on the development set. GPT-5.4’s errors are dominated by overcautious (“unknown” where the reasoner says “no”); Minimax’s errors are dominated by malformed JSON (a reasoning-model token-budget artefact rather than a semantic error). 
+
+strategy is most naturally deployed in batch or offline com-pliance validation rather than in the hot path of an interactive user loop. For interactive use, the reasoner audit can be gated behind confidence filters or invoked only for cases the reasoner would otherwise resolve as “no”. Second, among the repair modes, the verdict-only variant is not only the most accurate (97.8 % vs 67.2 % for the hint variant) but also the cheapest :1.63 average rounds vs 1.93, a 16 % reduction in repair cost alongside a 30.6 pp accuracy gain. Counter-intuitively, the richer prompt is strictly dominated on both axes. 
+
+C. Implications for reasoner–LLM hybrids 
+
+A natural assumption in reasoner–LLM hybrid systems is that more reasoner output ⇒ better LLM correction. Our data refute this: the richer counterexample template is associated with a 30.6-pp reduction in repair quality compared to the verdict-only variant (Table I, p = 8 × 10 −16 ). For practitioners TABLE II LATENCY AND QUERY BUDGET PER MODE (180 QUERIES , GPT-5.4).                
+
+> Mode Avg. latency Avg. rounds Total wall-clock direct 4.07 s 1.00 12.2 min na¨ ıve repair 4.90 s 1.76 25.8 min cx repair (hint) 5.05 s 1.93 29.3 min cx repair (verdict-only) 4.77 s 1.63 23.3 min
+
+building reasoner-in-the-loop systems, three implications fol-low. First, the wrapper around the reasoner’s verdict should be treated as a hyperparameter and ablated explicitly; any new prompt template should be benchmarked against a content-light baseline on a targeted failure set. Second, explanations that are logically correct but topically mismatched can be worse than no explanation at all; the generic advice to “teach the model why it was wrong” needs a mode-specific refine-ment. Third, structural overcaution on entailed negation, if unaddressed, constrains the range of ontological constructs that can safely be put behind an LLM interface in a compliance pipeline — rules that rely on FunctionalProperty closure or class disjointness are exactly the ones a human compliance engineer would write, and exactly the ones our data show the model struggles to honour unaided. VI. E THICS , R EPRODUCIBILITY , T HREATS , AND 
+
+CONCLUSION 
+
+A. Ethics and digital-ethics relevance 
+
+Compliance-sensitive deployments of LLMs (e.g. credit, in-surance, or clinical triage) often rest on rules that are naturally expressible as ontological closures — a functional attribute bounds a quantity, a disjointness axiom bounds a category. A model that systematically returns “unknown” where the rule logically entails “no” is not harmlessly cautious: downstream it may degrade to either silent abstention or unprincipled over-deferral to a human reviewer, neither of which is auditable in the sense of [9]. Our study isolates such a failure mode on a narrow but realistic pattern and shows it is correctable through bounded feedback. The finding that a logically-correct but mode-mismatched hint can degrade a reasoner-guided loop has direct ethical implications for practitioners wiring formal verifiers into agentic pipelines: verifier feedback that looks safer on a surface read may in fact bias the model toward the exact behaviour the reviewer would flag. 
+
+B. Reproducibility 
+
+All 10 development scenarios, the 30-variant generator, both held-out ontologies, and every raw model transcript are preserved as JSON for every run reported. Reasoner gold answers are computed by Algorithm 1 and verified to match hand-authored labels on all 38 development queries. We will release the harness, scenario generator, and results upon pub-lication. The entire pipeline — scenario construction, reasoner audit, LLM querying, statistical analysis — runs from asingle command on commodity hardware with a CPython 3.13 interpreter, a Java runtime (11 for HermiT, 21 for Pellet), and network access to a provider-specific LLM endpoint. 
+
+C. Future work 
+
+Three directions follow directly from the present stress test. First, a cross-family failure survey that extends the auditability framework (direct vs na¨ ıve retry vs verdict vs verdict-with-hint) across Western frontier models — Claude 4.x, Gem-ini 2.x, Llama 3 — as well as additional release dates of GPT itself. Replicating the fingerprint (or ruling it out) on these families is the single highest-value follow-up, and separates model-specific pathologies from a broader architectural ten-dency of autoregressive LLMs to hedge on entailed negations. Second, a systematic sweep over hint vocabularies: the single hint we ablated is one point in a large design space of reasoner-feedback templates; minimal-pair controls across synonyms, negation markers, and rule-grounding phrases could map where the backfire region begins and ends, and whether the effect survives paraphrase. Third, composing auditability-aware repair with retrieval-augmented or graph-augmented inference [12]–[14]: if the primary error source is structural overcaution, a verifier signal that locates the triggering axiom 
+
+(rather than merely reporting a verdict) may close the residual gap visible in Fig. 1. A parallel line of inquiry is scaling the evaluation to large, publicly available OWL 2 DL ontologies — see the next subsection for why our targeted-stress-test design could not absorb those outright. 
+
+D. Threats to validity 
+
+This study has limits. Single model under detailed study. 
+
+Our deep characterisation is of GPT-5.4 only. The cross-model context (Sec. V-D) shows three other frontier models accessed through the same gateway (GLM-5, Kimi-k2.5, Minimax-2.7) do not exhibit the overcaution fingerprint on the development set, which rules out a trivial “all LLMs share this overcaution” reading; it does not establish that Western frontier models (Claude, Gemini, Llama 3) are immune. We did not have stable, controlled access to those endpoints during the study period and defer the full cross-family survey to future work. Our claim is correspondingly narrow — a reproducible failure mode on one deployed model — not a universal architectural diagnosis. 
+
+Templated expansion. The 180-query main set is generated from one Cartesian template, but the held-out scenarios in two unrelated domains (insurance, clinical) preserve the same failure fingerprint, showing that the effect is not a procedural-template artefact. 
+
+Scale and ontology complexity. This is a targeted stress test, not a general ontology-reasoning benchmark. Our 180 + 18 + 38 queries are dwarfed by DL-ReasonSuite [2] and OntoURL [3]. A natural question is whether the verdict-only repair strategy holds on large production ontologies such as SNOMED CT or the Gene Ontology. We flag two considerations. (i) SNOMED CT and the Gene Ontology are authored in the OWL 2 EL profile, which excludes 
+
+FunctionalProperty and DisjointClasses axioms for tractability; the exact closure mechanisms that trigger the fingerprint we study therefore do not arise in pure EL ontologies, so the failure pattern is not directly reproducible on them. (ii) Larger OWL 2 DL ontologies that do include these constructs — e.g. the NCI Thesaurus, GALEN, or BFO-grounded extensions of SNOMED — are the natural next evaluation target, and we expect the prompt-wrapping effect to persist structurally while the repair budget and reasoner-audit cost both grow with reasoning depth. A controlled scaling study on these ontologies is deferred to future work. 
+
+Closed-model determinism. We accessed all models via a third-party gateway in April 2026 with no client-side control over decoding temperature or random seed, and did not sweep prompt paraphrases; replication under perturbation and on direct provider APIs is deferred. Provider-side updates may also change the model’s behaviour without a public version bump. 
+
+Held-out sample size. The 18-query held-out set is too small to power pairwise mode comparisons; it is intended only to test whether the direct-mode failure pattern transfers to vocabulary unrelated to the expansion template. 
+
+E. Conclusion 
+
+We characterise a reproducible structural failure of GPT-5.4 on OWL 2 DL queries that require FunctionalProperty closure or class disjointness — “overcaution against entailed negation”. Generic retry recovers most of the deficit; reasoner-guided repair with a content-light verdict template recovers nearly all of it; reasoner-guided repair with a logically correct but mode-mismatched semantic hint recovers less than generic retry. The wrapper around corrective feedback can dominate its content. We release the harness, scenario generators, and reasoner-audited gold answers. REFERENCES [1] B. Wang et al. , “Evaluating large language models on DL-Lite reason-ing,” in Findings of EMNLP , 2024. [2] “DL-ReasonSuite: a benchmark for description-logic reasoning in lan-guage models,” Applied Sciences , vol. 16, no. 4, p. 1821, 2026. [3] “OntoURL: a large-scale benchmark for ontology question answering,” arXiv:2505.11031, 2025. [4] Yang et al. , “Large language models for OWL proofs,” 2026. [5] “Explanation-refiner: iterative LLM refinement under formal verifier feedback,” arXiv:2405.01379, 2024. [6] B. Glimm et al. , “HermiT: an OWL 2 reasoner,” Journal of Automated Reasoning , vol. 53, no. 3, pp. 245–269, 2014. [7] E. Sirin et al. , “Pellet: a practical OWL-DL reasoner,” Journal of Web Semantics , vol. 5, no. 2, pp. 51–53, 2007. [8] Y. Qi, S. Cai, Z. Zhao, J. Li, Y. Lin, and Z. Wang, “Benchmarking large language models for image classification of marine mammals,” in 2024 IEEE Int. Conf. on Knowledge Graph (ICKG) , 2024, pp. 258–265. [9] Y. Xing, T. Yang, Y. Qi, M. Wei, Y. Cheng, and H. Xin, “Structured memory mechanisms for stable context representation in large language models,” in IEEE Int. Conf. on Artificial Intelligence and Digital Ethics (ICAIDE) , 2025. [10] T. Yang, Y. Cheng, Y. Qi, and M. Wei, “Distilling semantic knowledge via multi-level alignment in TinyBERT-based language models,” Journal of Computer Technology and Software , vol. 4, no. 5, 2025. [11] Y. Qi, H. Guo, and Y. Qi, “Can LLMs simulate economic agents? Testing production theory with GPT-based firm behavior,” Preprints , 2026. [12] Y. Qi, Y. Qi, and T. Wagh, “Coverage-aware web crawling for domain-specific supplier discovery via a Web–Knowledge–Web pipeline,” arXiv:2602.24262, 2026. [13] Y. Qi, Q. Lu, S. Dou, X. Sun, M. Li, and Y. Li, “Graph neural network-driven hierarchical mining for complex imbalanced data,” in Int. Symp. on Big Data and Applied Statistics (ISBDAS) , 2025. [14] Y. Qi, H. Guo, and Y. Qi, “Detecting high-potential SMEs with hetero-geneous graph neural networks,” arXiv:2602.19591, 2026. [15] J. Wei et al. , “Chain-of-thought prompting elicits reasoning in large lan-guage models,” in Advances in Neural Information Processing Systems ,vol. 35, 2022, pp. 24824–24837.

@@ -6,64 +6,64 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-30
-- 运行时间：2026-04-30 21:07:15 UTC
+- 最新运行日期：2026-05-01
+- 运行时间：2026-05-01 21:34:38 UTC
 - 运行状态：成功
 - 本次总论文数：14
 - 精读区：3
 - 速读区：11
 
 ### 今日简报（AI）
-聚焦自动化程序修复与LLM在软件测试中的实用性探索。  
-重点发现：程序修复复现难度高，LLM在黑盒测试与缺陷生成中展现潜力。  
-建议关注大模型驱动的工程测试框架与复现标准化趋势。
-- 详情：[/202604/30/README](/202604/30/README)
+聚焦自动化代码修复与智能记忆检索，今日共研读 14 篇论文。  
+最值得关注的是 CI 流程驱动的补丁验证基准与风险敏感的上下文记忆机制，对提升 LLM 在软件工程中的稳定性具有突破意义。  
+建议读者重点关注模型可解释性与工具评测标准的演进，以理解未来智能开发助手的可靠性。
+- 详情：[/202605/01/README](/202605/01/README)
 
 ### 精读区论文标签
-1. [Reproducible Automated Program Repair Is Hard -- Experiences With the Defects4J Dataset](/202604/30/2604.26674v1-reproducible-automated-program-repair-is-hard----experiences-with-the-defects4j-dataset)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：自动程序修复基准测试中的挑战及基于证据的比较
-2. [Using Large Language Models for Black-Box Testing of FMU-Based Simulations](/202604/30/2604.25650v1-using-large-language-models-for-black-box-testing-of-fmu-based-simulations)  
+1. [CI-Repair-Bench: A Repository-Aware Benchmark for Automated Patch Validation via CI Workflows](/202605/01/2604.27148v1-ci-repair-bench-a-repository-aware-benchmark-for-automated-patch-validation-via-ci-workflows)  
+   标签：评分：9.5/10、query:apr-oracle
+   evidence：通过CI工作流进行自动补丁验证的基准测试
+2. [Learning When to Remember: Risk-Sensitive Contextual Bandits for Abstention-Aware Memory Retrieval in LLM-Based Coding Agents](/202605/01/2604.27283v1-learning-when-to-remember-risk-sensitive-contextual-bandits-for-abstention-aware-memory-retrieval-in-llm-based-coding-agents)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：LLM生成的仿真测试断言预言
-3. [TDD Governance for Multi-Agent Code Generation via Prompt Engineering](/202604/30/2604.26615v1-tdd-governance-for-multi-agent-code-generation-via-prompt-engineering)  
+   evidence：用于重用修复追踪和调试经验的基于学习的决策模型
+3. [ScaleBox: Enabling High-Fidelity and Scalable Code Verification for Large Language Models](/202605/01/2604.27467v1-scalebox-enabling-high-fidelity-and-scalable-code-verification-for-large-language-models)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：用于多智能体代码生成和修复的TDD框架
+   evidence：大语言模型的高保真代码验证和自动评测生成
 
 ### 速读区论文标签
-1. [LLM-Guided Issue Generation from Uncovered Code Segments](/202604/30/2604.26118v1-llm-guided-issue-generation-from-uncovered-code-segments)  
-   标签：评分：7.5/10、query:apr-oracle
-   evidence：基于LLM的缺陷识别和修复建议
-2. [You Don't Need Public Tests to Generate Correct Code](/202604/30/2604.21598v2-you-dont-need-public-tests-to-generate-correct-code)  
+1. [When Corrective Hints Hurt: Prompt Design in Reasoner-Guided Repair of LLM Overcaution on Entailed Negations under OWL~2~DL](/202605/01/2604.23398v1-when-corrective-hints-hurt-prompt-design-in-reasoner-guided-repair-of-llm-overcaution-on-entailed-negations-under-owl2dl)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：模拟引导的规划和调试，以生成功能正确的程序
-3. [Evaluation of LLM-Based Software Engineering Tools: Practices, Challenges, and Future Directions](/202604/30/2604.24621v1-evaluation-of-llm-based-software-engineering-tools-practices-challenges-and-future-directions)  
+   evidence：使用外部逻辑验证器引导大语言模型错误的修复
+2. [Evaluation of LLM-Based Software Engineering Tools: Practices, Challenges, and Future Directions](/202605/01/2604.24621v1-evaluation-of-llm-based-software-engineering-tools-practices-challenges-and-future-directions)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估包括代码生成和审查在内的基于LLM的软件工程工具
-4. [FGDM: Reasoning Aware Multi-Agentic Framework for Software Bug Detection using Chain of Thought and Tree of Thought Prompting](/202604/30/2604.24831v1-fgdm-reasoning-aware-multi-agentic-framework-for-software-bug-detection-using-chain-of-thought-and-tree-of-thought-prompting)  
+   evidence：基于大模型的软件工程工具评估与行为可靠性
+3. [Adaptive and AI-Augmented Security Testing: A Systematic Survey of Program Analysis, Feedback-Driven Testing, and Hybrid Learning-Based Approaches](/202605/01/2604.27000v1-adaptive-and-ai-augmented-security-testing-a-systematic-survey-of-program-analysis-feedback-driven-testing-and-hybrid-learning-based-approaches)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于软件缺陷检测与修复的多智能体框架
-5. [SWE-Bench 5G: Benchmarking AI Coding Agents on Telecom Network Engineering Tasks](/202604/30/2604.26278v1-swe-bench-5g-benchmarking-ai-coding-agents-on-telecom-network-engineering-tasks)  
+   evidence：反馈驱动的测试与基于学习的安全分析
+4. [To Diff or Not to Diff? Structure-Aware and Adaptive Output Formats for Efficient LLM-based Code Editing](/202605/01/2604.27296v1-to-diff-or-not-to-diff-structure-aware-and-adaptive-output-formats-for-efficient-llm-based-code-editing)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估AI编码代理解决真实世界缺陷的能力
-6. [Will It Break in Production? Metric-Driven Prediction of Residual Defects in Python Systems](/202604/30/2604.26667v1-will-it-break-in-production-metric-driven-prediction-of-residual-defects-in-python-systems)  
+   evidence：用于大语言模型代码编辑的结构感知差异格式
+5. [How Code Representation Shapes False-Positive Dynamics in Cross-Language LLM Vulnerability Detection](/202605/01/2604.27714v1-how-code-representation-shapes-false-positive-dynamics-in-cross-language-llm-vulnerability-detection)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：使用机器学习进行度量驱动的残余缺陷预测
-7. [Hot Fixing in the Wild](/202604/30/2604.26892v1-hot-fixing-in-the-wild)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：研究人类与AI代理编写的热修复补丁之间的差异
-8. [Shift-Up: A Framework for Software Engineering Guardrails in AI-native Software Development -- Initial Findings](/202604/30/2604.20436v1-shift-up-a-framework-for-software-engineering-guardrails-in-ai-native-software-development----initial-findings)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：AI原生开发验证的结构化护栏
-9. [No Test Cases, No Problem: Distillation-Driven Code Generation for Scientific Workflows](/202604/30/2604.23106v1-no-test-cases-no-problem-distillation-driven-code-generation-for-scientific-workflows)  
+   evidence：跨语言漏洞检测中的误报动态研究
+6. [RAG-Reflect: Agentic Retrieval-Augmented Generation with Reflections for Comment-Driven Code Maintenance on Stack Overflow](/202605/01/2604.22217v1-rag-reflect-agentic-retrieval-augmented-generation-with-reflections-for-comment-driven-code-maintenance-on-stack-overflow)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：无需I/O测试用例的代码生成，采用蒸馏驱动的接地技术
-10. [Can Code Evaluation Metrics Detect Code Plagiarism?](/202604/30/2604.25778v1-can-code-evaluation-metrics-detect-code-plagiarism)  
+   evidence：注释驱动的代码维护与正确性预测
+7. [A systematic literature Review for Transformer-based Software Vulnerability detection](/202605/01/2604.24822v1-a-systematic-literature-review-for-transformer-based-software-vulnerability-detection)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：评估CodeBERTScore等代码表示模型在代码评估中的表现
-11. [Graph Construction and Matching for Imperative Programs using Neural and Structural Methods](/202604/30/2604.26578v1-graph-construction-and-matching-for-imperative-programs-using-neural-and-structural-methods)  
+   evidence：基于Transformer的软件漏洞检测和表示学习
+8. [Commit-Aware Learning-Based Test Case Prioritization for Continuous Integration](/202605/01/2604.25363v1-commit-aware-learning-based-test-case-prioritization-for-continuous-integration)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于程序和规范匹配的神经与结构方法
+   evidence：基于代码变更和历史执行的机器学习测试用例优先级排序
+9. [Learning Generalizable Multimodal Representations for Software Vulnerability Detection](/202605/01/2604.25711v1-learning-generalizable-multimodal-representations-for-software-vulnerability-detection)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：用于软件漏洞检测的多模态表示模型
+10. [Learning Generalizable Multimodal Representations for Software Vulnerability Detection](/202605/01/2604.25711v2-learning-generalizable-multimodal-representations-for-software-vulnerability-detection)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：用于软件漏洞检测的多模态表示
+11. [Beyond the Training Distribution: Mapping Generalization Boundaries in Neural Program Synthesis](/202605/01/2604.27551v1-beyond-the-training-distribution-mapping-generalization-boundaries-in-neural-program-synthesis)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：评估神经程序合成中的泛化能力
 
 
 <div class="dpr-home-promo-card">
