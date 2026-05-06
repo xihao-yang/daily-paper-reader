@@ -6,64 +6,55 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-05
-- 运行时间：2026-05-05 20:51:07 UTC
+- 最新运行日期：2026-05-06
+- 运行时间：2026-05-06 20:32:37 UTC
 - 运行状态：成功
-- 本次总论文数：14
-- 精读区：5
-- 速读区：9
+- 本次总论文数：11
+- 精读区：4
+- 速读区：7
 
 ### 今日简报（AI）
-聚焦14篇论文，深入探索自动化漏洞修复与多智能体自我纠错测试。  
-最值得关注的是LLM驱动的自主修复边界研究及基于领域模式的漏洞修复方法。  
-建议读者下步关注多智能体协同与鲁棒性代码评估模型的发展趋势。
-- 详情：[/202605/05/README](/202605/05/README)
+今日聚焦代码修复与智能验证，共精读与速读论文 11 篇。  
+重点关注自动补丁验证基准与基于图的智能错误定位工具，两者在仓库级质量提升上表现突出。  
+建议读者后续关注模型代码验证与代理执行正确性的新方法，了解其在开发流程中的落地潜力。
+- 详情：[/202605/06/README](/202605/06/README)
 
 ### 精读区论文标签
-1. [Practical Limits of Autonomous Test Repair: A Multi-Agent Case Study with LLM-Driven Discovery and Self-Correction](/202605/05/2605.01471v1-practical-limits-of-autonomous-test-repair-a-multi-agent-case-study-with-llm-driven-discovery-and-self-correction)  
+1. [CI-Repair-Bench: A Repository-Aware Benchmark for Automated Patch Validation via CI Workflows](/202605/06/2604.27148v2-ci-repair-bench-a-repository-aware-benchmark-for-automated-patch-validation-via-ci-workflows)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：自动化测试系统中的自主测试修复和自我纠正
-2. [VulKey: Automated Vulnerability Repair Guided by Domain-Specific Repair Patterns](/202605/05/2605.01769v1-vulkey-automated-vulnerability-repair-guided-by-domain-specific-repair-patterns)  
+   evidence：通过 CI 工作流和仓库级修复进行自动化补丁验证
+2. [ARISE: A Repository-level Graph Representation and Toolset for Agentic Fault Localization and Program Repair](/202605/06/2605.03117v1-arise-a-repository-level-graph-representation-and-toolset-for-agentic-fault-localization-and-program-repair)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：基于大语言模型的自动漏洞修复框架，利用分层抽象指导补丁生成
-3. [Foundation Models as Oracles for Refactoring Correctness Detection](/202605/05/2605.02096v1-foundation-models-as-oracles-for-refactoring-correctness-detection)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：利用基础模型作为预言机来检测重构错误并确保正确性
-4. [HEJ-Robust: A Robustness Benchmark for LLM-Based Automated Program Repair](/202605/05/2605.02215v1-hej-robust-a-robustness-benchmark-for-llm-based-automated-program-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：针对LLM自动程序修复的鲁棒性基准测试，评估语法变体下的修复表现
-5. [QASecClaw: A Multi-Agent LLM Approach for False Positive Reduction in Static Application Security Testing](/202605/05/2605.01885v1-qasecclaw-a-multi-agent-llm-approach-for-false-positive-reduction-in-static-application-security-testing)  
+   evidence：用于智能体故障定位和程序修复的仓库级图表示
+3. [HEJ-Robust: A Robustness Benchmark for LLM-Based Automated Program Repair](/202605/06/2605.02215v2-hej-robust-a-robustness-benchmark-for-llm-based-automated-program-repair)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：使用基于大模型的上下文代码审查减少安全测试中的误报
+   evidence：针对基于大语言模型的自动程序修复的鲁棒性基准测试，评估语法变体
+4. [POSTCONDBENCH: Benchmarking Correctness and Completeness in Formal Postcondition Inference](/202605/06/2605.03356v1-postcondbench-benchmarking-correctness-and-completeness-in-formal-postcondition-inference)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：形式化后置条件支持调试、测试和验证
 
 ### 速读区论文标签
-1. [Constraint-Guided Multi-Agent Decompilation for Executable Binary Recovery](/202605/05/2604.23940v2-constraint-guided-multi-agent-decompilation-for-executable-binary-recovery)  
-   标签：评分：7.5/10、query:apr-oracle
-   evidence：通过测试用例进行行为等价性验证的分层验证流水线
-2. [Beyond Translation Accuracy: Addressing False Failures in LLM-Based Code Translation](/202605/05/2605.02195v1-beyond-translation-accuracy-addressing-false-failures-in-llm-based-code-translation)  
-   标签：评分：7.5/10、query:apr-oracle
-   evidence：解决代码评估和迭代修复中的错误失败问题
-3. [Themis: Training Robust Multilingual Code Reward Models for Flexible Multi-Criteria Scoring](/202605/05/2605.00754v2-themis-training-robust-multilingual-code-reward-models-for-flexible-multi-criteria-scoring)  
+1. [Beyond Translation Accuracy: Addressing False Failures in LLM-Based Code Translation](/202605/06/2605.02195v2-beyond-translation-accuracy-addressing-false-failures-in-llm-based-code-translation)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于多标准评分和功能正确性的代码奖励模型
-4. [CP-SynC: Multi-Agent Zero-Shot Constraint Modeling in MiniZinc with Synthesized Checkers](/202605/05/2605.01675v1-cp-sync-multi-agent-zero-shot-constraint-modeling-in-minizinc-with-synthesized-checkers)  
+   evidence：解决代码翻译中评估框架的错误失败和可靠性问题
+2. [Learning Correct Behavior from Examples: Validating Sequential Execution in Autonomous Agents](/202605/06/2605.03159v1-learning-correct-behavior-from-examples-validating-sequential-execution-in-autonomous-agents)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于预言验证和模型优化的合成语义检查器
-5. [SCRIBE: Practical Static Binary Patching via Binary-Aware Recompilation of Decompiled Code](/202605/05/2605.02121v1-scribe-practical-static-binary-patching-via-binary-aware-recompilation-of-decompiled-code)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：提高二进制代码重编译成功率和正确性的补丁框架
-6. [ARIADNE: Agentic Reward-Informed Adaptive Decision Exploration via Blackboard-Driven MCTS for Competitive Program Generation](/202605/05/2605.02431v1-ariadne-agentic-reward-informed-adaptive-decision-exploration-via-blackboard-driven-mcts-for-competitive-program-generation)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：程序生成中用于迭代调试和优化的执行反馈
-7. [PPO guided Agentic Pipeline for Adaptive Prompt Selection and Test Case Generation](/202605/05/2605.00942v1-ppo-guided-agentic-pipeline-for-adaptive-prompt-selection-and-test-case-generation)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：用于测试用例生成的强化学习驱动代理框架
-8. [LiveFMBench: Unveiling the Power and Limits of Agentic Workflows in Specification Generation](/202605/05/2605.01394v1-livefmbench-unveiling-the-power-and-limits-of-agentic-workflows-in-specification-generation)  
+   evidence：从执行轨迹中学习正确的行为模型以进行验证
+3. [Practical Formal Verification for MLIR Programs](/202605/06/2605.01124v1-practical-formal-verification-for-mlir-programs)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于程序验证和预言机可靠性的形式化规范生成
-9. [LLM-Assisted Repository-Level Generation with Structured Spec-Driven Engineering](/202605/05/2605.02455v1-llm-assisted-repository-level-generation-with-structured-spec-driven-engineering)  
+   evidence：程序转换语义等价性的形式化验证
+4. [FeedbackLLM: Metadata driven Multi-Agentic Language Agnostic Test Case Generator with Evolving prompt and Coverage Feedback](/202605/06/2605.01264v1-feedbackllm-metadata-driven-multi-agentic-language-agnostic-test-case-generator-with-evolving-prompt-and-coverage-feedback)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：结构化规范以提高代码生成的验证性
+   evidence：带有覆盖率反馈的自动化测试用例生成框架
+5. [Feedback-Normalized Developer Memory for Reinforcement-Learning Coding Agents: A Safety-Gated MCP Architecture](/202605/06/2605.01567v1-feedback-normalized-developer-memory-for-reinforcement-learning-coding-agents-a-safety-gated-mcp-architecture)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：强化学习编码代理与验证声明
+6. [FunFuzz: An LLM-Powered Evolutionary Fuzzing Framework](/202605/06/2605.02789v1-funfuzz-an-llm-powered-evolutionary-fuzzing-framework)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：利用反馈引导选择的LLM驱动进化模糊测试框架
+7. [ProgramBench: Can Language Models Rebuild Programs From Scratch?](/202605/06/2605.03546v1-programbench-can-language-models-rebuild-programs-from-scratch)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：用于评估生成程序的行为测试
 
 
 <div class="dpr-home-promo-card">
