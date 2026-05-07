@@ -1,0 +1,493 @@
+Title: LLM-Guided Issue Generation from Uncovered Code Segments
+
+URL Source: https://arxiv.org/pdf/2604.26118v2
+
+Published Time: Thu, 07 May 2026 00:13:38 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# LLM-Guided Issue Generation from Uncovered Code Segments 
+
+# Diany Pressato 
+
+Concordia University Montreal, Canada diany.pressato@mail.concordia.ca 
+
+# Honghao Tan 
+
+Concordia University Montreal, Canada honghao.tan@mail.concordia.ca 
+
+# Mariam Elmoazen 
+
+Concordia University Montreal, Canada mariam.elmoazen@gmail.com 
+
+# Shin Hwei Tan 
+
+Concordia University Montreal, Canada shinhwei.tan@concordia.ca 
+
+## Abstract 
+
+Developers are increasingly overwhelmed by AI-generated issue reports that lack actionability and reproducibility, eroding trust in automated bug detection tools. In this paper, we present Issue-Specter , an automated tool that finds bugs in uncovered code segments and automatically generates prioritized, actionable issue reports. IssueSpecter combines coverage analysis with LLM-based defect identification, producing structured reports complete with severity ratings, reproduction steps, and suggested fixes. We evalu-ate on 13 actively maintained Python projects, generating 10,467 issue reports. Manual annotation of the top-130 ranked issues by 
+
+IssueSpecter confirms that 84.6% of the LLM-generated issues are valid or warrant further investigation, with only 15.4% false posi-tives. LLM-based ranking outperforms rule-based ranking by 50% at P@3 and 41% in MRR. The identified bugs cover a wide variety of types, from logic and boundary errors to security vulnerabilities and state consistency bugs. By ranking issues by priority, Issue-Specter aims to help developers focus their attention on the most impactful bugs first. Finally, we validate IssueSpecter through case studies reproducing real bugs surfaced from its generated issue reports, demonstrating its practical value for automatic bug discov-ery in open-source Python projects. Compared against CoverUp, a state-of-the-art coverage-driven test generation tool, IssueSpecter 
+
+achieves a higher bug validity rate (81.0% vs. 76.2%) under identical evaluation conditions, using the same model and the same num-ber of evaluated artifacts per project, while additionally providing structured issue reports with reproduction steps and candidate fixes that are immediately actionable without requiring developers to interpret generated test intent. 
+
+## Keywords 
+
+Issue Report Generation, Large Language Models, Bug Prioritiza-tion, Automated Bug Detection 
+
+## 1 Introduction 
+
+Automated Software Resolution (ASR) techniques aim to automati-cally fix GitHub issues, one of the most resource-intensive phases of the software development lifecycle. Recent advances in Large Language Models (LLMs) have enabled autonomous agents capable of fault localization, patch generation, and issue closure with min-imal human oversight [ 12 , 25 ]. However, these techniques share an underlying assumption: that a human developer has already identified and submitted a bug report before any automated reso-lution can begin. This leaves a critical gap in the software quality assurance pipeline, as many latent defects remain undetected until they manifest as high-cost production failures. 
+
+The Coverage-Resolution Gap. A fundamental gap persists be-tween proactive testing and automated resolution. Proactive Au-tomated Test Generation (ATG) tools [ 7, 27 , 33 ] increase code coverage but suffer from the oracle problem : a generated test that reaches a buggy path often encodes the incorrect behavior into its assertions, masking the defect. Furthermore, the standard practice of filtering failing tests [ 31 ] systematically discards the very sig-nals that expose validation failures. Reactive Issue Resolution 
+
+agents [ 3, 12 ] possess the reasoning capacity to fix bugs but lack the activation signal for uncovered code. Consequently, coverage-driven suites may appear comprehensive while silently masking latent vulnerabilities. 
+
+Our Proposal: IssueSpecter . To bridge this gap, we present 
+
+IssueSpecter , a pipeline that transforms uncovered code segments into ranked, actionable issue reports. Rather than generating tests to 
+
+exercise code, IssueSpecter directs LLM semantic reasoning at the 
+
+uncovered segments themselves , where the absence of passing tests provides a precise, high-signal localization for latent defects. 
+
+IssueSpecter operates across three stages: (i) Coverage Localization 
+
+using coverage information to identify uncovered segments, (ii) 
+
+LLM-driven Defect Analysis to generate structured reports including severity, reproduction steps, and candidate fixes; and (iii) Two-Stage Ranking combining rule-based severity heuristics with LLM-based impact reordering to produce a prioritized triage list. We evaluate IssueSpecter on 13 actively maintained open-source Python projects from the CodaMosa [ 24 ] dataset. For each project, 
+
+IssueSpecter generated and selected a 10 top-ranked issues. Man-ual annotation of these issues yielded an 84.6% actionability rate ,with 37.7% confirmed as genuine bugs and only 15.4% classified as false positives. LLM-based Ranking outperforms rule-based rank-ing by 50% at P@3 and 41% in MRR . The detected defects in these issues fall into nine of the ten categories of the adopted bug taxonomy [ 34 ] with no domain-specific tuning. Besides encounter-ing a path traversal vulnerability (CWE-22), IssueSpecter surfaces three case studies illustrating the practical reach of these results: a memory exhaustion condition, a silent data-loss bug in a gzip decompressor, and a type constraint violation, all found in segments of fewer than 30 lines that no existing test had ever reached. 
+
+Contributions. Our contributions are summarised as follows: 
+
+> 1
+> arXiv:2604.26118v2 [cs.SE] 5 May 2026 Diany Pressato, Honghao Tan, Mariam Elmoazen, and Shin Hwei Tan
+
+Tool: We present IssueSpecter , the first automated pipeline that combines coverage-guided segment identification with LLM-based defect detection to generate prioritized, structured issue reports from uncovered code segments in Python projects. 
+
+Study: We conduct an evaluation on 13 open-source Python projects, generating 10,467 issue reports and manually annotating 130 top-ranked issues, showing that 84.6% are valid or warrant further investigation. We further compare IssueSpecter against CoverUp over 168 matched artifacts per tool, with IssueSpecter achieving a higher bug validity rate (81.0% vs. 76.2%), with LLM-based Ranking consistently outperforming rule-based ranking across all evaluated metrics. 
+
+Case Studies: We validate IssueSpecter through case studies re-producing real bugs across diverse bug types, demonstrating its practical value for surfacing bugs in open-source Python projects. 
+
+## 2 Motivating Example 
+
+To explain the design of various components of IssueSpecter ,consider a concrete scenario with HTTPie 1, a widely used HTTP client library, having 2,123 source files and a test coverage of 32.2%, with 206 uncovered code segments present in the project. These uncovered segments represent self contained blocks of untested logic which may contains bugs that are overlooked during software development. After identifying these uncovered segments, our Issue Generation phase, IssueSpecter produces 618 issue reports in total, of which 592 identify potential bugs either in the code or in its documentation. 63 of these generated issues are flagged as having high severity, a number that could be time-consuming for a human developer to manually inspect and verify their correctness. Without an automated selection step, a developer might over-look critical issues such as a path traversal vulnerability (CWE-22), confirmed through manual reproduction, which remains buried among hundreds of candidates. As this vulnerability was found in a short uncovered segments, this shows that even short untested parts of the code may contain serious bugs. 
+
+IssueSpecter addresses this through its two-stage reduction pipeline: a rule-based Repository-level Issue Selection phase that narrows the 618 reports down to the top 10 most important issues per project, followed by an LLM-based Ranking phase that reorders those 10 by impact, scope, and urgency. For the HTTPie project, the LLM-based Ranking achieves a perfect MRR score of 1.00, compared to 0.14 under rule-based ranking alone, placing the highest-priority issue (represented by a path traversal vulnerability), at the top of the ranked list. This example illustrates why ranking is necessary, since without it, the most critical bugs risk are probably being overlooked, even in a project with a substantial test suite of 1,028 unit tests. Table 1 shows the top 10 issues ranked by the rule-based sort-ing criteria for the HTTPie project, and the rankings produced by the LLM and the human annotators. The rule-based approach fails to rank because all 10 top-selected HTTPie issues share the same severity level and OS score, as shown in Table 1. As all candidates share the same ranking based on the severity and OS score, the rule-based ranking degenerates into a simple word count ordering that is 
+
+> 1https://github.com/httpie/cli
+
+agnostic to the actual impact of each defect. As a result, the path tra-versal vulnerability in function session_hostname_to_dirname 
+
+(CWE-22) is ranked 7𝑡ℎ , because its description is shorter than other issues. Meanwhile, the LLM-based Ranking correctly elevates this security vulnerability to position 1, in agreement with the golden ranking produced by human annotators, while also correctly at-tributes low priority to issues such as the output_file_specified ,demonstrating that LLM-based Ranking can help further improve the ranking given by the rule-based ranking phase. 
+
+Table 1: Top-4 ranking comparison for the HTTPie project. All issues share a Critical Priority Score and affect all Oper-ating Systems; the Rule-based Ranking and the LLM-based Ranking are compared against the Golden Ranking produced by human annotators.                  
+
+> Issue Title Word Golden Rule-based LLM-based Count Ranking Ranking Ranking
+> session_hostname_to_dirname: un-sanitized inputs leading to path tra-versal 444 171parse_content_type_header wrongly splits on semicolons in quoted values 531 214Unbounded buffering in Buffered-PrettyStream.iter_body can cause OOM 447 363Fallback to localhost for hostless URLs causes session collisions 459 442
+
+## 3 Methodology 
+
+Figure 1: IssueSpecter ’s overall workflow. 
+
+> 2LLM-Guided Issue Generation from Uncovered Code Segments
+
+Figure 1 shows IssueSpecter ’s overall workflow. It automatically generates and prioritizes issue reports via a four-phase approach: (1) Coverage-based Code Segment Localization, (2) Issue Generation, (3) Repository-level Issue Selection, (4) LLM-based Ranking. 
+
+Coverage-based Code Segment Localization: Instead of gen-erating issues for all the source code within a given project, our key insight in issue generation is that uncovered code segments cor-respond to untested segments that are more likely to contain bugs .Given the source code and the corresponding unit test suite of a project, IssueSpecter automatically identifies code segments that are uncovered by existing unit test suite. Specifically, we use Slip-Cover [ 6 ], a code coverage tool for Python that can compute a set of uncovered code with minimal overhead. 
+
+Issue Generation: For each uncovered segment identified in pre-vious phase, IssueSpecter uses GPT-5-mini to identify potential defects by prompting the model to discover up to three distinct bugs per each uncovered segment and generate corresponding issue reports. Figure 2 shows our prompt template used for automated bug identification. It specifies that every generated issue should contain: a severity category (Critical, High, Medium, Low, or Very Low) assigned by the LLM, the affected operating systems, an in-depth description with step-by-step reproduction instructions, and suggested code fixes for the identified defect.       
+
+> Role: You are an expert Python developer and test engineer. You will be provided with a Python code snippet extracted from PROJECT_NAME .
+> Task: Analyze the code, identify up to three distinct defects, and gener-ate corresponding bug reports. In the absence of bugs, include a boolean indicator explicitly stating that no bug was found. For each bug you identify, generate an issue report and provide an associated pull request suggestion. After completing the issue report, organize all found issues according to the precise JSON schema output. For every proposed fix, ensure the code maintains original functionality and style. For each bug, assess its severity (very low, low, medium, high, or critical) and specify affected operating system(s). Indicate whether documentation in-consistencies are involved and propose a Python code fix when appropriate, preserving original functionality and coding style.
+> Input: Python code snippet to be analyzed: CODE_SNIPPET
+> JSON Output: A JSON array of three objects, each with a boolean indicating whether a bug is present. If a bug exists, the object includes title, summary, bug severity, OS, generated issue, a boolean for inconsistent documentation, and fixed code, ensuring consistent, parseable output.
+
+Figure 2: Prompt template used for automated bug identifi-cation and reporting during our Issue Generation phase. Repository-level Issue Selection: The Issue Generation phase may produce a hundreds of issue reports across a project’s uncov-ered code segments. Hence, the goal of this phase is to select a list of important issues considering all uncovered code segments within a project. Specifically, we design a rule-based ranking approach based on prior research on bug reports prioritization [4]. Our selection strategy employs a three-steps hierarchical ranking mechanism, as summarized in Table 2. Issues are ranked according to the following priority order: 
+
+(1) Bug Severity Priority: Issues are first grouped into five severity levels, with higher severity groups taking absolute precedence. 
+
+(2) Operating System Impact: Within each severity group, issues are then sorted by the number of affected operating systems. Issues affecting all platforms receive the highest OS score of 100, while others receive a score equal to the number of distinct OS labels (e.g., 2 for an issue affecting Windows and macOS). Issues with higher OS scores are ranked first. 
+
+(3) Description Completeness: Finally, among issues with iden-tical severity and OS scores, we rank based on the word count, using description length as a proxy for completeness under the assumption that longer issues contain more detailed reproduction steps and context. This hierarchical ranking ensures that a critical bug affecting one platform is prioritized over a low-severity bug affecting all platforms, and that cross-platform issues within the same severity level are ranked above single-platform issues. For each project, this heuristic ranking selects top 10 issues, representing a list of high-severity issues with detailed descriptions. 
+
+Table 2: Three-steps hierarchical ranking criteria for Repository-level Issue Selection. 
+
+Order Criterion Description 
+
+1 Priority Severity grouping: Critical, High, Medium, Low and Very Low. 2 OS Score 100 for “all”; else distinct OS count (higher = more platforms). 3 Word Count Description length (higher = more complete). 
+
+LLM-based Ranking: The fourth phase employs an LLM-based Ranking, in which GPT-5-mini evaluates each project’s top 10 issues selected by the rule-based selection, and then assigns a priority ranking from 1 (highest priority) to 10 (lowest priority) for each issue according to impact , scope and urgency , as illustrated in the prompt template in Figure 3. IssueSpecter produces two outputs: (1) the rule-based ranking derived from Phase 3, and (2) the LLM ranking for the same set of top-selected issues per project, where the ranking process is performed independently for each project.                 
+
+> Role: You are a software engineering expert tasked with ranking up to 10 issue reports from a specified project according to urgency, scope and bug impact.
+> Task: Each issue includes associated attributes: bug severity ,affected os ,
+> number of unit tests failing from the project test suite when the proposed Python fix is applied, and word count .Evaluate each issue based on logical validity, alignment with best practices and documentation, and support from external technical resources, when available, and assess the issue’s fit with the project’s architecture and de-sign patterns. Additionally, evaluate the impact of failed tests, noting if a proposed fix passes all tests. Rank issues in descending order of impact and urgency, with “1” as the highest. If required data is missing or unverifiable, clearly indicate this in the output.
+> JSON Output: For each ranked issue, generate a structured Markdown report under the validity report field. The final output should be a valid JSON object with the ranking of each issue, with each object containing
+> issue id ,reasoning ,validity classification (a boolean to indicate if the issue is valid or not), confidence rating , and the validity report .
+> Input JSON: The JSON object input to process: ISSUES_ATTRIBUTES
+
+Figure 3: Prompt template used for LLM-based Ranking. Patch correctness. We use existing test suite to further rank the issues based on patch correctness. For each original program 𝑃 
+
+and the fixed program 𝑃 ′ (included in the issue), we execute all tests within the given test suite to identify regression-introduced 
+
+> 3Diany Pressato, Honghao Tan, Mariam Elmoazen, and Shin Hwei Tan
+
+patches by checking whether there are new failing tests (i.e., tests that passes in 𝑃 but fails in 𝑃 ′). Issues with regression-introduced patches are ranked lower, with the ranking decreasing further as the number of failing tests increases for a given patch. 
+
+## 4 Evaluation 
+
+Our evaluation focuses on three research questions: 
+
+RQ1: How effective is IssueSpecter in detecting bugs in uncovered code segments? 
+
+RQ2: How do the individual components of IssueSpecter con-tribute to its overall effectiveness? 
+
+RQ3: How does IssueSpecter compare with unit test generation approaches in surfacing bugs? 
+
+## 4.1 Dataset 
+
+Our evaluation consists of a total of 13 open-source projects, as shown in Table 3. Specifically, from the 27 projects in the CodaMosa dataset [ 24 ], we selected project that are actively maintained (e.g, with commits after 2023), excluding 11 inactive projects. Active maintenance is a critical selection criterion for our study, as we generate issues for the latest version of the project, validate gen-erated bug reports by submitting them as issues and pull requests to the respective repositories, enabling us to obtain future com-munity feedback. In addition, three projects with recent activity were excluded due to technical incompatibilities with SlipCover during coverage analysis (i.e., dependency conflicts that prevented the extraction of uncovered code segments). Overall, the 13 selected projects covers diverse domains that encompasses developer tools, web frameworks, data utilities, automation systems, and multimedia applications, ensuring IssueSpecter captures bugs across different programming paradigms. The selected projects are diverse in terms of complexity and test coverage, with project sizes varying consid-erably, ranging from compact codebases like TQDM with 67 files to bigger ones, such as iSort with 5,049 files. We focus on widely used Python projects that have been used for prior evaluation of unit test generation techniques [ 24 ], [ 7], [ 27 ], [ 15 ], [ 5 ], [ 33 ], [ 26 ], [20], [23], [22], [11], [28], [42]. 
+
+## 4.2 Segments 
+
+Table 4 shows the uncovered segments that IssueSpecter selected as targets for issue generation. The evaluated projects have an average of 15 to 25 lines per segment, suggesting that the uncovered regions tend to be compact , representing self-contained blocks, rather than large untested modules. 
+
+## 5 RQ1: Effectiveness of IssueSpecter 
+
+Metrics. We evaluate the effectiveness of IssueSpecter by man-ually annotating the top-ranked issues and measuring the error detection rate : the proportion of generated issues that are either confirmed bugs or plausible defects warranting further investiga-tion. We also characterize the diversity of surfaced defect types using the ten-category bug taxonomy from [34]. 
+
+Annotation Procedure. Two authors independently read each of the top-10 ranked issues per project (130 issues in total across 13 projects) and classified each as one of: Valid Bug (high confidence 
+
+Table 3: Characteristics of the 13 selected Python projects from CodaMosa dataset. Metrics include number of files, mean and maximum lines of code per file, test coverage per-centage, commit hash at analysis time, and number of exist-ing tests.                                                                                                 
+
+> Project #Files Mean Max Cov. Hash #Tests Ansible [29] 1,573 94.5 2,235 46.2% 22721 2,062 Cookiecutter [9] 89 70.5 590 88.6% af1d7 382 Dataclasses-JSON [17] 39 94.9 358 94.8% dc639 324 DocstringParser [18] 1,001 277.5 8,510 94.7% 43407 230 HTTPie [21] 2,123 211.8 8,664 32.2% 5b604 1,028 isort [37] 5,049 215.1 20,748 16.0% 77bc6 536 Mimesis [30] 90 577.0 13,068 99.1% 70b11 8,268 PySnooper [32] 1,013 147.7 5,158 40.1% 0561a 78 Sanic [2] 2,860 214.4 8,664 96.2% a64d7 1,693 Thonny [8] 328 184.4 3,432 37.3% 55ac2 3Tornado [38] 111 258.2 2,560 30.7% d30ef 1,317 tqdm [14] 67 85.5 1,427 71.0% 0ed5d 150 Youtube-DL [16] 902 152.3 5,158 62.5% 1e109 2,767 Total 15,245 ————18,838 Mean 1,173 198 6,120 62.3% —1,449
+
+Table 4: For each project, we report the total number of un-covered segments identified by SlipCover, along with the maximum, minimum, and average number of source lines spanned by those segments.                                                      
+
+> Project # Uncovered Segments Lines Maximum Lines Minimum Lines Average
+> Ansible 1832 364 120.77 Cookiecutter 25 101 224.32 Dataclasses-JSON 55 84 117.40 Docstring Parser 51 151 123.78 HTTPie 206 111 115.09 iSort 24 30 410.83 Mimesis 300 63 111.27 PySnooper 35 176 118.14 Sanic 322 188 121.98 Thonny 28 135 225.46 Tornado 284 193 118.35 tqdm 44 59 116.09 Youtube-DL 283 901 126.00
+
+the defect exists), Requires Further Investigation (plausible but not fully reproducible, e.g., edge cases), or Invalid (hallucination or mis-understanding of intended usage). For each issue, annotators also assigned a single bug category from the ten-category taxonomy of [ 34 ], with the annotated bug distribution shown in Table 6. Note that this annotation covers the 130 issues used to evaluate Issue-Specter ’s effectiveness (RQ1). The comparison against CoverUp in Section 7 is conducted over a separate set of 168 matched arti-facts per tool, to ensure a fair comparison and following the same classification scheme. 
+
+Issue Generation Volume. The 10,467 issues generated by Issue-Specter across the 13 selected projects, covers five severity levels (Critical, High, Medium, Low and Very Low). The Issue Generation 
+
+> 4LLM-Guided Issue Generation from Uncovered Code Segments
+
+phase achieved a high error detection rate: 9,929 out of 10,467 issues, corresponding to 94.9% of the issues, are flagged with at least one actual defect in the analyzed uncovered segment. This rate should be interpreted with caution rather than taken as a direct measure of bug detection accuracy, since LLMs tend to exhibit confirmation bias when prompted to find bugs (i.e., a model may report a defect even in correct code). 
+
+Annotation Results. Table 5 shows the results of the annotation, with an agreement of 80.3%. 84.6% of top-ranked issues are either confirmed valid bugs (37.7%) or require further investigation (46.9%), with only 15.4% classified as invalid (e.g., hallucinations or misun-derstandings of the project’s intended usage patterns). Although a relatively high percentage of the top-10 issues selected by our rule-based ranking approach are valid bugs, we believe that expos-ing developers to a non-trivial rate of invalid reports risks eroding trust in LLM-assisted tools over time, reinforcing the importance of the selection and ranking phases of IssueSpecter as a necessary layer between raw LLM output and developer attention. 
+
+Table 5: Manual assessment of 130 top-ranked generated issues by two human annotators. Valid bugs exhibit high confidence of existence; issues requiring further investiga-tion appear plausible but require execution for confirmation or represent edge cases; invalid issues are hallucinations or misunderstandings of project usage. Bug Assessment Count Percentage 
+
+Valid Bug 49 37.7% Requires Further Investigation 61 46.9% Invalid 20 15.4% 
+
+Total 130 100% 
+
+Bug Type Diversity. Table 6 shows that the validated issues skew heavily toward Logic and Conditional Bugs (43 cases, 33.1%) and Input Validation, Boundary, and Sentinel Handling Errors (39 cases, 30.0%). Together, these categories make up over 63% of the total annotated issues, suggesting that LLMs are particularly sensitive to control-flow and boundary-handling problems residing in un-covered code, precisely the category of defects that test suites most commonly fail to exercise. Security-related defects (Security and Sensitive Data Leakage Due to Logic Oversight) were less frequent but nonetheless present, with four identified cases. The distribution of surfaced defects spans nine out of ten cate-gories of the adopted taxonomy, with no single category accounting for more than one third of all validated issues. This diversity reflects the breadth of Python defect patterns that LLM-based analysis of uncovered segments is capable of exposing, spanning from low-level type mismatches and boundary errors to higher-level security vulnerabilities and protocol conformance violations. Domain-agnostic patterns hold consistently across web frame-works (Sanic, Tornado), developer tools (PySnooper, Thonny), data utilities (Mimesis, Dataclasses-JSON), and automation systems (An-sible), suggesting that logic and boundary errors represent a fun-damental class of defects that systematically escape test cover-age in Python projects. Domain-specific observations emerge at 
+
+Table 6: Distribution of bug categories across validated issues generated by GPT-5-mini, manually annotated according to the taxonomy from [ 34 ]. Logic errors and input validation issues dominate, while I/O handling and mutability bugs are less frequently detected for our 130 validated issues.           
+
+> Bug Category Count
+> Logic and Conditional Bug 43 Input Validation, Boundary, and Sentinel Handling Error 39 State Consistency, Bookkeeping, and Caching Bug 14 Protocol and Specification Conformance Bug 12 API, Signature Mismatch, or Backward Compatibility Break 10 Incorrect Argument Forwarding, Constructor, or Inheritance Contract Break 6Security and Sensitive Data Leakage Due to Logic Oversight 4IO, Filesystem, or Resource Handling Bug 1Copy Semantics, Mutability Aliasing, or In Place Mutation of Inputs 1Missing import / symbol / attribute error 0
+> Total 130
+
+finer granularity: security-related defects were exclusively found in projects that handle external input or perform filesystem and network operations; state consistency and bookkeeping bugs were disproportionately present in projects with asynchronous or stream-ing architectures; and API and signature mismatch bugs were most prevalent in large, multi-component projects such as Ansible. 
+
+Finding 1: IssueSpecter generates top-ranked issues of which 84.6% are either confirmed valid bugs (37.7%) or require further investigation (46.9%), with only 15.4% classified as outright false positives. Our defect distribution suggests that LLM-based anal-ysis of uncovered code segments can be effective at identifying control-flow and boundary-handling defects. 
+
+Implication 1: IssueSpecter issue generation from uncovered code segments could be a practical approach to complement exist-ing test suites by systematically ranking potential bugs, spanning a set of diverse bug types, that may warrant further investigation. 
+
+## 6 RQ2: Ablation Study 
+
+Annotation Setup. To evaluate the effectiveness of both rule-based and LLM-based Ranking, two annotators independently re-viewed the top 10 issues selected per project, totaling 130 issues across 13 projects, with an annotation agreement of 82%. Each issue was classified according to the bug taxonomy from BugPilot [ 34 ]and assessed for bug validity as shown in Table 6. Annotators also produced a golden ranking of each project’s 10 issues from 1 (highest priority) to 10 (lowest priority), using the same three criteria employed by the LLM-based ranker: impact 
+
+(severity of effect on functionality or users), scope (breadth of af-fected users, features, or components), and urgency (prioritizing security vulnerabilities and regressions). These annotated rankings serve as ground truth for evaluating both ranking strategies. 
+
+Metrics. We evaluate both ranking strategies using the following metrics: 
+
+> 5Diany Pressato, Honghao Tan, Mariam Elmoazen, and Shin Hwei Tan
+
+Precision at 𝑘 (P@ 𝑘 ). Measures the fraction of relevant issues among the top-𝑘 ranked results, rewarding strategies that surface true positives early in the ranking. 
+
+Normalized Discounted Cumulative Gain (NDCG@ 𝑘 ). Measures rank-ing quality by assigning higher weights to relevant results appear-ing at higher ranks, normalized against an ideal ranking: NDCG@ 𝑘 = DCG@ 𝑘 
+
+IDCG@ 𝑘 , where DCG@ 𝑘 =
+
+> 𝑘
+
+∑︁ 
+
+> 𝑖 =1
+
+rel 𝑖 
+
+log 2 (𝑖 + 1) (1) 
+
+Mean Reciprocal Rank (MRR). Measures the average reciprocal rank of the first relevant result across all queries: MRR = 1
+
+|𝑄 | 
+
+> |𝑄 |
+
+∑︁ 
+
+> 𝑞 =1
+
+1
+
+rank 𝑞 
+
+(2) 
+
+Expected Reciprocal Rank (ERR). Extends MRR by modeling user satisfaction as a cascade, where the probability of examining a result depends on the relevance of all preceding results. 
+
+Mean Average Precision (MAP). Computes the mean of Average Precision scores across all queries, where Average Precision rewards rankings that place all relevant results as high as possible: MAP = 1
+
+|𝑄 | 
+
+> |𝑄 |
+
+∑︁ 
+
+> 𝑞 =1
+
+AP (𝑞 ), where AP (𝑞 ) = 1
+
+𝑅 
+
+> 𝑛
+
+∑︁ 
+
+> 𝑘 =1
+
+𝑃 @𝑘 · ⊮[𝑑 𝑘 ∈ R] 
+
+(3) 
+
+Precision Results. Tables 7 and 8 present the comparison of rule-based versus LLM-based Ranking. LLM-based Ranking achieves higher precision at all cutoff points. At P@1, LLM-based Ranking correctly places the highest-priority issue in 4 projects, compared to only 2 for rule-based ranking, showing a 100% improvement at the position most relevant for developers who can inspect only one issue. This advantage increases at P@3, where LLM-based Ranking achieves a cumulative score of 8.00, while rule-based ranking scores 5.33, representing a 50% improvement. At P@5, LLM-based Ranking maintains a consistent 19% improvement (8.60 vs. 7.20). Notable in-dividual improvements include HTTPie, which improves P@1 from 0 to a perfect score under LLM-based Ranking and achieves perfect precision at P@5, and Youtube-DL, which reaches a perfect P@1 under LLM-based Ranking compared to 0 in rule-based ranking. 
+
+NDCG Results. LLM-based Ranking shows higher cumulative NDCG at every cutoff point (Table 8). NDCG rewards relevance while increasingly penalizing relevant items placed lower in the ranking. At NDCG@1, LLM-based Ranking scores 9.90, compared to 9.40 for rule-based ranking. This gap widens progressively, reach-ing 11.98 for LLM-based versus 11.61 for rule-based at NDCG@10. The consistent improvements at NDCG@10 across most projects suggest that LLM-based Ranking performs better across the entire top-10 list, not just at the top positions. 
+
+MRR, ERR, and MAP Results. As shown in Table 9, LLM-based Ranking achieves a cumulative MRR of 7.21, compared to 5.11 for rule-based ranking, showing a 41% improvement. HTTPie improves from MRR = 0.14 to 1.00, and Youtube-DL from 0.25 to 1.00. For ERR, LLM-based Ranking scores 8.83 vs. 7.22 for rule-based (22% improvement), with significant gains in HTTPie, Youtube-DL, and PySnooper. MAP improves from 8.05 to 9.33 (16% improvement). Despite these consistent improvements, accurately retrieving the single most relevant issue remains challenging for both approaches. However, LLM-based Ranking successfully reaches 66% of projects at P@5, offering meaningful practical value over heuristics alone. 
+
+Table 7: Precision at k comparison between the rule based approach and LLM-based Ranking across 13 projects. Values represent the proportion of valid or potential bugs among the top-k ranked issues. Bold indicates superior performance.                                                                                            
+
+> Project Rule-Based Ranking LLM-based Ranking P@1 P@3 P@5 P@1 P@3 P@5
+> ansible 1.00 0.67 0.60 1.00 1.00 0.80
+> cookiecutter 0.00 0.33 0.60 0.00 0.67 0.80
+> dataclasses_json 1.00 0.33 0.60 1.00 1.00 0.80
+> docstring_parser 0.00 0.67 0.60 0.00 0.33 0.60 httpie 0.00 0.33 0.60 1.00 0.67 1.00
+> isort 0.00 0.00 0.60 0.00 0.33 0.60 mimesis 0.00 0.33 0.40 0.00 0.33 0.40 pysnooper 0.00 0.67 0.40 0.00 0.67 0.60
+> sanic 0.00 0.67 0.80 0.00 1.00 0.80 thonny 0.00 0.33 0.40 0.00 0.33 0.40 tqdm 0.00 0.33 0.40 0.00 0.33 0.40 tornado 0.00 0.33 0.60 0.00 0.67 0.80
+> youtube_dl 0.00 0.33 0.60 1.00 0.67 0.60
+> Total 2.00 5.32 7.20 4.00 8.00 8.60
+
+Table 8: NDCG metrics comparison between Rule Based and LLM ranking at cutoffs @1, @3, and @5.                                                                                            
+
+> Project Rule Based LLM @1 @3 @5 @1 @3 @5 ansible 1.00 0.94 0.85 1.00 1.00 0.97
+> cookiecutter 0.10 0.53 0.65 0.60 0.85 0.87
+> dataclasses_json 1.00 0.72 0.73 1.00 1.00 0.98
+> docstring_parser 0.90 0.82 0.81 0.90 0.80 0.81 httpie 0.40 0.65 0.73 1.00 0.94 0.98
+> isort 0.60 0.51 0.66 0.80 0.51 0.67
+> mimesis 0.70 0.77 0.72 0.70 0.77 0.72 pysnooper 0.90 0.72 0.63 0.90 0.83 0.85
+> sanic 0.50 0.80 0.88 0.20 0.65 0.76 thonny 0.70 0.77 0.69 0.10 0.50 0.57 tqdm 0.90 0.81 0.74 0.90 0.81 0.74 tornado 0.70 0.71 0.67 0.80 0.89 0.85
+> youtube_dl 0.70 0.78 0.79 1.00 0.94 0.89
+> Total 9.40 9.53 9.82 9.90 10.49 10.66
+
+Finding 2: LLM-based Ranking consistently outperforms rule-based ranking across all evaluated metrics, with the advantage being most significant at top positions, which are most critical for developers who can only triage a small number of issues. 
+
+Implication 2: Rule-based heuristics alone are insufficient for reliably identifying the highest-priority bugs. Incorporating LLM-based re-ranking help improve the ranking, particularly for iden-tifying the most impactful issue per project, a valued concern in resource-constrained maintenance workflow. 
+
+> 6LLM-Guided Issue Generation from Uncovered Code Segments
+
+Table 9: MRR, ERR, and MAP metrics comparison 
+
+Project Rule-Based Ranking LLM Ranking MRR ERR MAP MRR ERR MAP ansible 1.00 1.00 0.78 1.00 1.00 0.89 
+
+cookiecutter 0.10 0.41 0.57 0.20 0.64 0.76 
+
+dataclasses_json 1.00 1.00 0.71 1.00 1.00 0.93 
+
+docstring_parser 0.50 0.51 0.70 0.50 0.51 0.66 httpie 0.14 0.58 0.63 1.00 1.00 0.86 
+
+isort 0.20 0.24 0.49 0.33 0.36 0.56 
+
+mimesis 0.25 0.38 0.58 0.25 0.38 0.58 pysnooper 0.50 0.51 0.58 0.50 0.75 0.72 
+
+sanic 0.17 0.63 0.76 0.50 0.62 0.72 thonny 0.25 0.39 0.60 0.10 0.57 0.56 tqdm 0.50 0.50 0.56 0.50 0.50 0.56 tornado 0.25 0.44 0.53 0.33 0.50 0.69 
+
+youtube_dl 0.25 0.63 0.56 1.00 1.00 0.82 
+
+Total/Average 5.11 7.22 8.05 7.21 8.83 9.33 
+
+## 6.1 Coverage-based Localization Ablation 
+
+We also investigate how test coverage level influences the quality and quantity of generated issues, to understand the contribution of the line coverage-based localization step to the overall pipeline. Projects with low test coverage naturally expose larger uncovered surfaces. iSort (16.0% coverage) and Tornado (30.7% coverage) pro-duced 24 and 284 uncovered segments, yielding 72 and 852 gener-ated issues respectively. Conversely, highly covered projects such as Mimesis (99.1%) and Dataclasses-JSON (94.8%) still produced 300 and 55 uncovered segments and 900 and 165 issues respectively, demonstrating that even near-complete test suites leave exploitable gaps that LLM-based analysis can detect. Codebase size interacts substantially with coverage to determine issue volume. Ansible, with 1,573 files and only 46.2% coverage, dominates the dataset with 5,496 generated issues from 1,832 un-covered segments, over half of all generated issues. This highlights that large codebases with moderate coverage present an impor-tant target for automated issue generation. Most projects cluster around an average of 15 to 25 lines per uncovered segment as in Table 4, suggesting that the uncovered regions tend to be compact, self-contained blocks rather than large untested modules. 
+
+Finding 3: Issue volume is driven by the combined effect of test coverage and codebase size: low-coverage, large projects (e.g., Ansible) generate the most issues, while even near-complete test suites (e.g., Mimesis at 99.1 %) leave exploitable uncovered gaps that contain valid bugs. Uncovered segments tend to be compact (spanning from 15 to 25 lines on average), providing focused targets for LLM-based defect analysis. 
+
+Implication 3: Automated issue generation and subsequent ranking may be more impactful for large, under tested code-bases, but remains valuable even for mature, well tested projects. Coverage percentage alone is not a reliable indicator of residual defect risk; this suggest that developers may benefit from comple-menting segment-level coverage tools (e.g., SlipCover) alongside LLM-based analysis to identify latent bugs. 
+
+## 7 RQ3: Comparison with Unit Test Generation 
+
+We compare IssueSpecter against CoverUp [ 7 ], the state-of-the-art coverage-driven test generation tool. We run CoverUp using the same model as IssueSpecter (i.e., GPT-5-mini) for a fair compari-son. To ensure a controlled comparison, we match the number of evaluated artifacts per project: for each project, CoverUp generates 
+
+𝑘 unit tests over a set of uncovered segments, while we apply the 
+
+IssueSpecter pipeline to the same segments and select the top-𝑘 
+
+ranked issues, so that both approaches produce exactly 𝑘 outputs per project. This process resulted in 168 artifacts per tool across all evaluated projects (168 unit tests generated in total and 168 issue reports generated in total). While RQ1 evaluates the top-10 ranked issues per project (130 issues total), this section adopts a matched-artifact design to ensure a fair comparison: both IssueSpecter and CoverUp are evaluated on exactly the same number of outputs per project, resulting in 168 artifacts per tool across all 13 projects. 
+
+Annotation Procedure. To assess the practical value of CoverUp-generated tests, we manually inspected all tests generated for the same 168 uncovered segments analyzed by IssueSpecter , classify-ing each as Valid Bug, Requires Further Investigation, or Invalid, following the same annotation procedure described in Section 5. 
+
+Results. Table 10 summarises the results. Regarding the CoverUp-generated tests, 33.3% were classified as valid, 42.9% require further investigation, and 23.8% were deemed invalid. Compared to Issue-Specter ’s actionability rate (the sum of Valid and Requiring Further Investigation categories) of 81.0%, CoverUp’s rate of 76.2% is similar in magnitude, though IssueSpecter additionally provides struc-tured issue reports with reproduction steps and candidate fixes, which CoverUp does not. 
+
+Table 10: Comparison of bug assessment outcomes between CoverUp and IssueSpecter over 168 matched artifacts per tool. Valid bugs correspond to verified bugs. Issues marked as Requiring Further Investigation appear plausible but require execution for confirmation or represent edge cases. Invalid issues are hallucinations or misunderstandings of the project requirement. CoverUp IssueSpecter 
+
+Bug Assessment Count % Count %
+
+Valid Bug 56 33.3% 70 41.7% Req. Further Inv. 72 42.9% 66 39.3% Invalid 40 23.8% 32 19.0% 
+
+Total 168 100% 168 100% 
+
+During our manual investigation of the unit tests generated by CoverUp, we note that over-mocking occurs when tests for seg-ments interacting with complex framework objects (e.g. matplotlib canvas, Tornado async primitives) replacing these objects with stubs that subtly diverge in behavior. In addition, invalid unit tests arise from trivial targets and fake modules injections. Trivial targets happen when CoverUp sometimes generates tests for simple code segments, such as a pass statement or basic attribute assignments, where no meaningful test can exist. Our second observed issue 
+
+> 7Diany Pressato, Honghao Tan, Mariam Elmoazen, and Shin Hwei Tan
+
+involves injecting fake modules into sys.modules and testing im-port mechanisms rather than runtime logic. The 23.8% invalid rate suggests that LLM-based test generators struggle with trivial cases and complex object instantiation. Figure 4 shows the overlap between actionable findings from both tools. For valid bugs, IssueSpecter exclusively identifies 64 bugs while CoverUp exclusively identifies 50, with only 6 bugs found by both tools. For issues requiring further investigation, Is-sueSpecter exclusively surfaces 51 cases and CoverUp 57, with 15 shared. The low intersection in both categories (6 and 15 respec-tively) suggests that the two approaches are largely complementary :each tool exposes a distinct set of defects, and combining both could surface a broader range of latent bugs than either approach alone. 
+
+Figure 4: Overlap between bugs found by IssueSpecter and CoverUp across 168 matched artifacts. Each circle is split into tool-exclusive bugs found (for both IssueSpecter and CoverUp) and shared bugs found (center). The left diagram represents the Valid bugs, and the right diagram accounts for Issues requiring further investigation. Finding 4: Both IssueSpecter and CoverUp achieve comparable bug detection rates (81.0% vs. 76.2%), with IssueSpecter holding a slight advantage. 
+
+Implication 4: Both approaches are viable for surfacing bugs in uncovered code, but IssueSpecter offers a slightly lower in-valid rate and produces structured issue reports with reproduc-tion steps and candidate fixes that are immediately actionable, whereas interpreting the intent and validity of a generated unit test requires additional effort from the developer and a deeper understanding of the project’s codebase. 
+
+## 8 Case Study 
+
+We illustrate the importance and the diversity of bug detected by 
+
+IssueSpecter by discussing three case studies. 
+
+## 8.1 Case 1: Out of Memory Vulnerability in HTTP Client Library 
+
+IssueSpecter identified an out-of-memory vulnerability in the same HTTP client library from our Section 2, where Buffered-PrettyStream.iter_body() accumulates all response chunks into            
+
+> class BufferedPrettyStream(PrettyStream): CHUNK_SIZE = 1024 * 10 +MAX_BUFFER_SIZE = 10 * 1024 * 1024 # 10 MiB def iter_body(self) -> Iterable[bytes]: converter = None body = bytearray() for chunk in self.msg.iter_body(self.CHUNK_SIZE): if not converter and b '\ 0 'in chunk: converter = self.conversion.get_converter(self.mime) if not converter: raise BinarySuppressedError() -body.extend(chunk) # no size limit here +body.extend(chunk) +if len(body) > self.MAX_BUFFER_SIZE: +raise ValueError( +f"Response body exceeds maximum buffered size of " +f"self.MAX_BUFFER_SIZE bytes" +)if converter: self.mime, body = converter.convert(body) yield self.process_body(body)
+
+Figure 5: Diff of the original and fixed 
+
+BufferedPrettyStream.iter_body() .
+
+a byte array without any size validation, causing out-of-memory conditions when processing large responses. 
+
+Manifestation. We reproduced the defect by crafting a synthetic 20 MiB response (2,000 chunks of 10 KB each) exceeding the pro-posed 10 MiB limit, verifying that a ValueError is raised when the limit is exceeded. The generated issue provided clear high-level reproduction steps that guided our investigation, describing how to serve a large HTTP response and observe memory exhaustion, which guided our investigation. 
+
+Root Cause. The defect stems from an unbounded accumulation loop in which body.extend(chunk) is called unconditionally re-gardless of available system memory, with no size check or early termination. 
+
+Fix. Figure 5 presents the diff between the original code of the project and the patch automatically generated by IssueSpecter ,without any manual adaptation. The patch adds a configurable maximum buffer size constant and raises a descriptive ValueError 
+
+when exceeded, allowing a graceful failure. 
+
+Classification and Impact. Following prior work [ 34 ], we classify this as a “state consistency/ bookkeeping/caching” bug of medium severity. While CLI usage causes local crashes only, the vulnerabil-ity becomes more severe when the library is integrated into web services or CI/CD pipelines. 
+
+## 8.2 Case 2: Data Loss in Tornado’s Gzip Decompressor 
+
+IssueSpecter identified a data loss vulnerability in Tornado’s gzip where GzipDecompressor.decompress() silently discards all members beyond the first in a concatenated gzip stream, and fails to check the unused_data attribute of the zlib decompressor for remaining bytes. 
+
+Manifestation. We reproduced the defect by concatenating two gzip-compressed segments and passing them to the decompres-sor. The output contained only the first segment without giving any warning. The generated issue described concrete reproduction steps: compressing two byte strings separately, concatenating the resulting gzip members, and feeding the combined stream to the 
+
+> 8
+
+LLM-Guided Issue Generation from Uncovered Code Segments                        
+
+> def decompress(self, value: bytes, max_length: int = 0) -> bytes: data = value out = bytearray() +remaining = max_length -for chunk in iterate_chunks(data): -result = self.decompressobj.decompress(chunk) -out.extend(result) +while True: +if remaining: +chunk = self.decompressobj.decompress( +data, remaining) +else: +chunk = self.decompressobj.decompress(data) +out.extend(chunk) +if remaining: +remaining = max(0, max_length - len(out)) +if remaining == 0: +break +unused = getattr(self.decompressobj, +"unused_data", b"") +if unused: +data = unused +self.decompressobj = zlib.decompressobj( +16 + zlib.MAX_WBITS) +continue +break return bytes(out)
+
+Figure 6: Diff of the original and fixed 
+
+GzipDecompressor.decompress() .
+
+decompressor. Based on the high-level logic provided in the gen-erated report, we manually refined these steps into an executable test. 
+
+Root Cause. The method assumes a single-member gzip stream and returns immediately after the first decompression completes— an incomplete state tracking assumption that fails silently when processing multi-member streams. 
+
+Fix. The automatically generated patch by IssueSpecter shown in Figure 6 introduces a loop that checks unused_data after each decompression step, instantiating a new decompressor for each subsequent member until the stream is fully processed. 
+
+Classification and Impact. Following prior work [ 34 ], we classify this as a “state consistency/ bookkeeping/caching” bug of medium severity, as it causes silent data loss in systems relying on multi-member gzip streams, a pattern common in HTTP streaming and log rotation tools. After submitting the issue to the Tornado reposi-tory, another GitHub user confirmed the problem 2 and opened a pull request adopting our proposed fix 3.
+
+## 8.3 Case 3: Type Constraint Violation in Cookiecutter’s Prompt Handler 
+
+IssueSpecter detected a type constraint violation in Cookiecut-ter’s prompt handler, where read_user_choice() raises a TypeError 
+
+when option values are unhashable types (e.g., dictionaries or lists), as they are used directly as dictionary lookup keys. 
+
+Manifestation. We reproduced the defect by constructing a template with nested dictionary cloud configuration options, triggering a 
+
+TypeError: unhashable type: ’dict’ crash that halted tem-plate generation, with the guidance of the high-level reproduction steps generated by our tool. The generated issue included concrete 
+
+> 2
+
+https://github.com/tornadoweb/tornado/issues/3560 
+
+> 3
+
+https://github.com/tornadoweb/tornado/pull/3577                      
+
+> if prompts and var_name in prompts: if isinstance(prompts[var_name], str): question = prompts[var_name] else: if "__prompt__" in prompts[var_name]: question = prompts[var_name]["__prompt__"] +prom_map = prompts[var_name] +def _label_for(value): +try: +label = prom_map.get(value) +except TypeError: # value is unhashable +label = None +if label is None: +label = prom_map.get(str(value)) +return label if label is not None \ +else str(value) -choice_lines = ( -f"[bold magenta]i[/] - [bold]" -f"prompts[var_name][p][/]" -if p in prompts[var_name] -else f"[bold magenta]i[/] - [bold]p[/]" -for i, p in choice_map.items()) +choice_lines = ( +f"[bold magenta]i[/] - " +f"[bold]_label_for(value)[/]" +for i, value in choice_map.items())
+
+Figure 7: Diff of the original and fixed read_user_choice() 
+
+in Cookiecutter. 
+
+reproduction steps showing exactly how to construct a prompts mapping with string-keyed representations of dict options, making it straightforward to trigger and confirm the crash with minimal manual effort. 
+
+Root Cause. The handler implicitly assumes all option values are hashable, violating Cookiecutter’s own support for arbitrary JSON structures as valid option values (a latent inconsistency undetected by static type checkers). 
+
+Fix. The automatically generated patch by IssueSpecter in Figure 7 introduces a _label_for() helper that catches TypeError for unhashable values and falls back to their string representation as the lookup key. Classification and Impact. Following prior work [ 34 ], we classify this as a type handling bug of medium severity, as it pre-vents users from defining templates with structured configuration options. 
+
+## 9 Related Work 
+
+Bug Report Prioritization. 
+
+Bug report prioritization has been extensively studied as a classi-fication problem, with early work establishing the core feature sets and classifiers that remain relevant today. Our rule-based criteria is derived from prior study on priority prediction [ 4] which investi-gates the effect of two feature sets (i.e., textual content drawn from bug report summaries and structured metadata such as component, operating system, and severity) on classification accuracy using Naive Bayes, Decision Trees, and Random Forest across Eclipse and Firefox Bugzilla datasets. Results show that metadata-based fea-tures substantially outperform text-only features, and that Random Forest and Decision Tree consistently surpass Naive Bayes. Building on this, a multi-factor approach known as DRONE [ 36 ] proposes an automated priority recommendation framework that extracts temporal, textual, author, related-report, severity, and product fea-tures from bug reports, training a discriminative model that handles ordinal class labels and imbalanced data. Evaluated on over 100,000 Eclipse bug reports, DRONE outperforms severity-based baselines 
+
+9Diany Pressato, Honghao Tan, Mariam Elmoazen, and Shin Hwei Tan 
+
+in average F-measure, particularly for high-priority reports. Sub-sequent work has explored richer signal sources for prioritization: an emotion-based approach [ 40 ] augments DRONE-style feature vectors with affect scores derived from the natural language of bug descriptions, while a deep learning study [ 10 ] employs RNN-LSTM to improve F-measure over SVM and KNN baselines on Eclipse and Mozilla. More recently, transformer-based approaches have pushed the state of the art further. Meanwhile, a Convolutional Neural Network (CNN)-based study [ 39 ] combines topic modeling via a variant of LDA with text classification on 85,156 Eclipse Platform bug reports, outperforming DRONE and other prior approaches in accuracy, precision, and recall. In contrast to these data-driven approaches, which require large labeled corpora of historically pri-oritized reports, IssueSpecter assigns severity ratings to newly generated issue reports using a rule-based technique applied at defect discovery time, without relying on any historical priority labels or training data. 
+
+GitHub Issue Resolution. Prior work [ 19 ] empirically inves-tigates what makes developer-ChatGPT conversations effective for software issue resolution, analysing 686 conversations shared within GitHub issue threads. They find that only 62% of these conversations are helpful, with ChatGPT performing best on well-scoped tasks such as code generation and tool/library recommenda-tions, but struggling with complex, project-specific problems such as system-level debugging and refactoring. MAGIS [ 35 ] proposes a multi-agent LLM framework for resolving GitHub issues, com-prising four specialized agents: a Manager, Repository Custodian, Developer, and Quality Assurance Engineer. Evaluated on SWE-bench, MAGIS resolves 13.94% of issues, an eight-fold improvement over direct GPT-4 application. Unlike IssueSpecter , which focuses on surfacing latent bugs in uncovered code and producing action-able reports, MAGIS targets repository-level patch generation for existing reported issues. SWE-Fixer [ 41 ] introduces an open-source pipeline-based framework for GitHub issue resolution, decompos-ing the task into coarse-to-fine file retrieval (BM25 combined with a fine-tuned 7B model) and code editing (a 72B model trained on 110K curated instances). Evaluated on SWE-Bench, SWE-Fixer achieves 22.0% on Lite and 30.2% on Verified, requiring only two model calls per instance. Unlike IssueSpecter , which proactively surfaces la-tent bugs in uncovered code, SWE-Fixer targets patch generation for already-reported issues. 
+
+LLM-based Technique on Bug Report Enhancement. Prior work on automated bug report enhancement [ 1] proposes an ap-proach to automatically transform unstructured bug reports into high-quality, structured ones, evaluating instruction fine-tuned LLMs (Qwen 2.5, Mistral, and Llama 3.2) against Chat-GPT-4o using the CTQRS (Crowdsourced Test Report Quality Score) criteria [ 43 ], a framework that systematically scores bug reports by combining morphological, relational, and analytical indicators through depen-dency parsing. Fine-tuned on 3,966 high-quality Bugzilla reports, the best-performing model achieves 77% CTQRS, outperforming other open-source models and matching ChatGPT-4o, while also demonstrating cross-project generalizability on unseen ecosystems such as Eclipse and GCC. Building on this foundation, a subse-quent multi-agent approach proposes AgentReport [ 13 ], an LLM pipeline that addresses the modularity, reproducibility, and scala-bility limitations of single-pipeline approaches. AgentReport inte-grates QLoRA-4bit fine-tuning, CTQRS-based structured prompting, Chain-of-Thought reasoning, and FAISS-based one-shot exemplar retrieval. Evaluated on the same 3,966 Bugzilla pairs, it achieves 80.5% CTQRS, 84.6% ROUGE-1 Recall, and 86.4% SBERT, outper-forming GPT-4o in both zero-shot and few-shot settings. While these studies focus on improving the quality of bug reports that developers write, IssueSpecter operates upstream (i.e., it automat-ically detects latent defects in uncovered code and generates issue reports without requiring any existing bug report corpus). 
+
+LLM-based Test Generation. Several test generation techniques have been proposed to generate unit test automatically [ 7, 24 , 26 , 33 ]. CodaMosa [ 24 ] was proposed to address coverage plateaus in tradi-tional SBST approaches. CodaMosa monitors Pynguin’s [ 27 ] search progress and, when coverage stalls, queries Codex to generate test cases targeting under-covered functions, which are then reinte-grated into the search. Previous work [ 26 ] proposes fine-tuning 
+
+DeepSeek-R1-Distill-Qwen-7B with AST-structured prompts and iterative coverage feedback for automated unit test generation. Eval-uated on seven open-source projects, it achieves up to 88.6% line coverage, 83.3% branch coverage, and a 78.9% mutation score, out-performing both the base model by over 20% and Pynguin. CoverUp [ 7 ] is a LLM-based test generation for Python that mea-sures existing test suite coverage using SlipCover [ 6], identifies functions and methods lacking line or branch coverage via AST analysis, and iteratively prompts an LLM with focused excerpts of the uncovered code, embedding precise coverage information and allowing the model to request additional context. If generated tests fail or do not improve coverage, the approach continues the dialogue with targeted feedback before accepting any test. IssueSpecter is grounded in the same insight that LLMs can be effectively directed toward uncovered code when given precise coverage signals, but it re-purposes coverage analysis not to generate tests, but to identify uncovered segments most likely to harbor undiscovered bugs, task-ing an LLM with detecting and reporting those defects rather than writing tests to trigger them. Instead of test generation that aims to improve coverage only, IssueSpecter focuses on detecting latent bugs and generate structured issue reports with severity ratings, reproduction steps, and suggested fixes. 
+
+## 10 Threats to validity 
+
+To minimize bias during ranking and bug type annotation, two annotators resolved disagreements through discussion. The LLM used for issue generation and ranking (GPT-5-mini) may produce inconsistent outputs across runs due to its non-deterministic na-ture. The rule-based ranking relies on heuristics such as word count as a proxy for completeness, which may not always reflect true issue quality. Bugs flagged per segment are also limited to three by our prompt design, potentially causing some defects to go unre-ported. Generated fixes are verified against the existing test suite, but passing tests does not guarantee correctness, as a fix may still be semantically incorrect. Furthermore, the LLM may exhibit confirma-tion bias toward identifying defects, tending to flag code segments as buggy even when no real defect exists, which can inflate false positives among top-ranked issues. 
+
+> 10
+
+LLM-Guided Issue Generation from Uncovered Code Segments 
+
+Finally, our evaluation is restricted to Python projects, which limits the generalizability of our findings to other programming languages. Language-specific constructs, ecosystems, and testing practices may influence both the types of bugs detected and the effectiveness of LLM-based analysis. By fixing the programming language while varying project domains, we isolate the effect of domain diversity on bug detection without introducing language-related features that would complicate interpretation of results. 
+
+## 11 Conclusions 
+
+We present IssueSpecter , an automated pipeline that transforms uncovered code segments into ranked, actionable issue reports by combining coverage-guided localization with LLM-based de-fect analysis and two-stage ranking. Evaluated on 13 open-source Python projects, IssueSpecter generated 10,467issue reports, of which 84.6% of the top-ranked issues were either confirmed valid bugs (37.7%) or warranted further investigation (46.9%), with only 15.4% classified as false positives. LLM-based ranking consistently outperformed rule-based ranking across all metrics, improving MRR by 41% and P@3 by 50%. Our case studies confirmed the practical value of our tool, surfacing a path traversal vulnerability (CWE-22), a silent data-loss bug in a gzip decompressor, and a type constraint violation. Compared to CoverUp, our adopted baseline, 
+
+IssueSpecter achieves a slightly superior comparable actionability rate while additionally providing structured reports with reproduc-tion steps and proposed Python fixes. These results suggest that LLM-based analysis of uncovered code is a practical complement to existing test suites for surfacing probable latent diverse bugs across Python projects from distinct domains. 
+
+## References 
+
+[1] Jagrit Acharya and Gouri Ginde. Can we enhance bug report quality using llms?: An empirical study of llm-based bug report generation. In Proceedings of the 29th International Conference on Evaluation and Assessment in Software Engineering ,EASE ’25, page 994–1003, New York, NY, USA, 2025. Association for Computing Machinery. [2] Adam Hopkins and Sanic Contributors. Sanic framework. [3] Chathurya Adapa, Anjana A R K, Rafsal Rahim, and Ajay Victor. A multi-agent ai framework for agile workflow automation, issue resolution, and developer performance evaluation. In 2025 IEEE International Conference for Women in Innovation, Technology & Entrepreneurship (ICWITE) , pages 1–6, 2025. [4] Mamdouh Alenezi and Shadi Banitaan. Bug reports prioritization: Which features and classifier to use? In 2013 12th International Conference on Machine Learning and Applications , volume 2, pages 112–116, 2013. [5] Nadia Alshahwan, Jubin Chheda, Anastasia Finogenova, Beliz Gokkaya, Mark Harman, Inna Harper, Alexandru Marginean, Shubho Sengupta, and Eddy Wang. Automated unit test improvement using large language models at meta. In 
+
+Companion Proceedings of the 32nd ACM International Conference on the Founda-tions of Software Engineering , FSE 2024, page 185–196, New York, NY, USA, 2024. Association for Computing Machinery. [6] Juan Altmayer Pizzorno and Emery D. Berger. Slipcover: Near zero-overhead code coverage for python. In Proceedings of the 32nd ACM SIGSOFT International Symposium on Software Testing and Analysis , ISSTA 2023, page 1195–1206, New York, NY, USA, 2023. Association for Computing Machinery. [7] Juan Altmayer Pizzorno and Emery D. Berger. Coverup: Effective high coverage test generation for python. Proc. ACM Softw. Eng. , 2(FSE), June 2025. [8] Aivar Annamaa. Introducing thonny, a python ide for learning programming. In Proceedings of the 15th Koli Calling Conference on Computing Education Re-search , Koli Calling ’15, page 117–121, New York, NY, USA, 2015. Association for Computing Machinery. [9] Audrey M. Roy Greenfeld and Cookiecutter Contributors. Cookiecutter: A command-line utility that creates projects from project templates. [10] Hani Bani-Salameh, Mohammed Sallam, and Bashar Al shboul. A deep-learning-based bug priority prediction using rnn-lstm neural networks. e-Informatica Software Engineering Journal , 15(1):29–45, 2021. [11] Shreya Bhatia, Tarushi Gandhi, Dhruv Kumar, and Pankaj Jalote. Unit test genera-tion using generative ai : A comparative performance analysis of autogeneration tools. In Proceedings of the 1st International Workshop on Large Language Models for Code , LLM4Code ’24, page 54–61, New York, NY, USA, 2024. Association for Computing Machinery. [12] Silin Chen, Shaoxin Lin, Yuling Shi, Heng Lian, Xiaodong Gu, Longfei Yun, Dong Chen, Lin Cao, Jiyang Liu, Nu Xia, and Qianxiang Wang. Swe-exp: Experience-driven software issue resolution, 2026. [13] Seojin Choi and Geunseok Yang. Agentreport: A multi-agent llm approach for automated and reproducible bug report generation. Applied Sciences , 15(22), 2025. [14] Casper da Costa-Luis, Stephen Karl Larroque, Kyle Altendorf, Hadrien Mary, richardsheridan, Mikhail Korobov, Noam Yorav-Raphael, Ivan Ivanov, Marcel Bar-gull, Nishant Rodrigues, Shawn, Mikhail Dektyarev, Michał Górny, mjstevens777, Matthew D. Pagel, Martin Zugnoni, JC, CrazyPython, Charles Newey, Antony Lee, pgajdos, Todd, Staffan Malmgren, redbug312, Orivej Desh, Nikolay Nechaev, Mike Boyle, Max Nordlund, MapleCCC, and Jack McCracken. tqdm: A fast, Extensible Progress Bar for Python and CLI, November 2024. [15] Arghavan Moradi Dakhel, Amin Nikanjam, Vahid Majdinasab, Foutse Khomh, and Michel C. Desmarais. Effective test generation using pre-trained large language models and mutation testing. Information and Software Technology ,171:107468, 2024. [16] Daniel Bolton and youtube-dl Contributors. youtube-dl: A command-line pro-gram to download videos from youtube and other sites. [17] dataclasses-json Contributors. dataclasses-json: A library for serializing python dataclasses to json. [18] docstring-parser Contributors. docstring-parser: A python library to parse docstrings. [19] Ramtin Ehsani, Sakshi Pathak, Esteban Parra, Sonia Haiduc, and Preetha Chat-terjee. What characteristics make chatgpt effective for software issue resolution? an empirical study of task, project, and conversational signals in github issues. 
+
+Empirical Software Engineering , 31, 11 2025. [20] Khalid El Haji, Carolin Brandt, and Andy Zaidman. Using github copilot for test generation in python: An empirical study. In Proceedings of the 5th ACM/IEEE International Conference on Automation of Software Test (AST 2024) , AST ’24, page 45–55, New York, NY, USA, 2024. Association for Computing Machinery. [21] HTTPie Contributors. Httpie: a command-line http client. [22] Medlen Jiri, Bari Emese, and Patrick Medlen. Leveraging large language models for python unit test. In 2024 IEEE International Conference on Artificial Intelligence Testing (AITest) , pages 95–100, 2024. [23] Lukas Krodinger, Stephan Lukasczyk, and Gordon Fraser. Combining type inference and automated unit test generation for python, 2025. [24] Caroline Lemieux, Jeevana Priya Inala, Shuvendu K. Lahiri, and Siddhartha Sen. Codamosa: Escaping coverage plateaus in test generation with pre-trained large language models. In 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) , pages 919–931, 2023. [25] Caihua Li, Lianghong Guo, Yanlin Wang, Daya Guo, Wei Tao, Zhenyu Shan, Ming-wei Liu, Jiachi Chen, Haoyu Song, Duyu Tang, Hongyu Zhang, and Zibin Zheng. Advances and frontiers of llm-based issue resolution in software engineering: A comprehensive survey, 2026. [26] Jianlin Long, Renchao Qin, Zujun Jiang, Jialin Duan, Suonan Li, and Xiaosheng Qu. A python unit test generation method based on fine-tuned language models and coverage. In 2025 18th International Congress on Image and Signal Processing, BioMedical Engineering and Informatics (CISP-BMEI) , pages 1–6, 2025. [27] Stephan Lukasczyk and Gordon Fraser. Pynguin: automated unit test generation for python. In Proceedings of the ACM/IEEE 44th International Conference on Software Engineering: Companion Proceedings , ICSE ’22, page 168–172, New York, NY, USA, 2022. Association for Computing Machinery. [28] Stephan Lukasczyk, Florian Kroiß, and Gordon Fraser. An empirical study of automated unit test generation for python. Empirical Software Engineering , 28, 01 2023. [29] Michael DeHaan and Ansible Project Contributors. Ansible: Simple it automation. [30] Mimesis Contributors. Mimesis: A python library for generating fake data. [31] Jiayi Pan, Xingyao Wang, Graham Neubig, Navdeep Jaitly, Heng Ji, Alane Suhr, and Yizhe Zhang. Training software engineering agents and verifiers with swe-gym. ArXiv , abs/2412.21139, 2024. [32] Ram Rachum, Alex Hall, Iori Yanokura, et al. Pysnooper: Never use print for debugging again, jun 2019. [33] Max Schäfer, Sarah Nadi, Aryaz Eghbali, and Frank Tip. An empirical evalua-tion of using large language models for automated unit test generation. IEEE Transactions on Software Engineering , 50(1):85–105, 2024. [34] Atharv Sonwane, Isadora White, Hyunji Lee, Matheus Pereira, Lucas Caccia, Min-seon Kim, Zhengyan Shi, Chinmay Singh, Alessandro Sordoni, Marc-Alexandre Côté, et al. Bugpilot: Complex bug generation for efficient learning of swe skills. 
+
+arXiv preprint arXiv:2510.19898 , 2025. [35] Wei Tao, Yucheng Zhou, Yanlin Wang, Wenqiang Zhang, Hongyu Zhang, and Yu Cheng. Magis: Llm-based multi-agent framework for github issue resolution. In A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. Tomczak, and 11 Diany Pressato, Honghao Tan, Mariam Elmoazen, and Shin Hwei Tan 
+
+C. Zhang, editors, Advances in Neural Information Processing Systems , volume 37, pages 51963–51993. Curran Associates, Inc., 2024. [36] Yuan Tian, David Lo, and Chengnian Sun. Drone: Predicting priority of reported bugs by multi-factor analysis. In 2013 IEEE International Conference on Software Maintenance , pages 200–209. IEEE, 2013. [37] Timothy Crosley and isort Contributors. isort: A python utility / library to sort imports. [38] Tornado Contributors. Tornado: A python web framework and asynchronous networking library. [39] Qasim Umer, Hui Liu, and Inam Illahi. Cnn-based automatic prioritization of bug reports. IEEE Transactions on Reliability , 69(4):1341–1354, 2019. [40] Qasim Umer, Hui Liu, and Yasir Sultan. Emotion based automated priority prediction for bug reports. IEEE Access , 6:35743–35752, 2018. [41] Chengxing Xie, Bowen Li, Chang Gao, He Du, Wai Lam, Difan Zou, and Kai Chen. SWE-fixer: Training open-source LLMs for effective and efficient GitHub issue resolution. In Wanxiang Che, Joyce Nabende, Ekaterina Shutova, and Mohammad Taher Pilehvar, editors, Findings of the Association for Computational Linguistics: ACL 2025 , pages 1123–1139, Vienna, Austria, July 2025. Association for Computational Linguistics. [42] Zhiqiang Yuan, Mingwei Liu, Shiji Ding, Kaixin Wang, Yixuan Chen, Xin Peng, and Yiling Lou. Evaluating and improving chatgpt for unit test generation. Proc. ACM Softw. Eng. , 1(FSE), July 2024. [43] Huan Zhang, Yuan Zhao, Shengcheng Yu, and Zhenyu Chen. Automated quality assessment for crowdsourced test reports based on dependency parsing. In 2022 9th International Conference on Dependable Systems and Their Applications (DSA) ,pages 34–41, 2022. 12

@@ -6,55 +6,49 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-06
-- 运行时间：2026-05-06 20:32:37 UTC
+- 最新运行日期：2026-05-07
+- 运行时间：2026-05-07 21:02:23 UTC
 - 运行状态：成功
-- 本次总论文数：11
-- 精读区：4
-- 速读区：7
+- 本次总论文数：9
+- 精读区：3
+- 速读区：6
 
 ### 今日简报（AI）
-今日聚焦代码修复与智能验证，共精读与速读论文 11 篇。  
-重点关注自动补丁验证基准与基于图的智能错误定位工具，两者在仓库级质量提升上表现突出。  
-建议读者后续关注模型代码验证与代理执行正确性的新方法，了解其在开发流程中的落地潜力。
-- 详情：[/202605/06/README](/202605/06/README)
+聚焦自动化程序修复与验证基准研究，完成 9 篇论文阅读。  
+CI-Repair-Bench 与 HEJ-Robust 均展示了基于 CI 流程和大模型的鲁棒修复评测前沿。  
+建议关注大模型辅助代码修复的可验证性与跨语言优化趋势，跟进开源基准进展。
+- 详情：[/202605/07/README](/202605/07/README)
 
 ### 精读区论文标签
-1. [CI-Repair-Bench: A Repository-Aware Benchmark for Automated Patch Validation via CI Workflows](/202605/06/2604.27148v2-ci-repair-bench-a-repository-aware-benchmark-for-automated-patch-validation-via-ci-workflows)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：通过 CI 工作流和仓库级修复进行自动化补丁验证
-2. [ARISE: A Repository-level Graph Representation and Toolset for Agentic Fault Localization and Program Repair](/202605/06/2605.03117v1-arise-a-repository-level-graph-representation-and-toolset-for-agentic-fault-localization-and-program-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：用于智能体故障定位和程序修复的仓库级图表示
-3. [HEJ-Robust: A Robustness Benchmark for LLM-Based Automated Program Repair](/202605/06/2605.02215v2-hej-robust-a-robustness-benchmark-for-llm-based-automated-program-repair)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：针对基于大语言模型的自动程序修复的鲁棒性基准测试，评估语法变体
-4. [POSTCONDBENCH: Benchmarking Correctness and Completeness in Formal Postcondition Inference](/202605/06/2605.03356v1-postcondbench-benchmarking-correctness-and-completeness-in-formal-postcondition-inference)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：形式化后置条件支持调试、测试和验证
+1. [CI-Repair-Bench: A Repository-Aware Benchmark for Automated Patch Validation via CI Workflows](/202605/07/2604.27148v2-ci-repair-bench-a-repository-aware-benchmark-for-automated-patch-validation-via-ci-workflows)  
+   标签：评分：9.5/10、query:apr-oracle
+   evidence：通过CI工作流进行自动化补丁验证的仓库感知基准
+2. [HEJ-Robust: A Robustness Benchmark for LLM-Based Automated Program Repair](/202605/07/2605.02215v2-hej-robust-a-robustness-benchmark-for-llm-based-automated-program-repair)  
+   标签：评分：9.5/10、query:apr-oracle
+   evidence：基于LLM的自动程序修复的鲁棒性基准
+3. [Root-Cause-Driven Automated Vulnerability Repair](/202605/07/2605.04251v1-root-cause-driven-automated-vulnerability-repair)  
+   标签：评分：9.5/10、query:apr-oracle
+   evidence：基于大语言模型的根因驱动自动化漏洞修复
 
 ### 速读区论文标签
-1. [Beyond Translation Accuracy: Addressing False Failures in LLM-Based Code Translation](/202605/06/2605.02195v2-beyond-translation-accuracy-addressing-false-failures-in-llm-based-code-translation)  
+1. [LLM-Guided Issue Generation from Uncovered Code Segments](/202605/07/2604.26118v2-llm-guided-issue-generation-from-uncovered-code-segments)  
+   标签：评分：7.5/10、query:apr-oracle
+   evidence：基于大语言模型的缺陷识别与修复建议
+2. [Reproduction Test Generation for Java SWE Issues](/202605/07/2605.04320v1-reproduction-test-generation-for-java-swe-issues)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：解决代码翻译中评估框架的错误失败和可靠性问题
-2. [Learning Correct Behavior from Examples: Validating Sequential Execution in Autonomous Agents](/202605/06/2605.03159v1-learning-correct-behavior-from-examples-validating-sequential-execution-in-autonomous-agents)  
+   evidence：生成复现测试以验证软件问题
+3. [CodeEvolve: LLM-Driven Evolutionary Optimization with Runtime-Enriched Target Selection for Multi-Language Code Enhancement](/202605/07/2605.04677v1-codeevolve-llm-driven-evolutionary-optimization-with-runtime-enriched-target-selection-for-multi-language-code-enhancement)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：从执行轨迹中学习正确的行为模型以进行验证
-3. [Practical Formal Verification for MLIR Programs](/202605/06/2605.01124v1-practical-formal-verification-for-mlir-programs)  
+   evidence：基于大语言模型的进化框架，用于代码增强、自动细化和评估
+4. [On the Effectiveness of Modular Testing in EvoSuite](/202605/07/2604.27112v2-on-the-effectiveness-of-modular-testing-in-evosuite)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：程序转换语义等价性的形式化验证
-4. [FeedbackLLM: Metadata driven Multi-Agentic Language Agnostic Test Case Generator with Evolving prompt and Coverage Feedback](/202605/06/2605.01264v1-feedbackllm-metadata-driven-multi-agentic-language-agnostic-test-case-generator-with-evolving-prompt-and-coverage-feedback)  
+   evidence：评估并改进EvoSuite测试生成器的模块化测试
+5. [Improving LLM Code Generation via Requirement-Aware Curriculum Reinforcement Learning](/202605/07/2605.00433v1-improving-llm-code-generation-via-requirement-aware-curriculum-reinforcement-learning)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：带有覆盖率反馈的自动化测试用例生成框架
-5. [Feedback-Normalized Developer Memory for Reinforcement-Learning Coding Agents: A Safety-Gated MCP Architecture](/202605/06/2605.01567v1-feedback-normalized-developer-memory-for-reinforcement-learning-coding-agents-a-safety-gated-mcp-architecture)  
+   evidence：通过强化学习和需求改进代码生成的正确性
+6. [Mitigating False Positives in Static Memory Safety Analysis of Rust Programs via Reinforcement Learning](/202605/07/2605.04000v2-mitigating-false-positives-in-static-memory-safety-analysis-of-rust-programs-via-reinforcement-learning)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：强化学习编码代理与验证声明
-6. [FunFuzz: An LLM-Powered Evolutionary Fuzzing Framework](/202605/06/2605.02789v1-funfuzz-an-llm-powered-evolutionary-fuzzing-framework)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：利用反馈引导选择的LLM驱动进化模糊测试框架
-7. [ProgramBench: Can Language Models Rebuild Programs From Scratch?](/202605/06/2605.03546v1-programbench-can-language-models-rebuild-programs-from-scratch)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：用于评估生成程序的行为测试
+   evidence：基于强化学习的虚假警报分类与抑制方法
 
 
 <div class="dpr-home-promo-card">
