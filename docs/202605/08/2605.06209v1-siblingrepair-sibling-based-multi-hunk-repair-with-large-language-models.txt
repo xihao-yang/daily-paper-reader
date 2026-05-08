@@ -1,0 +1,613 @@
+Title: SiblingRepair: Sibling-Based Multi-Hunk Repair with Large Language Models
+
+URL Source: https://arxiv.org/pdf/2605.06209v1
+
+Published Time: Fri, 08 May 2026 01:31:55 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+> 1
+
+# SIBLING REPAIR : Sibling-Based Multi-Hunk Repair with Large Language Models 
+
+Xinyu Liu, Jiayu Ren, Yusen Wang, Qi Xin, Xiaoyuan Xie, and Jifeng Xuan 
+
+Abstract —Developers often make similar mistakes across mul-tiple code locations implementing related functionalities. These buggy locations, referred to as siblings, share similar issues and require similar fixes. It is important for automated program re-pair (APR) to identify such siblings and apply consistent patches for their repair. The state-of-the-art H ERCULES is designed for this purpose but it is limited by strong assumptions about sibling locations and commit-history availability, rigid AST-based sibling matching that may miss valid siblings, and template-based patch generation with low flexibility and effectiveness. To address these limitations, we propose SIBLING REPAIR ,a new LLM-based multi-hunk APR technique that specializes in sibling repair. Starting from a suspicious location identified by spectrum-based fault localization, S IBLING REPAIR searches for semantically related sibling candidates using token- and embedding-based code matching without restricting sibling dis-covery to failing-test coverage or commit history. It then leverages an LLM to identify true failure-relevant siblings and generate consistent patches via two strategies: simultaneous repair, which jointly identifies and repairs siblings, and iterative repair, which proceeds in a progressive manner by examining each sibling candidate and evaluating the generated patches based on test outcomes and execution feedback. SIBLING REPAIR also pre-serves promising patches identified in previous suspicious location repair and carries them forward; these patches across multiple iterations can be combined to form a general multi-hunk patch. We implemented a prototype of S IBLING REPAIR and eval-uated it on Defects4J and GHRB. Compared with state-of-the-art multi-hunk APR techniques including H ERCULES and ITER, SIBLING REPAIR achieves better repair. For example, under spectrum-based fault localization, it correctly repaired 23 sibling bugs and 76 multi-hunk bugs in Defects4J. By comparison, HERCULES repaired only 4 sibling and 9 multi-hunk bugs, and ITER repaired only 24 multi-hunk bugs. We also show that S IBLING REPAIR is efficient at generating correct patches, and that its candidate sibling detection and LLM-based repair components are effective, and that its performance with different LLMs on GHRB is comparable, which implies limited data leak impact for LLM-based repair. Overall, these results demonstrate SIBLING REPAIR ’s substantial advancement for sibling-based and general multi-hunk repair. 
+
+Index Terms —Automated program repair, sibling repair, multi-hunk repair, large language model. 
+
+I. I NTRODUCTION 
+
+Automated program repair (APR) [1], [2] is gaining mo-mentum nowadays. It holds the promise of automatically fixing bugs to save developers’ time and effort for debugging. Developers often make similar mistakes [3], [4] at different locations. As a result, a significant portion of real fixes handle 
+
+All authors are with the School of Computer Science, Wuhan University, Wuhan 430072, China (e-mail: xinyuliu4@whu.edu.cn; renjiayu@whu.edu.cn; yusenwang@whu.edu.cn; qxin@whu.edu.cn; xxie@whu.edu.cn; jxuan@whu.edu.cn). Corresponding author: Qi Xin. 
+
+related issues. This is evidenced by a study [5] that shows about 11% of multi-hunk fixes addressing multiple locations deal with related issues. Our investigation of the developer patches (ground-truth) of the Defects4J bugs [6] also shows that 14.2% of the multi-hunk fixes are similar, according to GumTree’s code matching algorithm [7], [8]. Thus, it is important for APR to generate similar fixes to repair the related issues across multiple locations. Following previous work [4], we refer to code locations exhibiting related issues and requiring similar fixes as siblings , the corresponding bugs as sibling bugs , and the repair addressing such bugs as sibling repair .HERCULES [4] is a state-of-the-art APR technique designed for sibling repair. Given a buggy program and a test suite com-prising passing tests and at least one failing test exposing the failure, H ERCULES assumes that the failure is due to a sibling bug, and for its repair, H ERCULES starts with spectrum-based fault localization to identify a list of suspicious locations. For each location l, H ERCULES leverages test coverage, commit history, and an AST-based code matching algorithm to identify its siblings. To repair the siblings alongside l, H ERCULES uses template-based patch generation. Although promising with its stated goal, H ERCULES suffers from three key weaknesses: (1) strong assumptions on where the siblings exist and the usefulness of commit-history; (2) rigid AST-based matching algorithm for sibling matching; and (3) template-based patch generation, which has limited repair ability and has no tolerance of any sibling identification errors. Specifically, for (1), H ERCULES assumes that the sibling locations are covered in the execution of failing tests, and when missing, can be identified from the commit history, since siblings can co-occur in historical revisions. Unfortunately, failing tests may not be sufficient to capture all similar mis-takes but often one or a few of them. Besides, their executions can terminate prematurely due to early exceptions or assertion failures. As a result, failing test executions do not necessarily cover all the siblings, as also acknowledged by H ERCULES ’s authors [4]. Our own investigation of the test coverage also shows that for as high as 61% of the Defects4J sibling bugs, failing tests do not cover all siblings. Although the commit history might help with sibling identification, its actual usefulness is limited. As evidence, we found that for only 17% of sibling bugs where the test coverage is insufficient, the commit history can complement this by containing the co-occurrence records for all siblings. For (2), H ERCULES uses an AST-based code matching al-gorithm that relies on code structure comparison, in particular, the compatibility of node kinds (following super- or sub-class 
+
+> arXiv:2605.06209v1 [cs.SE] 7 May 2026 2
+
+relationships) and types (satisfying type casting criteria) for sibling identification. However, siblings that share a related issue may not be kind- or type-compatible, as the core buggy part may be wrapped in different types of expressions or state-ments that are not compatible under H ERCULES ’s criterion. As such, H ERCULES may incorrectly exclude siblings for repair. For (3), once the siblings are identified, H ERCULES uses template-based patch generation to repair them. However, it is well known that a limited set of templates are insufficient to handle diverse forms of buggy code [9], [10]. Besides, HERCULES ’s patch generation has no tolerance of sibling identification errors — it only attempts to repair all identified siblings together, so any mis-identification can lead to an ineffective patch. To overcome these weaknesses, we propose S IBLING RE-
+
+> PAIR
+
+, a new LLM-based APR technique that specializes in sibling repair while also supporting general multi-hunk repair. Given a buggy program and the test suite, S IBLING REPAIR 
+
+performs spectrum-based fault localization to identify a list of suspicious locations and, for each, identifies siblings and gen-erates patches for repair. Unlike H ERCULES , S IBLING REPAIR 
+
+does not assume the siblings are covered by failing tests only, nor does it rely on commit history for sibling identification. Instead, S IBLING REPAIR allows siblings to be anywhere in the code exercised by any test (not just the failing tests). To identify them, S IBLING REPAIR collects statements exercised by the test suite, extracts their surrounding code contexts, and performs code comparison based on semantic embeddings to identify locations related to the suspicious location as candi-date siblings. Since semantic embedding comparison over all exercised statements is expensive, S IBLING REPAIR adopts a more feasible method: it first performs token-based matching using TF-IDF similarity [11] to exclude low-similarity loca-tions that are unlikely to be siblings, and then applies semantic comparison only to the remaining candidates. S IBLING REPAIR 
+
+ignores potential siblings not exercised by any test, since repairs of such siblings cannot be validated by existing tests and may introduce unsafe changes. With the candidate siblings found, S IBLING REPAIR next determines failure-relevant siblings and generates patches with the help of an LLM. To this end, S IBLING REPAIR adopts two complementary strategies: simultaneous repair and iterative repair. In simultaneous repair, the goal is to jointly identify and repair the siblings. To support this process, S IBLING REPAIR 
+
+constructs a prompt that includes the suspicious location and its enclosing method, the failing test case, the failure information (including error message and stack traces), a filtered set of the candidate siblings (to fit the prompt window), relevant fix ingredients, and the test feedback. This prompt provides the LLM with the bug context, failure evidence, and sibling candidates for identification, while also guiding patch generation using the provided fix ingredients. In addition, test feedback is used to help the LLM refine the generated patches. Although simultaneous repair enables a joint fix for all failure-relevant locations, it may fail due to sibling filtering errors or LLM’s hallucination issues, which cause inaccurate sibling identification and incorrect patch generation for the shared issues. To mitigate these limitations, S IBLING REPAIR 
+
+also performs iterative repair, in which it examines candidate siblings one at a time. For each candidate sibling, it prompts the LLM to repair only that location and then evaluates whether the generated patch leads to any progress, as indicated by reduction in failing tests or an extended execution (e.g., progressing beyond a previous failure point). When such progress is observed, S IBLING REPAIR treats the sibling as failure-relevant and reuses the resulting patch in subsequent prompts to guide repairs at other locations. Although S IBLING REPAIR specializes in sibling repair, it also supports general single-hunk and multi-hunk repair. Given a suspicious location and its candidate siblings, the LLM may determine that only the suspicious location requires a modification, yielding single-hunk patches. For multi-hunk repair, S IBLING REPAIR retains promising patches generated at earlier suspicious locations and carries them over to subse-quent locations. When combined, these promising patches can form a general multi-hunk patch. To assess the effectiveness of S IBLING REPAIR , we imple-mented a prototype and evaluated it on two bug benchmarks, Defects4J [6] and GHRB [12]. We compared S IBLING REPAIR 
+
+with four state-of-the-art multi-hunk APR techniques includ-ing H ERCULES [4] and ITER [13]. Our results demonstrate SIBLING REPAIR ’s superiority in repairing sibling bugs: using the DeepSeek LLM (v3.2), it successfully repaired 23 De-fects4J sibling bugs under SBFL, whereas H ERCULES repaired only 4. Despite specializing in sibling repair, S IBLING REPAIR 
+
+repaired 76 multi-hunk bugs and 100 single-hunk bugs in Defects4J with correct patches, substantially outperforming the baseline techniques, with the best repairing only 78 bugs (multi-hunk and single-hunk). Under single perfect fault lo-calization, where a real buggy location is known and placed at the top of the suspicious list, S IBLING REPAIR can repair many more bugs, or 278 in total. Our results also show that SIBLING REPAIR is efficient at generating plausible patches and that its candidate sibling detection and its complementary repair components are effective. Moreover, our evaluation of SIBLING REPAIR on the GHRB sibling bugs shows that it achieves comparable results with different LLMs, GPT-3.5-Turbo, whose training predates the dataset, and DeepSeek v3.2, a more recent model. This result implies a limited data leakage impact on S IBLING REPAIR ’s effectiveness. Taken to-gether, these results demonstrate S IBLING REPAIR as a strong sibling-based APR technique for multi-hunk repair. In summary, our paper makes the following contributions.  
+
+> •
+
+An LLM-based multi-hunk APR technique S IBLING RE- 
+
+> PAIR
+
+that identifies and repairs sibling bugs using a combination of token- and embedding-based matching with simultaneous and iterative repair strategies, while also supporting general multi-hunk repair.  
+
+> •
+
+A comprehensive evaluation showing that S IBLING RE- 
+
+> PAIR
+
+repairs more sibling bugs than the state-of-the-art technique H ERCULES and outperforms other techniques in general multi-hunk repair. II. M OTIVATION AND OVERVIEW 
+
+In this section, we use a motivating example to illustrate the limitations of H ERCULES , and then provide an overview of LIU et al. : SIBLINGREPAIR: SIBLING-BASED MULTI-HUNK REPAIR WITH LARGE LANGUAGE MODELS 3
+
+Fig. 1: The Math 100 bug and its correct patch (on the left), along with H ERCULES ’s AST-based code matching and edit generation (on the right). 
+
+SIBLING REPAIR , showing how it addresses these limitations. 
+
+A. Motivating Example 
+
+We use the Math 100 bug from Defects4J [6] as a moti-vating example. The failure manifested as ArrayIndexOutOf-BoundsException is caused by using the full parameter vector in the computation that expects only the active (unbound) parameter subset, leading to a dimension mismatch and out-of-bounds access. To fix the bug, the developer patch consistently replaces getAllParameters() with getUnboundParameters() at three locations, as shown in Fig. 1. This example illustrates a class of sibling bugs that require similar fixes at multiple locations with contexts not highly similar. H ERCULES fails to repair this bug due to three key limitations: (1) strong assumptions about the sibling locations and the usefulness of commit history; (2) rigid AST-based code matching method for sibling identification; and (3) the limited flexibility and repair ability of its template-based patch generation. First, H ERCULES searches for siblings within code exer-cised by failing tests. However, in this example, the failing test alone is insufficient to cover all siblings, leading to false nega-tives. Specifically, the failing test execution terminates prema-turely due to the ArrayIndexOutOfBoundsException triggered by a call to getCovariance , and therefore does not complete. As a result, only the sibling at line 4 is covered, whereas the other two at line 10 and line 17 are not. While H ERCULES 
+
+also seeks co-occurring relationships from commit history for sibling identification, the history provides no evidence of co-occurrence in this case, since the three locations were never modified together. As a result, H ERCULES incorrectly excludes the siblings at lines 10 and 17, leading to a repair failure. Second, even if H ERCULES were to include lines 10 and 17 as sibling candidates, its AST-based code matching algorithm would still fail to identify all three locations as failure-relevant siblings to repair. This is because the algorithm relies heavily on structural similarity, comparing the compatibility of node kinds (based on super- or sub-class relationships) and types (according to type casting criteria). However, siblings may differ substantially in statement structure even when their core buggy expressions are similar. In this example, the statement at line 17 differs structurally from those at lines 4 and 10, causing the algorithm to exclude it as a sibling. Specifically, the statement at line 4 is a scalar variable declaration, whereas the one at line 17 is an array declaration. Moreover, the right-hand side of line 4 is a field access, whereas that of line 17 is an array initialization. These structural differences lead to an edit distance of 7 in statement comparison under H ERCULES ’s employed tree distance algorithm [14], ultimately causing line 17 to be excluded. Third, H ERCULES uses template-based patch generation, inheriting 11 templates from existing work [15]–[17], such as Insert Cast/Null Pointer/Range Checkers , Mutate Opera-tors/Return Statements , and Statement Movement . However, a limited set of templates are not effective to deal with diverse forms of buggy code. Besides, the patch generation is inflexible, in that it has no tolerance of sibling identification errors: H ERCULES only attempts to apply templates to all the identified siblings for patch generation, and any identification error would result in repair failures. 
+
+B. Overview of SIBLING REPAIR 
+
+SIBLING REPAIR addresses these limitations with token-and embedding-based candidate sibling identification and a 4
+
+combination of simultaneous and iterative strategies for sibling matching and repair with the help of an LLM. The workflow of S IBLING REPAIR is illustrated in Fig. 2. Given a buggy program and the test suite, S IBLING REPAIR 
+
+first performs spectrum-based fault localization (SBFL) to ob-tain a ranked list of suspicious statements. For each, S IBLIN -
+
+> G
+
+REPAIR operates in two stages for sibling repair: candidate sibling detection and LLM-based sibling identification and repair. In the first stage, S IBLING REPAIR identifies candidate siblings of the suspicious statement. Then, in the second stage, SIBLING REPAIR uses two strategies: simultaneous repair and iterative repair to identify failure-relevant siblings and repair them. We next walk through the two stages with the example to explain how S IBLING REPAIR works. Starting from the suspicious statement at line 4 (ranked 9th by fault localization), S IBLING REPAIR first searches for semantically related sibling candidates. Unlike H ERCULES , it does not restrict the search to code exercised only by failing tests, nor does it rely on commit history. Instead, it considers all code locations exercised by any test, yielding a pool of 639 potential sibling locations in this example. Rather than relying on rigid structural matching, S IBLING REPAIR aims to identify semantically related code. To this end, it first extracts the local context of line 4—which in this case contains line 4 and its previous line using H ERCULES ’s method [4]—and applies TF-IDF similarity to filter out locations unlikely to be siblings. It then performs embedding-based semantic comparison only on the remaining candidates, thereby reducing the overhead of semantic embedding vector generation. Through this two-stage filtering and semantic matching process, S IBLING RE- 
+
+> PAIR
+
+identifies 73 candidate statements, including the true, failure-relevant sibling locations at lines 10 and 17. Once the candidate siblings are identified, S IBLING REPAIR 
+
+next performs simultaneous repair, leveraging an LLM to jointly identify the failure-relevant siblings and repair them. Unlike H ERCULES ’s template-based patch generation, which applies predefined templates to all candidates and is highly sensitive to identification errors, the LLM can flexibly select locations to repair based on its reasoning about the root cause. Besides, its patch construction ability is more powerful than a template-based method. In this step, S IBLING REPAIR prompts the LLM with the suspicious location and its enclosing method, the failing test, the failure information, the candidate siblings, and relevant fix ingredients (fields and methods de-fined in related classes) to identify the failure-relevant siblings and generates method-level patches. It also uses previous test failures and generated patches as feedback to help the LLM refine its results. To ensure that the candidate siblings fit within the prompt window, S IBLING REPAIR applies an additional filtering step based on Jaccard similarity [11], which in this example reduces the candidate set from 73 to 24 (across 13 methods). Through simultaneous repair, S IBLING REPAIR 
+
+successfully identifies the two methods containing the three statements in red as the target repair locations and constructs the correct patch shown in Fig. 2. In particular, the retrieved fix ingredient getUnboundParameters() from the relevant class of the parameter problem helps with patch construction. Although simultaneous repair suffices for this example, it may fail in general due to either sibling filtering errors, which can lead to incomplete repairs, or LLM hallucina-tion issues, which can result in incorrect sibling identifica-tion and patch generation. We observed such failures in the JacksonDatabind 32 and Math 46 bugs from Defects4J. For JacksonDatabind 32, S IBLING REPAIR mistakenly filters out a failure-relevant sibling that is not highly similar to the suspicious location but requires a similar fix: the insertion of 
+
+case JsonTokenId.ID_END_OBJECT: . For Math 46, the LLM incorrectly identifies return NaN; in the atan 
+
+method as a failure-relevant sibling, likely because it shares similar NaN-handling semantics with the real siblings and 
+
+atan invokes the method where the real siblings exist. To address these limitations, S IBLING REPAIR also performs iterative repair, in which it examines candidate siblings one at a time, generates method-level patches only for each candidate individually, and evaluates whether any generated patch is promising. This evaluation is based on test feedback and stack traces, checking whether a patch reduces failing tests or possibly extends execution beyond a previous termination point (e.g., an exception-throwing location). Candidate loca-tions for which no promising patch is found are considered not failure-relevant and are skipped. Promising patches generated from earlier candidate locations are then reused to guide the repair of subsequence locations. For both JacksonDatabind 32 and Math 46, S IBLING REPAIR successfully repaired the bugs through iterative repair by reusing promising patches retained to guide subsequent repair while correctly skipping irrelevant locations. Moreover, these retained patches not only support sibling repair for the current suspicious location but are also carried forward to subsequent suspicious locations, enabling general multi-hunk repair. III. T HE SIBLING REPAIR APPROACH 
+
+Algorithm 1 outlines the workflow of S IBLING REPAIR .The algorithm begins with spectrum-based fault localization (SBFL) using the common Ochiai metric [18] for suspicious-ness quantification (line 4). For each suspicious location and its context (line 6), it searches for candidate siblings using token-and embedding-based matching (lines 7–8). It then performs simultaneous repair (line 9) and iterative repair (line 13) with the LLM to identify failure-relevant siblings and generate patches. Promising patches are retained in Ppro and carried forward across the iterations of suspicious location repair. We next elaborate on the key steps: candidate sibling detection, simultaneous repair, and iterative repair. 
+
+A. Candidate Sibling Detection 
+
+With fault localization, S IBLING REPAIR obtains a ranked list of suspicious statements. For each suspicious statement, it identifies candidate siblings — locations that potentially share similar underlying issues (e.g., related API misuses) and require similar fixes. To achieve this, S IBLING REPAIR adopts a three-step procedure: (1) context extraction, (2) token-based matching, and (3) embedding-based matching. LIU et al. : SIBLINGREPAIR: SIBLING-BASED MULTI-HUNK REPAIR WITH LARGE LANGUAGE MODELS 5
+
+Fig. 2: The overview of S IBLING REPAIR .
+
+Algorithm 1: The S IBLING REPAIR Algorithm 
+
+INPUT: initial buggy program b, test suite T , fault localization F , max candidate siblings number k,embeding similarity threshold θ, jaccard similarity threshold α, repair attempts t, max fix ingredients of each line n
+
+OUTPUT: plausible patches Ppl  
+
+> 1
+
+SIBLING REPAIR (b, k, θ, α, t, n, T, F ) 
+
+> 2
+
+Ppro ← ∅ ; // initial promising patch  
+
+> 3
+
+Ppl ← ∅ ; // initial plausible patch  
+
+> 4
+
+L ← F (b, T ); // suspicious statements list  
+
+> 5
+
+Lctx ← CONTEXT EXTEND (L);  
+
+> 6
+
+for lctx in Lctx do  
+
+> 7
+
+Lctx rel init ← TOKEN BASED MATCHING (lctx , L ctx , k );// statement with relevant context  
+
+> 8
+
+Lctx rel ←
+
+EMBEDDING BASED MATCHING (lctx , L ctx rel init , θ ); 
+
+> 9
+
+SIM REPAIR (Lctx rel , b, t, α, n, P pro , P pl , T ); 
+
+> 10
+
+if Ppl ̸ = ∅ then  
+
+> 11
+
+break ; 
+
+> 12
+
+end  
+
+> 13
+
+ITER REPAIR (Lctx rel , b, t, n, P pro , P pl , T ); 
+
+> 14
+
+if Ppl ̸ = ∅ then  
+
+> 15
+
+break ; 
+
+> 16
+
+end  
+
+> 17
+
+end  
+
+> 18
+
+return Ppl ; 
+
+> 19
+
+end 
+
+1) Context Extraction: SIBLING REPAIR adopts HER -
+
+> CULES
+
+’s method [4], which is based on reaching-definition analysis, to extract context for both the suspicious statement and each potential sibling (exercised by tests). Specifically, it first collects all variables used in the target statement repre-senting the suspicious location and then includes their most recent assignments or definitions as the relevant context. If no such context is found, the statement immediately preceding the target statement is used instead. Note that the context extracted includes the target statement itself. 
+
+2) Token-based Matching: Directly applying embedding-based comparison across all potential locations is computa-tionally expensive, given the costly interaction with the online model TEXT-EMBEDDING-ADA-002 [19] for embedding generation, even in batch mode (approximately 2-3 hours for 10,000 locations). To improve efficiency, S IBLING REPAIR first performs token-based matching, which consists of three steps: preprocessing, similarity calculation, and pruning.  
+
+> •
+
+Preprocessing: Operators, parentheses, and semicolons are removed, and identifiers, keywords, and digits are splitted by camel case to extract lowercase tokens from the context. For example, 
+
+getUnboundParameters() is tokenized into 
+
+[get, unbound, parameters] . 
+
+> •
+
+Similarity Calculation: Each context including the target statement is treated as a document. S IBLING REPAIR then computes TF-IDF similarity scores to measure token-level similarity between locations. As a lightweight and computationally efficient method, TF-IDF is well suited for large-scale location filtering.  
+
+> •
+
+Pruning: The top 100 most similar locations (contexts) are retained as initial candidate siblings. We use 100 as it provides a good balance between efficiency and effective-ness by preserving relevant candidates while substantially reducing the search space. For example, in Math 100, this step reduces the candidate set by 75% while retaining the relevant candidates, reducing the subsequent embedding computation time from hours to less than 5 minutes. 6
+
+3) Embedding-based Matching: SIBLING REPAIR next ap-plies embedding-based code matching to identify semantics-related locations as the candidate siblings for subsequent si-multaneous and iterative repair. To this end, it uses the TEXT-EMBEDDING-ADA-002 model [19] to generate a semantic embedding vector for each location (context). It then computes the cosine similarity between each candidate embedding and that of the suspicious location. Finally, a predefined similarity threshold is applied to select the final sibling candidates. We chose TEXT-EMBEDDING-ADA-002 for its strong cross-domain robustness and its independence from language-specific structural assumptions. In contrast, code embedding models such as Code2Vec [20] are primarily designed for method-level tasks (e.g., method name prediction) and opti-mized to capture structural patterns of entire functions through AST-based representations. Our task however focuses on se-mantic similarity across code contexts rather than method-level summarization or structural modeling. Moreover, prior work [21] suggests that source-code token embeddings do not generalize well to downstream tasks. 
+
+Algorithm 2: Simultaneous Repair Algorithm                          
+
+> INPUT: list of candidate siblings with contexts Lctx rel , initial buggy program b, test suite T, promising patches Ppro ,plausible patches Ppl , Jaccard similarity threshold α, repair attempts t, max fix ingredients of each line n
+> OUTPUT: update Ppl
+> 1SIM REPAIR (Lctx rel , b, t, α, n, P pro , P pl , T )
+> 2L′
+> ctx rel ←JACCARD FILTER (Lctx rel , α );
+> 3M′
+> rel ←GROUP BYMETHOD (L′
+> ctx rel );
+> 4f b ←[ ] ;
+
+// initial feedback info     
+
+> 5tried ←0;
+
+// initial attempts without promising patch                                                                                               
+
+> 6while tried < t do
+> 7prompt ←CONSTRUCT PROMPT (M′
+> rel , b, T, f b, n );
+> 8p←GENERATE PATCH (prompt );
+> 9result ←VALIDATE (p, b, T );
+> 10 if result =“pass all” then
+> 11 Ppl .add (p);
+> 12 f b ←[ ] ;
+> 13 APPEND (f b, p );
+> 14 else
+> 15 f b ←[ ] ;
+> 16 APPEND (f b, (p, GET TEST RESULTS (p, b, T ))) ;
+> 17 end
+> 18 tried ←tried + 1 ;
+> 19 end
+> 20 for ppro in Ppro do
+> 21 f b ←[ ] ;
+> 22 APPEND (f b, (ppro ,GET TEST RESULTS (ppro , b, T ))) ;
+> 23 tried ←0;
+> 24 while tried < t do
+> 25 prompt ←CONSTRUCT PROMPT (M′
+> rel , b, T, f b, n );
+> 26 p←GENERATE PATCH (prompt ) + ppro ;
+> 27 result ←VALIDATE (p, b, T );
+> 28 if result =“pass all” then
+> 29 Ppl .add (p);
+> 30 f b ←[ ] ;
+> 31 APPEND (f b, p );
+> 32 else
+> 33 f b ←[ ] ;
+> 34 APPEND (f b, (p, GET TEST RESULTS (p, b, T ))) ;
+> 35 end
+> 36 tried ←tried + 1 ;
+> 37 end
+> 38 end
+> 39 end
+
+Fig. 3: Illustration of the prompt construction. 
+
+B. Simultaneous Repair 
+
+In this step, S IBLING REPAIR jointly identifies the failure-relevant locations from the candidate siblings and generates patches for them, with the help of the LLM. Algorithm 2 details the process. Given the candidate siblings identified in the previous step, S IBLING REPAIR first filters out those with low similarity (line 2), as such candidates are unlikely to share similar issues with the target. Here S IBLING REPAIR focuses on lexical similarity and uses Jaccard similarity scores. This step helps make the remaining candidates fit within the repair prompt. It then groups the remaining candidates by their en-closing methods (line 3), marking the sibling locations within each method. Following prior work [22], patch generation is performed at the method level. SIBLING REPAIR first attempts independent repair without using prior promising patches carried over from previous suspicious location repair (lines 6-19). It then performs repair by considering each promising patch in turn (lines 20-38). In both cases, it constructs a prompt with five components to guide the LLM in generating similar patches (lines 7-8 & 25-26). Plausible patches that cause all tests to pass are retained not only because they resolve the observed failure (lines 11 & 29), but also because they serve as valuable guidance for the LLM to generate more diverse candidate patches, thereby increasing the likelihood of producing a correct fix. Meanwhile, failing patches, along with their associated test feedback, are also preserved (lines 15-16 & 33-34) to support subsequent patch refinement. The prompt used by S IBLING REPAIR is shown in Fig. 3. It consists of four descriptive components in the prompt head, followed by a structured bug-related information section. The latter includes the buggy methods, test case results, feedback information, and fixing ingredients. LIU et al. : SIBLINGREPAIR: SIBLING-BASED MULTI-HUNK REPAIR WITH LARGE LANGUAGE MODELS 7
+
+Algorithm 3: Fixing Ingredients Extraction            
+
+> INPUT: enclosing methods of the filtered siblings M, buggy program b, max fix ingredients of each statement n
+> OUTPUT: repair prompt prompt
+> 1FIXING INGREDIENTS EXTRACTION (M, b, n )
+> 2If ix ← ∅ ;
+
+// initial fix ingredients         
+
+> 3for min Mdo
+> 4u← ∅ ;
+
+// initial called methods and fields                                   
+
+> 5for ℓin m. sibling lines do
+> 6u←u∪CALLSAND FIELDS (ℓ, m. file path , b );
+> 7If ix ←If ix ∪u;
+> 8C←EXTRACT SOURCE FILE (u, b );
+> 9D←EXTRACT CALLS (C);
+> 10 D′←TOKEN MATCH (u, D, n );
+> 11 If ix ←If ix ∪D′;
+> 12 end
+> 13 end
+> 14 return If ix ;
+> 15 end
+
+1) Role Description: The prompt begins with a role spec-ification: “You are an Automated Program Repair Tool.” This instruction aligns the LLM with the repair objective. 
+
+2) Task Description: This component provides a high-level description of the repair task, instructing the LLM to (a) analyze multiple methods together with their labeled sibling statements, (b) evaluate previous patching attempts, (c) learn from previous patching results, and (d) generate consistent patches. 
+
+3) Reasoning Steps: This component guides the LLM through the repair process using the following steps:  
+
+> •
+
+Examine bug-related information and identify failure-relevant siblings;  
+
+> •
+
+Analyze previous patches and infer repair rationales;  
+
+> •
+
+Map fixing ingredients to the inferred repair rationales;  
+
+> •
+
+Design consistent repair strategies;  
+
+> •
+
+Define the required output format. In steps 1–3, S IBLING REPAIR assembles bug-related infor-mation, the previous patches with feedback, and fixing in-gredients. In step 4, SIBLING REPAIR requests that LLM generate consistent patches for the siblings. Finally, in step 5, S IBLING REPAIR defines the output format. In step 1, to collect bug-related information, S IBLING RE- 
+
+> PAIR
+
+includes the failing test cases, runtime error messages, and stack traces, which help the LLM understand failure symptoms and potential root causes. In step 2, to allow the LLM to reuse previous patches, S IBLING REPAIR includes the patches and their corresponding test outcomes as feedback into the prompt. The previous patches can be plausible patches, incorrect patches, or promising patches. The plausible patches allow the LLM to explore alternative consistent repairs so as to increase patch generation diversity; the incorrect patches instruct the LLM to refine its previous failing repair attempts; and the promising patches (from previous suspicious location repair) helps construct general multi-hunk patches. To collect fixing ingredients in step 3, S IBLING REPAIR 
+
+uses Algorithm 3. For each enclosing method of the filtered siblings, S IBLING REPAIR first extracts all fields and methods referenced at the sibling locations (lines 6-7), then identifies their enclosing classes (line 8), and collects all fields and method declarations from those classes (line 9). These ele-ments are ranked by token-level similarity (TF-IDF), and the top n items are selected as fixing ingredients (lines 10-11). 
+
+4) Patch Definitions: This part shows what plausible and promising patches are. A plausible patch is described as a patch that makes all tests pass. A promising patch is one that partially addresses the root cause and leads to repair progress in terms of test outcomes and execution. 
+
+C. Iterative Repair 
+
+If simultaneous repair fails due to sibling filtering errors or LLM’s inability to correctly identify and repair siblings, SIBLING REPAIR performs iterative repair, as detailed in Al-gorithm 4. In iterative repair, S IBLING REPAIR first groups candidate siblings by their enclosing methods (line 2) and then examines these methods one at a time for patch generation (line 3). For each candidate method, following Algorithm 2, it performs both independent repair (lines 7-24), which ignores previously identified promising patches, and dependent repair (lines 25-49), which incorporates such patches accumulated from prior candidate methods or suspicious locations. Independent repair helps avoid error propagation from earlier iterations, including mistakes in fault localization or sibling identification, whereas dependent repair enables the construction of combined patches for multi-hunk fixes. In both cases, S IBLING REPAIR prompts the LLM to generate patches only for the current method and validates them against the test suite to obtain feedback (lines 8-11 & 30-33). If a generated patch is plausible, it is stored in Ppl . Otherwise, S IBLING REPAIR evaluates whether the patch is promising; if so, it is first stored in newP ro , and then merged into Ppro for use across subsequent suspicious locations. Candidate methods that yield no promising patches are skipped. To determine whether a patch is promising, S IBLING RE- 
+
+> PAIR
+
+evaluates repair progress, as reflected by a reduction of failing tests or extended execution progress. Specifically, a patch is considered promising if it causes any previously failing test to pass. If no previously failing test is observed to pass, S IBLING REPAIR further checks whether the patch enables execution to proceed beyond a previously observed failure point—such as an assertion failure or an exception-throwing location—for any failing test. To this end, S IBLIN -
+
+> G
+
+REPAIR compares the stack traces obtained before and after applying the patch. More specifically, it aligns the stack frames from the test case downward until the point of divergence, and then checks whether the patched execution terminates within the same method but at a later location, as determined by the line number. When the diverging frames correspond to different methods while all preceding frames remain identical, SIBLING REPAIR still treats the patch as promising, as such a behavioral change may still indicate repair progress through altered control flow. Although stack-trace-based comparison may introduce false positives, we found it to be empirically effective. A more precise alternative would be to instrument the program and compare full execution traces; however, such an approach incurs substantially higher overhead due 8
+
+to the length and granularity of execution traces. We leave an efficient execution-trace-based promising patch detection to future work. 
+
+Algorithm 4: Iterative Repair Algorithm                            
+
+> INPUT: list of candidate siblings with contexts Lctx rel , initial buggy program b, test suite T, promising patches Ppro ,plausible patches Ppl , repair attempts t, max fix ingredients of each line n
+> OUTPUT: Updated Ppro and Ppl
+> 1ITER REPAIR (Lctx rel , b, t, n, P pro , P pl , T )
+> 2Mrel ←GROUP BYMETHOD (Lctx rel );
+> 3for min Mrel do
+> 4f b ←[ ] ;
+
+// initial feedback info    
+
+> 5newP ro ← ∅ ;
+
+// initial new promising patches     
+
+> 6tried ←0;
+
+// initial repair attempts       
+
+> 7while tried < t do
+> 8M← { m};
+
+// wrap m as a singleton method set                                                               
+
+> 9prompt ←CONSTRUCT PROMPT (M, b, T, f b, n );
+> 10 p←GENERATE PATCH (prompt );
+> 11 result ←VALIDATE (p, b, T );
+> 12 if result =“pass all” then
+> 13 Ppl .add (p);
+> 14 f b ←[ ] ;
+> 15 APPEND (f b, p );
+> 16 else
+> 17 if result =“better” then
+> 18 newP ro. add (p);
+> 19 end
+> 20 f b ←[ ] ;
+> 21 APPEND (f b, (p, GET TEST RESULTS (p, b, T ))) ;
+> 22 end
+> 23 tried ←tried + 1 ;
+> 24 end
+> 25 for ppro in Ppro do
+> 26 f b ←[ ] ;
+> 27 APPEND (f b, (ppro ,GET TEST RESULTS (ppro , b, T ))) ;
+> 28 tried ←0;
+> 29 while tried < t do
+> 30 M← { m};
+
+// wrap m as a singleton method set                                                  
+
+> 31 prompt ←
+> CONSTRUCT PROMPT (M, b, T, f b, n );
+> 32 p←GENERATE PATCH (prompt ) + ppro ;
+> 33 result ←VALIDATE (p, b, T );
+> 34 if result =“pass all” then
+> 35 Ppl .add (p);
+> 36 f b ←[ ] ;
+> 37 APPEND (f b, p );
+> 38 else
+> 39 if result =“better” then
+> 40 newP ro. add (p);
+> 41 else
+> 42 newP ro. add (ppro );
+> 43 end
+> 44 f b ←[ ] ;
+> 45 APPEND (f b, (p, GET TEST RESULTS (p, b, T ))) ;
+> 46 end
+> 47 tried ←tried + 1 ;
+> 48 end
+> 49 end
+> 50 Ppro ←newP ro ;
+> 51 end
+> 52 end
+
+IV. E XPERIMENTAL SETTINGS 
+
+To assess the effectiveness of S IBLING REPAIR , we compare it with state-of-the-art multi-hunk APR techniques on the Defects4J v2.0.1 benchmark [23] under two fault localization settings: spectrum-based fault localization (SBFL) and single perfect fault localization (SPFL). Under SBFL, repair techniques use spectrum-based fault localization with the Ochiai metric to obtain a ranked list of suspicious locations for repair. The setting reflects realistic end-to-end APR usage. Under SPFL, one real buggy location 
+
+lk is assumed to be known. Among all real buggy locations derived from the developer patch, lk denotes the location with the highest suspiciousness score. For the repair experiments, the original suspicious list is modified such that lk becomes the top-ranked suspicious location, while all other locations retain their relative order with slightly lower ranks. This modified list is then used for repair. We conducted SPFL experiments to better understand the repair abilities of techniques such as SIBLING REPAIR and H ERCULES , which initiate multi-hunk repair from a single suspicious location. To further evaluate S IBLING REPAIR ’s ability to repair sib-ling bugs, we also conduct experiments on the sibling bugs from GHRB [12]. We include GHRB in addition to Defects4J because it contains more recent bugs and presents a lower risk of data leakage for LLM-based evaluation. For Defects4J, SIBLING REPAIR is configured to use DeepSeek-V3.2. For GHRB, it is evaluated with both DeepSeek-V3.2 and GPT-3.5-Turbo, whose training cutoff predates the GHRB bugs. We designed five research questions (RQs). Next, we present each RQ together with its corresponding experimental setup in detail. 
+
+A. Research Questions 
+
+RQ-1: How does SIBLING REPAIR perform under SBFL? 
+
+To answer this question, we evaluate S IBLING REPAIR under the realistic SBFL setting and compare it against APR tech-niques that are most relevant to our scenario, namely sibling-based or general multi-hunk repair approaches operating on SBFL-generated suspicious lists rather than assuming perfect fault localization. Following this criterion, we include rep-resentative approaches for multi-hunk repair across different paradigms, including H ERCULES (sibling-oriented template-based repair) [4], ITER (iterative learning-based repair) [13], and ARJACLM (search-based repair with LLM-assisted ingre-dients) [24]. These baselines are closely aligned with our focus while covering diverse repair strategies. For these techniques, we used their publicly available implementations at [25]– [27] with only minimal adaptations required for execution compatibility with our experimental environment. We exclude several APR techniques that are not well aligned with our setting. First, search-based multi-hunk approaches such as GenProg [28], ARJA [29], and ARJA-e [30] are not included because prior evaluations have shown them to be inferior to ARJACLM, which serves as a stronger baseline with the same paradigm. Second, approaches such as MultiMend [31], RepairAgent [32] 1, RepairLLaMA [33],   
+
+> 1Although the authors state that the approach can be combined with SBFL, they do not describe how this integration supports multi-hunk repair, nor do they provide an implementation that incorporates SBFL. LIU et al. : SIBLINGREPAIR: SIBLING-BASED MULTI-HUNK REPAIR WITH LARGE LANGUAGE MODELS 9
+
+PReMM [34], DynaFix-v1 [35] 2, and SRepair [37] are ex-cluded because they assume perfect fault localization (PFL), where all buggy locations are known in advance. This is a strong assumption for multi-hunk repair, making a direct com-parison with S IBLING REPAIR unfair. Third, ThinkRepair [38] is not included, as the approach assumes a known location (i.e., a buggy method). We nevertheless compare S IBLIN -
+
+> G
+
+REPAIR and ThinkRepair under SPFL (see RQ2). Finally, we do not consider non-test-based repair techniques such as AutoCodeRover [39], SpecRover [40], and Agentless [41] or single-hunk repair techniques including FitRepair [42], Gamma [43], and AlphaRepair [44], since our primary focus is multi-hunk repair under test-based scenarios. We ran S IBLING REPAIR , H ERCULES , and ARJACLM on all Defects4J bugs to obtain their repair results. For ITER, we used the results from its original evaluation for 501 bugs from 10 Defects4J projects. For the remaining 334 bugs, for which no results were reported, we ran the tool to obtain the missing results. Following [5], we use a 5-hour time budget for repair. 
+
+RQ-2: How does S IBLING REPAIR perform under SPFL? 
+
+RQ-2 complements RQ-1 by focusing on multi-hunk repair starting from a single fault location, which aligns with the repair paradigm of sibling-based techniques such as SIB -
+
+> LING
+
+REPAIR . We evaluate all four tools—S IBLING REPAIR ,HERCULES , ARJACLM, and ITER—under SPFL, using the modified suspicious list, where a real buggy location is ranked first, as described at the beginning of Section IV. We run these tools to obtain the results under SPFL, using a 5-hour time budget. ThinkRepair, in contrast, is designed to handle only multi-hunk bugs within a single method and assumes that the buggy method is given, rather than operating over a suspicious list. This difference makes the comparison not strictly equivalent. Nevertheless, to provide a point of reference, we reuse its previously reported results under the assumption that the buggy method is known in advance. 
+
+RQ-3: What is the repair time cost of S IBLING REPAIR ?
+
+In this RQ, we investigate S IBLING REPAIR ’s efficiency by measuring the time required to repair bugs. Specifically, we consider the elapsed time from the start of the candidate sibling detection phase to the end of the repair process. The process terminates either when plausible patches are generated or when the 5-hour time budget is exhausted. This measurement reflects the total repair time of S IBLING REPAIR , excluding the fault localization phase. 
+
+RQ-4: What is the effectiveness of each component in SIBLING REPAIR ?
+
+In RQ-4, we evaluate the effectiveness of S IBLING REPAIR ’s key components: candidate sibling detection, simultaneous repair, and iterative repair. Specifically, we first assess the recall of candidate sibling detection to determine whether the candidate set includes the failure-relevant siblings. We focus on recall rather than precision at this stage because the 
+
+> 2While DynaFix-v1 [35] assumes PFL, DynaFix-v2 [36] additionally sup-ports the SBFL configuration and is thus comparable to S IBLING REPAIR .However, DynaFix-v2 was released only recently (on April 19th) and was unavailable at the time of our experiments, so we did not include it in our evaluation. Nevertheless, according to its reported results on Defects4J-v1.2 (no results on v2.0), DynaFix-v2 repairs 26 fewer bugs than S IBLING REPAIR ,indicating weaker effectiveness.
+
+subsequent repair stages are responsible for identifying the true failure-relevant siblings. We then analyze the contributions of the simultaneous repair and iterative repair stages in terms of their impact on overall repair performance. Rather than performing a standard ablation study, we con-duct an effectiveness analysis, as these components operate in a sequential and interdependent pipeline. Candidate sibling detection provides the input to the subsequent repair stages, while iterative repair builds upon the outcomes of simultane-ous repair. Under this design, isolating individual components through standard ablation is less meaningful, since removing an earlier stage would invalidate the inputs required by later stages. 
+
+RQ-5: How does S IBLING REPAIR perform on additional recent bugs? 
+
+To further assess the generalizability of S IBLING REPAIR ,we additionally evaluate it on the sibling bugs from the GHRB benchmark, as introduced at the beginning of Section IV. To identify sibling bugs, we examine the developer patches of all GHRB bugs provided in the benchmark and determine whether the multi-hunk changes across different locations are similar. Specifically, we first extract hunk-level modifications using GumTree [8], and then compute pairwise edit-text similarity using Python’s difflib.SequenceMatcher . We set the similarity threshold as 0.6 and classify a bug as sibling-based only if each hunk modification has at least one other hunk modification with similarity no lower than 0.6. This threshold is chosen based on empirical observation. Using this procedure, we identify 17 siblings bugs for evaluation. We also apply the same method to Defects4J and identify 77 sibling bugs for analysis purposes. For the GHRB bugs, SIBLING REPAIR is run with two LLM models, DeepSeek-V3.2 and GPT-3.5-Turbo. We include GPT-3.5-Turbo because its training cutoff predates these bugs, providing a stricter setting for controlling potential data leakage. 
+
+B. Patch Assessment 
+
+All plausible patches are manually inspected against the developer patch (ground truth) to determine repair correctness. Specifically, a patch is considered correct if it is either syntacti-cally identical or semantically equivalent to the corresponding developer patch. Given the total number of plausible patches (1,751), we divide them into three subsets and assign each subset to a different author for independent assessment. For the majority of patches (1,529), the assigned author is able to make a confident judgment, as the distinction between correct and incorrect patches is typically straightforward. In these cases, incorrect patches either introduce substantially different modifications from the developer patch, or resemble it while omitting necessary changes. By contrast, correct patches are highly similar and semantically equivalent to the developer patch. For the remaining 222 patches where the assigned author is uncertain, all three authors independently review these patches and determine their correctness through discussion and consensus. 10 
+
+TABLE I: Plausible and correct repairs on Defects4J un-der SBFL.                                                                                          
+
+> Dataset SIBLING REPAIR HERCULES ARJACLM ITER Chart 10/20 5/10 4/7 10/14 Closure 18/49 1/1 2/11 17/22 Lang 21/57 6/12 6/11 9/11 Math 31/70 6/14 7/27 20/36 Mockito 11/22 0/1 1/3 0/0 Time 3/7 0/2 1/1 2/4 Defects4J 1.2 94/225 18/40 21/60 58/87 Cli 1/4 1/8 3/5 6/13 Closure 3/7 0/0 1/4 0/0 Codec 9/14 1/6 0/5 3/6 Collections 0/3 0/0 0/1 0/0 Compress 10/27 1/10 3/8 4/6 Csv 4/13 3/4 2/2 2/5 Gson 6/11 1/2 1/2 0/0 JacksonCore 6/15 0/6 0/8 3/6 JacksonDatabind 12/61 0/5 1/19 1/7 JacksonXml 4/4 0/0 0/2 0/0 Jsoup 23/60 3/6 4/12 1/6 JxPath 4/10 0/4 1/4 0/2 Defects4J 2.0 82/229 10/51 16/72 20/51 Total 176/454 28/91 37/132 78/138
+> *x/y: x and y are the numbers of bugs for which correct patches and plausible patches were generated respectively.
+
+C. Experimental Environment 
+
+All experiments were conducted on machines with 16 Intel i9-11900K 3.5 GHz CPUs, NVIDIA RTX A4000/5000 GPUs of 16/24 GB, and 128 GB RAM, running Ubuntu-20.04. V. E XPERIMENTAL RESULTS 
+
+A. RQ1: How does SIBLING REPAIR perform under SBFL? 
+
+Table I presents the repair results of Defects4J by projects, and Table II shows correct repairs of single-hunk (SH), multi-hunk (MH), and sibling (Sibling) bugs. Under SBFL in Table II, S IBLING REPAIR repairs 23 sibling bugs (15 from v1.2 and 8 from v2.0), substantially outperforming its sibling repair counterpart H ERCULES , which repairs only 4 sibling bugs. Even as a sibling-oriented technique, S IBLING REPAIR 
+
+repairs 76 multi-hunk bugs (44 from v1.2 and 32 from v2.0), with the best baseline ITER repairing only 24 multi-hunk bugs. These results demonstrate S IBLING REPAIR ’s superior sibling and multi-hunk repair abilities. As shown in Table I, SIBLING REPAIR generates correct patches for 176 out of 835 bugs. It outperforms ITER, ARJACLM, and H ERCULES ,which repair 78, 37, and 28 bugs respectively. 
+
+Answer to RQ-1: Under SBFL, SIBLING REPAIR out-performs HERCULES , ARJACLM, and ITER on Defects4J, achieving the highest number of correct repairs. It is par-ticularly effective on sibling and multi-hunk bugs, repairing about 6x as many sibling bugs as HERCULES and about 3x as many multi-hunk bugs as ITER. 
+
+B. RQ2: How does SIBLING REPAIR perform under SPFL? 
+
+Under SPFL, where a real buggy location is used as the repair starting point, SIBLING REPAIR repairs many more bugs, as shown in Table II. Specifically, it correctly repairs 29 sibling bugs (19 from v1.2 and 10 from v2.0), whereas HERCULES repairs only 4. For multi-hunk bugs, it repairs 124 (71 from v1.2 and 53 from v2.0), while the strongest baseline ThinkRepair repairs only 37. These results demon-strate S IBLING REPAIR ’s strong capability to perform repair starting from a single location, particularly for sibling bugs and more broadly multi-hunk bugs. This makes it well suited to current fault-localization techniques that provide a ranked list of suspicious locations. These results also suggest strong potential of S IBLING REPAIR for further improving multi-hunk repair performance as the accuracy of the underlying fault localization improves. Of the 77 sibling bugs, S IBLING REPAIR correctly repairs 29 and fails on the remaining 48 bugs. We analyze the failures and find that 18 are caused by incomplete test coverage, where the test suite does not exercise all failure-relevant siblings, pre-venting S IBLING REPAIR from including them into its repair scope. Among the remaining 30 bugs, 12 failures are due to candidate sibling detection, where the token- and embedding-based matching fails to recognize the failure-relevant siblings as sufficiently related. One possible mitigation is to lower the similarity threshold to retain more relevant locations. However, this would also introduce more irrelevant candidates, enlarging the search space and potentially reducing the accuracy of subsequent LLM-based sibling identification and patch gener-ation. For the remaining 18 bugs, all failure-relevant siblings are included in the candidate set, and the bottleneck shifts to LLM-based repair stages. Specifically, the LLM fails to select some failure-relevant siblings for 4 bugs and incorrectly selects irrelevant locations for 3 bugs. Our analysis suggests that these cases often involve complex execution behavior, where the true sibling locations are deeply embedded in the execution trace. Without sufficient dynamic execution context, the LLM may struggle to make accurate sibling selections. Finally, for the remaining 11 bugs, the LLM still fails to generate correct repairs even when the failure-relevant siblings are correctly selected. These failures are primarily due to hallucinations during simultaneous patch construction and the inability of iterative repair to identify promising patches when no clear repair progress is observed. 
+
+Answer to RQ-2: Under SPFL, SIBLING REPAIR demon-strates strong multi-hunk repair capability when starting from a single suspicious location, substantially outper-forming all baselines, particularly on sibling and multi-hunk bugs; its failures stem from incomplete test coverage, missed sibling detection, limitations of LLM-based sibling selection and patch generation, and progress identification for iterative repair. 
+
+C. RQ-3: What is the repair time cost of SIBLING REPAIR ?
+
+Fig. 4 presents the time cost of S IBLING REPAIR ’s repair process, excluding fault localization. The box plots summarize the distribution of repair time across all the Defects4J bugs under SBFL and SPFL. Since fault localization is excluded, the LIU et al. : SIBLINGREPAIR: SIBLING-BASED MULTI-HUNK REPAIR WITH LARGE LANGUAGE MODELS 11 
+
+TABLE II: Correct repair of Defects4J single-hunk, multi-hunk, and sibling bugs under SBFL and SPFL.                                                                                                         
+
+> Setting Tool Defects4J V1.2 V2.0 All SH MH Sibling Total SH MH Sibling Total Total SBFL HERCULES 13 5418 64010 28 ARJACLM 15 6321 13 3016 37 ITER 39 19 10 58 15 5320 78
+> SIBLING REPAIR 50 44 15 94 50 32 882 176
+> SPFL HERCULES 14 5419 94013 32 ARJACLM 16 7223 14 3017 40 ITER 14 5319 11 2013 32 ThinkRepair 64 16 -80 69 21 -90 170
+> SIBLING REPAIR 81 71 19 152 73 53 10 126 278
+> *SH: Single-hunk bugs; MH: Multi-hunk bugs; Sibling: Sibling bugs (a special type of multi-hunk bugs); Total: SH + MH. Since ThinkRepair assumes a known location (a buggy method), we only compare it with other tools under SPFL. We run the ITER tool provided by the authors [26] for bug repair under SPFL. In this setting, ITER does not achieve better repair than under SBFL, which includes results from the previous evaluation. Correct
+> repair
+> Incorrect repair
+> with plausible patches
+> Failed repair with no
+> plausible patches
+
+Repair Types 
+
+> 0
+> 50
+> 100
+> 150
+> 200
+> 250
+> 300
+> Repair Time (minutes)  SBFL: left box plot
+> SPFL: right box plot
+
+Fig. 4: Box plots of S IBLING REPAIR ’s repair time for the Defects4J bugs under SBFL (left) and SPFL (right) for each setting. Time for fault localization is excluded. From left to right, it shows the statistics for bugs correctly repaired, incorrectly repaired with plausible patches, and not repaired with no plausible patches. 
+
+difference between the two settings arises from the suspicious location lists used. Recall that under SBFL, the list is ranked using the Ochiai metric, whereas under SPFL, it is modified by placing a real buggy location at the top. Fig. 4 reports results for three categories of bugs: those correctly repaired (left), those incorrectly repaired with plausible patches (middle), and those for which no plausible patches are found (right). The results indicate that S IBLING REPAIR is efficient at generating plausible patches. For correctly repaired bugs under SBFL, the median time for plausible patch generation is 9 minutes, while for incorrectly repaired bugs with plausible patches, the median time is 23.5 minutes. Under SPFL, where a real buggy location is examined first, S IBLING REPAIR is faster, requiring a median of 6 minutes to correctly repair a bug. These findings suggest that S IBLING REPAIR can provide timely repair results if it can find a plausible patch. For bugs that S IBLING REPAIR fails with no plausible patches, it is almost always the case that S IBLING REPAIR uses up the time budget but finds no plausible patch. 
+
+Answer to RQ-3: SIBLING REPAIR generates plausible patches efficiently, typically within minutes. When it suc-cessfully produces a correct patch, it usually does so quickly—especially under SPFL—whereas cases with no plausible patches tend to exhaust the full time budget. 
+
+D. RQ-4: What is the effectiveness of each component in 
+
+SIBLING REPAIR ?
+
+In this RQ, we evaluate the effectiveness of S IBLING RE-
+
+> PAIR
+
+’s core components—candidate sibling detection, simul-taneous repair, and iterative repair (applied when simultaneous repair fails)—on the 77 Defects4J sibling bugs. For candidate sibling detection, we assess recall at both the statement and method levels. While S IBLING REPAIR performs detection at the statement level, we also report method-level results because the LLM-based repair operates at the method level and can tolerate inaccuracies in statement-level detection within a buggy method. Our analysis focuses on the SPFL setting, where the initial suspicious location is a real buggy location. If the initial location is not buggy, missing siblings cannot be attributed to weaknesses in candidate sibling detec-tion. We focus on recall, as subsequent repair stages further filter failure-relevant siblings from the candidates. The results show that S IBLING REPAIR identifies all sibling statements for 53.2% (41/77) of the bugs and covers all sibling methods for 70.1% (54/77) of the bugs. Missed candidate siblings are primarily due to the limitations of S IBLING RE-
+
+> PAIR
+
+’s token- and embedding-based matching methods in capturing related but less similar code fragments, as discussed in Section V-B. For the 54 bugs where all failure-relevant siblings are included in the candidate set, we further evaluate simulta-neous and iterative repair. In simultaneous repair, S IBLIN -
+
+> G
+
+REPAIR correctly identifies failure-relevant siblings for 41 (75.9%) of these bugs and produces plausible patches for 38 (70.4%), among which 25 (46.3%) are correct. For the 13 bugs, the generated patches are plausible but incorrect. In these cases, the LLM modifies the right methods and resolves the test failures, but the patches are not strictly semantically consistent with the developer patches, although sometimes they are also valid. A representative example is Closure 131, where the developer patch additionally invokes 
+
+Character.isIdentifierIgnorable to support iden-tifier validation, whereas the LLM instead uses specific charac-ters and digits to approximate the legality check. In this case, the generated patch resolves the immediate failing behavior, but it does not precisely match the developer patch because it does not fully capture the intended program specification. When simultaneous repair fails, iterative repair produces plausible patches for 8 additional bugs, among which 4 are correct. For the other 4 plausible-but-incorrect cases, a main issue is that iterative repair produces partial patches that make the failing tests (and all tests) pass, revealing insufficient tests 12 
+
+for bug exposing. Note that in these cases all the failure-relevant siblings are exercised by at least one test, but failing tests are insufficient to expose all of them as buggy. For the remaining 8 (54-38-8) bugs where S IBLING REPAIR 
+
+does not produce any plausible patch, the failures are mostly due to bug complexity: even when the true sibling statements are localized accurately, simultaneous repair still generate incorrect patches, and iterative repair either fails to produce promising patches or produces promising-but-incorrect partial patches that cannot be extended into a correct full repair. 
+
+Answer to RQ-4: SIBLING REPAIR ’s components are ef-fective. Candidate sibling detection achieves 53.2% recall at the statement level and 70.1% at the method level. When all failure-relevant siblings are included, simultaneous repair can correctly repair about half of the bugs, and iterative repair provides additional benefit. 
+
+E. RQ-5: How does SIBLING REPAIR perform on additional recent bugs? 
+
+To assess the potential impact of LLM’s data leakage on the repair performance, we conduct an experiment in which SIBLING REPAIR is applied to the GHRB sibling bugs using two LLMs: DeepSeek-V3.2 and GPT-3.5-Turbo. GPT-3.5-Turbo is trained on data up to September 2021, while GHRB consists of bugs introduced after this date. As a result, using GPT-3.5-Turbo reduces the risk of data leakage, since the model is not exposed to these bugs during training. In this experiment, we run S IBLING REPAIR under perfect fault localization (PFL), assuming that all buggy locations are known. This setting is used because the GZoltar tool [45] employed by S IBLING REPAIR for fault localization does not support the JUnit 5 test cases in GHRB. Although APR under PFL is less realistic, it is appropriate for this RQ, as our goal is to isolate and examine the influence of LLM data leakage on repair performance. Under PFL, buggy locations are ranked according to their order of appearance in the developer patches provided in the dataset. Table III reports the repair results. Using DeepSeek-V3.2, SIBLING REPAIR correctly repairs 7 bugs, compared to 6bugs when using GPT-3.5-Turbo. This difference suggests that data leakage may have some impact on repair effectiveness. However, the overall performance remains comparable across the two models, indicating that the impact is limited. 
+
+Answer to RQ-5: While SIBLING REPAIR achieves slightly better results with DeepSeek-V3.2, which may have been exposed to the GHRB bugs during training, its perfor-mance with GPT-3.5-Turbo—whose training predates the dataset—remains comparable. This suggests that potential data leakage has a limited impact on SIBLING REPAIR ’s effectiveness. 
+
+VI. T HREATS TO VALIDITY 
+
+External threats. A potential external threat arises from the data leakage in Defects4J, as many bugs in this benchmark 
+
+TABLE III: Plausible and correct repairs on the 17 GHRB sibling bugs with two LLM models: DeepSeek-V3.2 and GPT-3.5-Turbo under perfect fault localization (PFL).                       
+
+> Projects SIBLING REPAIR
+> (DeepSeek-V3.2) SIBLING REPAIR
+> (GPT-3.5-Turbo) checkstyle 5/5 5/5 gson 1/1 0/0 jackson-core 0/0 0/1 jackson-databind 0/0 0/1 jackson-dataformat-xml 0/0 0/0 nacos 0/0 0/0 openapi-generator 1/1 1/1 rocketmq 0/2 0/0 seata 0/0 0/0 Total 7/9 6/8
+> *x/y: x and y are the numbers of bugs for which correct patches and plausible patches were generated respectively.
+
+were fixed before the training cutoffs of LLMs and may appear in training data. To mitigate this threat, we further evaluate SIBLING REPAIR using GPT-3.5-Turbo model on GitHub Re-cent Bugs (GHRB) [12], where bugs are fixed after the training cutoff for GPT-3.5-Turbo: September 2021. The results on GHRB show that our approach generalizes beyond Defects4J. 
+
+Internal threats. First, some tools are not available or have errors. The original implementation of HERCULES is not publicly available, so we use the tool re-implemented at [25] based on the original technical description [4]. ARJACLM suffers from failed sanity check and bugs in the process of collecting test results. We fix these errors and use the fixed version [46] for experiments. Second, we manually assess plausible patches generated by S IBLING REPAIR and other baselines. To reduce bias, three authors independently review uncertain patches and determine their correctness through discussion and consensus. VII. R ELATED WORK 
+
+In this section, we focus on multi-hunk repair approaches, while also reviewing single-hunk repair approaches and related research on code clone detection. 
+
+A. Multi-hunk Repair 
+
+Multi-hunk repair remains one of the most challenging prob-lems in APR. Although recent advances in deep learning and LLMs have substantially improved the quality of generated patches, many existing learning-based approaches still struggle to generate correct repairs across multiple code locations in real-world settings where the buggy locations are not known a priori. HERCULES [4] is the closest work to SIBLING REPAIR 
+
+in sibling-based repair but differs in both sibling identifica-tion and repair strategy. H ERCULES identifies siblings from statements covered by failing tests through AST matching and then expands siblings using historical commits. Thus, HERCULES struggles with sibling bugs uncovered by fail-ing tests, syntactically different bugs, and early-stage bugs. Instead, S IBLING REPAIR uses token-based and embedding-based matching over statements executed by both passing and LIU et al. : SIBLINGREPAIR: SIBLING-BASED MULTI-HUNK REPAIR WITH LARGE LANGUAGE MODELS 13 
+
+failing tests to detect candidate repair siblings, and then filters candidates by LLM reasoning. Considering repair strategy, HERCULES applies the same repair template to all siblings, while S IBLING REPAIR generates patches with LLM and feed-back from failed attempts using two complementary strategies, enabling more flexible and effective sibling-based repair. ITER [13] is a representative APR approach based on iterative repair strategy, which alternates between testing, fault localization, and repair to gradually refine promising patches toward correct patches. Unlike S IBLING REPAIR , ITER does not target sibling bugs. Although related in the iterative part, S IBLING REPAIR primarily differs from ITER in both identification criteria of promising patches and how such patches are reused for effective repair. ITER considers a patch promising if it reduces the number of failing tests. In contrast, SIBLING REPAIR considers a patch promising if it enables any previous failing test to pass or moves the failure point deeper in the stack trace. Moreover, S IBLING REPAIR reuses promising patches in both simultaneous and iterative repair processes, while ITER only adopts iterative repair strategy. These designs allow S IBLING REPAIR to better explore promising patches and accumulate effective multi-hunk repairs across iterations. Learning-based APR employs neural network models or LLMs to learn knowledge of program repair from large amounts of data in open source software [2] and has shown strong potential in handling multi-hunk bugs [47]. ARJA-CLM [24] enhances ARJA [29] by using LLMs to generate high-quality patch ingredients. MultiMend [31] heuristically combines patches across locations to enable multi-method repair. Other learning-based approaches adopt autonomous agents to diagnose and repair multi-method bugs, such as RepairAgent [32]. In contrast, SIBLING REPAIR does not treat LLM outputs merely as auxiliary ingredients, nor does it simply combine partial patches or fully delegate repair decisions to an autonomous agent. Instead, it uses LLMs within a structured framework to identify sibling relationships and generate similar patches for sibling locations, prioritizing consistent fixes across methods. There are also APR approaches that rely on the assump-tion of perfect fault localization where the buggy locations are known a priori. These approaches are mainly found in learning-based methods, such as RepairLLaMA [33], SRe-pair [37], and PReMM [34]. 
+
+B. Single-hunk Repair 
+
+In contrast to multi-hunk repair, a large body of APR research has focused on repairing a single location. Constraint-based approaches, such as SemFix [48], typically synthesize repairs for an individual buggy location by solving repair constraints. Search-based methods narrow the search space by retrieving similar code from the target project and patches mined from software repositories, but they usually support only single-hunk repair, such as ssFix [49], SimFix [50] and ConFix [51]. Template-based approaches generally apply predefined or mined fix patterns to one buggy location at a time, such as ACS [17] and FixMiner [52]. Learning-based approaches have further advanced single-hunk repair by leveraging LLMs or neural network models that are pre-trained to capture repair patterns from large-scale data, including FitRepair [42], Gamma [43], and AlphaRepair [44]. 
+
+C. Code Clone Detection 
+
+Our work is related to code clone detection but targets a fun-damentally different objective. Code clone detection aims to identify structurally (lexically or syntactically) similar or func-tionally equivalent code fragments, whereas S IBLING REPAIR 
+
+focuses on identifying code fragments that are likely to require similar modifications, or siblings. Although our approach draws inspiration from token-based and embedding-based techniques commonly used in Type-3 (syntactic similarity) and Type-4 (semantic similarity) [53] clone detection, these techniques are used only to preliminarily identify candidate siblings from suspicious locations. After obtaining candidate siblings, S IBLING REPAIR uses an LLM to further reason about true siblings in simultaneous and iterative repair stages. We therefore focus on repair-oriented semantic relevance rather than structural similarity or functional equivalence. VIII. C ONCLUSION AND FUTURE WORK 
+
+SIBLING REPAIR is an LLM-based multi-hunk APR tech-nique that targets sibling repair, addressing the common case where similar bugs occur across multiple locations and require similar fixes. Unlike prior work, it avoids strong assumptions on test coverage and commit history by combining token-based filtering with embedding-based semantic matching to identify candidate siblings across test-exercised code. It then employs two complementary strategies—simultaneous repair for joint failure-relevant sibling identification and fixing, and iterative repair for progressively validating and accumulat-ing promising patches—thus improving robustness to sibling identification errors and effectiveness of patch generation. Beyond sibling repair, S IBLING REPAIR also supports general multi-hunk repair by composing promising patches across locations. Our evaluation on Defects4J and GHRB shows that S IBLING REPAIR substantially outperforms state-of-the-art APR techniques in repairing both sibling bugs and general multi-hunk bugs, demonstrating its advancement in APR. For future work, we plan to explore richer dynamic execu-tion guidance to further improve S IBLING REPAIR ’s ability to detect promising patches during iterative repair. We also aim to extend S IBLING REPAIR to handle siblings not covered by the existing test suite. To this end, we will investigate generating new tests to expose such siblings and leveraging these tests to guide their repair. REFERENCES [1] C. L. Goues, M. Pradel, and A. Roychoudhury, “Automated program repair,” Communications of the ACM , vol. 62, no. 12, pp. 56–65, 2019, https://doi.org/10.1145/3318162. [2] Q. Zhang, C. Fang, Y. Xie, Y. Ma, W. Sun, Y. Yang, and Z. Chen, “A systematic literature review on large language models for auto-mated program repair,” ACM Transactions on Software Engineering and Methodology , 2024, https://doi.org/10.1145/3799693. [3] J. F. Islam, M. Mondal, and C. K. Roy, “Bug replication in code clones: An empirical study,” in Proceedings of the 23rd IEEE International Con-ference on Software Analysis, Evolution, and Reengineering (SANER) .IEEE, 2016, pp. 68–78, https://doi.org/10.1109/SANER.2016.78. 14 
+
+[4] S. Saha, R. k. Saha, and M. r. Prasad, “Harnessing evolution for multi-hunk program repair,” in Proceedings of the 41st IEEE/ACM International Conference on Software Engineering (ICSE) . IEEE, 2019, pp. 13–24, https://doi.org/10.1109/ICSE.2019.00020. [5] Q. Xin, H. Wu, J. Tang, X. Liu, S. P. Reiss, and J. Xuan, “Detecting, creating, repairing, and understanding indivisible multi-hunk bugs,” 
+
+Proceedings of the ACM on Software Engineering , vol. 1, no. FSE, pp. 2747–2770, 2024, https://doi.org/10.1145/3660828. [6] R. Just, D. Jalali, and M. D. Ernst, “Defects4J: A database of exist-ing faults to enable controlled testing studies for Java programs,” in 
+
+Proceedings of the 23rd ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) . ACM, 2014, pp. 437–440, https://doi.org/10.1145/2610384.2628055. [7] J. Falleri, F. Morandat, X. Blanc, M. Martinez, and M. Monperrus, “Fine-grained and accurate source code differencing,” in Proceedings of the 29th IEEE/ACM International Conference on Automated Software Engineering (ASE) . ACM, 2014, pp. 313–324, https://doi.org/10.1145/ 2642937.2642982. [8] J. Falleri and M. Martinez, “Fine-grained, accurate and scalable source differencing,” in Proceedings of the 46th IEEE/ACM International Conference on Software Engineering (ICSE) . ACM, 2024, pp. 231:1– 231:12, https://doi.org/10.1145/3597503.3639148. [9] X. Meng, X. Wang, H. Zhang, H. Sun, X. Liu, and C. Hu, “Template-based neural program repair,” in Proceedings of the 45th IEEE/ACM International Conference on Software Engineering (ICSE) . IEEE, 2023, pp. 1456–1468, https://doi.org/10.1109/ICSE48619.2023.00127. [10] K. Huang, J. Zhang, X. Meng, and Y. Liu, “Template-guided program repair in the era of large language models,” in Proceedings of the 47th IEEE/ACM International Conference on Software Engineering (ICSE) .IEEE, 2025, pp. 1895–1907, https://doi.org/10.1109/ICSE55347.2025. 00030. [11] J. Leskovec, A. Rajaraman, and J. D. Ullman, Mining of massive data sets . Cambridge University Press, 2020, https://doi.org/10.1017/ 9781108684163. [12] J. Y. Lee, S. Kang, J. Yoon, and S. Yoo, “The github recent bugs dataset for evaluating llm-based debugging applications,” in Proceedings of the 17th IEEE International Conference on Software Testing, Verification and Validation (ICST) . IEEE, 2024, pp. 442–444, https://doi.org/10. 1109/ICST60714.2024.00049. [13] H. Ye and M. Monperrus, “Iter: Iterative neural repair for multi-location patches,” in Proceedings of the 46th IEEE/ACM International Conference on Software Engineering (ICSE) . ACM, 2024, pp. 1–13, https://doi.org/10.1145/3597503.3623337. [14] K. Zhang and D. Shasha, “Simple fast algorithms for the editing distance between trees and related problems,” SIAM journal on computing ,vol. 18, no. 6, pp. 1245–1262, 1989, https://doi.org/10.1137/0218082. [15] D. Kim, J. Nam, J. Song, and S. Kim, “Automatic patch genera-tion learned from human-written patches,” in Proceedings of the 35th IEEE/ACM International Conference on Software Engineering (ICSE) .IEEE, 2013, pp. 802–811, https://doi.org/10.1109/ICSE.2013.6606626. [16] R. K. Saha, Y. Lyu, H. Yoshida, and M. R. Prasad, “Elixir: Effective object-oriented program repair,” in Proceedings of the 32nd IEEE/ACM International Conference on Automated Software Engineering (ASE) .IEEE, 2017, pp. 648–659, https://doi.org/10.1109/ASE.2017.8115675. [17] Y. Xiong, J. Wang, R. Yan, J. Zhang, S. Han, G. Huang, and L. Zhang, “Precise condition synthesis for program repair,” in Proceedings of the 39th IEEE/ACM International Conference on Software Engineering (ICSE) . IEEE, 2017, pp. 416–426, https://doi.org/10.1109/ICSE.2017. 45. [18] R. Abreu, P. Zoeteweij, and A. J. Van Gemund, “On the accuracy of spectrum-based fault localization,” in Proceedings of the Testing: Academic and Industrial Conference Practice and Research Techniques-MUTATION (TAICPART-MUTATION 2007) . IEEE, 2007, pp. 89–98, https://doi.org/10.1109/TAIC.PART.2007.13. [19] R. Greene, T. Sanders, L. Weng, and A. Neelakantan, “New and improved embedding model,” https://openai.com/blog/ new-and-improved-embedding-model, 2022, Accessed: 2026-04-10. [20] U. Alon, M. Zilberstein, O. Levy, and E. Yahav, “code2vec: learn-ing distributed representations of code,” Proceedings of the ACM on Programming Languages , vol. 3, no. POPL, pp. 1–29, 2019, https: //doi.org/10.1145/3290353. [21] H. J. Kang, T. F. Bissyand´ e, and D. Lo, “Assessing the generalizability of code2vec token embeddings,” in Proceedings of the 34th IEEE/ACM International Conference on Automated Software Engineering (ASE) .IEEE, 2019, pp. 1–12, https://doi.org/10.1109/ASE.2019.00011. [22] A. Chen, H. Wu, Q. Xin, S. P. Reiss, and J. Xuan, “Studying and understanding the effectiveness and failures of conversational llm-based repair,” in Proceedings of the 2025 IEEE/ACM International Workshop on Automated Program Repair (APR) . IEEE, 2025, pp. 56–59, https://doi.org/10.1109/APR66717.2025.00014. [23] R. Just, D. Jalali, and M. D. Ernst, “Defects4J repository,” https://github. com/rjust/defects4j, 2023, Accessed: 2026-04-24. [24] O. Lijzenga, I. Hemati Moghadam, and V. Zaytsev, “Leveraging search-based and pre-trained code language models for automated program repair,” in Proceedings of the 40th ACM/SIGAPP Symposium on Applied Computing (SAC) . ACM, 2025, pp. 1627–1636, https://doi.org/10.1145/ 3672608.3707774. [25] Q. Xin, H. Wu, J. Tang, X. Liu, S. P. Reiss, and J. Xuan, “The Hercules tool,” https://github.com/give-to/Hercules, 2026, Accessed: 2026-04-25. [26] H. Ye and M. Monperrus, “The ITER tool,” https://github.com/ ASSERT-KTH/ITER, 2024, Accessed: 2026-04-24. [27] O. Lijzenga, I. Hemati Moghadam, and V. Zaytsev, “The ARJACLM tool,” https://doi.org/10.5281/zenodo.14222432, 2024, Accessed: 2025-10-20. [28] C. Le Goues, T. Nguyen, S. Forrest, and W. Weimer, “GenProg: A generic method for automatic software repair,” IEEE Transactions on Software Engineering , vol. 38, no. 1, pp. 54–72, 2011, https://doi.org/ 10.1109/TSE.2011.104. [29] Y. Yuan and W. Banzhaf, “ARJA: Automated repair of java programs via multi-objective genetic programming,” IEEE Transactions on software engineering , vol. 46, no. 10, pp. 1040–1067, 2018, https://doi.org/10. 1109/TSE.2018.2874648. [30] ——, “A hybrid evolutionary system for automatic software repair,” in Proceedings of the 2019 Genetic and Evolutionary Computation Conference (GECCO) . ACM, 2019, pp. 1417–1425, https://doi.org/ 10.1145/3321707.3321830. [31] R. Gharibi, M. H. Sadreddini, and S. M. Fakhrahmad, “Multimend: Multilingual program repair with context augmentation and multi-hunk patch generation,” Automated Software Engineering , vol. 33, no. 2, p. 69, 2025, https://doi.org/10.1007/s10515-026-00611-2. [32] I. Bouzenia, P. Devanbu, and M. Pradel, “Repairagent: An autonomous, llm-based agent for program repair,” in Proceedings of the 47th IEEE/ACM International Conference on Software Engineering (ICSE) .IEEE, 2025, pp. 2188–2200, https://doi.org/10.1109/ICSE55347.2025. 00157. [33] A. Silva, S. Fang, and M. Monperrus, “Repairllama: Efficient repre-sentations and fine-tuned adapters for program repair,” IEEE Transac-tions on Software Engineering , vol. 51, no. 8, pp. 2366–2380, 2025, https://doi.org/10.1109/TSE.2025.3581062. [34] L. Xie, Z. Li, Y. Pei, Z. Wen, K. Liu, T. Zhang, and X. Li, “PReMM: LLM-based program repair for multi-method bugs via divide and con-quer,” Proceedings of the ACM on Programming Languages , vol. 9, no. OOPSLA2, pp. 1316–1344, 2025, https://doi.org/10.1145/3763097. [35] Z. Huang, L. Xu, C. Liu, W. Sun, X. Zhang, Y. Lei, M. Yan, and H. Zhang, “Dynafix: Iterative automated program repair driven by execution-level dynamic information,” Computing Research Repos-itory , vol. abs/2512.24635, 2025, https://doi.org/10.48550/arXiv.2512. 24635v1. [36] ——, “Dynafix: Iterative automated program repair driven by execution-level dynamic information,” Computing Research Repository , vol. abs/2512.24635, 2025, https://doi.org/10.48550/arXiv.2512.24635v2. [37] J. Xiang, X. Xu, F. Kong, M. Wu, Z. Zhang, H. Zhang, and Y. Zhang, “How far can we go with practical function-level program repair?” 
+
+Computing Research Repository , vol. abs/2404.12833, 2024, https://doi. org/10.48550/arXiv.2404.12833. [38] X. Yin, C. Ni, S. Wang, Z. Li, L. Zeng, and X. Yang, “Thinkrepair: Self-directed automated program repair,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) . ACM, 2024, pp. 1274–1286, https://doi.org/10.1145/3650212. 3680359. [39] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury, “Autocoderover: Autonomous program improvement,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) . ACM, 2024, p. 1592–1604, https://doi.org/10.1145/3650212. 3680384. [40] H. Ruan, Y. Zhang, and A. Roychoudhury, “Specrover: Code intent extraction via llms,” in Proceedings of the 47th IEEE/ACM International Conference on Software Engineering (ICSE) . IEEE, 2025, p. 963–974, https://doi.org/10.1109/ICSE55347.2025.00080. [41] C. S. Xia, Y. Deng, S. Dunn, and L. Zhang, “Demystifying llm-based software engineering agents,” Proceedings of the ACM on Software LIU et al. : SIBLINGREPAIR: SIBLING-BASED MULTI-HUNK REPAIR WITH LARGE LANGUAGE MODELS 15 
+
+Engineering , vol. 2, no. FSE, pp. 801–824, 2025, https://doi.org/10.1145/ 3715754. [42] C. S. Xia, Y. Ding, and L. Zhang, “The plastic surgery hypothesis in the era of large language models,” in Proceedings of the 38th IEEE/ACM International Conference on Automated Software Engi-neering (ASE) . IEEE, 2023, pp. 522–534, https://doi.org/10.1109/ ASE56229.2023.00047. [43] Q. Zhang, C. Fang, T. Zhang, B. Yu, W. Sun, and Z. Chen, “Gamma: Revisiting template-based automated program repair via mask predic-tion,” in Proceedings of the 38th IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE, 2023, pp. 535–547, https://doi.org/10.1109/ASE56229.2023.00063. [44] C. S. Xia and L. Zhang, “Less training, more repairing please: revisiting automated program repair via zero-shot learning,” in Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE) .ACM, 2022, pp. 959–971, https://doi.org/10.1145/3540250.3549101. [45] J. Campos, A. Riboira, A. Perez, and R. Abreu, “Gzoltar: an eclipse plug-in for testing and debugging,” in Proceedings of the 27th IEEE/ACM International Conference on Automated Software Engineer-ing (ASE) . ACM, 2012, p. 378–381, https://doi.org/10.1145/2351676. 2351752. [46] X. Liu, J. Ren, Y. Wang, Q. Xin, X. Xie, and J. Xuan, “ARJACLM,” https://github.com/chengkangda2/ARJACLM, 2026, Accessed: 2026-05-05. [47] K. Huang, Z. Xu, S. Yang, H. Sun, X. Li, Z. Yan, and Y. Zhang, “Evolv-ing paradigms in automated program repair: Taxonomy, challenges, and opportunities,” ACM Computing Surveys , vol. 57, no. 2, pp. 1–43, 2024, https://doi.org/10.1145/3696450. [48] H. D. T. Nguyen, D. Qi, A. Roychoudhury, and S. Chandra, “Semfix: Program repair via semantic analysis,” in Proceedings of the 35th IEEE/ACM International Conference on Software Engineering (ICSE) .IEEE, 2013, pp. 772–781, https:/doi.org/10.1109/ICSE.2013.6606623. [49] Q. Xin and S. P. Reiss, “Leveraging syntax-related code for automated program repair,” in Proceedings of the 32nd IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE, 2017, pp. 660–670, https://doi.org/10.1109/ASE.2017.8115676. [50] J. Jiang, Y. Xiong, H. Zhang, Q. Gao, and X. Chen, “Shaping program repair space with existing patches and similar code,” in Proceedings of ACM 27th SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) . ACM, 2018, pp. 298–309, https://doi.org/10.1145/ 3213846.3213871. [51] J. Kim and S. Kim, “Automatic patch generation with context-based change application,” Empirical Software Engineering , vol. 24, no. 6, pp. 4071–4106, 2019, https://doi.org/10.1007/s10664-019-09742-5. [52] A. Koyuncu, K. Liu, T. F. Bissyand´ e, D. Kim, J. Klein, M. Monperrus, and Y. Le Traon, “Fixminer: Mining relevant fix patterns for automated program repair,” Empirical Software Engineering , vol. 25, no. 3, pp. 1980–2024, 2020, https://doi.org/10.1007/s10664-019-09780-z. [53] S. Dou, J. Shan, H. Jia, W. Deng, Z. Xi, W. He, Y. Wu, T. Gui, Y. Liu, and X. Huang, “Towards understanding the capability of large language models on code clone detection: A survey,” Computing Research Repos-itory , vol. abs/2308.01191, 2023, https://doi.org/10.48550/arXiv.2308. 01191.
