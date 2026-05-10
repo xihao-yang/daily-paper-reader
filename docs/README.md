@@ -6,29 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-09
-- 运行时间：2026-05-09 20:28:13 UTC
+- 最新运行日期：2026-05-10
+- 运行时间：2026-05-10 20:17:13 UTC
 - 运行状态：成功
-- 本次总论文数：2
+- 本次总论文数：5
 - 精读区：0
-- 速读区：2
+- 速读区：5
 
 ### 今日简报（AI）
-速览两篇AI与软件验证前沿研究，探讨智能体在代码管理与知识图谱验证中的潜力。  
-重点关注“代理式代码评估协议”和“知识图谱赋能形式化验证”两大方向。  
-建议读者关注AI在自动化开发与系统安全验证结合的新趋势。
-- 详情：[/202605/09/README](/202605/09/README)
+今天速读了 5 篇论文，聚焦 AI 辅助软件开发与大模型质量治理。  
+重点值得关注的是代码生成质量评测与 AI 开发流程的可靠性规范化趋势。  
+建议读者持续关注工具层安全性和生成质量改进方向，理解智能开发的风险平衡。
+- 详情：[/202605/10/README](/202605/10/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [BUILD-AND-FIND: An Effort-Aware Protocol for Evaluating Agent-Managed Codebases](/202605/09/2605.06136v1-build-and-find-an-effort-aware-protocol-for-evaluating-agent-managed-codebases)  
+1. [Agentic Vulnerability Reasoning on Windows COM Binaries](/202605/10/2605.05000v1-agentic-vulnerability-reasoning-on-windows-com-binaries)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：用于漏洞发现和验证概念证明生成的代理流水线
+2. [Bridging Generation and Training: A Systematic Review of Quality Issues in LLMs for Code](/202605/10/2605.05267v1-bridging-generation-and-training-a-systematic-review-of-quality-issues-in-llms-for-code)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：对LLM生成代码中的质量问题和缺陷进行的系统综述
+3. [The Productivity-Reliability Paradox: Specification-Driven Governance for AI-Augmented Software Development](/202605/10/2605.01160v1-the-productivity-reliability-paradox-specification-driven-governance-for-ai-augmented-software-development)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：评估代理管理代码库中生成的代码行为是否正确
-2. [Knowledge Graphs, the Missing Link in Agentic AI-based Formal Verification](/202605/09/2605.06434v1-knowledge-graphs-the-missing-link-in-agentic-ai-based-formal-verification)  
+   evidence：规范驱动的治理，以解决AI增强开发中的可靠性问题
+4. [ProgramBench: Can Language Models Rebuild Programs From Scratch?](/202605/10/2605.03546v1-programbench-can-language-models-rebuild-programs-from-scratch)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：生成用于形式化验证的断言以解决语义不匹配问题
+   evidence：生成行为测试以匹配参考可执行文件的行为
+5. [Constraint Decay: The Fragility of LLM Agents in Backend Code Generation](/202605/10/2605.06445v1-constraint-decay-the-fragility-of-llm-agents-in-backend-code-generation)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：评估基于LLM的代码生成中的结构约束
 
 
 <div class="dpr-home-promo-card">
