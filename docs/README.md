@@ -6,38 +6,49 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-10
-- 运行时间：2026-05-10 20:17:13 UTC
+- 最新运行日期：2026-05-11
+- 运行时间：2026-05-11 21:44:49 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：0
-- 速读区：5
+- 本次总论文数：9
+- 精读区：5
+- 速读区：4
 
 ### 今日简报（AI）
-今天速读了 5 篇论文，聚焦 AI 辅助软件开发与大模型质量治理。  
-重点值得关注的是代码生成质量评测与 AI 开发流程的可靠性规范化趋势。  
-建议读者持续关注工具层安全性和生成质量改进方向，理解智能开发的风险平衡。
-- 详情：[/202605/10/README](/202605/10/README)
+今日聚焦自动化代码修复与LLM程序理解，共精读与速读9篇论文。  
+值得关注的是HEJ-Robust与GRPO信号重塑两项工作，展示了LLM在弱反馈与鲁棒性基准下的显著提升。  
+建议持续跟踪LLM在代码生成、错误纠正及跨语言迁移训练的最新进展。
+- 详情：[/202605/11/README](/202605/11/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [HEJ-Robust: A Robustness Benchmark for LLM-Based Automated Program Repair](/202605/11/2605.02215v3-hej-robust-a-robustness-benchmark-for-llm-based-automated-program-repair)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：基于LLM的自动程序修复的鲁棒性基准测试
+2. [Signal Reshaping for GRPO in Weak-Feedback Agentic Code Repair](/202605/11/2605.07276v1-signal-reshaping-for-grpo-in-weak-feedback-agentic-code-repair)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：智能体代码修复的信号重塑与语义奖励
+3. [Beyond Translation Accuracy: Addressing False Failures in LLM-Based Code Translation](/202605/11/2605.02195v3-beyond-translation-accuracy-addressing-false-failures-in-llm-based-code-translation)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：解决代码修复评估框架中的虚假失败问题
+4. [SmellBench: Evaluating LLM Agents on Architectural Code Smell Repair](/202605/11/2605.07001v1-smellbench-evaluating-llm-agents-on-architectural-code-smell-repair)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：评估LLM智能体在架构代码异味修复及修复有效性方面的表现
+5. [TraceFix: Repairing Agent Coordination Protocols with TLA+ Counterexamples](/202605/11/2605.07935v1-tracefix-repairing-agent-coordination-protocols-with-tla-counterexamples)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：利用模型检测器的反例迭代修复协议
 
 ### 速读区论文标签
-1. [Agentic Vulnerability Reasoning on Windows COM Binaries](/202605/10/2605.05000v1-agentic-vulnerability-reasoning-on-windows-com-binaries)  
+1. [Reproduction Test Generation for Java SWE Issues](/202605/11/2605.04320v2-reproduction-test-generation-for-java-swe-issues)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于漏洞发现和验证概念证明生成的代理流水线
-2. [Bridging Generation and Training: A Systematic Review of Quality Issues in LLMs for Code](/202605/10/2605.05267v1-bridging-generation-and-training-a-systematic-review-of-quality-issues-in-llms-for-code)  
+   evidence：用于验证和诊断的复现测试生成
+2. [Boosting Automatic Java-to-Cangjie Translation with Multi-Stage LLM Training and Error Repair](/202605/11/2605.07403v1-boosting-automatic-java-to-cangjie-translation-with-multi-stage-llm-training-and-error-repair)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：对LLM生成代码中的质量问题和缺陷进行的系统综述
-3. [The Productivity-Reliability Paradox: Specification-Driven Governance for AI-Augmented Software Development](/202605/10/2605.01160v1-the-productivity-reliability-paradox-specification-driven-governance-for-ai-augmented-software-development)  
+   evidence：基于大语言模型的代码翻译错误修复
+3. [RepoZero: Can LLMs Generate a Code Repository from Scratch?](/202605/11/2605.07122v1-repozero-can-llms-generate-a-code-repository-from-scratch)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：规范驱动的治理，以解决AI增强开发中的可靠性问题
-4. [ProgramBench: Can Language Models Rebuild Programs From Scratch?](/202605/10/2605.03546v1-programbench-can-language-models-rebuild-programs-from-scratch)  
+   evidence：基于执行的生成代码库验证
+4. [Mage: Multi-Axis Evaluation of LLM-Generated Executable Game Scenes Beyond Compile-Pass Rate](/202605/11/2605.07342v1-mage-multi-axis-evaluation-of-llm-generated-executable-game-scenes-beyond-compile-pass-rate)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：生成行为测试以匹配参考可执行文件的行为
-5. [Constraint Decay: The Fragility of LLM Agents in Backend Code Generation](/202605/10/2605.06445v1-constraint-decay-the-fragility-of-llm-agents-in-backend-code-generation)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：评估基于LLM的代码生成中的结构约束
+   evidence：超越编译通过率的多轴评估，以确保生成产物的正确性
 
 
 <div class="dpr-home-promo-card">
