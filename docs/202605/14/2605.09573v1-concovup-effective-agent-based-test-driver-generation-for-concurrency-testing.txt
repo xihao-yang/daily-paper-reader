@@ -1,0 +1,559 @@
+Title: ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing
+
+URL Source: https://arxiv.org/pdf/2605.09573v1
+
+Published Time: Tue, 12 May 2026 02:02:53 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 
+
+## YUANDAO CAI ∗, Independent Researcher 
+
+## SHUHAO FU ∗, The Hong Kong University of Science and Technology 
+
+## WENSHENG TANG, Independent Researcher 
+
+## CHENG WEN, Xidian University 
+
+## SHENGCHAO QIN, Xidian University 
+
+## CHARLES ZHANG, The Hong Kong University of Science and Technology 
+
+Concurrency testing is essential to improve the reliability and security of multi-threaded programs. Dynamic analysis tools (e.g., TSan) depend on high-quality test drivers that reach critical shared-memory interactions at runtime. However, current testing practices predominantly focus on sequential logic, leaving a critical gap in automated concurrent test generation. Recently, Large Language Models (LLMs) have shown promise in generating sequential tests, but they struggle to produce effective concurrent tests without a deep understanding of concurrency semantics. This paper presents ConCovUp , a novel multi-agent framework that combines LLMs with program analysis. ConCovUp grounds test generation in static analysis to extract shared memory accesses and their calling contexts. To trigger hard-to-reach accesses, it introduces an LLM-driven backward tracing approach, leveraging the model’s semantic reasoning to deduce concrete inputs that satisfy complex path constraints, and iteratively refines the generated tests via dynamic execution feedback. Our evaluation on nine real-world C/C++ libraries shows that ConCovUp improves average Shared Memory Access Pair Coverage (SMAP Coverage) from 36.6% to 68.1% over the general Claude Code agent baseline. Additional Key Words and Phrases: Concurrent Test Generation, Large Language Models, Coverage 
+
+1 INTRODUCTION 
+
+Concurrent programming is ubiquitous for achieving high performance in modern software systems, yet it introduces complex, non-deterministic behaviors that are difficult to exercise systematically [ 2, 3 , 8 , 40 ]. Unfortunately, current software testing practices remain heavily skewed towards sequential logic. This gap is particularly obvious in open-source libraries: although these components are widely assumed to be thread-safe, they often lack the necessary multi-threaded test drivers to validate this assumption [ 7, 25 , 26 ]. Developers typically rely on sequential unit tests, which, while sufficient for functional validation, fail to exercise internal synchronization interactions. Consequently, without test drivers to orchestrate concurrent invocations, the thread safety of these libraries remains under-tested. Researchers have developed seminal dynamic analysis techniques [ 12 –14 , 36 , 37 ], such as predictive trace analysis [ 38 ,41 ] and dynamic data race detection [ 6, 32 ]. However, the effectiveness of these tools is limited by the quality of the input test cases. If the provided test driver does not actively spawn threads to create interactions on shared memory, these dynamic tools receive little useful concurrent execution signal. Therefore, the primary challenge lies in automatically generating effective concurrent test drivers, a difficult task without prior knowledge of the concurrency semantics required to manipulate shared objects across threads.  
+
+> ∗Both authors contributed equally to this research. Manuscript submitted to ACM
+
+1
+
+> arXiv:2605.09573v1 [cs.SE] 10 May 2026
+
+2 Yuandao Cai, Shuhao Fu, et al. 
+
+Limitations of Existing Works. Previous works [ 23 – 25 , 31 ] typically generate concurrent tests by leveraging existing sequential tests or assembling method call sequences to identify possible shared object interactions. However, these approaches are inherently limited by the quality and diversity of the underlying sequential tests. If the sequential tests lack sufficient coverage, these tools cannot synthesize effective concurrent scenarios. Furthermore, these methods lack a holistic semantic understanding of the program, often embedded within both documentation and the source code itself (e.g., inline comments and identifier names) [ 5, 39 ] or complex code logic across data flows [ 28 ], which is necessary to infer intricate state setups or essential concurrent invocations. 
+
+Limitations of LLMs and General Coding Agents. While LLMs have advanced sequential test generation [ 15 , 22 ,35 ], applying general coding agents to real-world concurrent testing faces two key challenges. First, LLMs struggle to comprehend global concurrency semantics. Concurrency-relevant behaviors often stem from complex interactions across multiple files and modules, necessitating a repository-level understanding of shared memory accesses. However, LLMs are constrained by finite context windows, preventing them from ingesting entire repositories. Furthermore, because LLMs are trained primarily on sequential text, their inherent linear reasoning struggles to capture the non-deterministic nature of thread interleavings. Second, existing LLM-based coding agents (e.g., Claude Code and OpenCode) lack the specialized skills or tools required to analyze concurrency. Standard code search or retrieval mechanisms cannot provide the deep semantic insights needed to identify shared variables and complex call chains. As our experiments demonstrate, without concurrency-aware tooling, general coding agents exhibit a weak ability to generate effective concurrent tests. Consequently, how to architect an agentic workflow for concurrent test generation remains a critical open question. 
+
+Our Agent-Based Generative Approach. To address these key challenges, we introduce ConCovUp , a novel multi-agent framework designed for automated concurrent test generation. At a high level, ConCovUp combines the reasoning capabilities of Large Language Models (LLMs) with program analysis to connect natural language comprehension with structural code semantics. By equipping our agents with specialized static analysis tools, ConCovUp identifies the program locations of shared memory accesses and extracts their calling contexts. Furthermore, by identifying feasible execution paths to these targeted accesses, ConCovUp guides the LLMs to generate concurrent tests for hard-to-reach shared-memory interactions. This approach reduces the need to ingest entire repositories into limited context windows while preserving repository-level concurrency context. Specifically, Figure 1 illustrates the architecture of ConCovUp , which operates in three key stages. First , to fill the tooling gap of existing coding agents, an Analysis Agent employs whole-program static analysis to extract shared variables, shared memory accesses, and their calling contexts, which are structural elements that LLMs natively struggle to retrieve using standard search mechanisms. Second , to resolve the intricate state setups required for concurrent invocations, a Path Agent relies on a static Control Flow Graph (CFG) to perform a heuristic-guided backward greedy search. This search extracts feasible execution paths while intentionally avoiding opaque environmental APIs (e.g., I/O) and complex data structures. The agent then summarizes the path constraints using a hybrid representation of natural language and code snippets. Instead of relying on heavyweight external SMT solvers [ 17 ], the agent leverages the LLM’s deep semantic comprehension to directly deduce the concrete variable values and initial states required to satisfy these constraints. Third , leveraging the extracted semantic contexts and the deduced concrete inputs, a Test Generation Agent synthesizes multi-threaded test drivers. Crucially, because the LLM’s input deduction is heuristic, 
+
+ConCovUp operates within a continuous feedback loop: it monitors the dynamic runtime coverage of the targeted shared memory accesses. If certain accesses remain uncovered or if the generated inputs fail to compile/execute, these 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 3Build IR     
+
+> Run Call Graph
+> Analysis
+> Run Shared
+> Access Analysis
+
+Analysis Agent                      
+
+> Access pairs Inputs and paths Call chains
+> Global State
+> Tool Kit
+> Shared Variable Analyzer Instrument Tool …
+> Run Shared
+> Access Analysis
+> Final Tests Programs
+> ①②Current tests ⑤Coverage report ④Uncovered pairs ⑥③
+> ①②
+> ⑤
+
+Test Generation Agent           
+
+> (Re)Write Tests
+> Compile Tests
+> Search Project
+> Assess
+> Coverage
+> Report
+> Runtime
+> Terminal
+> Run Tests
+> Coverage
+> Call Graph Analyzer Search Code
+> Path Constraint
+> Summarization
+> Greedily
+> Backward
+> Explore Path
+> Semantic Input
+> Deduction
+
+Path Agent            
+
+> ①② ③①② ③④⑤ ⑥①③⑤⑥ ④⑤ ⑥①⑥ ③
+> Iterative
+> Refinement
+> on demand on demand on demand
+
+Fig. 1. Overview of ConCovUp ’s multi-agent workflow: the Analysis Agent identifies static target pairs, the Path Agent derives path and input constraints, and the Test Generation Agent refines concurrent test drivers with coverage feedback. 
+
+specific failures are fed back to the Path Agent to explore alternative execution paths and refine its semantic reasoning, thereby improving coverage of hard-to-reach concurrent behaviors. Our evaluation on 9 real-world C/C++ libraries totaling about 1,000 kLoC shows that ConCovUp improves average Shared Memory Access Pair Coverage (SMAP Coverage) from 36.6% to 68.1% over the general Claude Code agent baseline. The ablation study further shows that static target identification alone provides only limited gains, while the full workflow, which combines target analysis, backward path reasoning, and iterative feedback, raises coverage from 39.2% to 68.1%. We also find that model capability materially affects the result: Claude Sonnet 4.6 achieves the strongest average SMAP Coverage, compared with 55.9% for GPT 5.4 and 28.1% for Kimi K2.5. In summary, this paper makes the following contributions: 
+
+• We address key limitations of applying LLMs and coding agents to concurrent test generation by proposing a novel agent-based framework that combines LLMs with program analysis. 
+
+• We introduce a Path Agent with a backward tracing mechanism that combines CFG-based heuristic search and semantic constraint satisfaction, empowering the LLM to derive concrete inputs for uncovered targets without the overhead of formal constraint solvers. 
+
+• We implement and evaluate ConCovUp on 9 real-world C/C++ libraries totaling approximately 1,000 kLoC, demonstrating clear improvements in SMAP Coverage compared to a general Claude Code agent baseline. 
+
+Paper Organization. The rest of the paper is organized as follows. Section 2 positions ConCovUp against existing test-generation and symbolic-execution approaches and presents a motivating example. Section 3 defines the shared-memory access-pair abstraction and SMAP Coverage. Section 4 describes the three-agent workflow of ConCovUp ,and Section 5 summarizes its LLVM-based static analysis and coverage instrumentation. Section 6.1 presents the experimental setup, followed by the effectiveness, ablation, model-sensitivity, and case-study results. Finally, Section 7 discusses threats to validity and future work, and Section 8 concludes the paper. 
+
+> Manuscript submitted to ACM
+
+4 Yuandao Cai, Shuhao Fu, et al. 
+
+2 CONCOVUP IN A NUTSHELL 
+
+In this section, we first discuss the related work. We then highlight the essence of ConCovUp for effective concurrent test generation. 
+
+2.1 Related Work and Their Limitations 
+
+Many recent works focus on generating sequential tests using LLMs. The first paradigm for context augmentation aims to address the limitations of LLMs’ context windows and their lack of global code understanding. For instance, ChatUniTest [ 4 ] proposes an Adaptive Focal Context mechanism to precisely tailor prompts, while ASTER [ 21 ] introduces a rigorous static analysis pipeline to extract structured information, thereby guiding LLMs to generate high-coverage test code that aligns with human developers’ practices. The second paradigm with intention and semantic guidance focuses on mitigating LLMs’ shortcomings in handling complex mock behaviors and generating precise assertions. For example, IntUT [ 20 ] injects explicit test intentions (e.g., test inputs, mock behaviors, and expected outcomes) into LLMs, improving branch coverage in industrial-level Java projects. The third paradigm uses execution feedback and agentic refinement, which emphasizes embedding LLMs into a closed-loop "generation-validation-repair" workflow, utilizing compiler errors or dynamic runtime information for self-correction [ 16 , 22 ]. However, all these works focus exclusively on sequential logic, ignoring the capability to reason about concurrency and shared memory accesses, which distinguishes them from our work. 
+
+Concurrent Test Generation. Some previous works focus on generating concurrent codes [ 23 – 25 , 31 ]. Specifically, Narada [ 23 , 25 ] is a trace-based approach, which relies on recording execution traces of existing sequential tests, identifying objects that could be shared, and constructing a concurrent test harness using those captured object references. If the sequential test suite does not contain a specific object state required to trigger a complex race, Narada cannot produce the necessary setup code. It is bound by the quality and coverage of the seed suite. Similar to previous works [ 25 , 31 ], ConCovUp allows the LLM to extract crucial context from repository artifacts, when available. By analyzing source code comments, documentation, and sequential tests, the agent can improve the quality of the generated concurrent tests. However, a key distinction is that ConCovUp does not depend on the presence of sequential tests. Instead, it leverages the reasoning capabilities of LLMs, guided by static concurrency analysis, to autonomously synthesize concurrent tests from scratch. Finally, unlike techniques focused on exploring the vast space of thread schedules, such as stateless model check-ing [ 10 ], controlled concurrency testing [ 19 , 36 ], and predictive analysis [ 8 , 40 , 41 ], our work does not aim to maximize interleaving diversity directly. Instead, our approach is orthogonal to these methods. By generating semantically valid drivers that reach critical synchronization points, ConCovUp provides the necessary entry points for fine-grained schedule exploration tools to operate effectively. 
+
+Neural-Enhanced Symbolic Execution. Recent advancements have explored the integration of neural models into symbolic execution frameworks [ 1 ] to address traditional limitations. For instance, Agentic Concolic Execution [17 ]leverages LLMs to assist forward concolic execution, primarily aiming to enhance overall code coverage. In contrast, 
+
+ConCovUp employs a directed backward execution strategy: our approach anchors its search from specific shared memory accesses and works backwards for synthesizing targeted concurrent tests. Another notable approach is Neuro-Symbolic Execution [ 27 ], which trains a dedicated neural network to approximate complex constraints and accelerate the underlying SMT solving process. Unlike their approach, which still relies on mathematical constraint solving, 
+
+ConCovUp does not rely on heavyweight SMT solvers (e.g., Z3). Instead of accumulating complex mathematical 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 51. bool insert (int key) {                                                                               
+
+> 2. int h = hash(key);
+> 3. Node* n = buckets[h]; // Hash semantics
+> 4.
+> 5. // acquire(& bucket_mutex );
+> 6. while (n != nullptr && n ->key != key) // List traversal
+> 7. n = n ->next;
+> 8. if (n == nullptr ) { // Container grow semantics
+> 9. // ... insert a new node
+> 10. mask.store (mask.load () * 2 + 1); // Write
+> 11. }
+> 12.
+> 13. if (try_acquire (& node_mutex )) {
+> 14. m = mask.load (std:: memory_order_acquire ); // Read
+> 15. // ... update the node
+> 16. }
+> 17. // release(& bucket_mutex );
+> 18. return true;
+> 19. }
+> /*** Thread 1:
+> Inserts a NEW key.
+> Path: Key not found (n ==
+> nullptr )—> triggers write.
+> ***/
+> void thread1 () {
+> insert( unique_key ++);
+> }
+> /*** Thread 2:
+> Inserts the SAME key.
+> Path: Key found (n !=
+> nullptr )—> skips write,
+> triggers read ( mask.load ).
+> ***/
+> void thread2 () {
+> insert(KEY_A);
+> }
+> 𝑙 1
+> 𝑙 6
+> 𝑙 7
+> 𝑙 8
+> 𝑙 10
+> 𝑙 13
+> 𝑙 14
+> 𝑙 18
+> Path Constraint Summary ：
+> •𝑙 6:The traversal loop must exhaust
+> the linked list, terminating when !(n
+> != nullptr && n ->key != key).
+> •𝑙 8:The execution must take the
+> growth branch, requiring n ==
+> nullptr to evaluate to true.
+> Path Constraint Summary ：
+> •𝑙 6:Finding the key in the bucket (n
+> != nullptr && n ->key == key).
+> •𝑙 8:Bypassing the growth branch (n
+> == nullptr is false).
+> •𝑙 13 :Finally acquiring the lock
+> (try_acquire (& node_mutex ) is true).
+> 𝑙 1𝑙 6𝑙 8𝑙 10
+> 𝑙 6𝑙 8𝑙 13 𝑙 14𝑙 1
+> Backward tracing of W：
+> Backward tracing of R：
+
+(a)  (b)  (c) 
+
+Fig. 2. Motivating example of SMAP Coverage-guided concurrent test generation: (a) shows a thread-unsafe function with an atomicity violation, while (b) and (c) illustrate backward tracing and test generation. 
+
+formulas that often lead to high computational overhead and scalability walls, our methodology operates at a higher semantic abstraction level. ConCovUp summarizes path conditions into natural language constraints and directly leverages the LLM’s reasoning capabilities to deduce concrete inputs. This design reduces dependence on solver-heavy path exploration for complex data structures and opaque library calls. 
+
+2.2 Our Multi-Agent Generative Approach 
+
+To the best of our knowledge, ConCovUp is the first agent-based approach to generate test drivers for concurrency testing. We employ Shared Memory Access Pair Coverage (SMAP Coverage) [ 9, 34 ] as our evaluation metric, which assesses whether conflicting access pairs, such as write-write and write-read operations executed by different threads on a given shared variable, are adequately covered by the test cases. Prior work has shown that these inter-thread data dependencies are important execution targets for studying atomicity and order violations [29]. We illustrate how ConCovUp operates using the concurrent insert function of a hash map, shown in Figure 2 (a). Its control flow graph is shown in Figure 2 (b) with 𝑙 denoting the line. In this snippet, an unsafe interaction may arise if one thread resizes the container (writing to the global variable 𝑚𝑎𝑠𝑘 at line 10) while another thread concurrently reads the 𝑚𝑎𝑠𝑘 (line 14) without proper synchronization. To exercise this potential atomicity interaction, a test driver need spawn two threads that concurrently execute the exact Write-Read pair on the shared variable 𝑚𝑎𝑠𝑘 . Relying solely on a general coding agent to generate such a test is unreliable, especially for a large concurrent codebase. The agent often fails to comprehend the complex control flow (e.g., hash semantics, linked-list traversals) required to reach these specific lines, resulting in tests that execute shallow paths and miss the deep concurrent interactions. ConCovUp 
+
+addresses this through its three-stage multi-agent workflow: 
+
+1. Static Analysis (Analysis Agent): Instead of feeding the entire codebase to the LLM blindly, the Analysis Agent first performs whole-program static analysis. It automatically identifies 𝑚𝑎𝑠𝑘 as a shared variable and extracts the target Write-Read pair: the write operation 𝑚𝑎𝑠𝑘.𝑠𝑡𝑜𝑟𝑒 (... ) at line 10, and the read operation 𝑚𝑎𝑠𝑘.𝑙𝑜𝑎𝑑 (... ) at line 14. 
+
+> Manuscript submitted to ACM
+
+6 Yuandao Cai, Shuhao Fu, et al. 
+
+2. Backward Tracing & Input Deduction (Path Agent): To reach these specific accesses, the Path Agent performs a backward search on the CFG to extract the necessary path conditions, summarizing them into natural language constraints. For Thread 1 to reach the write at line 10, the Path Agent generates the NL constraint summary as shown in in Figure 2 (b). For Thread 2 to reach the read at line 14 (while skipping the write), the NL constraint summary is also shown in Figure 2 (b). Crucially, traditional symbolic execution and SMT solvers struggle with such constraints due to the opaque hash functions (line 2) and unbounded heap-based list traversals (lines 6-7). Instead of relying on heavyweight solvers, ConCovUp leverages the LLM’s deep semantic comprehension. The LLM interprets the summaries and helps deduce that satisfying the first path requires inserting a new, unique key , whereas the second path requires inserting an already existing key .
+
+3. Test Generation (Test Generation Agent): Equipped with the deduced concrete inputs, the Test Generation Agent synthesizes the final executable test driver. It constructs the necessary concurrent function invocations to trigger the exact target interleaving, as illustrated in Figure 2(c). By assigning the deduced inputs to specific threads, ConCovUp 
+
+steers execution along hard-to-reach paths and exercises the targeted Write-Read conflict. The primary goal of our approach is to synthesize test drivers that improve coverage of these shared memory access pairs; runtime checkers such as ThreadSanitizer can be applied separately as auxiliary analyses. 
+
+3 PRELIMINARIES 
+
+This section defines the key concepts, metrics, and notations used throughout the paper. 
+
+Basic Notions. Let 𝑉 shared be the set of shared variables in a target program that can be accessed concurrently across multiple threads (e.g., global variables, objects escaping thread boundaries). For a given shared variable 𝑣 ∈ 𝑉 shared , we define an access point as a specific source code location (file and line number) where a single read or write operation occurs. Each access point is assigned a unique identifier. The set of all access points for 𝑣 is denoted as 𝐴 𝑣 , and the union of all shared accesses across the program is defined as 𝐴 shared = Ð𝑣 ∈𝑉 shared 𝐴 𝑣 . Furthermore, let 𝐹 root denote the set of public entry functions (i.e., API functions) that, when invoked concurrently, may trigger one or more shared accesses in 𝐴 shared .
+
+Shared Memory Access Pair Coverage. To measure the effectiveness of the generated concurrent tests, we formalize the metric of Shared Memory Access Pair Coverage . Let a runtime access operation be a tuple 𝑎 = ⟨𝜏, 𝑜𝑝, 𝑙, 𝑎𝑑𝑑𝑟 ⟩,where 𝜏 denotes the thread identifier, 𝑜𝑝 ∈ { Write , Read } represents the operation type, 𝑙 ∈ 𝐴 shared is the context-insensitive access point corresponding to a shared variable, and 𝑎𝑑𝑑𝑟 is the dynamic memory address accessed at runtime. We define a static target access pair as 𝑝 = (𝑙 𝑖 , 𝑙 𝑗 ), where 𝑙 𝑖 , 𝑙 𝑗 ∈ 𝐴 shared satisfy the following conditions: (1) 
+
+Shared Target: 𝑙 𝑖 and 𝑙 𝑗 access the same underlying shared variable 𝑣 . (2) Conflict: at least one of the two locations is a write access, effectively capturing W-W, W-R, and R-W interactions. Let 𝑃 total be the set of static target access pairs identified in the target program. A pair 𝑝 = (𝑙 𝑖 , 𝑙 𝑗 ) is covered if the execution contains runtime accesses 𝑎 𝑖 and 
+
+𝑎 𝑗 such that 𝑎 𝑖 .𝑙 = 𝑙 𝑖 , 𝑎 𝑗 .𝑙 = 𝑙 𝑗 , 𝑎 𝑖 .𝜏 ≠ 𝑎 𝑗 .𝜏 , and 𝑎 𝑖 .𝑎𝑑𝑑𝑟 = 𝑎 𝑗 .𝑎𝑑𝑑𝑟 . Let 𝑃 covered ⊆ 𝑃 total be the subset of pairs covered during the dynamic execution of the tests. The coverage is formally defined as |𝑃 covered |/| 𝑃 total |. We refer to this metric as SMAP Coverage in the rest of the paper. The execution results of generated tests naturally partition the target pairs into covered and uncovered sets, directly guiding the subsequent refinement. Note that our coverage metric is evaluated context-insensitively . Specifically, we consider a target pair covered as long as its constituent static access points are triggered by different threads on the same dynamic memory address, 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 7regardless of the specific function call contexts (i.e., call stacks) through which these accesses are reached. We further discuss this in the Section 7. 
+
+Goal. Given a target C/C++ open-source program, ConCovUp aims to automatically synthesize concurrent test drivers , which are multi-threaded programs that invoke functions in 𝐹 root to maximize SMAP Coverage. By maximizing this coverage, ConCovUp exercises concurrency-relevant shared-memory interactions and provides stronger executions for downstream dynamic analyses. 
+
+Iteration Budgets. Static analysis is over-approximated, possibly identifying shared memory accesses that are semantically unreachable (dead code) or guarded by unsatisfiable constraints. Without a termination condition, the LLM agent could waste infinite cycles attempting to reach these infeasible targets. To prevent resource exhaustion, ConCovUp 
+
+employs a configurable refinement budget, 𝐾 refine . This bounds the dynamic feedback loop to 𝐾 refine iterations per test, ensuring the process terminates even if some statically identified targets remain uncovered. We set the 𝐾 refine to three in our experiments. 
+
+4 CONCOVUP IN DETAIL 
+
+ConCovUp is a multi-agent framework designed to automatically generate test drivers for concurrency testing by integrating static analysis with LLM agents. The workflow of ConCovUp is orchestrated across three distinct agentic phases. First, the Analysis Agent uses static analysis tools to comprehensively analyze the target program. Initially, it invokes a Call Graph Analyzer to pinpoint the top-level entry functions and extract the precise call graphs leading to each shared memory access. Subsequently, it employs a Shared Access Analyzer to identify shared variables and their corresponding memory access points. The second phase focuses on the reachability of each memory access within an identified pair. Here, the Path Agent performs backward tracing and semantic input deduction. Instead of accumulating complex mathematical formulas for a traditional SMT solver, the agent summarizes the path conditions into natural language constraints. Relying on its code comprehension capabilities, the LLM heuristically explores the execution paths and deduces the concrete inputs required to satisfy these constraints. This prompt-based reasoning reduces dependence on heavyweight formal solvers and their overhead on complex data structures and loops. The agent then formulates these deduced inputs and environment setup requirements, feeding them to the Test Generation Agent. In the third phase, guided by the flagged shared variables, their access points, and the concrete inputs deduced in the previous stage, the Test Generation Agent synthesizes the initial batch of concurrent test drivers. These generated tests are then compiled and executed using a custom-built instrumentation tool to dynamically evaluate execution coverage. Crucially, the system operates on an iterative feedback loop between Phase 2 and Phase 3. Based on the coverage feedback from the custom instrumentation tool, if a target access pair remains uncovered, the system loops back: the Path Agent re-evaluates the semantic constraints or explores alternative execution paths, and the Test Generation Agent refines the test drivers accordingly. This collaborative process iterates until either all target access pairs are successfully covered or a predefined iteration limit is reached. 
+
+4.1 Analysis Agent with Static Analysis Tools 
+
+The Analysis Agent orchestrates a suite of static analysis tools to analyze the target source code. Its primary objective is to extract potential shared memory accesses and identify appropriate entry functions, thereby providing the targets 
+
+> Manuscript submitted to ACM
+
+8 Yuandao Cai, Shuhao Fu, et al. for the subsequent reachability analysis and guiding the test generation process. ConCovUp begins by addressing a key challenge in analyzing open programs (e.g., libraries): identifying possible shared memory accesses without a full application execution context. To achieve this autonomously, the Analysis Agent is initialized with a specialized system prompt that defines its persona, available toolset, and strict output constraints. The core prompt structure is outlined in Figure 3. 
+
+Call Graph Analyzer: ConCovUp prioritizes public entry points over internal functions, as invoking these entry points exercises the underlying internal logic. The agent invokes the [Call_Graph_Analyzer] to construct a global Call Graph (CG) of the target program. By traversing the CG, the framework identifies the top-level API functions, defined as the Root Functions ( 𝐹 root ). These root functions serve as the primary entry points for the multi-threaded test drivers because generated tests invoke them to trigger the deeply embedded shared accesses. 
+
+Shared Access Analyzer: Identifying shared memory accesses in open programs is difficult; traditional flow-sensitive analyses often struggle with inter-procedural aliasing when the calling context from an upper-layer application is absent. To address this, the agent utilizes the [Shared_Access_Analyzer] , which employs a flow-insensitive yet field-sensitive pointer analysis [ 11 ]. The flow-insensitivity over-approximates the control flow, allowing the system to conservatively model the possible function invocations and thread interleavings. To counterbalance this over-approximation and reduce false positives, field-sensitivity is applied to prune infeasible aliasing relationships. A variable is classified into the shared variable set ( 𝑉 shared ) if it satisfies any of the following criteria: (1) It is passed as a pointer or reference parameter to a Root Function ( 𝑓 ∈ 𝐹 root ). (2) It is protected by a synchronization primitive, such as a lock (encompassing both heap-allocated memory and global variables). (3) It is passed as an argument to a thread creation API (e.g., pthread_create ). Once 𝑉 shared is established, the analyzer scans the codebase to extract the set of corresponding memory access points (𝐴 shared ). To prepare for the dynamic testing phases, the Analysis Agent groups these individual context-insensitive access locations (e.g., 𝑙 𝑖 , 𝑙 𝑗 ∈ 𝐴 shared ) into the set of static target access pairs ( 𝑃 total ). The agent ensures that for each pair 
+
+(𝑙 𝑖 , 𝑙 𝑗 ) ∈ 𝑃 total , both locations access the same underlying shared variable 𝑣 , and at least one operation is a write access (capturing W-W, W-R, and R-W conflicts). By mapping the call chains from the Root Functions ( 𝐹 root ) down to these context-insensitive access pairs, the Analysis Agent establishes the concurrency semantics required to output the final JSON array, directly guiding the following phases. 
+
+Example 4.1. To illustrate this process, consider Figure 2. The Analysis Agent first identifies insert as a Root Function ( 𝑓 ∈ 𝐹 root ). During the shared access analysis, the agent observes the global variable 𝑚𝑎𝑠𝑘 . Because 𝑚𝑎𝑠𝑘 is accessed within a critical section protected by 𝑛𝑜𝑑𝑒 _𝑚𝑢𝑡𝑒𝑥 (via 𝑡𝑟𝑦 _𝑎𝑐𝑞𝑢𝑖𝑟𝑒 at line 13), it satisfies the second criterion and is added to the shared variable set ( 𝑉 shared ). Subsequently, the agent extracts its memory access points: a write operation at line 10 ( 𝑚𝑎𝑠𝑘.𝑠𝑡𝑜𝑟𝑒 (... )) and a read operation at line 14 ( 𝑚𝑎𝑠𝑘.𝑙𝑜𝑎𝑑 (... )) inside the locked region. These two code locations, denoted as 𝑙 10 and 𝑙 14 , are then grouped into a valid access pair (𝑙 10 , 𝑙 14 ) ∈ 𝑃 total representing a Write-Read conflict. Finally, the agent outputs this pair along with its call chain in the JSON array, setting the stage for the reachability analysis in Phase II. 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 9System: You are an expert C/C++ static analysis agent                   
+
+> specialized in concurrency …
+> Available Tools: [LLVM_IR_Builder ],
+> [Call_Graph_Analyzer ], [ Shared_Access_Analyzer ]…
+> Workflow :
+> •Build the Project by [LLVM_IR_Builder ]…
+> •Identify CG, shared variables, and accesses by...
+> Constraint:
+> •Do not hallucinate; strictly ground all identified
+> variables and control flows in the source code.
+> Output Format: A JSON array containing
+> [{ entry_functions ,shared_ variables ,memory _access es ,
+> access_pairs }].
+> <Output Example>
+
+Analysis Agent  Path Agent  Generation Agent                                        
+
+> System: You are an expert agent acting as a backward
+> symbolic execution and constraint -solving engine for
+> C/C++ programs.
+> Available Tools: [CFG_Navigator ], [Search _Code ]…
+> Workflow :
+> •Starting from < Target_Access >, perform
+> backward tracing along the Control Flow Graph
+> (CFG) to their respective entry functions .
+> •Collect all path constraint expressions (branch
+> predicates, loop bounds) and .
+> •Reason about the collected expressions Φand
+> identify the initial states and inputs.
+> Output: A JSON array containing [{ target_loc ,
+> feasible_path ,concrete_inputs }].
+> <Output Example>
+> System: You are an elite C/C++ concurrency testing
+> agent specialized in synthesizing self -contained,
+> executable concurrent test harnesses.
+> Available Tools: [Search _Code ], [ Compiler ],
+> [Coverage_Instrument_Tool ],…
+> Inputs: <entry_functions ><concrete_ inputs >…
+> Workflow :Your sole objective is to con -
+> struct a compilable , executable concurrent test
+> harness. Follow these steps:
+> •Context Initialization and State Setup: …
+> •Test Driver Construction :…
+> •Compilation & Refinement: …
+> Output: {compilation_status ,harness_code ,coverage,
+> uncovered_accesses }
+
+Fig. 3. Prompt structure of ConCovUp ’s multi-agent workflow, showing the task roles, tool interfaces, and structured outputs used by each agent. 
+
+4.2 Path Agent for Semantic Path Exploration 
+
+To generate the precise input values required to reach the constituent accesses of each target pair, ConCovUp introduces the Path Agent. Operating as the second phase of our framework, this agent initially analyzes all identified shared memory accesses to provide baseline execution paths and concrete inputs for the Test Generation Agent (Phase III). In addition, it also has an iterative refinement capability. When Phase III reports (via dynamic coverage feedback) that certain deeply embedded accesses remain uncovered—often due to complex control-flow dependencies or rigid environmental requirements—the Path Agent is re-invoked. During this feedback loop, it re-analyzes the execution paths, deprioritizes previously failed routes, and synthesizes alternative concrete inputs. To achieve this autonomously, the Path Agent is driven by a specialized prompt (as detailed in Figure 3). The prompt defines its persona as an expert backward execution and constraint-solving engine for C/C++ programs. It equips the agent with navigation and search tools, such as [CFG_Navigator] and [Search_Code] , and dictates a strict workflow: starting from a constituent target access location, the agent performs backward tracing along the CFG to an entry function, collects path constraint expressions, reasons about these expressions to identify initial states, and finally outputs a JSON array containing the target location, feasible path, and concrete inputs. Unlike traditional dynamic symbolic execution (DSE) engines, which frequently suffer from path explosion and struggle with complex data structures, this agent operates at a higher semantic abstraction level. It is designed to autonomously discover feasible execution paths, summarize path constraints, and perform semantic input deduction through LLMs. Ultimately, the insights derived by this agent form a collaborative, closed-loop system with Phase III, capable of synthesizing precise concurrent tests. 
+
+Backward Path Extraction. To reach a target memory access, the agent identifies a feasible execution route origi-nating from a top-level entry function (Root Function). Relying on a pre-computed static CFG and its [CFG_Navigator] 
+
+tool, the agent performs a backward traversal starting from each constituent target access location. To mitigate the well-known path explosion problem inherent in path exploration, the agent employs a heuristic-guided greedy search strategy. Rather than exhaustively exploring all predecessors, the agent evaluates and prioritizes 
+
+Manuscript submitted to ACM 10 Yuandao Cai, Shuhao Fu, et al. paths based on a defined reachability cost. Specifically, this heuristic favors paths with fewer complex branch conditions and actively penalizes paths that involve heavy environmental interactions, such as system calls, network I/O, or complex file operations. By intentionally avoiding these opaque, environment-dependent APIs, the agent focuses its computational effort on paths driven purely by internal program logic and input parameters. During iterative refinement, if a previously selected path fails to achieve coverage in Phase III, the agent dynamically adjusts its search space, pruning the failed branch and selecting the next optimal path from its priority queue. 
+
+Path Summarization and Semantic Input Deduction. Once a promising path is identified, the agent transitions to constraint extraction and semantic input deduction. Traditional DSE engines [ 1 , 33 ] mechanically translate every instruction into low-level bitvector formulas, an approach that frequently overwhelms formal solvers. In contrast, our Path Agent leverages the LLM’s native reasoning capabilities to formulate and resolve path constraints at a semantic level. The agent collects branch predicates, loop bounds, and state transformations along the path, summarizing them into a high-level representation that captures the core program requirements and variable relationships without the instruction-level translation. We denote the collected path constraints as Φ.Instead of relying on SMT solvers, the LLM acts as an autonomous reasoning engine. It analyzes the collected constraint expressions Φ and directly deduces the initial states and concrete inputs required to satisfy them based on its semantic understanding of the code. ConCovUp incorporates a robust backtracking mechanism during this deduction phase: if the LLM determines that the current path constraints are logically conflicting or unsatisfiable (UNSAT)—indicating that the path is logically dead or blocked by mutually exclusive conditions—the agent discards the path, backtracks to the extraction phase, and selects the next most promising route. When a path is considered satisfiable, the agent reasons the concrete variable values required to satisfy the branch conditions. Finally, the agent passes both the identified execution path and the concrete input values forward to the Test Generation Agent. With this semantic guidance, Phase III can synthesize a targeted test driver that navigates the complex control flow to trigger the concurrent memory access. 
+
+Example 4.2. Returning to Figure 2, the Path Agent deduces inputs to trigger the Write-Read conflict on 𝑚𝑎𝑠𝑘 . For Thread 1 to reach the write operation at line 10, the agent traces backward and summarizes the constraints: the traversal loop at line 6 exhausts the list ( n == nullptr ), and the execution takes the growth branch at line 8. Conversely, for Thread 2 to reach the read at line 14 while skipping the write, the constraints dictate that the loop at line 6 finds the key (n != nullptr && n->key == key ), skips the growth branch at line 8, and successfully acquires the lock at line 13. 
+
+4.3 Generation Agent for Concurrent Tests 
+
+The Concurrent Test Generation Agent serves as the synthesis core of ConCovUp (Phase III). Guided by the static analysis targets and target entry functions extracted in Phase I and the feasible paths, path constraints, and concrete inputs provided by the Path Agent in Phase II, this phase harnesses the generative capabilities of LLMs to automatically construct executable, multi-threaded test drivers. To manage the complexity of concurrent scenarios, the agent is driven by a system prompt that defines its persona as an “elite C/C++ concurrency testing agent specialized in synthesizing self-contained, executable concurrent test harnesses.” Its workflow is organized into four operational stages: Task Partitioning, Tool-Augmented Context Resolution, Prompt-Driven Synthesis, and Coverage Validation. 
+
+Task Partitioning and Code Annotation. A naive approach to test generation would overwhelm the LLM by feeding it the entire set of shared variables simultaneously, leading to context dilution. To prevent this, ConCovUp 
+
+employs a Write-Anchor Partitioning Strategy . For a given shared variable 𝑣 , the system fixes a specific write access 𝑙 𝑖 as 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 11 the “anchor” and pairs it with another target access 𝑙 𝑗 (read or write). Let 𝐸 (𝑙 ) ∈ 𝐹 root denote the selected root function whose call chain reaches access location 𝑙 . The task scheduler dictates the construction of a two-thread test driver: Thread 1 invokes the top-level entry function 𝐸 (𝑙 𝑖 ), while Thread 2 concurrently invokes 𝐸 (𝑙 𝑗 ). To further assist the LLM’s attention, the source code snippets are dynamically annotated with inline comments and line-number markers directly adjacent to the target memory accesses. 
+
+Tool-Augmented Context Resolution. A problem in generating compilable C/C++ test drivers is the Missing Context Problem . The agent receives <entry_functions> and static targets from Phase I, as well as <concrete_inputs> 
+
+and path constraints from Phase II, but it still has to properly initialize complex parameters and global states. To resolve this, the prompt equips the agent with Available Tools , notably [Search_Code] . When the agent encounters an unknown custom data type or an opaque function signature, it autonomously invokes this tool to query the codebase. It dynamically retrieves source code, struct definitions, and existing sequential tests, ensuring the setup code correctly maps Phase II’s semantic inputs into valid C/C++ initialization code. 
+
+Prompt-Driven Test Synthesis. With the context resolved, the agent proceeds to the core synthesis step, strictly following the Workflow defined in its prompt. Because Phase II has provided candidate resolutions for the path constraints, Phase III is dedicated to the precise engineering task of code construction. The prompt instructs the agent to follow a step-by-step process: (1) Context Initialization and State Setup: Guided by the retrieved variable, function, and structure definitions, the agent generates the code required to instantiate complex data structures, allocate memory, and set up global states. (2) Test Driver Construction: To improve compilability and encourage correct thread interactions, the agent encapsulates the initialized environment, spawns the two interacting threads (e.g., using std::thread ), invokes the target entry functions with the synthesized inputs, and cleanly joins the threads. A provided one-shot exemplar ensures a rigid, compilable output format. 
+
+Compilation, Execution, and Refinement. ConCovUp operates in a closed-loop environment. The prompt instructs the agent to perform the compilation and refinement using the provided [Compiler] and 
+
+[Coverage_Instrument_Tool] . Once compiled, ConCovUp automatically executes the harness. A target pair is marked as covered when the runtime coverage log shows that the generated concurrent harness triggered both designated static locations and that the corresponding accesses refer to the exact same dynamic memory address .Finally, the agent formats its results into the requested Output format: a structured JSON containing 
+
+{compilation_status, harness_code, coverage, uncovered_accesses} . If the generated test successfully trig-gers the target access pair, the pair is marked as covered. For pairs that fail to trigger—often due to rigid environmental checks or precise timing requirements—the execution trace is logged in uncovered_accesses and fed back to the Path Agent (Phase II). This triggers the iterative refinement process, where Phase II computes alternative paths to guide Phase III in subsequent generation attempts. 
+
+Example 4.3. In the Figure 2, based on the Phase II results, it assigns a dynamically incrementing unique_key++ 
+
+to thread1 to satisfy the “new key” precondition, and a specific KEY_A (pre-initialized in the state setup step) to 
+
+thread2 to satisfy the “existing key” precondition. Crucially, following the concurrent scaffolding rules defined in the prompt, the agent completes the test case by explicitly spawning and joining two concurrent threads (e.g., std::thread t1(thread1); std::thread t2(thread2); t1.join(); t2.join(); ). This creates a concurrent execution in which 
+
+> Manuscript submitted to ACM
+
+12 Yuandao Cai, Shuhao Fu, et al. the two functions can overlap, enabling the generated harness to trigger the targeted Write-Read interaction in the shared memory. 
+
+5 IMPLEMENTATION 
+
+ConCovUp is implemented as a set of tool-augmented subagents in Claude Code 2.1.90 for C/C++ libraries. The subagents follow the workflow in Figure 1 and invoke specialized tools on demand, including a shared access analyzer and a coverage instrumentation tool. These tools provide structural program facts that cannot be reliably inferred through textual code search alone. 
+
+Static analysis tools. The static analysis tools are built on LLVM 15. The Call Graph Analyzer computes reachability from the root functions to internal functions and memory access locations. The Shared Access Analyzer follows the criteria used by the Analysis Agent: it conservatively marks pointer or reference arguments of root functions, objects protected by synchronization primitives, and objects passed to thread-creation APIs as candidate shared memory objects. It then checks reachable reads and writes for each candidate and groups conflicting accesses into access pairs. The analysis is field-sensitive, so different fields of the same aggregate object are represented as distinct memory locations. 
+
+Coverage instrumentation. ConCovUp measures SMAP Coverage through bitcode-level instrumentation. For each statically identified access, the instrumentation logs the access ID, access type (read or write), executing thread ID, and dynamic memory address. ConCovUp reconstructs observed pairs from this log by matching statically identified target accesses that execute in different threads on the same dynamic address, with at least one access being a write. The instrumentation provides coverage feedback to the agents for subsequent test refinement. 
+
+6 EVALUATION 
+
+We evaluate our work through investigating the below questions: 
+
+• (RQ1: Overall Effectiveness ) To what degree does ConCovUp enhance SMAP Coverage and improve concurrent test generation effectiveness compared with a general Claude Code agent baseline? 
+
+• (RQ2: Ablation Study ) What are the individual and combined contributions of stage-level agents and iterative generation to the SMAP Coverage achieved by ConCovUp ?
+
+• (RQ3: Model Sensitivity ) How does the selection of the underlying LLM backend affect the SMAP Coverage attained by ConCovUp ?
+
+6.1 Experimental Setup 
+
+Libraries. We select nine widely used C/C++ libraries that cover common domains in systems software, as summarized in Table 1. The libraries include networking (c-ares, curl, libuv), data structures and compression (cJSON, concurrentqueue, zlib), cryptography (libsodium), and logging (spdlog, zlog), totaling approximately 1,000 kLoC. These libraries expose public APIs and maintain shared state through global objects, heap objects, synchronization-protected data, or callback-driven execution. This mix lets us evaluate whether generated concurrent drivers can handle different API styles and shared-memory access patterns rather than a single library family. 
+
+Configurations. We compare three configurations that share the same iterative generation budget but differ in the program-analysis support available to the agent. General CC Agent is our baseline. It runs in Claude Code with Claude Sonnet 4.6 and receives natural-language task instructions and the basic testing workflow, with the simplified skill shown 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 13 
+
+> Table 1. Benchmark Libraries Used in the Evaluation.
+
+Library Domain / Functionality kLoC c-ares Asynchronous DNS resolver 66.9 cJSON JSON parser/generator 24.4 concurrentqueue Lock-free queue 327.0 curl URL transfer library 294.9 libsodium Cryptographic library 76.3 libuv Event-loop and asynchronous I/O 111.8 spdlog C++ logging library 33.7 zlib Compression library 44.4 zlog C logging library 19.7 in Appendix A. It can use the ordinary coding-agent environment, but it is not given ConCovUp ’s specialized static-analysis tools, backward tracing capability, or SMAP Coverage instrumentation support. Analysis-guided is an ablation that adds the Analysis Agent and its static tools, so the generator receives shared-memory targets and entry functions before producing tests; it does not include the Path Agent’s backward tracing. The full ConCovUp configuration includes the Analysis Agent, the Path Agent, the Test Generation Agent, and coverage feedback. Appendix A summarizes the simplified skills used for the three configurations. All configurations use 𝐾 refine = 3, so the stage ablation isolates the contribution of agent-provided program facts and semantic path guidance rather than the presence of iteration itself. 
+
+Metric. We use SMAP Coverage, defined in Section 3, as the primary metric. For each library and configuration, we aggregate SMAP Coverage over the generated test drivers that compile and execute successfully. We also record generation time, token usage, and TSan warnings for the full ConCovUp configuration. 
+
+Environment and LLM Selection. All experiments run on Ubuntu 20.04 with an Intel(R) Xeon(R) Platinum 8358 CPU and 256GB RAM. We configure ConCovUp to use Claude Sonnet 4.6 as the default LLM because ConCovUp is implemented and orchestrated in Claude Code. For the model comparison experiments in RQ3, we also evaluate GPT 5.4 as another closed-source frontier model and Kimi K2.5 as an open-source coding-oriented model with a strong verified entry on the Terminal-Bench 2.0 leaderboard at the time of access [ 18 , 30 ]. The comparison is intended to cover different model providers and coding-agent backends. 
+
+6.2 RQ1: Effectiveness of ConCovUp 
+
+RQ1 compares the full ConCovUp workflow with General CC Agent . Both configurations run in Claude Code with Claude Sonnet 4.6 and use the same iteration budget; the difference is that ConCovUp provides static analysis, backward tracing, and coverage feedback. We use SMAP Coverage [9, 34] as the metric. 
+
+Results. Figure 4 shows that the full ConCovUp configuration achieves 68.1% average SMAP Coverage, compared with 36.6% for General CC Agent . This is a 31.5 percentage-point improvement, and the full workflow improves coverage on every evaluated library. The largest gains appear on zlog, libsodium, libuv, and c-ares. These libraries require the generator to identify relevant shared-memory targets, choose entry functions, and construct initialization states or path conditions that expose the target pairs. The general baseline receives the testing goal and a basic workflow, but it does not receive the static targets or path constraints that ConCovUp provides. This explains why the gap is larger on libraries where simply invoking public APIs is not enough to reach the intended shared accesses. 
+
+> Manuscript submitted to ACM
+
+14 Yuandao Cai, Shuhao Fu, et al. 020 40 60 80 100 SMAP Coverage (%)   
+
+> cJSON
+> libsodium
+> concurrentqueue
+> spdlog
+> c-ares
+> zlog
+> libuv
+> curl
+> zlib
+> General CC Analysis-guided Full ConCovUp Coverage by configuration
+
+Fig. 4. SMAP Coverage of ConCovUp and General/Ablated Configurations. Table 2. Static Target Scale, Generation Time, Token Usage, and TSan Warnings for the Full ConCovUp Configuration. 
+
+Library # Shared Var # Shared Access Static Time Wall Time In / Out Tokens (k) TSan Warnings cJSON 6 24 6s 20m 8s 333 / 43 5libsodium 11 26 7m 18s 47m 1s 779 / 77 0concurrentqueue 52 211 16s 21m 39s 454 / 39 0spdlog 17 43 24s 52m 40s 1043 / 104 0c-ares 24 130 24s 51m 43s 931 / 115 1zlog 7 32 21s 20m 39s 317 / 31 7libuv 21 59 1m 24s 1h 19m 1112 / 161 4curl 7 56 2m 9s 37m 37s 698 / 74 0zlib 2 36 26s 47m 35s 696 / 105 2
+
+ConCovUp also reaches 100.0% SMAP Coverage on cJSON and zlog, and obtains high coverage on curl, libsodium, and c-ares. These results show that the same workflow applies across different API styles, including compact C libraries, logging libraries with global state, and networking libraries with callback- or state-driven execution. The lower-coverage cases are also explainable. zlib requires threads to share the same z_stream or related state object while respecting its API lifecycle. spdlog is header-only and template-heavy, so generated tests can execute logging APIs while leaving many target pairs less visible to instrumentation. concurrentqueue uses lock-free data-structure patterns where coverage depends on object sharing and specific interleavings. These cases leave less room for purely syntactic test construction and motivate the path- and feedback-guided parts of ConCovUp .Table 2 reports the static target scale, generation time, token usage, and TSan warnings for the full configuration. The benchmark subjects contain 2–52 shared-memory objects and 24–211 shared accesses, while the static tools remain lightweight relative to generation time: most libraries finish static analysis in under 30 seconds, and the longest static-analysis run is 7m 18s on libsodium. End-to-end wall time ranges from 20m 8s to 1h 19m, and token usage ranges from 317k/31k to 1112k/161k input/output tokens per library. The generated tests also execute under ThreadSanitizer, producing 19 TSan warnings across the benchmark suite. 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 15 020 40 60 80 100 SMAP Coverage (%)   
+
+> cJSON
+> libsodium
+> concurrentqueue
+> spdlog
+> c-ares
+> zlog
+> libuv
+> curl
+> zlib
+> Iter. 1 Iter. 2 All Iters. Coverage across iterations
+
+Fig. 5. Cumulative SMAP Coverage Gains from Iterative Test Generation. Table 3. Cumulative Number of Generated Test Cases across Iterations. 
+
+Project After Iter. 1 After Iter. 2 After Iter. 3 c-ares 52 64 70 cJSON 32 45 53 concurrentqueue 5 11 16 curl 19 24 29 libsodium 8 12 14 libuv 6 12 18 spdlog 6 12 18 zlib 6 9 12 zlog 18 40 51 
+
+Answer to RQ1: ConCovUp improves average SMAP Coverage from 36.6% to 68.1% over the general Claude Code agent baseline. The gains are largest when static targets, path constraints, and feedback help the generator construct shared-state executions that are hard to obtain from natural-language guidance alone. 
+
+6.3 RQ2: Component Contribution Ablation 
+
+RQ2 studies where the coverage gains come from. We use Figure 4 to compare stage-level support, Figure 5 to measure how coverage accumulates over iterations, and Table 3 to report the cumulative number of generated test cases. 
+
+Results. Figure 4 shows that Analysis-guided achieves 39.2% average SMAP Coverage, compared with 36.6% for General CC Agent . The full workflow reaches 68.1%, a 28.9 percentage-point gain over Analysis-guided . Figure 5 shows a related pattern for iteration: average SMAP Coverage increases from 52.4% after the first iteration to 64.9% after the second iteration, and then to 68.1% after all iterations. Table 3 shows that the iterative process also expands the generated test pool, from the initial tests after Iteration 1 to the cumulative tests after Iteration 3. The small gap between General CC Agent and Analysis-guided suggests that target identification alone mostly tells the generator what to test. It does not by itself solve how to reach the target paths or how to make multiple threads 
+
+> Manuscript submitted to ACM
+
+16 Yuandao Cai, Shuhao Fu, et al. share the intended runtime object. This explains why Analysis-guided remains unchanged from the general baseline on libsodium, c-ares, and libuv, and why it covers fewer pairs on spdlog. In contrast, the full workflow turns static targets into path constraints, concrete setup hints, and feedback-guided repairs, which accounts for the larger gains on zlog, libsodium, libuv, and c-ares. Iteration helps most when the first generated harness is close but misses part of the required setup. The test-count trend should be read together with Figure 5: later iterations add more candidate tests, but coverage improves only when those tests repair missing setup, object sharing, or path reachability. Since our evaluation caps the refinement budget at 𝐾 refine = 3, the reported coverage should be read as the result under this fixed budget rather than as a saturation point; additional iterations may further increase coverage when feedback leads to executable repairs for the remaining target pairs. concurrentqueue is the clearest case: coverage is 0.0% after the first iteration and rises to 45.5% after the second, even though the cumulative test count remains small. libuv shows a similar pattern, increasing from 17.2% to 62.1%, which is consistent with event-loop and callback setup being repairable after feedback. zlog improves from 61.1% to 100.0% as its cumulative test count grows from 18 to 40 and then 51, suggesting that iterative repair helps logging/global-state setup. By contrast, cJSON and c-ares continue to add tests, but their coverage mostly saturates after the first iteration, indicating that additional tests do not necessarily trigger new static target pairs. libsodium, curl, and zlib show a similar saturation pattern, where their covered targets are mostly determined by the initial setup that 
+
+ConCovUp synthesizes. 
+
+Answer to RQ2: Static target information provides a small gain by identifying what to test. Most of the improvement comes from combining target information with path reasoning, concrete setup guidance, and feedback-based repair. 
+
+6.4 RQ3: Impact of Different LLMs 
+
+RQ3 keeps the ConCovUp workflow fixed and changes only the underlying LLM backend. This experiment evaluates how path reasoning, library-specific setup inference, and compilable harness synthesis vary across Claude Sonnet 4.6, GPT 5.4, and Kimi K2.5. 
+
+Results. Figure 6 shows a clear model effect, with darker cells indicating higher SMAP Coverage. Claude Sonnet 4.6 achieves the highest average SMAP Coverage at 68.1%, GPT 5.4 reaches 55.9%, and Kimi K2.5 reaches 28.1%. Claude Sonnet 4.6 is best or tied for best on eight of the nine libraries, which is consistent with its role as the default model in our Claude Code implementation. The model comparison also shows that ConCovUp ’s program-analysis workflow is useful beyond one model backend, but the quality of the generated harness still depends on the model. GPT 5.4 remains close to Claude Sonnet 4.6 on cJSON, zlog, and curl, and it outperforms Claude Sonnet 4.6 on concurrentqueue. This suggests that some data-structure scenarios can be handled well by a different model when the workflow supplies the same static targets and feedback. The lower GPT 5.4 results on c-ares, spdlog, and zlib point to library-specific setup as a source of sensitivity. c-ares exposes hidden or internal types during setup, spdlog relies on template-heavy logging APIs, and zlib requires careful lifecycle and object sharing. Kimi K2.5 performs reasonably on curl and concurrentqueue but is lower on zlog, libuv, c-ares, and zlib. This pattern suggests that terminal or coding benchmark strength does not always translate to sustained multi-step reasoning over shared-memory targets, API states, and executable concurrent harnesses. 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 17 Claude Sonnet 4.6 GPT 5.4 Kimi K2.5   
+
+> cJSON libsodium concurrentqueue spdlog c-ares zlog libuv curl zlib 0100 SMAP Coverage (%)
+> Fig. 6. Model sensitivity of ConCovUp : darker cells indicate higher SMAP Coverage for a given library and LLM backend.
+
+Overall, model choice changes the final coverage, while the workflow still provides a common structure for each backend: static targets define what to cover, path reasoning proposes how to reach it, and feedback helps repair generated harnesses. 
+
+Answer to RQ3: Model choice has a clear effect on SMAP Coverage. Claude Sonnet 4.6 provides the highest average result, GPT 5.4 remains competitive on several libraries, and Kimi K2.5 shows that coding-agent benchmark strength does not always translate into high SMAP Coverage [18, 30]. 
+
+6.5 Explaining Remaining Coverage Gaps 
+
+The RQ1–RQ3 results show that several lower-coverage cases are not random artifacts. To understand these cases, we reviewed the generated tests and iteration logs in the hybrid/results_iterative artifact tree. The logs point to three recurring constraints: object identity across threads, the gap between diagnosis and executable repair, and instrumentation visibility. 
+
+Object identity across threads. In zlib , generated tests call relevant APIs such as deflate , deflateResetKeep ,and deflateParams , but workers often allocate separate z_stream instances. The tests are concurrent, yet the observed accesses do not converge on the same object. A similar pattern appears in libsodium , where the logs report that remaining uncovered pairs access different dynamic addresses for the same access identifiers. These cases explain why API relevance alone is not enough for SMAP Coverage: the harness also has to preserve object identity across threads. 
+
+Diagnosis versus executable repair. For zlog and zlib , later iterations often describe the right repair direction, such as sharing state to repair aliasing, but the generated code still allocates fresh per-thread objects or manipulates 
+
+> Manuscript submitted to ACM
+
+18 Yuandao Cai, Shuhao Fu, et al. unstable internal structures. c-ares exposes a related buildability problem: generated tests often combine public calls with brittle internal setup and fail on hidden types such as ares_slist_t . These tests can be semantically close to the intended behavior, but compile-invalid harnesses do not improve SMAP Coverage. 
+
+Instrumentation visibility. spdlog is header-only and template-heavy; generated tests compile and TSan warnings are absent, but the full configuration still reaches only 37.8% SMAP Coverage. This suggests that valid logging tests can execute relevant APIs without making many target access pairs jointly observable under the instrumentation. 
+
+zlog shows a related issue, where only part of the generated tests are instrumented in early iterations. In contrast, 
+
+libuv shows a case where iteration helps once the setup is repairable: later iterations raise coverage after weak initial scaffolding. Overall, the case study explains both the strengths and remaining limits of ConCovUp . Static analysis and path reasoning help the agent move beyond surface-level API calls, while feedback repairs many setup issues. The remaining low-coverage cases usually involve shared object identity, library lifecycle, buildability, or observability constraints, which are reasonable for this concurrency-focused metric. 
+
+7 THREATS TO VALIDITY 
+
+Currently, ConCovUp is subject to specific scope limitations. First, the tool confines its test generation to the scope of single shared variables in isolation. Consequently, it does not directly target cross-variable dependencies, such as multi-variable atomicity interactions or inconsistent state updates across coupled resources. However, the underlying framework is designed to be generalizable. This limitation can be addressed by extending the static analysis phase to identify correlated variables, such as those frequently accessed together or protected by a common lock, and prompting the LLM to produce drivers that exercise the composite invariants. Second, ConCovUp employs static analysis to identify candidate shared variables and their access points. However, static analysis is inherently conservative and prone to false positives, often misclassifying thread-local data as shared or flagging dynamically-infeasible code paths. The imprecision can lead to wasted computational effort, as the tool may generate spurious test drivers for non-shared variables or exhaust computation resources attempting to satisfy unsatisfiable path constraints. These limitations could be mitigated by employing highly precise static analysis, such as context-sensitive pointer analysis, or by refining the framework to support a human-in-the-loop mechanism, allowing the agent to query developers for semantic annotations regarding the true shared variables. Finally, ConCovUp currently focuses on reaching access points and matching dynamic addresses, but it does not explicitly diversify the data state (i.e., the specific runtime values) present during those accesses. To address this limitation and enhance the concurrent test generation, we could integrate finer-grained guidance metrics, such as branch coverage, path coverage, and value-range analysis, to drive the generation of test inputs that explore a wider range of the program’s state space. We leave this direction to our future exploration. 
+
+8 CONCLUSION 
+
+This paper presents ConCovUp , a novel multi-agent framework that integrates LLMs with program analysis for concurrency test generation. ConCovUp grounds the generation process in static analysis to identify shared memory accesses and their calling contexts, and further employs an LLM-powered backward tracing approach to reach execution paths that are difficult to exercise. Experiments on 9 real-world libraries show that ConCovUp improves average SMAP Coverage from 36.6% to 68.1% over the general Claude Code agent baseline. These results suggest that combining 
+
+> Manuscript submitted to ACM
+
+ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 19 program-analysis evidence with coding-agent workflows is a promising direction for concurrency testing, while leaving room for future work on richer alias reasoning, more robust harness repair, and broader support for diverse build systems. 
+
+REFERENCES 
+
+[1] Cristian Cadar, Daniel Dunbar, and Dawson R. Engler. 2008. KLEE: Unassisted and Automatic Generation of High-Coverage Tests for Complex Systems Programs. In 8th USENIX Symposium on Operating Systems Design and Implementation, OSDI 2008, December 8-10, 2008, San Diego, California, USA, Proceedings , Richard Draves and Robbert van Renesse (Eds.). USENIX Association, 209–224. http://www.usenix.org/events/osdi08/tech/full_ papers/cadar/cadar.pdf [2] Yuandao Cai, Peisen Yao, and Charles Zhang. 2021. Canary: practical static detection of inter-thread value-flow bugs. In PLDI ’21: 42nd ACM SIGPLAN International Conference on Programming Language Design and Implementation, Virtual Event, Canada, June 20-25, 2021 , Stephen N. Freund and Eran Yahav (Eds.). ACM, 1126–1140. https://doi.org/10.1145/3453483.3454099 [3] Yuandao Cai, Chengfeng Ye, Qingkai Shi, and Charles Zhang. 2022. Peahen: fast and precise static deadlock detection via context reduction. In Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering, ESEC/FSE 2022, Singapore, Singapore, November 14-18, 2022 , Abhik Roychoudhury, Cristian Cadar, and Miryung Kim (Eds.). ACM, 784–796. https://doi.org/10.1145/3540250.3549110 [4] Yinghao Chen, Zehao Hu, Chen Zhi, Junxiao Han, Shuiguang Deng, and Jianwei Yin. 2024. ChatUniTest: A Framework for LLM-Based Test Generation. In Companion Proceedings of the 32nd ACM International Conference on the Foundations of Software Engineering (Porto de Galinhas, Brazil) (FSE 2024) . Association for Computing Machinery, New York, NY, USA, 572–576. https://doi.org/10.1145/3663529.3663801 [5] Yiu Wai Chow, Max Schäfer, and Michael Pradel. 2023. Beware of the Unexpected: Bimodal Taint Analysis. CoRR abs/2301.10545 (2023). https://doi.org/10.48550/ARXIV.2301.10545 arXiv:2301.10545 [6] Cormac Flanagan and Stephen N. Freund. 2009. FastTrack: efficient and precise dynamic race detection. In Proceedings of the 30th ACM SIGPLAN Conference on Programming Language Design and Implementation (Dublin, Ireland) (PLDI ’09) . Association for Computing Machinery, New York, NY, USA, 121–133. https://doi.org/10.1145/1542476.1542490 [7] Sishuai Gong, Dinglan Peng, Deniz Altınbüken, Pedro Fonseca, and Petros Maniatis. 2023. Snowcat: Efficient Kernel Concurrency Testing using a Learned Coverage Predictor. In Proceedings of the 29th Symposium on Operating Systems Principles (Koblenz, Germany) (SOSP ’23) . Association for Computing Machinery, New York, NY, USA, 35–51. https://doi.org/10.1145/3600006.3613148 [8] Yuqi Guo, Shihao Zhu, Yan Cai, Liang He, and Jian Zhang. 2024. Reorder Pointer Flow in Sound Concurrency Bug Prediction. In Proceedings of the 46th IEEE/ACM International Conference on Software Engineering, ICSE 2024, Lisbon, Portugal, April 14-20, 2024 . ACM, 19:1–19:13. https: //doi.org/10.1145/3597503.3623300 [9] Shin Hong, Jaemin Ahn, Sangmin Park, Moonzoo Kim, and Mary Jean Harrold. 2012. Testing concurrent programs to achieve high synchronization coverage. In International Symposium on Software Testing and Analysis, ISSTA 2012, Minneapolis, MN, USA, July 15-20, 2012 , Mats Per Erik Heimdahl and Zhendong Su (Eds.). ACM, 210–220. https://doi.org/10.1145/2338965.2336779 [10] Jeff Huang. 2015. Stateless model checking concurrent programs with maximal causality reduction. In Proceedings of the 36th ACM SIGPLAN Conference on Programming Language Design and Implementation, Portland, OR, USA, June 15-17, 2015 , David Grove and Stephen M. Blackburn (Eds.). ACM, 165–174. https://doi.org/10.1145/2737924.2737975 [11] Jeff Huang. 2016. Scalable thread sharing analysis. In Proceedings of the 38th International Conference on Software Engineering, ICSE 2016, Austin, TX, USA, May 14-22, 2016 , Laura K. Dillon, Willem Visser, and Laurie A. Williams (Eds.). ACM, 1097–1108. https://doi.org/10.1145/2884781.2884811 [12] Jeff Huang, Patrick O’Neil Meredith, and Grigore Rosu. 2014. Maximal sound predictive race detection with control flow abstraction. In ACM SIGPLAN Conference on Programming Language Design and Implementation, PLDI ’14, Edinburgh, United Kingdom - June 09 - 11, 2014 , Michael F. P. O’Boyle and Keshav Pingali (Eds.). ACM, 337–348. https://doi.org/10.1145/2594291.2594315 [13] Jeff Huang and Arun K. Rajagopalan. 2016. Precise and maximal race detection from incomplete traces. In Proceedings of the 2016 ACM SIGPLAN International Conference on Object-Oriented Programming, Systems, Languages, and Applications, OOPSLA 2016, part of SPLASH 2016, Amsterdam, The Netherlands, October 30 - November 4, 2016 , Eelco Visser and Yannis Smaragdakis (Eds.). ACM, 462–476. https://doi.org/10.1145/2983990.2984024 [14] Ao Li, Byeongjee Kang, Vasudev Vikram, Isabella Laybourn, Samvid Dharanikota, Shrey Tiwari, and Rohan Padhye. 2025. Fray: An Efficient General-Purpose Concurrency Testing Platform for the JVM. Proc. ACM Program. Lang. 9, OOPSLA2, Article 417 (Oct. 2025), 29 pages. https: //doi.org/10.1145/3764119 [15] Jinwei Liu, Chao Li, Rui Chen, Shaofeng Li, Bin Gu, and Mengfei Yang. 2025. STRUT: Structured Seed Case Guided Unit Test Generation for C Programs using LLMs. Proc. ACM Softw. Eng. 2, ISSTA, Article ISSTA093 (June 2025), 23 pages. https://doi.org/10.1145/3728970 [16] Andrea Lops, Fedelucio Narducci, Azzurra Ragone, and Michelantonio Trizio. 2024. AgoneTest: Automated creation and assessment of Unit tests leveraging Large Language Models. In Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering (Sacramento, CA, USA) (ASE ’24) . Association for Computing Machinery, New York, NY, USA, 2440–2441. https://doi.org/10.1145/3691620.3695318 [17] Zhengxiong Luo, Huan Zhao, Dylan Wolff, Cristian Cadar, and Abhik Roychoudhury. 2026. Agentic Concolic Execution. In Proceedings of the 47th IEEE Symposium on Security and Privacy (S&P) . IEEE. Manuscript submitted to ACM 20 Yuandao Cai, Shuhao Fu, et al. 
+
+[18] Moonshot AI. 2026. Kimi K2.5: Visual Agentic Intelligence. https://github.com/MoonshotAI/Kimi-K2.5 Accessed: May 4, 2026. [19] Suvam Mukherjee, Pantazis Deligiannis, Arpita Biswas, and Akash Lal. 2020. Learning-based controlled concurrency testing. Proc. ACM Program. Lang. 4, OOPSLA, Article 230 (Nov. 2020), 31 pages. https://doi.org/10.1145/3428298 [20] Zifan Nan, Zhaoqiang Guo, Kui Liu, and Xin Xia. 2025. Test Intention Guided LLM-Based Unit Test Generation. In 47th IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa, ON, Canada, April 26 - May 6, 2025 . IEEE, 1026–1038. https://doi.org/10.1109/ICSE55347. 2025.00243 [21] Rangeet Pan, Myeongsoo Kim, Rahul Krishna, Raju Pavuluri, and Saurabh Sinha. 2025. ASTER: Natural and Multi-Language Unit Test Generation with LLMs. In 47th IEEE/ACM International Conference on Software Engineering: Software Engineering in Practice, SEIP@ICSE 2025, Ottawa, ON, Canada, April 27 - May 3, 2025 . IEEE, 413–424. https://doi.org/10.1109/ICSE-SEIP66354.2025.00042 [22] Juan Altmayer Pizzorno and Emery D. Berger. 2025. CoverUp: Effective High Coverage Test Generation for Python. Proc. ACM Softw. Eng. 2, FSE (2025), 2897–2919. https://doi.org/10.1145/3729398 [23] Malavika Samak and Murali Krishna Ramanathan. 2014. Multithreaded test synthesis for deadlock detection. In Proceedings of the 2014 ACM International Conference on Object Oriented Programming Systems Languages & Applications, OOPSLA 2014, part of SPLASH 2014, Portland, OR, USA, October 20-24, 2014 , Andrew P. Black and Todd D. Millstein (Eds.). ACM, 473–489. https://doi.org/10.1145/2660193.2660238 [24] Malavika Samak and Murali Krishna Ramanathan. 2015. Synthesizing tests for detecting atomicity violations. In Proceedings of the 2015 10th Joint Meeting on Foundations of Software Engineering, ESEC/FSE 2015, Bergamo, Italy, August 30 - September 4, 2015 , Elisabetta Di Nitto, Mark Harman, and Patrick Heymans (Eds.). ACM, 131–142. https://doi.org/10.1145/2786805.2786874 [25] Malavika Samak, Murali Krishna Ramanathan, and Suresh Jagannathan. 2015. Synthesizing racy tests. In Proceedings of the 36th ACM SIGPLAN Conference on Programming Language Design and Implementation, Portland, OR, USA, June 15-17, 2015 , David Grove and Stephen M. Blackburn (Eds.). ACM, 175–185. https://doi.org/10.1145/2737924.2737998 [26] Malavika Samak, Omer Tripp, and Murali Krishna Ramanathan. 2016. Directed synthesis of failing concurrent executions. In Proceedings of the 2016 ACM SIGPLAN International Conference on Object-Oriented Programming, Systems, Languages, and Applications, OOPSLA 2016, part of SPLASH 2016, Amsterdam, The Netherlands, October 30 - November 4, 2016 , Eelco Visser and Yannis Smaragdakis (Eds.). ACM, 430–446. https: //doi.org/10.1145/2983990.2984040 [27] Shiqi Shen, Shweta Shinde, Soundarya Ramesh, Abhik Roychoudhury, and Prateek Saxena. 2019. Neuro-Symbolic Execution: Augmenting Symbolic Execution with Neural Constraints. In 26th Annual Network and Distributed System Security Symposium, NDSS 2019, San Diego, California, USA, February 24-27, 2019 . The Internet Society. https://www.ndss-symposium.org/ndss-paper/ neuro-symbolic-execution-augmenting-symbolic-execution-with-neural-constraints/ [28] Qingkai Shi, Xiao Xiao, Rongxin Wu, Jinguo Zhou, Gang Fan, and Charles Zhang. 2018. Pinpoint: fast and precise sparse value flow analysis for million lines of code. In Proceedings of the 39th ACM SIGPLAN Conference on Programming Language Design and Implementation, PLDI 2018, Philadelphia, PA, USA, June 18-22, 2018 , Jeffrey S. Foster and Dan Grossman (Eds.). ACM, 693–706. https://doi.org/10.1145/3192366.3192418 [29] Yao Shi, Soyeon Park, Zuoning Yin, Shan Lu, Yuanyuan Zhou, Wenguang Chen, and Weimin Zheng. 2010. Do I use the wrong definition?: DeFuse: definition-use invariants for detecting concurrency and sequential bugs. In Proceedings of the 25th Annual ACM SIGPLAN Conference on Object-Oriented Programming, Systems, Languages, and Applications, OOPSLA 2010, October 17-21, 2010, Reno/Tahoe, Nevada, USA , William R. Cook, Siobhán Clarke, and Martin C. Rinard (Eds.). ACM, 160–174. https://doi.org/10.1145/1869459.1869474 [30] Terminal-Bench. 2026. terminal-bench@2.0 Leaderboard. https://www.tbench.ai/leaderboard/terminal-bench/2.0 Accessed: April 18, 2026. [31] Valerio Terragni and Shing-Chi Cheung. 2016. Coverage-driven test code generation for concurrent classes. In Proceedings of the 38th International Conference on Software Engineering (Austin, Texas) (ICSE ’16) . Association for Computing Machinery, New York, NY, USA, 1121–1132. https: //doi.org/10.1145/2884781.2884876 [32] Mosaad Al Thokair, Minjian Zhang, Umang Mathur, and Mahesh Viswanathan. 2023. Dynamic Race Detection with O(1) Samples. Proc. ACM Program. Lang. 7, POPL (2023), 1308–1337. https://doi.org/10.1145/3571238 [33] David Trabish, Timotej Kapus, Noam Rinetzky, and Cristian Cadar. 2020. Past-sensitive pointer analysis for symbolic execution. In ESEC/FSE ’20: 28th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering, Virtual Event, USA, November 8-13, 2020 , Prem Devanbu, Myra B. Cohen, and Thomas Zimmermann (Eds.). ACM, 197–208. https://doi.org/10.1145/3368089.3409698 [34] Wenwen Wang, Zhenjiang Wang, Chenggang Wu, Pen-Chung Yew, Xipeng Shen, Xiang Yuan, Jianjun Li, Xiaobing Feng, and Yong Guan. 2014. Localization of concurrency bugs using shared memory access pairs. In Proceedings of the 29th ACM/IEEE International Conference on Automated Software Engineering (Vasteras, Sweden) (ASE ’14) . Association for Computing Machinery, New York, NY, USA, 611–622. https: //doi.org/10.1145/2642937.2642972 [35] Zejun Wang, Kaibo Liu, Ge Li, and Zhi Jin. 2024. HITS: High-coverage LLM-based Unit Test Generation via Method Slicing. In Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering (Sacramento, CA, USA) (ASE ’24) . Association for Computing Machinery, New York, NY, USA, 1258–1268. https://doi.org/10.1145/3691620.3695501 [36] Cheng Wen, Mengda He, Bohao Wu, Zhiwu Xu, and Shengchao Qin. 2022. Controlled Concurrency Testing via Periodical Scheduling. In 
+
+44th IEEE/ACM 44th International Conference on Software Engineering, ICSE 2022, Pittsburgh, PA, USA, May 25-27, 2022 . ACM, 474–486. https: //doi.org/10.1145/3510003.3510178 Manuscript submitted to ACM ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing 21               
+
+> [37] Dylan Wolff, Zheng Shi, Gregory J. Duck, Umang Mathur, and Abhik Roychoudhury. 2024. Greybox Fuzzing for Concurrency Testing. In Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2, ASPLOS 2024, La Jolla, CA, USA, 27 April 2024- 1 May 2024 , Rajiv Gupta, Nael B. Abu-Ghazaleh, Madan Musuvathi, and Dan Tsafrir (Eds.). ACM, 482–498. https://doi.org/10.1145/3620665.3640389 [38] Minjian Zhang, Daniel Wee Soong Lim, Mosaad Al Thokair, Umang Mathur, and Mahesh Viswanathan. 2025. Efficient Timestamping for Sampling-Based Race Detection. Proc. ACM Program. Lang. 9, PLDI (2025), 150–175. https://doi.org/10.1145/3729252 [39] Mingwei Zheng, Danning Xie, Qingkai Shi, Chengpeng Wang, and Xiangyu Zhang. 2025. Validating Network Protocol Parsers with Traceable RFC Document Interpretation. Proc. ACM Softw. Eng. 2, ISSTA (2025), 1772–1794. https://doi.org/10.1145/3728955 [40] Shihao Zhu, Yuqi Guo, Yan Cai, Bin Liang, Long Zhang, Rui Chen, and Tingting Yu. 2025. Reduce Dependence for Sound Concurrency Bug Prediction. In 47th IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa, ON, Canada, April 26 - May 6, 2025 . IEEE, 242–254. https://doi.org/10.1109/ICSE55347.2025.00149 [41] Shihao Zhu, Yuqi Guo, Long Zhang, and Yan Cai. 2023. Tolerate Control-Flow Changes for Sound Data Race Prediction. In 45th IEEE/ACM International Conference on Software Engineering, ICSE 2023, Melbourne, Australia, May 14-20, 2023 . IEEE, 1342–1354. https://doi.org/10.1109/ICSE48619.2023.00118
+
+A SIMPLIFIED SKILLS 
+
+This section lists simplified skills used for each configuration. Due to page limits, we include abbreviated skill descriptions here to illustrate the workflow structure and differences among the RQ2 settings. Please refer to the artifacts for the full skills and prompts used in our experiments. 
+
+A.1 General CC Agent Configuration. 
+
+This skill describes the baseline workflow given to the General CC Agent . The agent receives the target library and a natural-language testing workflow, but it is not given ConCovUp ’s specialized static-analysis, call-graph, or path-analysis tools. 
+
+Role. You are an expert C/C++ concurrency testing assistant. 
+
+Skill Goal. Guide the agent to generate concurrent test drivers for a target C/C++ library to maximize SMAP Coverage over the generated tests that compile and execute successfully. 
+
+Available Inputs. The agent is given the target library source code and its public APIs. 
+
+Workflow. 
+
+(1) Inspect the target library source code directly and identify candidate shared memory locations, including global or static variables, shared heap objects, and shared struct fields. (2) Group accesses to the same location into alias groups, and label each access as read or write. (3) Select public API functions that may trigger the accesses in each alias group. (4) Generate pthread-based concurrent test drivers that attempt to exercise write-write and write-read access pairs for those alias groups. (5) Execute the generated tests with runtime instrumentation and compute SMAP Coverage from the observed cross-thread shared-memory accesses. (6) Analyze uncovered pairs, unreached accesses, and compile or execution failures, then revise the tests accordingly. (7) Repeat the generation-and-feedback loop for at most three iterations, or stop earlier if coverage reaches 100%. 
+
+Constraints. Do not modify the library source code. Do not use specialized static-analysis, call-graph, or path-analysis tools. Coverage only counts valid shared-memory access pairs observed in successful executions. 
+
+> Manuscript submitted to ACM
+
+22 Yuandao Cai, Shuhao Fu, et al. 
+
+Expected Output. The skill asks the agent to return the generated concurrent tests and a final summary reporting covered pairs, total pairs, and overall SMAP Coverage. 
+
+A.2 Analysis-guided Configuration. 
+
+This skill corresponds to the stage ablation that gives the agent static shared-memory targets and call-graph guidance, but not the backward path reasoning used by the full ConCovUp workflow. 
+
+Role. You are an expert C/C++ concurrency testing assistant with access to static-analysis tools. 
+
+Skill Goal. Guide the agent to generate concurrent test drivers for a target C/C++ library to maximize SMAP Coverage over the generated tests that compile and execute successfully. 
+
+Available Inputs. The agent is given the target library source code and its public APIs. 
+
+Workflow. 
+
+(1) Run the static analyzer tool to identify shared memory locations, shared-memory accesses, and alias groups, and label each access as read or write. (2) Use the static analyzer tool to extract a call graph from the library source code and identify exposed entry functions that can reach the target accesses. (3) For each alias group, select public API entry points using the call graph so that the generated tests are guided toward the target accesses. (4) Generate pthread-based concurrent test drivers that attempt to exercise write-write and write-read access pairs for those alias groups. (5) Execute the generated tests with runtime instrumentation and compute SMAP Coverage from the observed cross-thread shared-memory accesses. (6) Analyze uncovered pairs, unreached accesses, and compile or execution failures, then revise the tests 
+
+using the static-analysis targets and static-analysis-derived call-graph guidance .(7) Repeat the generation-and-feedback loop for at most three iterations, or stop earlier if coverage reaches 100%. 
+
+Constraints. Do not modify the library source code. Use the static analyzer both to identify shared-memory targets and to recover the call graph used for entry-function selection, but rely on runtime execution to measure actual coverage. 
+
+Expected Output. The skill asks the agent to return the generated concurrent tests and a final summary reporting covered pairs, total pairs, and overall SMAP Coverage.

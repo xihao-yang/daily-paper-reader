@@ -1,0 +1,653 @@
+Title: Decaf: Improving Neural Decompilation with Automatic Feedback and Search
+
+URL Source: https://arxiv.org/pdf/2605.11501v1
+
+Published Time: Wed, 13 May 2026 00:43:06 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Decaf: Improving Neural Decompilation with Automatic Feedback and Search 
+
+Alexander Shypula 
+
+University of Pennsylvania Philadelphia, Pennsylvania 19104 Email: shypula@seas.upenn.edu 
+
+Osbert Bastani 
+
+University of Pennsylvania Philadelphia, Pennsylvania 19104 Email: obastani@seas.upenn.edu 
+
+Edward Schwartz 
+
+Carnegie Mellon University Pittsburgh, Pennsylvania 15213 Email: eschwartz@cert.org Preprint. Under review. 
+
+Abstract —Decompilers are useful tools used in reverse engi-neering to understand compiled source code. Reconstructing source code from compiled binaries is a challenging task, because high-level syntax, identifiers, and custom data types are generally lost as the compiler translates human-readable code to low-level machine code. Deterministic decompilers are useful tools for binary analysis, but can struggle to infer idiomatic syntax and identifier names. Generative AI models are a natural fit for reconstructing high-level syntax, iden-tifiers, and types, but they can still suffer by hallucinating improper programming constructs and semantics. Instead of attempting to improve neural decompilers with more data and more training, we argue that compiler feedback can be used to dramatically improve the semantic correctness of neural decompiler outputs via search. Our system: D ECAF 
+
+(DECompilation with Automated Feedback) raises the neural decompilation rate from 26.0% on ExeBench to 83.9% on the REAL -O2 split without sacrificing similarity to the original source code. We also find our automatic feedback methodology is highly effective for improving weaker neural decompilation models. 
+
+## 1. Introduction 
+
+Decompilation is the process of taking low-level as-sembly code from an executable and translating it back into a form that resembles the original high-level source code. Reverse engineers employ decompilers to assist with several security tasks, including analyzing malware, dis-covering, understanding and exploiting vulnerabilities, and fixing legacy software. Understanding compiled executables in general is a challenging task, because many of the de-sign elements that make source-code understandable, such as variable, types, and identifier names, are “lost” as the program is lowered from an abstract source-code represen-tation to an execution-focused assembly code representation. Fortunately, decompiler research, which has been studied for over 30 years, has shown that many of these abstractions can be at least partially recovered by traditional decompilers 
+
+which employ sophisticated program analysis to recover in-formation about the original program’s variables, types, and functions. Traditional decompilers include both academic efforts [1], [2], [3] and industrial decompilers such as Ghidra and Hex-Rays, which are typically employed by reverse engineers. Although these abstractions make decompiled code more understandable than assembly code, traditional decompilers output code that is non-idiomatic and significantly more 
+
+difficult to understand than the original source code. To demonstrate these limitations and motivate our solution, we present a simple C function in Figure 1a as our working example, and its decompilation using the traditional decom-piler Ghidra in Figure 1c. It is easy to see that Ghidra did not recover function names, type names, variable names, or comments. To address these limitations, researchers have been studying how to apply neural learning techniques to guess or predict many forms of missing information, such as proposing identifier names [4], [5], [6], [7] and recover-ing meaningful types [5], [8], [9], [10]. More recently, researchers have begun to train neural models to decompile entire functions, either starting from assembly code [11], [12], or learning how to transform the output of a traditional decompiler into the original source code [13], [14]. These neural algorithms are an intuitive fit for decom-pilation, as training pairs can be mined by pairing compiled source code with the original source code that generated them. Learning algorithms will then encourage models to infer reasonable identifier names, types, and idiomatic syn-tax from the context provided. For example, in Figure 1b, we show the output of LLM4Decompile [13], a recent neural decompiler based on large language models (LLMs). The decompiled code is easy to read, with meaningful identifier names and idiomatic structure. While these neural models can guess more idiomatic identifiers, types, and source code, they offer no guarantees, and are prone to hallucinating semantically incorrect decom-piled code and can even fail to generate code that compiles or executes without errors. We can also see this in Figure 1b, where the decompiled code is functionally incorrect because it omits the critical break condition that is present on line 9 of the original source. This is the problem we are trying to solve in this paper: how can we produce decompiled code that is both idiomatic and functionally correct ?To this end, we are motivated by a simple observation: the first output of a neural model is not always the best, and 1
+
+> arXiv:2605.11501v1 [cs.SE] 12 May 2026
+
+(a) Original Source Code  
+
+> 1
+
+void createDimensions(int* arr, int size){  
+
+> 2
+
+int x = 1, y;  
+
+> 3
+
+while(1){  
+
+> 4
+
+if(x == size){  
+
+> 5
+
+y = 1; break;  
+
+> 6
+
+} 
+
+> 7
+
+y = size / x;  
+
+> 8
+
+if(x >= y){  
+
+> 9
+
+if(x * y == size) break;  
+
+> 10
+
+} 
+
+> 11
+
+x++;  
+
+> 12
+
+} 
+
+> 13
+
+arr[0] = x; arr[1] = y;  
+
+> 14
+
+}
+
+(b) LLM4Decompile Decompiled (Incorrect)  
+
+> 1
+
+void SplitBij(int *r, int n)  
+
+> 2
+
+{ 
+
+> 3
+
+int i, j;  
+
+> 4
+
+for (i = 1; i != n; i++) {  
+
+> 5
+
+j = n / i;  
+
+> 6
+
+if (i >= j) break;  
+
+> 7
+
+} 
+
+> 8
+
+r[0] = i; r[1] = n / i;  
+
+> 9
+
+}
+
+(c) Ghidra Decompiled (Correct)  
+
+> 1
+
+void FUN_00101140(int *param_1,int param_2)  
+
+> 2
+
+{ 
+
+> 3
+
+int iVar1, iVar2 = 1;  
+
+> 4
+
+if (param_2 != 1) {  
+
+> 5
+
+do {  
+
+> 6
+
+iVar1 = param_2 / iVar2;  
+
+> 7
+
+if ((iVar1 <= iVar2) && (iVar1 * iVar2 == param_2)) goto LAB_0010116e;  
+
+> 8
+
+iVar2 = iVar2 + 1;  
+
+> 9
+
+} while (param_2 != iVar2);  
+
+> 10
+
+} 
+
+> 11
+
+iVar1 = 1;  
+
+> 12
+
+LAB_0010116e:  
+
+> 13
+
+*param_1 = iVar2;  
+
+> 14
+
+param_1[1] = iVar1;  
+
+> 15
+
+return;  
+
+> 16
+
+}
+
+(d) Decaf Decompiled (Correct)  
+
+> 1
+
+struct image_t {int cols; int rows; };  
+
+> 2
+
+static void get_shape(image_t *self, int area)  
+
+> 3
+
+{ 
+
+> 4
+
+if (area == 1) {  
+
+> 5
+
+self->cols = 1; self->rows = 1; return;  
+
+> 6
+
+} 
+
+> 78
+
+int cols, rows = 1; cols = area / rows;  
+
+> 9
+
+while (!(cols <= rows && rows * cols == area))  
+
+> 10
+
+{ 
+
+> 11
+
+rows++; cols = area / rows;  
+
+> 12
+
+} 
+
+> 13
+
+self->cols = rows; self->rows = cols;  
+
+> 14
+
+}
+
+(e) Decaf Decompiled (Incorrect)  
+
+> 1
+
+struct Image {int width; int height; };  
+
+> 2
+
+void get_image_size(Image *image, int number_of_pixels) { ,→ 
+
+> 3
+
+int i;  
+
+> 45
+
+for (i = 1; i < number_of_pixels; ++i) {  
+
+> 6
+
+if (i * i > number_of_pixels) {  
+
+> 7
+
+break;  
+
+> 8
+
+} 
+
+> 9
+
+} 
+
+> 10 11
+
+image->width = i;  
+
+> 12
+
+image->height = number_of_pixels / i;  
+
+> 13
+
+}
+
+Figure 1: Working example. Code is slightly reformatted for space. (a) The original source code returns a factorization of size . The highlighted line shows the critical break condition logic that is missing from some decompilations. (b) LLM4Decompile is easy to understand but omits the critical break condition. (c) Ghidra is functionally correct but non-idiomatic. (d) Decaf’s first choice is easy to understand and functionally correct. (e) Lower ranked Decaf candidates are close but functionally incorrect, similar to LLM4Decompile. 2Reference Binary Disassembly 
+
+.text+0x1a9e0 · stripped                   
+
+> 1e4e0: endbr64 1e4e4: mov $0x1,%ecx 1e4e9: cmp $0x1,%esi 1e4ec: je 1e509 1e4ee: xchg %ax,%ax 1e4f0: mov %esi,%eax 1e4f2: cltd 1e4f3: idiv %ecx 1e4f5: cmp %ecx,%eax 1e4f7: jg 1e502 1e4f9: mov %eax,%edx 1e4fb: imul %ecx,%edx 1e4fe: cmp %esi,%edx 1e500: je 1e50e 1e502: add $0x1,%ecx 1e505: cmp %ecx,%esi 1e507: jne 1e4f0 1e509: mov $0x1,%eax 1e50e: mov %ecx,(%rdi) 1e510: mov %eax,0x4(%rdi) 1e513: ret
+
+Candidate A (Correct) 
+
+get_shape                       
+
+> 0: endbr64 4: cmp $0x1,%esi 7: je 38 <get_shape+0x38> 9: mov %esi,%eax b: mov $0x1,%ecx 10: jmp 20 <get_shape+0x20> 12: nopw 0x0(%rax,%rax,1) 18: mov %esi,%eax 1a: add $0x1,%ecx 1d: cltd 1e: idiv %ecx 20: cmp %ecx,%eax 22: jg 18 <get_shape+0x18> 24: mov %eax,%edx 26: imul %ecx,%edx 29: cmp %esi,%edx 2b: jne 18 <get_shape+0x18> 2d: mov %ecx,(%rdi) 2f: mov %eax,0x4(%rdi) 32: ret 33: nopl 0x0(%rax,%rax,1) 38: mov $0x1,%ecx 3d: mov $0x1,%eax 42: mov %ecx,(%rdi) 44: mov %eax,0x4(%rdi) 47: ret
+
+NORMALIZED BYTE -W ISE DIST 71.15 
+
+RERANKER SCORE 85.8% 
+
+Candidate B (Incorrect) 
+
+get_image_size                     
+
+> 0: endbr64 4: mov $0x1,%ecx 9: cmp $0x1,%esi c: jg 19 <get_image_size+0x19> e: jmp 25 <get_image_size+0x25> 10: mov %ecx,%edx 12: imul %ecx,%edx 15: cmp %esi,%edx 17: jg 30 <get_image_size+0x30> 19: add $0x1,%ecx 1c: cmp %ecx,%esi 1e: jne 10 <get_image_size+0x10> 20: mov $0x1,%esi 25: mov %ecx,(%rdi) 27: mov %esi,0x4(%rdi) 2a: ret 2b: nopl 0x0(%rax,%rax,1) 30: mov %esi,%eax 32: mov %ecx,(%rdi) 34: cltd 35: idiv %ecx 37: mov %eax,%esi 39: mov %esi,0x4(%rdi) 3c: ret
+
+NORMALIZED BYTE -W ISE DIST 71.15 
+
+RERANKER SCORE 68.1% 
+
+Figure 2: A comparison of the disassembly used for reranking the examples from Figure 1. Candidate A preserves the per-iteration idiv /imul sequence found in the reference (85.8%). Candidate B lacks idiv in its loop body entirely (highlighted), instead deferring it to a separate exit path after ret at 0x30 (68.1%) sampling multiple candidates increases the chance that at least one is correct. Recent neural decompilation work [13], [14] considers only a single candidate per input, leaving potential improvements untapped. As we show later in the paper (Section 3.2 and Figure 4), sampling 32 candidates from a neural decompiler yields a 88% chance that at least one candidate is functionally correct, compared to just 60% when considering only a single candidate. In this work, we show how to amplify neural decom-pilation models to produce code that is both idiomatic and 
+
+functionally correct by generating multiple candidate de-compilations and automatically selecting the most promising one. The central challenge lies in the selection step, which reduces to the undecidable problem of binary verification. Fortunately, we propose several practical approximations that work well in practice. Our best-performing is a neural reranker that we trained to score each candidate based on how closely its compiled output matches the original binary. For example, our neural decompiler emitted the candidates in Figures 1d and 1e (among others) which are functionally correct and incorrect, respectively. In Figure 2 we show how our neural reranker detected that the candidate in Figure 1d was closer to the target function than the incorrect candidate in Figure 1e, and yielded the correct decompilation to the reverse engineer despite the fact that the bytewise distance between these two programs and the reference bytes were equivalent. We name this approach D ECAF : Dec ompilation with 
+
+Automatic Feedback. Our approach is general and can be used to amplify any neural decompiler that produces diverse candidates. Using Decaf, we substantially advance the state-of-the art in neural decompilation across numerous metrics. On the E XE BENCH stripped R EAL -O2 compiled split, we attain a 83.9% functionally correct solve rate and a 70.9% exact byte-wise match significantly outperforming the strongest prior neural model, I DIOMS (26.0% and 19.1% respectively) on this split. Reranking generally yields sub-stantial improvements in functional correctness, and gener-ally re-prioritizes decompiled programs that are more similar to the original source code. 
+
+Contributions . In our work we contribute a new LLM gen-erator model Decaf-Gen-22b that strongly outperforms other state-of-the-art neural decompilers on all E XE BENCH 
+
+splits utilizing a single sample. We also contribute method-ologies on how to benefit from taking more samples from a LLM decompiler, culminating with large LLM reranking model Decaf-ReRanker-32b which generally attains the highest reranking results on our evaluation sets. We demonstrate as well that our reranking methods also can also dramatically amplify the strength of other LLM decompilers such as LLM4Decompile-Ref-22b-v2 . We document potential weaknesses of our approach and outline potential directions for future work to benefit from our insights. We also open source our code and models to the community available at https://github.com/AlexShypula/decaf. 301101001 11010010 00101101 Binary Ghidra // decompiled int func(v1) { if(v1>0) return 1; }Decompiled LLM Decompiler  
+
+> int is_pos(.. return x>0; }Gen 1
+> BEST
+> bool check(.. if(n>0) return 1; Gen 2 int gt_zero.. return val > 0; Gen N C O M P I L E bin ₁
+> bin ₂
+> bin ₙ
+> 01101001 11010010 Original
+> Neural Verifier Best
+
+Figure 3: A Visual Overview of the D ECAF system. In our implementation the D ECAF pipeline follows multiple steps from taking the output from a traditional decompiler, generating multiple candidates from an LLM, compiling all the results, and finally getting feedback from our “Verifier” LLM. 
+
+## 2. Methodology 
+
+2.1. Approach 
+
+We provide an overview of our multi-step process in Figure 3. Following some prior work in neural decompila-tion we first process the target function with a traditional 
+
+decompiler [13], [14]. Traditional decompilers have been studied for decades [15], and this allows neural decompilers to benefit from hard-earned engineering advances. In this paper, we utilize the Ghidra decompiler, because it is widely and freely available. We provide Ghidra’s decompilation output as the input 
+
+to our neural decompiler model. Similar to other recent neural decompilers [13], [14], when given the output from a traditional decompiler, our model is trained to predict the original source code that was compiled into the target function. (See Section 2.2). This is where our approach begins to differ from prior work. Rather than performing inference a single time, we can take an arbitrarily large number of samples from our model (e.g., 32, 128, 1024) using a standard ML technique called temperature sampling [16], [17], [18]. The advantage of temperature sampling is that it introduces randomness into the inference process, which enables the model to produce a diverse set of responses. As we will show later in this paper, the best decompilation is often not the first. At this point, we have sampled the model n times and have n candidate decompilations. We attempt to re-compile each of these candidates into an object file (e.g., using gcc -c ). If a candidate fails to compile, we discard it. We are now left with m candidate decompilations that compile in isolation. The next step is to identify the candidate that most closely resembles the original. To do this, we employ a “reranker” neural model that takes two assembly sequences and predicts how likely they are functionally equivalent. We use the reranker to compare each of the m compiled candidates to the target assembly code, and return the top candidates to the user. 
+
+2.2. Data 
+
+LLM Decompiler Data . Obtaining training data was crucial for training both our LLM decompiler model as well as our LLM reranker model. To create training data for fine-tuning both LLM models, we used E XE BENCH [19]. E XE BENCH 
+
+is a large scale benchmark of standalone compilable and executable C functions mined from open source code. We obtained source code from E XE BENCH , which we subse-quently compiled and decompiled to create training pairs. We processed the EXE BENCH REAL SIMPLE IO, SYNTH RICH IO, and S YNTH SIMPLE IO splits for training our LLM decompiler, and used the R EAL SIMPLE IO and SYNTH RICH IO splits for our neural reranker. E XE BENCH 
+
+provides heuristically inferred #include statements for the R EAL split and leverages P SYCHE -C [20], [21], a type inference tool for incomplete C programs, for the S YNTH 
+
+splits. We incorporate both the inferred headers and type information into our prediction task, enabling type-aware supervision where the model is trained to produce compil-able code. Although LLM4D ECOMPILE [13] also required a large-scale dataset of Ghidra-decompiled functions, only 100,000 examples were publicly released, and these were not processed with the additional steps we outline below. We compiled all functions using gcc 11.4.0 at both the 
+
+-O0 and -O2 optimization levels. All programs were com-piled for x86-64 architecture. To simulate more real-world decompilation scenarios, we compile each E XE BENCH ex-ample with a dummy main function to produce a linked executable file instead of an object file. Other research has frequently found that decompiler output is challenging to recompile [13]. We believe that this is partly caused by attempting to compile a func-tion’s decompiled code without declaring functions, types and globals the function may reference. To mitigate this problem, we utilize a custom decompilation exporter for Ghidra that properly declares referenced functions, types, and globals using its internal databases. In Table 3 we demonstrate that our custom exporter dramatically enhances the re-compilability and executability of Ghidra decompiled 4TABLE 1: LLM fine-tuning dataset (1.34M unstripped / 1.35M stripped).                             
+
+> Tokens Lines
+> Prompt Compl. Prompt Compl.
+> Unstripped
+> Total 221.9M 341.8M 25.2M 35.1M Mean 166 255 19 26 Median 98 178 13 21
+> Stripped
+> Total 244.9M 343.9M 24.3M 35.3M Mean 182 255 18 26 Median 115 178 13 21
+
+code. For each E XE BENCH function that we compile, we produce two decompilations: (1) from the unstripped com-piled binary that contains symbols, and (2) from the stripped executable (i.e., processed with the strip command). The collection of all this data allows us to create a dataset where the traditionally decompiled input we can feed to our neural decompiler along with the original source code and dependencies that we will train to predict. 
+
+LLM Reranker Data . To train our LLM reranker, we require a mixture of functionally equivalent and non-equivalent decompiled functions relative to the target func-tion. To approximate the distribution of positive and negative examples we expect to encounter in practice—a common best practice in ML—we construct such examples using a multi-step pipeline. First, we attempt to decompile functions from the training split using Ghidra. Next, we decompile the same functions using LLM4Decompile-Ref-22b-v2 , sampling eight candidate outputs per function. Finally, we compile and execute each LLM-generated candidate to determine functional correctness. We found that often the outputs of executing reference functions from E XE BENCH did not match the cached out-puts provided in the dataset itself. We re-processed our executable splits by compiling and re-executing all possible functions twice (a second time to ensure programs did not contain side-effects from pseudo-random libraries or other sources of non-determinism). Then, using each of our LLM-generated outputs, we cache the output and side-effects from execution of all test cases. This enables comparison against the target function as well as comparison between generations to form positive and negative pairs based on execution-based equivalence. For each function, we can further expand the training examples by re-compiling the decompiled function at both the -O0 
+
+and -O2 optimization levels. Because we evaluate on both stripped and unstripped binaries, we collect both forms of disassembly for these verification examples. In practice, especially for code com-piled at -O0 , disassembly can become quite long and may exceed the reranker’s context window. Rather than including full disassembly pairs, we compress the input by pairing the target disassembly with a diff with respect to the generated disassembly. All disassembly is obtained using GNU binutils TABLE 2: Reranker dataset (1.52M unstripped / 1.80M stripped).              
+
+> Tokens Lines Unstripped
+> Total 1,982.8M 181.5M Mean 1,302 119 Median 868 85
+> Stripped
+> Total 2,343.0M 228.5M Mean 1,299 127 Median 859 90
+
+objdump -d .
+
+Vulnerability Recovery Experiment Data . In addition to the E XE BENCH test set, we also evaluate D ECAF on its ability to generalize to other valid use cases such as recov-ering vulnerabilities in stripped binaries via decompilation. The premise of this experiment is to assess if decompilation can recover vulnerabilities in source code from stripped and compiled binaries which can then be detected by static analysis tools like CodeQL. For this we use version C/C++ Version 1.3 Juliet test suite 1. The Juliet test suite is a part of the NIST Soft-ware Assurance Reference Dataset consisting of data sets with programs with documented weaknesses. The Juliet test suite contains C/C++ test cases organized into 118 different Common Weakness Enumeration (CWE) classes. Each test case contains a good example without any vulnerability and a bad example harboring a pattern within the CWE class. We subset only good/bad pairs which were classified correctly using CodeQL’s C/C++ security-extended 
+
+query suite, and then used random stratified sub-sampling of examples within each CWE to ensure high coverage and reduce experiment latency and re-balance the total number of good/bad functions to be even. We report results on a function-level: where we process 296 total functions (148 each). Binaries are compiled from the Juliet test suite using the -O2 -fno-inline flags from gcc and are stripped of debug information. 
+
+2.3. Implementation 
+
+Models. For our LLM generation model, we uti-lize LLM4Decompile-Ref-22b-v2 as our base model. Our decision lies in the general intuition and empiri-cal evidence that larger models trained on more data tend to perform better [22]: the model consists of 22 billion parameters and was fine-tuned on a large cor-pus of decompilation data from EXE BENCH . To ab-late decompilation performance relative to parameters, we also finetune LLM4Decompile-Ref-6.7b-v1.6 and 
+
+LLM4Decompile-Ref-1.3b-v1.6 on our dataset. For our LLM reranker model, we utilize Q WEN 3-32 B, a 32-billion parameter LLM [23], given that models from a 
+
+> 1. Available via: https://github.com/arichardson/juliet-test-suite-c
+
+5similar family appear to be among the best-performing open-source LLMs at equivalence checking for x86-64 assembly [24]. 
+
+Training . All training was performed on a DGX B200 node with 8 × NVIDIA B200 GPUs (192GB HBM3e each), dual Intel Xeon Platinum 8570 processors (112 cores), and 2TB system memory using bfloat16 precision, FSDP, and gradient checkpointing. We trained two reranker models from Q WEN 3-32 B—one for stripped and one for unstripped binaries—for approximately 2 weeks each. The generator was fine-tuned from LLM4Decompile-Ref-22b-v2 for approximately 3 days (2 epochs). 
+
+Hyperparameters . For the generator model, we used a learning rate of 2e-6 with 1000 warmup steps, an effective batch size of 528 (batch size 3 per GPU × 8 GPUs ×
+
+22 gradient accumulation steps), and a maximum sequence length of 5120 tokens. For the reranker models, we used a learning rate of 5e-6 with a linear scheduler and 15% warmup ratio, an effective batch size of 256 (batch size 2 per GPU × 8 GPUs × 16 gradient accumulation steps), and a maximum sequence length of 4096 tokens. Both used the AdamW optimizer with gradient clipping (max norm 1.0). 
+
+Inference and Evaluation . Inference and evaluation were conducted on servers equipped with 8 × NVIDIA RTX A6000 GPUs (48GB each), with either dual Intel Xeon Gold 6342 CPUs (48 cores, 96 threads) and 1TB RAM, or dual AMD EPYC 7402 CPUs (48 cores) and 504GB RAM. During data mining and evaluation, we executed hundreds of thousands of LLM-generated programs. Given the potential security risks of executing arbitrary generated code, all experiments were performed in a containerized environment. Our Dockerfile and scripts for installing additional dependencies are included in with our artifacts and will be made openly available. 
+
+2.4. Evaluation Setup 
+
+We evaluate decompilation quality along multiple axes: 
+
+Functional correctness . A decompilation is correct if, when recompiled, it produces a binary functionally equivalent to the original. In the general case, program verification is highly non-trivial, especially for programs with loops and in programming languages with pointers. As a result, we approximate functional correctness with test case execution. Using E XE BENCH , this entails re-compiling the decompiled code, linking it with a wrapper that instruments it with test cases, and checking that the outputs from executing the program as well as its side effects on the program state are equivalent to the reference function. We perform this for three of four dataset splits that are available to us. Because the S YNTH split may contain function calls and the stripping process will remove the names of these function calls: we do not have enough information to decompile and link these functions to the E XE BENCH harness containing implementations of these callee functions. As a result for the stripped S YNTH split we do not attempt to execute for correctness. Hence all fields for functional correctness for the striped S YNTH split remain empty given the challenge of linking a re-executing. 
+
+Byte-Wise Match . In addition to measuring functional correctness through execution, we also impose a stricter notion of correctness by reporting byte-wise match of the re-compiled function. In our experiments, we assume we have access to the reference compiler. We consider this a relatively reasonable assumption given prior work has demonstrated that inferring the compiler which generated code is a task that can be predicted [25], [26]. Furthermore, it is a possibility that different compiler configurations could also be searched over as well. We define an alternate edit distance that accounts for relocation artifacts by first using binutils to identify the byte offsets affected by pending relocations. Bytes at these offsets are treated as wildcards, and we compute a modified Levenshtein distance that al-lows wildcard positions to match any character without penalty, focusing the distance on semantically meaningful differences. In our reranking experiments, we also use this modified edit distance as a method to rerank decompiled outputs. 
+
+Similarity to Reference Source Code . Given that the goal of decompilation is often to assist the reverse engineer in understanding a program, a metric that approximates the similarity to the original source code is desirable. We use the Levenshtein distance, or the Edit distance, to approximate how similar our decompiled code is to the reference. The Edit distance metric we report is the Levenshtein distance normalized by the maximum length of the two sequences under consideration. 
+
+Compilation Rate . In addition to all the metrics above, we also include the ability to compile the decompiled source code as an object file. For generations from LLM4D ECOMPILE , we allow the model to use #include 
+
+statements as well as other potential P SYCHE -C dependen-cies provided by E XE BENCH to enhance the compilability of code. 
+
+Models for Comparison and Modifications to Test Sets . In order to report baseline comparisons, we use LLM4Decompile-Ref-22b-v2 from [13] and 
+
+Idioms-Gemma-7b from [14]. We use Idioms-Gemma-7b as it has outperformed other models from LLM4D ECOMPILE on E XE BENCH and to our knowledge is state-of-the art on this task of any openly-available model. Because Idioms-Gemma-7b requires inputs pro-vided from the Hex-Rays Decompiler, we obtained Hex-Rays decompiled outputs for E XE BENCH in addition to Ghidra decompiled outputs. Because over 15% of some splits of E XE BENCH could not be decompiled by Hex-Rays Decompiler, we omitted these examples from the EXE BENCH test sets. In I DIOMS , the authors focused on decompiling stripped inputs from E XE BENCH : as a result, we were only able to obtain stripped Hex-Rays inputs for the 
+
+Idioms-Gemma-7b and we could not evaluate Idioms-Gemma-7b on the unstripped dataset splits. Because com-piling and executing functions from E XE BENCH can be time consuming, we randomly subsampled 1,000 examples for all splits of the E XE BENCH test sets. For all experiments, 6when sampling from LLMs, we sample according to the distribution of the model with the Temperature parameter set to 0.8. 
+
+## 3. Experiments 
+
+We structure our evaluation around five research ques-tions: 
+
+RQ1: How does model scale and fine-tuning with type-aware supervision affect decompilation performance? 
+
+RQ2: How does decompilation performance scale with more samples assuming perfect “oracle” reranking. 
+
+RQ3: In the absence of an execution oracle, how much performance can automatic feedback from compilation and neural reranking attain? 
+
+RQ4: Can automatic feedback from compilation be ef-fective on other neural models? 
+
+RQ5: Can D ECAF be effective in recovering vulnerabil-ities in compiled binaries? 
+
+RQ6: Can neural reranking be robust to differences in compiler configuration 
+
+3.1. Model Scale and Type-Aware Supervision 
+
+As previously mentioned, we adopt the underlying model 
+
+LLM4Decompile-Ref-22b-v2 ; however, we further adapt it in two ways. To simulate more real-world reverse-engineering scenarios, we collected binaries that were stripped before decompiling so that we could adapt our model to this task. Additionally, we also trained our model to generate declarations for any functions, globals, or UDTs it may later reference within the source code. In this vein, our model is similar to Idioms-Gemma-7b in that we jointly predict types and source code. However, our 22B model is significantly larger, trained on more decompilation examples and initialized from a strong pre-existing LLM. Our 6.7 and 1.3 billion parameter models are smaller than 
+
+Idioms-Gemma-7b .We report the performance of our own model as well as other baselines in Table 3 using one sample only for evaluation. Across all splits our model Decaf-Gen-22b significantly outperforms Idioms-Gemma-7b and 
+
+LLM4Decompile-Ref-22b-v2 on functional accuracy and byte-wise match. For example on the stripped R EAL 
+
+-O2 split, our functional correctness performance is 59.1%; whereas LLM4Decompile-Ref-22b-v2 and Idioms-Gemma-7b are 24.0% and 26.0% respectively. Additionally we find that Decaf-Gen-6.7b and Decaf-Gen-1.3b 
+
+generally outperform Idioms-Gemma-7b on functional accuracy and byte-wise match as well. We also find that Ghidra with the custom decompilation exporter attains a very high compilability rate and functional accuracy rate; however, it underperfoms all neural models in terms of Edit-Distance relative to the source code. Additionally, we find that our model generally does not sacrifice much in terms of Edit-Distance relative to source code. Lastly, depending on the compiler flags used, we also find that even with one sample, our model can often achieve more byte-wise matches to the reference code than Ghidra or the other LLM baselines: for example on the stripped R EAL -O0 
+
+split Decaf-Gen-22b attains a 24.6% byte-wise match rate compare to Ghidra which attains a 17.2% byte-wise match rate. 
+
+0 8 16 24 32 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+Number of Samples ( k)Success Rate 
+
+Decompilation Upper Limit Scaling with Samples 
+
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1
+
+> Edit Distance (lower is better)
+> Functional Correctness Exact Bytewise Match Source Edit Distance
+
+Figure 4: We plot the best possible success rate for func-tional correctness, recompilation exact bytewise, and source code edit distance vs. number of samples taken. We plot this for our LLM generator model on the R EAL split from EXE BENCH when decompiling examples compiled with 
+
+GCC ’s -O2 optimization flag. The only difference in our model and 
+
+LLM4Decompile-Ref-22b-v2 is that our model [1] jointly predicts types, and [2] is also trained on stripped inputs. We believe both tasks may be contributing to performance improvements. When inspecting errors of LLM4Decompile-Ref-22b-v2 our model gets correct, the base model is prone to hallucinating UDTs in decompiled code that it does not generate declarations for. Nonetheless, the fact our model performs better on the stripped R EAL split than the unstripped R EAL is potential evidence that the LLM decompiler may be over-reliant on the function name as a shortcut heuristic instead of focusing on the semantics of the underlying source code. The phenomenon of shortcut learning in deep learning has been well-documented [27], [28]. Our model differs from Idioms-Gemma-7b in that it is significantly larger, our dataset has more functions, and our input representation is Ghidra. We hypothesize that the larger number of parameters and data our model has seen drive our performance. 7TABLE 3: Decompilation results across all splits with N=1 samples. Acc : functional correctness (percentage of decompila-tions that pass all I/O tests). BM : bytewise match (percentage of recompiled binaries that are byte-identical to the original). 
+
+Edit : normalized source code edit distance between decompiled and original source (lower is better). Comp : compilation success rate. Ghidra + Cust. Exp. uses our custom exporter introduced in Section 2.2. As discussed in Section 2.4 [1] we omit functional correctness on the stripped S YNTH split given the intractability of linking function calls after stripping the binary, and [2] we only evaluate Idioms-Gemma-7b on the stripped splits, because we only had access to stripped Hex-Rays inputs.                                                                                                                                                                                                                                      
+
+> Real Synth
+> O0 O2 O0 O2 Split Method Acc BM Edit Comp Acc BM Edit Comp Acc BM Edit Comp Acc BM Edit Comp Stripped Ghidra 29.4 5.8 69.5 35.2 34.2 17.9 70.7 39.5 –0.8 76.3 8.5 –2.0 78.5 9.1 LLM4Decompile 30.2 9.0 57.9 45.5 24.0 14.1 61.2 43.1 –0.1 74.9 16.2 –0.3 77.8 16.1 Idioms Gemma 42.8 16.5 54.9 69.3 26.0 19.1 62.2 60.5 –2.1 53.3 10.6 –2.4 58.5 11.2 Ghidra + Cust. Exp. 83.1 17.2 69.5 95.2 80.3 40.8 70.7 92.8 –9.2 76.3 81.2 –14.8 78.5 63.7 DECAF -1.3B 47.6 17.8 59.2 89.7 37.8 25.4 62.9 87.1 –18.0 64.8 79.7 –18.7 68.4 79.7 DECAF -6.7B 54.9 21.0 57.7 91.3 35.8 29.3 61.2 91.1 –20.5 62.8 87.4 –21.4 66.8 87.7 DECAF -22B 68.1 24.6 56.0 95.6 59.1 38.0 59.2 95.4 –28.6 59.1 89.6 –28.2 62.9 88.9
+> Unstripped Ghidra 29.3 5.8 64.4 34.8 33.2 17.1 65.7 38.4 7.0 0.8 64.4 8.0 6.5 2.0 70.5 9.1 LLM4Decompile 45.9 18.1 44.5 60.6 38.8 24.7 46.9 56.9 25.6 16.2 35.5 30.5 22.0 12.0 50.0 36.0 Ghidra + Cust. Exp. 81.5 17.2 64.4 92.8 79.3 40.0 65.7 90.8 75.1 11.8 64.4 85.6 58.6 20.4 70.5 81.5 DECAF -1.3B 43.0 15.8 51.1 86.0 38.0 24.8 53.7 87.5 33.6 19.5 46.9 70.3 31.7 18.3 52.3 79.8 DECAF -6.7B 51.8 19.4 48.8 91.2 44.4 26.7 52.1 92.3 53.8 26.6 37.5 84.7 37.2 22.0 48.2 87.9 DECAF -22B 61.3 25.5 45.9 94.9 53.8 34.9 49.5 94.7 70.3 40.9 29.1 90.4 47.5 32.1 40.6 90.1
+
+TABLE 4: Reranking results with N=32 candidate samples using our D ECAF LLM Generator. None : single-sample baseline (N=1). Log Prob : reranking by model log probability. Byte Dist : reranking by bytewise distance to original binary. DECAF 
+
+ReRanker : learned reranking model. Metrics as in Table 3.                                                                                                                                                        
+
+> Real Synth
+> O0 O2 O0 O2 Split Method Acc BM Edit Comp Acc BM Edit Comp Acc BM Edit Comp Acc BM Edit Comp Stripped None (N=1) 68.1 24.6 56.0 95.6 59.1 38.0 59.2 95.4 –28.6 59.1 89.6 –28.2 62.9 88.9 Log Prob 71.5 24.9 55.7 95.8 64.2 40.3 58.3 96.0 –31.4 56.3 90.5 –32.8 60.1 91.3 Byte Dist 82.6 56.8 49.6 99.3 81.1 70.9 54.8 99.4 –51.8 54.1 99.7 –46.7 58.5 99.6
+> DECAF ReRanker 87.3 56.8 51.3 99.7 83.9 70.9 55.5 99.8 –51.8 55.3 99.8 –46.7 60.0 99.8
+> Unstripped None (N=1) 61.3 25.5 45.9 94.9 53.8 34.9 49.5 94.7 70.3 40.9 29.1 90.4 47.5 32.1 40.6 90.1 Log Prob 71.2 30.5 42.6 97.2 66.1 44.4 45.6 96.8 79.5 49.2 23.7 93.3 62.5 38.9 36.1 95.0 Byte Dist 83.5 59.2 38.5 99.6 82.0 71.1 44.2 99.5 84.6 62.2 22.9 99.2 53.6 50.9 34.4 99.4
+> DECAF ReRanker 86.5 59.2 40.4 99.8 82.7 71.1 44.9 99.7 86.9 62.2 25.0 99.3 54.5 50.9 36.9 99.4
+
+3.2. Upper-Limit of Decompilation Performance with Samples 
+
+We show in this section that taking more samples from a LLM significantly raises the ceiling for high-quality neu-ral decompilations. In Figure 4 we plot the best-possible performance across functional correctness, bytewise match, and source code edit distance as we take more samples. We report this on the R EAL split from E XE BENCH when compiled with GCC -O2 .We find that as we take more samples, the upper-limit of performance can still dramatically increase: functional cor-rectness best at 32 samples is 88.3%, the lowest normalized edit distance is 39.7%, and we can attain a 70.9% byte-wise match rate. Assuming access to the reference compiler or an ability to search over compiler configurations, compiling the decompiled code and checking for byte-wise match is a highly-effective technique for searching over decompile examples. However, given no reference exact match may ex-ist, improving the functional correctness of LLM-generated decompilations is still desirable. 
+
+3.3. Improving Performance from Compilation and Neural Reranking 
+
+In the scenario where we do not have access to an oracle for program execution, we attempt to approximate checking that our decompiled source code is equivalent to the original function we are trying to reverse. In Table 4 we show our results from applying different methods of reranking to our task. In reranking, we use three methods. We adopt Log Probability reranking as a baseline where we use the length-normalized scoring function from [29] to rerank candidate sequences. Since ranking by raw log-probability biases to-ward shorter sequences, the authors apply a length penalty to balance sequence quality against length: 
+
+s(Y, X ) = log( P (Y |X)) /lp (Y )
+
+lp (Y ) = (5 + |Y |)α
+
+(5 + 1) α
+
+(1) where log( P (Y |X)) = P|Y | 
+
+> t=1
+
+log P (yt|y<t , X ) is the sum 80 8 16 24 32 
+
+0.55 
+
+0.65 
+
+0.75 
+
+0.85 
+
+0.95 
+
+Number of Samples ( k)
+
+> Functional Correctness
+
+Reranking Method Scaling with Samples   
+
+> Upper-Limit Neural Reranker
+> Byte Distance Log Probability
+
+Figure 5: Comparison of reranking methods for selecting among n decompilation candidates. The upper-limit from executing all candidates and selecting the best. All reranking methods are also plotted where we vary the number of samples allowed to be reranked and choosing only the highest reranked example. We plot this on the R EAL split from E XE BENCH when decompiling examples compiled with GCC ’s -O2 optimization flag. of token-level log-probabilities from the generator model conditioned on the input prompt X, |Y | is the length of the candidate sequence, and α controls the strength of the length normalization. We use α = 0 .6 in our experiments. In addition to Log Probability reranking, we also inves-tigate how utilizing the edit distance on the bytes between the reference function’s bytes and the decompiled functions bytes (after re-compilation) as a reranking heuristic: we refer to this as our Byte Dist reranking method. This method relies on automatic compiler feedback, but does not require our neural reranker. Lastly, we also evaluate our neural reranker Decaf-ReRanker-32b which takes as input the canonicalized disassembly of the reference function being decompiled and the disassembly of our LLM generated candidate function (after re-compilation). For this method, we employ a two-step process: if there is an exact byte-wise match after ac-counting for relocation alignment, we prioritize that function first. Otherwise, we take the generation that had the highest score under our neural reranker. 
+
+Reranking Results . Across the board, on nearly all splits, reranking with compiler feedback can substantially increase decompilation performance: we obtain byte-wise matches over 50% of the time on all splits, and functional accuracy in the mid-eighty percents on numerous splits. For example, on the stripped R EAL -O2 split, we attain a 83.9% function-ally correct solve rate and a 70.9% exact byte-wise match significantly outpacing our N=1 performance of 59.1% and 38.0% respectively Furthermore, even though reranking on the distance of compiled bytes or neural reranking on the functional correctness of assembly pairs does not directly optimize for similarity to source code: we see a strong pattern that reranking in this fashion generally improves the similarly to the source code: for example on the stripped R EAL 
+
+-O2 split our Edit Distance score drops from 59.2% to 54.8% with Byte Dist reranking and 55.5% with neural reranking. In other words: reranking to improve functional correctness does not trade-off with similarity to the original source code: it actually improves it . It is important to note that on the unstripped -O2 SYNTH split, Log Probabilty reranking outperformed decompilation with compiler and neural feedback for functional correctness. We note that at least within our experiments: there is a pattern that our neural reranker seems to consistently outperform Byte Distance reranking on functional accuracy; however, Byte Distance reranking outperforms our model in reranking decompiled functions that are more similar to the reference source functions, even in the stripped decompi-lation scenarios. Even though a compiler will substantially transform code, that bytes or assembly that are more similar to one-another are more likely to be generated by programs with similar procedural steps and programming syntax. As a result: at the extremes, our neural reranker which is optimized for correctness may ultimately tradeoff some idiomaticity in the implementation source code for a greater likelihood of generating a semantic correct decompilation. 
+
+Scaling of Reranking Performance . In Figure 5 we pro-vide a more fine-grained analysis on how our reranking methods scale with more samples under consideration on the stripped R EAL split compiled with -O2 . We note that although the general trend is that more samples generally improves performance, this does not imply that performance will necessarily monotonically improve. Especially with the neural reranker, there is a risk that as more programs are sampled, the potential may increase for a negative example to “trick” the reranker into making a false-positive error. Despite some slight noise in the performance of the neural reranker over more samples considered, the fact the general trend is positive implies that likelihood of generating a posi-tive example the reranker will correctly classify as positive is generally higher than the likelihood of generating a negative example that will “trick” the reranker. 
+
+3.4. Is Compilation and Neural Reranking Effec-tive on Other Models? 
+
+In addition to evaluating our reranking on our DECAF generation model, we also evaluate it on 
+
+LLM4Decompile-Ref-22b-v2 reranking over 32 gen-erations in Table 5. We find that with a weaker decompilation model; our reranking methods can still yield very strong decompilation 9TABLE 5: Reranking results with N=32 candidate samples using LLM4Decompile. None : single-sample baseline (N=1). 
+
+Log Prob : reranking by model log probability. Byte Dist : reranking by bytewise distance to original binary. Metrics: Acc (Accuracy %), BM (Exact Match %), Edit (C-Dist), Comp (Compile %).                                                                                                                                                        
+
+> Real Synth
+> O0 O2 O0 O2 Split Method Acc BM Edit Comp Acc BM Edit Comp Acc BM Edit Comp Acc BM Edit Comp Stripped None (N=1) 30.2 9.0 57.9 45.5 24.0 14.1 61.2 43.1 –0.1 74.9 16.2 –0.3 77.8 16.1 Log Prob 36.8 12.7 55.3 50.6 34.2 20.9 58.8 51.8 –0.3 74.3 18.8 –0.6 78.0 21.8 Byte Dist 73.2 43.7 48.9 95.6 71.2 58.5 54.2 96.3 –5.0 72.8 69.0 –6.2 76.3 77.1 DECAF ReRanker 78.7 43.7 51.0 96.2 73.5 58.5 54.9 97.4 –5.0 74.2 71.9 –6.2 76.8 78.9
+> Unstripped None (N=1) 45.9 18.1 44.5 60.6 38.8 24.7 46.9 56.9 25.6 16.2 35.5 30.5 22.0 12.0 50.0 36.0 Log Prob 52.3 25.1 39.7 64.6 47.6 31.9 43.0 64.9 29.0 19.3 31.9 33.2 25.8 14.1 48.3 40.9 Byte Dist 75.7 49.6 36.7 93.1 74.0 60.9 41.4 92.2 41.8 28.4 32.7 50.6 35.8 19.9 48.2 61.9 DECAF ReRanker 79.4 49.6 38.4 93.8 76.3 60.9 41.8 93.0 44.5 28.4 33.2 50.6 38.0 19.9 49.0 62.0
+
+results: for example attaining 73.5% functional correctness on decompiling -O2 compiled and stripped functions from the R EAL split; significantly higher than the pass rate of 24.0% attained by taking only one sample. Similar to the results discussed in Section 3.3, we find that our neural reranker generally increases functional correctness over the Byte Dist reranking method with a tradeoff for a higher edit distance relative to the reference source code. These findings demonstrate that our method of using automatic compiler and neural feedback can be highly effective for other neural decompilation models. 
+
+3.5. Can D ECAF be Effective in Recovering Vul-nerabilities 
+
+TABLE 6: Vulnerability recovery on the Juliet test suite. Ghidra denotes the Ghidra decompiler with our custom exporter. Metrics: F1 (F1 score), P (Precision %), R (Recall %), Comp (Compile %). Best per column in bold .
+
+Method F1 P R Comp Ghidra 1.7 100.0 0.8 87.4 DECAF -22B (Byte Dist) 25.0 100.0 14.3 97.3 DECAF -22B (Log Prob) 29.6 91.3 17.6 83.2 DECAF -22B (D ECAF ReRanker) 29.8 95.5 17.6 98.2 
+
+In addition to our experiments on decompiling for functional correctness on EXE BENCH , we also perform experiments on the NIST Juliet dataset as mentioned in Section 2.2. We found greater success re-compiling and analyzing Ghidra when we used the custom exporter men-tioned in Section 2.2. For the D ECAF experiments we use 
+
+Decaf-Gen-22b with 32 samples. We report our results on function level analysis in Table 6. We see on this task that the Neural reranker achieves the highesst F1 score of all methods with 29.8% and in general all D ECAF methods are capable of high-precision and reasonable recall: substantially outperforming Ghidra by over 20 points on F1. We hypothesize that this gap is in part because security-focused CodeQL queries may match against declarations of specific C standard library functions, which our model is trained to provide via forward declarations or #include directives in its dependency block. 
+
+3.6. Are Reranking Methods Robust to Alternative Compiler Configurations 
+
+In our work a major assumption made was access to the reference compiler configuration (e.g. either through a search process or through prediction). While prior work exists demonstrating that such configurations can often be predicted (see Section 5.3), we stress test this idea by re-compiling our generated programs with Clang instead of 
+
+GCC for feedback. Specifically, for the splits on which we decompiled GCC -O2 compiled code, we run two experi-ments where we assume we only have access to Clang with the -O2 and -Os flags respectively. In Table 7 we show the results of this experiment: we omit byte-wise matching from the table as we were not able to find any bytewise matches after recompiling with Clang. We see two dramatically different stories between the stripped and unstripped splits. On the stripped splits, we see a similar trend as in all previous experiments where our neural reranker improves performance. While the neural reranker improves functional correctness, the overall func-tional accuracy and edit-distances are lower than before. For example on the stripped R EAL -O2 split our neural reranker attains 70.5% and 70.2% functional correctness for code re-compiled with Clang -O2 and -Os respectively: higher than N=1 performance of 59.1%. However, on the unstripped split the phenomenon is very different. Log Probability reranking strongly outperforms on the R EAL 
+
+split, and moreover neural reranking leads to degenerate performance on the S YNTH split. We hypothesize that our neural reranker generally struggles due to the distribution shift [30], [31]. While it may learn assembly semantics from its discriminative training task, it may not have been exposed to certain patterns of assembly the Clang may generate that GCC may not generate. This underscores an importance that a neural reranker should be trained on a highly diverse set of generated assembly pairs from different compiler configurations if it is expected to generalize to such scenarios. 10 TABLE 7: Reranking results with Clang recompilation. Generated decompilations are recompiled with clang -O2 or 
+
+clang -Os before evaluation. N=32 candidate samples. None : single-sample baseline (N=1). Log Prob : reranking by model log probability. Byte Dist : reranking by bytewise distance to original binary. DECAF ReRanker : learned reranking model (using stripped reranker for unstripped data). Exact match omitted as recompilation precludes binary-identical outputs.                                                                                                                    
+
+> Real Synth
+> -O2 -Os -O2 -Os Split Method Acc Edit Comp Acc Edit Comp Acc Edit Comp Acc Edit Comp Stripped None (N=1) 59.1 59.2 95.4 59.1 59.2 95.4 –62.9 88.9 –62.9 88.9 Log Prob 64.2 58.3 96.0 64.2 58.3 96.0 –60.1 91.3 –60.1 91.3 Byte Dist 63.7 57.8 98.9 63.7 57.3 99.6 –62.0 96.7 –61.8 96.6 DECAF ReRanker 70.5 58.5 99.8 70.2 58.4 99.8 –62.7 97.1 –62.9 97.1
+> Unstripped None (N=1) 53.8 49.5 94.7 53.8 49.5 94.7 47.5 40.6 90.1 47.5 40.6 90.1 Log Prob 66.1 45.6 96.8 66.1 45.6 96.8 62.5 36.1 95.0 62.5 36.1 95.0
+> Byte Dist 60.6 47.9 98.1 64.2 47.4 99.4 46.0 38.5 94.4 45.5 38.3 94.5 DECAF ReRanker 60.4 49.4 99.7 60.4 49.6 99.7 42.7 41.4 94.6 42.8 41.4 94.6
+
+## 4. Discussion and Future Work 
+
+Taking more samples from a neural LLM decompiler increases the potential for both functionally and idiomat-ically correct decompilations. Given access to the correct compiler configuration, automatic feedback and a trained neural reranker are highly effective at boosting both func-tional correctness and similarity to the original source code. Even without compiler feedback, Log Probability reranking dramatically improves over single-sample inference, and our reranking methods generalize effectively to other models such as LLM4Decompile-Ref-22b-v2 .
+
+Performance on Compilers Outside the Training Set .Our Clang stress-test (Section 3.6) reveals mixed results: the neural reranker’s performance drops, likely due to distri-bution shift from unfamiliar Clang-generated assembly pat-terns. Extending both the generator and reranker to diverse compiler configurations and instruction set architectures is an important direction for future work if the reranker is intended to generalize to these domains. 
+
+Reinforcement Learning and Iterative Refinement . As described in Section 2.2, we sample eight candidates per function during data collection, yielding positive and neg-ative sequences that could be used for offline RL [32], [33], Direct Preference Optimization [34], or online RL algorithms such as PPO [35], [36] or GRPO [37]. In earlier iterations we also explored an iterative refinement model to recursively edit generator outputs, but did not find significant improvements. 
+
+## 5. Related Work 
+
+5.1. Traditional Decompilation 
+
+Decompilation has been studied for over five decades [15], but most modern systems trace their lineage to Cifuentes’ 1994 dissertation [38]. Cifuentes argued that decompilers should mirror compiler architecture: a front-end that translates binary or assembly into an intermediate representation, an analysis layer, and a back-end that emits high-level code. The roles are reversed compared to acompiler—the decompiler front-end consumes low-level code and the back-end reconstructs source. Cifuentes also highlighted several critical stages (type analysis, control-flow graph recovery, and control-flow structuring) that remain central to contemporary decompilers. Recent research has explored many problems in decom-pilation relevant to security. A major area is control-flow structuring : converting a control-flow graph into high-level constructs such as while and if. Schwartz et al. proposed an iterative algorithm that inserts goto statements where necessary to preserve semantics [3]. Yakdan et al. showed that some of those gotos can be avoided by duplicating code regions [1]. More recently, Basque et al. observed that certain gotos are artifacts of compiler transformations and proposed a compiler-aware structuring algorithm to recognize and reverse those patterns [2]. Type analysis is another area of research in academic decompilers. Caballero and Lin survey the area and orga-nize approaches by inferred types, methods, and evaluation practices [39]. Early work such as Mycroft’s type-based de-compilation frames reconstruction as classic type inference over recovered program structure [40]. TIE uses type recon-struction theory as well, but explicitly recovers source-level variables instead of registers and reports a range of possible types to cope with uncertainty [41]. OSPREY distinguishes itself by applying probabilistic analysis to recover variables and data structures from stripped binaries [42]. ReTypd and a closely related work, BinSub, focus on recovering poly-morphic types [43], [44]. T-Rex is unique in its explicit shift from recovering a single ground-truth source type to type reconstruction : it uses structural types to capture behavior and introduces a new evaluation framing and metric aligned with reverse-engineering needs [45]. In practice, security practitioners often rely on industrial decompilers such as Ghidra [46], Hex-Rays [47], and Binary Ninja [48]. While these tools differ in user experience and internal representations, they share the same overall 11 objective as academic systems: recover readable, high-level code from low-level machine instructions by combining control-flow recovery, dataflow analysis, and type recovery. Ironically, although these tools are widely used in security practice, their internal algorithms and evaluation method-ologies are not well documented in the academic literature, with a few exceptions [49]. 
+
+5.2. Neural Decompilation 
+
+Neural decompilation has recently emerged as a promis-ing alternative to traditional program analysis-based ap-proaches. One of the primary challenges of decompilation is the one-to-many nature of the problem: many different source programs can compile to the same binary. Neural models can naturally capture this uncertainty by learning a distribution over possible source programs given a bi-nary. This makes them particularly well-suited to recovering details that are lost during compilation, such as identifier names, as well as deciding between typing decisions that can result in identical code (e.g., a struct with two ints vs. an array of two ints). 
+
+5.2.1. Abstractions. Most early work in neural decompi-lation focused on recovering specific pieces of information that are lost during the compilation process. Arguably one of the most painful omissions of traditional decompilers is the loss of meaningful identifier names; unsurprisingly, several works have applied neural models of various architectures to recover such names [4], [5], [6], [7]. Despite much research in type recovery in traditional decompilation (see Section 5.1), mainstream decompilers continue to struggle to recover helpful type information from stripped binaries [45]. This can also be seen in our working example in Figure 1. Recent work has applied neural models to improve the type recovery process [5], [8], [9], [10], [14]. Such work has two notable advantages. First, similar to identifier name recovery, neural models can not only recover lost type information but can also predict meaningful type and field names , which can have a significant impact on code readability. Second, neural models can better handle the inherent uncertainty in type recovery by learning distributions over possible types than most traditional approaches which are not statistical (with the notable exception of OSPREY [42]). 
+
+5.2.2. Decompilation. Some of the earliest work in neural decompilation focused on end-to-end decompilation. These systems attempted to directly translate binaries or assembly code into high-level source code using neural sequence-to-sequence models [12], [50]. More recently, with the introduction of large language models (LLMs) and their demonstrated ability to generate code, there has been a surge of interest in using LLMs for decompilation tasks. These models leverage vast amounts of training data and sophisticated architectures to produce high-quality decompilations [11], [13], [14]. Most recent work [13], [14], including ours, trains a model to start from the output of a traditional decompiler (versus assem-bly code [11]). The benefits of this hybrid approach are multifold. First, it leverages the long history of research and engineering that has gone into traditional decompilers, rather than starting from scratch. Second, decompiler output is generally much shorter than raw assembly or binary code, making the learning problem easier for neural models. Finally, as we show in our experiments in Table 3, using a custom exporter, Ghidra’s decompiled code is difficult to read but is functionally accurate, making it an excellent starting point for neural refinement. Our Decaf-Gen-22b model is similar in spirit to these recent LLM-based decompilation systems but differs in a few critical ways. First and foremost, our model is trained to produce compilable code, which we believe is a critical requirement for practical use of decompilation tools. LLM4Decompile [13] often references types without defining them; Idioms [14] improves this by recovering type definitions separately, but their final decompilations may still often fail to compile. Last, our model is designed to work in tandem with a neural reranker, which provides another opportunity for our approach to yield a more accurate de-compilation. 
+
+5.3. Perfect Decompilation 
+
+While most pre-neural decompilation work emphasizes 
+
+program analysis , another line of work targets perfect (byte-equivalent) decompilation, where recompiling the recovered source yields a binary identical to the target. Decomper-son [51] ran a large-scale competition to study how experts iteratively refine decompilations toward this goal, and the video-game reverse-engineering community has long pur-sued perfect decompilation to reconstruct lost source code for classic games [52]. Schulte et al. used genetic pro-gramming to evolve code snippets and automate the search for perfect decompilations [53]. Our approach is conceptu-ally similar to this work but replaces genetic programming with temperature-based sampling of neural models. We also show that our neural reranker outperforms the simpler edit-distance-based strategies. 
+
+Compiler Provenance . One of the underlying assumptions of perfect decompilation is that the original compilation process can be repeated. This of course requires the original compiler and flags to be known. Fortunately, there is prior work on recovering information about the compiler used to build a binary and its flags [25], [26]. However, use of a compiler that is unavailable for any reason could still pose challenges for perfect decompilation. 
+
+5.4. AI and Machine Learning 
+
+Our approach—sampling many candidates and selecting the best via a learned reranker, commonly referred to a “veri-fier” in the machine learning literature, is an instance of test-time compute scaling [54]. An early instance of generate-then-verify paradigm was introduced for math reasoning [55] and also found success with AlphaCode in addressing 12 competitive programmings [56], by generating a very large amount of programs and filtered by execution. 
+
+## 6. Threats to Validity 
+
+In our work, we choose to use E XE BENCH , because it has been used in the neural decompilation literature [11], [13], [14], it is mined from real world open-source soft-ware projects, and it ships with test cases. Although the dataset was intended for purposes such as decompilation, the test cases in E XE BENCH may not be comprehensive: a lack of test case coverage may admit false positives, thereby increasing reported functional correctness scores. Additionally, while the functions in E XE BENCH are mined from real world software projects, the implicit filtering and processing necessary to collect and prepare the data may not reflect the complexity of source code encountered in real-world reverse engineering scenarios. Because adversarial code such as malware is not as publicly available and likely under-represented in E XE BENCH we do not claim our model will generalize to malware patterns that it has not been trained on. We chose the Juliet test suite because it is a well-established benchmark; however, given that many test cases may be synthetic, performance on vulnerability recovery may not generalize to more complex code bases. Because of the large volume of already-existing experi-ments, we did not collect or evaluate on functions compiled for alternate architectures like ARM or RISC-V. Further-more, we do not employ more advanced techniques to make reversing more challenging such as obfuscation. 
+
+## 7. Conclusion 
+
+We presented D ECAF , a system that improves neural decompilation by generating multiple candidate decompila-tions and automatically selecting the most promising one using compiler feedback and a trained neural reranker. Our results demonstrate that taking more samples from a neural decompiler dramatically increases the chance of produc-ing both functionally and idiomatically correct code. We show that provided access to the reference compiler, that automatic feedback, whether through bytewise distance or neural reranking, is highly effective at identifying the best candidate. Importantly, our reranking methods generalize to other models such as LLM4Decompile-Ref-22b-v2 ,and even Log Probability reranking yields substantial gains over single-sample inference. We also demonstrate that our model can be useful in a practically-framed downstream task such as vulnerability recovery. We plan to release our models, data, and evaluation infrastructure to support the community and future work in neural decompilation. 13 Acknowledgments References 
+
+[1] K. Yakdan, S. Eschweiler, E. Gerhards-Padilla, and M. Smith, “No more gotos: Decompilation using pattern-independent control-flow structuring and semantic-preserving transformations,” in Proceedings of the Network and Distributed System Security Symposium , 2015. [2] Z. L. Basque, A. P. Bajaj, W. Gibbs, J. O’Kain, D. Miao, T. Bao, A. Doup´ e, Y. Shoshitaishvili, and R. Wang, “Ahoy sailr! there is no need to DREAM of C: A compiler-aware structuring algorithm for binary decompilation,” in Proceedings of the USENIX Security Symposium , 2024. [3] E. J. Schwartz, J. Lee, M. Woo, and D. Brumley, “Native x86 decom-pilation using semantics-preserving structural analysis and iterative control-flow structuring,” in Proceedings of the USENIX Security Symposium , 2013. [4] J. Lacomis, P. Yin, E. Schwartz, M. Allamanis, C. Le Goues, G. Neu-big, and B. Vasilescu, “Dire: A neural approach to decompiled iden-tifier naming,” in IEEE/ACM International Conference on Automated Software Engineering . IEEE, 2019, pp. 628–639. [5] Q. Chen, J. Lacomis, E. J. Schwartz, C. Le Goues, G. Neubig, and B. Vasilescu, “Augmenting decompiler output with learned variable names and types,” in Proceedings of the USENIX Security Symposium ,2022, pp. 4327–4343. [6] K. K. Pal, A. P. Bajaj, P. Banerjee, A. Dutcher, M. Nakamura, Z. L. Basque, H. Gupta, S. A. Sawant, U. Anantheswaran, Y. Shoshi-taishvili, A. Doup´ e, C. Baral, and R. Wang, “”len or index or count, anything but v1”: Predicting variable names in decompilation output with transfer learning,” in Proceedings of the IEEE Symposium on Security and Privacy , 2024. [7] X. Xu, Z. Zhang, Z. Su, Z. Huang, S. Feng, Y. Ye, N. Jiang, D. Xie, S. Cheng, L. Tan, and X. Zhang, “Unleashing the power of generative model in recovering variable names from stripped binary,” in Pro-ceedings of the Network and Distributed System Security Symposium ,2025. [8] Y. Wang, R. Liang, Y. Li, P. Hu, K. Chen, and B. Zhang, “TypeForge: Synthesizing and selecting best-fit composite data types for stripped binaries,” in Proceedings of the IEEE Symposium on Security and Privacy , 2025. [9] C. Zhu, Z. Li, A. Xue, A. P. Bajaj, W. Gibbs, Y. Liu, R. Alur, T. Bao, H. Dai, A. Doup´ e, M. Naik, Y. Shoshitaishvili, R. Wang, and A. Machiry, “TYGR: type inference on stripped binaries using graph neural networks,” in Proceedings of the USENIX Security Symposium ,2024. [10] D. Xie, Z. Zhang, N. Jiang, X. Xu, L. Tan, and X. Zhang, “ReSym: Harnessing llms to recover variable and data structure symbols from stripped binaries,” in Proceedings of the ACM Conference on Com-puter and Communications Security , 2024. [11] J. Armengol-Estap´ e, J. Woodruff, C. Cummins, and M. F. O’Boyle, “Slade: A portable small language model decompiler for optimized assembly,” in 2024 IEEE/ACM International Symposium on Code Generation and Optimization (CGO) . IEEE, 2024, pp. 67–80. [12] D. S. Katz, J. Ruchti, and E. Schulte, “Using recurrent neural net-works for decompilation,” in 2018 IEEE 25th international conference on software analysis, evolution and reengineering (SANER) . IEEE, 2018, pp. 346–356. [13] H. Tan, Q. Luo, J. Li, and Y. Zhang, “Llm4decompile: Decom-piling binary code with large language models,” arXiv preprint arXiv:2403.05286 , 2024. [14] L. Dramko, C. Le Goues, and E. J. Schwartz, “Idioms: Neural decompilation with joint code and type prediction,” in Proceedings of the Network and Distributed System Security Symposium , 2026. [15] M. Van Emmerik, “Static single assignment form for machine code,” Ph.D. dissertation, The University of Queensland, Brisbane, Australia, 2001. [Online]. Available: https://espace.library.uq.edu.au/view/UQ: 158682 [16] D. H. Ackley, G. E. Hinton, and T. J. Sejnowski, “A learning algorithm for boltzmann machines,” Cognitive science , vol. 9, no. 1, pp. 147–169, 1985. [17] J. Ficler and Y. Goldberg, “Controlling linguistic style aspects in neural language generation,” arXiv preprint arXiv:1707.02633 , 2017. [18] C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger, “On calibration of modern neural networks,” in International conference on machine learning . PMLR, 2017, pp. 1321–1330. [19] J. Armengol-Estap´ e, J. Woodruff, A. Brauckmann, J. W. d. S. Ma-galhaes, and M. F. O’Boyle, “Exebench: an ml-scale dataset of executable c functions,” in Proceedings of the 6th ACM SIGPLAN International Symposium on Machine Programming , 2022, pp. 50– 59. [20] L. T. Melo, R. G. Ribeiro, B. C. Guimar˜ aes, and F. M. Q. Pereira, “Type inference for c: Applications to the static analysis of incom-plete programs,” ACM Transactions on Programming Languages and Systems (TOPLAS) , vol. 42, no. 3, pp. 1–71, 2020. [21] A. F. Da Silva, B. C. Kind, J. W. de Souza Magalh˜ aes, J. N. Rocha, B. C. F. Guimaraes, and F. M. Q. Pereira, “Anghabench: A suite with one million compilable c benchmarks for code-size reduction,” in 
+
+2021 IEEE/ACM International Symposium on Code Generation and Optimization (CGO) . IEEE, 2021, pp. 378–390. [22] J. Kaplan, S. McCandlish, T. Henighan, T. B. Brown, B. Chess, R. Child, S. Gray, A. Radford, J. Wu, and D. Amodei, “Scaling laws for neural language models,” arXiv preprint arXiv:2001.08361 , 2020. [23] A. Yang, A. Li, B. Yang, B. Zhang, B. Hui, B. Zheng, B. Yu, C. Gao, C. Huang, C. Lv et al. , “Qwen3 technical report,” arXiv preprint arXiv:2505.09388 , 2025. [24] A. Wei, J. Cao, R. Li, H. Chen, Y. Zhang, Z. Wang, Y. Liu, T. S. Teixeira, D. Yang, K. Wang et al. , “Equibench: Benchmarking large language models’ reasoning about program semantics via equivalence checking,” in Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing , 2025, pp. 33 856–33 869. [25] N. E. Rosenblum, B. P. Miller, and X. Zhu, “Extracting compiler provenance from program binaries,” in Proceedings of the ACM Workshop on Program Analysis for Software Tools and Engineering ,2010. [26] Y. Du, O. Alrawi, K. Snow, M. Antonakakis, and F. Monrose, “Improving security tasks using compiler provenance information recovered at the binary-level,” in Proceedings of the ACM Conference on Computer and Communications Security , 2023. [27] R. T. McCoy, E. Pavlick, and T. Linzen, “Right for the wrong reasons: Diagnosing syntactic heuristics in natural language inference,” arXiv preprint arXiv:1902.01007 , 2019. [28] R. Geirhos, J.-H. Jacobsen, C. Michaelis, R. Zemel, W. Brendel, M. Bethge, and F. A. Wichmann, “Shortcut learning in deep neural networks,” Nature Machine Intelligence , vol. 2, no. 11, pp. 665–673, 2020. [29] Y. Wu, M. Schuster, Z. Chen, Q. V. Le, M. Norouzi, W. Macherey, M. Krikun, Y. Cao, Q. Gao, K. Macherey et al. , “Google’s neural machine translation system: Bridging the gap between human and machine translation,” arXiv preprint arXiv:1609.08144 , 2016. [30] S. Ben-David, J. Blitzer, K. Crammer, A. Kulesza, F. Pereira, and J. W. Vaughan, “A theory of learning from different domains,” Ma-chine learning , vol. 79, no. 1, pp. 151–175, 2010. [31] S. Yang, W.-L. Chiang, L. Zheng, J. E. Gonzalez, and I. Stoica, “Rethinking benchmark and contamination for language models with rephrased samples,” arXiv preprint arXiv:2311.04850 , 2023. [32] X. B. Peng, A. Kumar, G. Zhang, and S. Levine, “Advantage-weighted regression: Simple and scalable off-policy reinforcement learning,” 
+
+arXiv preprint arXiv:1910.00177 , 2019. 
+
+14 [33] L. Chen, K. Lu, A. Rajeswaran, K. Lee, A. Grover, M. Laskin, P. Abbeel, A. Srinivas, and I. Mordatch, “Decision transformer: Reinforcement learning via sequence modeling,” Advances in neural information processing systems , vol. 34, pp. 15 084–15 097, 2021. [34] R. Rafailov, A. Sharma, E. Mitchell, C. D. Manning, S. Ermon, and C. Finn, “Direct preference optimization: Your language model is secretly a reward model,” Advances in neural information processing systems , vol. 36, pp. 53 728–53 741, 2023. [35] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov, “Proximal policy optimization algorithms,” arXiv preprint arXiv:1707.06347 , 2017. [36] N. Stiennon, L. Ouyang, J. Wu, D. Ziegler, R. Lowe, C. Voss, A. Radford, D. Amodei, and P. F. Christiano, “Learning to summarize with human feedback,” Advances in neural information processing systems , vol. 33, pp. 3008–3021, 2020. [37] Z. Shao, P. Wang, Q. Zhu, R. Xu, J. Song, X. Bi, H. Zhang, M. Zhang, Y. Li, Y. Wu et al. , “Deepseekmath: Pushing the limits of mathematical reasoning in open language models,” arXiv preprint arXiv:2402.03300 , 2024. [38] C. Cifuentes, “Reverse compilation techniques,” Ph.D. dissertation, Queensland University of Technology, Brisbane, Australia, 1994. [39] J. Caballero and Z. Lin, “Type inference on executables,” ACM Comput. Surv. , vol. 48, no. 4, May 2016. [Online]. Available: https://doi.org/10.1145/2896499 [40] A. Mycroft, “Type-based decompilation,” in European Symposium on Programming , Mar. 1999. [41] J. Lee, T. Avgerinos, and D. Brumley, “TIE: Principled reverse engineering of types in binary programs,” in Proceedings of the Network and Distributed System Security Symposium , Feb. 2011. [42] Z. Zhang, Y. Ye, W. You, G. Tao, W.-c. Lee, Y. Kwon, Y. Aafer, and X. Zhang, “Osprey: Recovery of variable and data structure via probabilistic analysis for stripped binary,” in Proceedings of the IEEE Symposium on Security and Privacy , 2021. [43] M. Noonan, A. Loginov, and D. Cok, “Polymorphic type inference for machine code,” SIGPLAN Not. , vol. 51, no. 6, p. 27–41, Jun. 2016. [Online]. Available: https://doi.org/10.1145/2980983.2908119 [44] I. Smith, “Binsub: The simple essence of polymorphic type inference for machine code,” in Static Analysis , R. Giacobazzi and A. Gorla, Eds. Cham: Springer Nature Switzerland, 2025, pp. 425–450. [45] J. Bosamiya, M. Woo, and B. Parno, “ {TRex }: Practical type re-construction for binary code,” in 34th USENIX Security Symposium (USENIX Security 25) , 2025, pp. 6897–6915. [46] National Security Agency, “Ghidra,” Software reverse engineering framework. https://ghidra-sre.org/. [47] Hex-Rays, “Hex-rays decompiler,” Commercial decompiler. https:// hex-rays.com/. [48] Vector 35, “Binary ninja,” Interactive reverse engineering platform. https://binary.ninja/. [49] I. Guilfanov, “Decompilers and beyond,” in BlackHat USA , 2008. [50] I. Hosseini and B. Dolan-Gavitt, “Beyond the c: Retargetable de-compilation using neural machine translation,” in Proceedings of the Workshop on Binary Analysis Research , 2022. [51] K. Burk, F. Pagani, C. Kruegel, and G. Vigna, “Decomperson: How humans decompile and what we can learn from it,” in Proceedings of the USENIX Security Symposium , 2022. [52] decomp.me contributors, “decomp.me,” Collaborative decompilation platform. https://decomp.me/. [53] E. Schulte, J. Ruchti, M. Noonan, D. Ciarletta, and A. Loginov, “Evolving exact decompilation,” in Proceedings of the Workshop on Binary Analysis Research , 2018. [54] C. Snell, J. Lee, K. Xu, and A. Kumar, “Scaling llm test-time compute optimally can be more effective than scaling model parameters,” arXiv preprint arXiv:2408.03314 , 2024. [55] K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser, M. Plappert, J. Tworek, J. Hilton, R. Nakano et al. , “Training verifiers to solve math word problems,” arXiv preprint arXiv:2110.14168 ,2021. [56] Y. Li, D. Choi, J. Chung, N. Kushman, J. Schrittwieser, R. Leblond, T. Eccles, J. Keeling, F. Gimeno, A. Dal Lago et al. , “Competition-level code generation with alphacode,” Science , vol. 378, no. 6624, pp. 1092–1097, 2022. 
+
+15
