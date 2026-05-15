@@ -1,0 +1,1033 @@
+Title: RubricRefine: Improving Tool-Use Agent Reliability with Training-Free Pre-Execution Refinement
+
+URL Source: https://arxiv.org/pdf/2605.09730v2
+
+Published Time: Fri, 15 May 2026 00:16:59 GMT
+
+Number of Pages: 33
+
+Markdown Content:
+# RubricRefine: Improving Tool-Use Agent Reliability with Training-Free Pre-Execution Refinement 
+
+Will LeVine ∗, Brendan Evers, Sam Saltwick, Abhay Venkatesh 
+
+Anduril Industries 
+
+Abstract 
+
+Iterative self-refinement is a popular inference-time reliability technique, but its effectiveness in code-mode tool use depends heavily on the structure of the feedback signal: unstructured critique helps inconsis-tently across models, and even revision with real execution feedback improves only mod-estly ( 0.75 vs. 0.65 baseline). The dominant failures are inter-tool contract violations— wrong output shape, incorrect tool routing, broken argument provenance—that run to completion without raising errors, making runtime feedback insufficient. We introduce 
+
+RubricRefine , a training-free method for pre-execution semantic contract verification that generates task- and registry-specific rubrics, scores candidate code against ex-plicit contract checks, and iteratively re-pairs failures before any execution occurs. With zero execution attempts, RubricRe-fine reaches 0.86 on M3ToolEval averaged across seven models—improving over prior inference-time baselines on every model tested on this benchmark, at 2.6× lower latency than the strongest non-iterative alternative—and remains flat on the pre-dominantly single-step API-Bank, consis-tent with the method’s reliance on inter-tool contract structure. A rubric-category abla-tion and calibration analysis further char-acterize when and why the method works. 
+
+1 Introduction 
+
+Code-mode tool-use agents act by emitting executable programs rather than flat JSON function calls, a design that lets one turn ex-press multiple tool calls, branching, intermedi-ate state, and output formatting inside a single executable trace (Allal et al., 2024; Cloudflare, 2024; Wang et al., 2024). This expressivity shifts the dominant failure mode away from   
+
+> ∗Correspondence to wlevine@anduril.com .
+
+action-format errors and toward inter-tool con-tract failures—wrong output shape, broken ar-gument provenance, incorrect tool routing, mis-matched call ordering—that run to completion without raising exceptions and are invisible to execution-based feedback. Existing reliability methods either require post-training for the tar-get tool registry (e.g., CodeActAgent-style se-tups (Wang et al., 2024)) or depend on observed execution outcomes, leaving no deployment-time path to catch these contract failures be-fore the first live action. This gap is opera-tionally consequential: a failed attempt may already have altered external state in ways that are only partially observable, and execution is often rate-limited, paid, or safety constrained— conditions under which retrying after failure is not a free repair mechanism. This motivates the single-attempt setting, where all verifi-cation and repair must happen before a task’s one allowed live action. What is missing is a deployment-time method that adapts to a new registry and improves execution readiness without any training or execution. The question is what form that pre-execution control signal should take. One natural ap-proach is unstructured iterative self-revision, as in Self-Refine (Madaan et al., 2023). But prior work has shown that self-correction without external grounding is unreliable (Huang et al., 2024; Snell et al., 2024), and our results con-firm this inconsistency: Self-Refine underper-forms single-pass generation on five of the seven models we test, helping only on the two open-weight models. The loop is not the problem; the feedback quality is. Without a structured account of what specifically failed and why, free-form critique does not reliably diagnose or direct repair of contract violations in code-mode programs. This motivates a more tar-geted form of grounding: contract-structured, 
+
+> arXiv:2605.09730v2 [cs.LG] 13 May 2026
+
+sample-dependent rubrics that decompose a tool-use task into individually checkable cor-rectness criteria before any execution occurs. Recent rubric-based work suggests a natural candidate. A rubric decomposes task correct-ness into individually checkable criteria, yield-ing feedback that is both structured —a set of criteria rather than a free-form critique (Zheng et al., 2023; Kim et al., 2024)—and, when gen-erated per instance, task-specific (Raghavendra et al., 2026; Gunjal et al., 2025; LeVine and Varjavand, 2025). These properties are what iterative repair needs in a feedback signal, but prior work has used rubrics post hoc (for eval-uation) or offline (for training); we apply them as an online revision signal. We introduce RubricRefine , a method for pre-execution semantic contract verification in multi-step code-mode agents that generates a registry-conditioned rubric, scores candidate code against explicit contract checks, and iter-atively repairs failures before runtime. Our central contribution is semantic con-tract verification as a pre-execution reliabil-ity primitive for code-mode agents—a charac-terization of a failure class (silent contract viola-tions invisible to execution feedback) and an op-erationalization (contract-structured instance-specific rubrics) that detects these failures be-fore any live action. On M3ToolEval (Wang et al., 2024), RubricRefine improves over prior inference-time baselines by +0 .14 to +0 .38 
+
+across seven models; on the single-step API-Bank (Li et al., 2023), it is flat. The method helps in proportion to how much inter-tool con-tract structure a task contains, because the rubric is centered on catching contract errors. Additional analyses show top-bin calibration enables early stopping even with poor aggre-gate calibration, and a rubric-category ablation reveals which rules are load-bearing on which models. 
+
+2 Related Work 
+
+Inference-Time Self-Correction Process reward models show that step-level evaluation outperforms outcome-only rewards for search (Lightman et al., 2023); RubricRefine can be viewed as a training-free analogue applied to pre-execution semantic contract verification. Self-Refine (Madaan et al., 2023) uses the same generate-critique-revise loop but with unstruc-tured critique, which prior work has shown to be unreliable without external grounding (Huang et al., 2024; Snell et al., 2024). Self-Debug (Chen et al., 2023) and Reflexion (Shinn et al., 2023) revise iteratively from observed execution outcomes; we evaluate Self-Debug with real execution feedback as a direct base-line (Section 4.3). Test-execution-based code verification methods like CodeT (Chen et al., 2022) and AlphaCodium (Ridnik et al., 2024) iterate code against generated tests. These ap-proaches are pre-deployment in pure-code SWE tasks, but in tool-use settings running a test is itself a live tool invocation that can affect the environment—incompatible with the single-attempt constraint. Additional execution-feedback and learned-verifier methods are dis-cussed in Appendix R.1. 
+
+Rubric-Based Evaluation RubricRefine in-herits the rubric-based judging perspective of LLM-as-a-Judge and related rubric-conditioned evaluators (Zheng et al., 2023; Kim et al., 2024), but uses it for iterative repair rather than post hoc scoring. Two especially relevant precedents are Rubrics-as-Rewards, which uses sample-dependent rubrics generated from human-written reference answers for reinforcement-learning post-training (Gunjal et al., 2025), and Agentic Rubrics, which generates rubrics from pull-request descriptions to evaluate code changes in software-engineering tasks (Raghavendra et al., 2026). REBEL (LeVine and Varjavand, 2025) applies sample-dependent rubric scoring to document reranking rather than iterative code repair. Concurrently, Zhang et al. (2026) show that rubric-based rewards mitigate reward over-optimization during post-training. RubricRefine adopts the same sample-dependent rubric intuition, but conditions the rubric on the current task prompt and tool reg-istry rather than on a pull-request workflow or a human-written reference answer and uses these signals for online refinement. 
+
+3 Method 
+
+3.1 Problem Formulation (Single-Attempt Execution) 
+
+We adopt the executable-action interaction set-ting introduced in CodeAct (Wang et al., 2024). Each task instance provides an instruction Iand a tool registry T = {t1, . . . , t K }, where every tool exposes a name, signature, and doc-umentation string. The agent’s action is a piece of executable code c, and our deployment as-sumption is single-attempt execution : the agent may spend arbitrary inference-time com-pute before acting, but the environment is exe-cuted at most once per instance. 
+
+3.2 RubricRefine: Pre-Execution Algorithm 
+
+RubricRefine is the pre-execution algorithm that implements this generator-verifier pattern under the single-attempt regime. Figure 1 il-lustrates a complete trajectory. 
+
+3.2.1 Rubric Generation 
+
+Given (I, T ), a rubric generator VR produces a structured rubric R containing itemized checks. In our implementation VR is the same under-lying LLM as the verifier V (Section 3.2.2), invoked with a distinct rubric-construction prompt; they remain two separate functional roles. This rubric is generated specifically for the current task instruction and tool registry rather than drawn from a static checklist. The rubric criteria fall into four categories that cover distinct dimensions of correctness aris-ing broadly in code-mode tool use: 
+
+• Tool-choice rules : whether the agent dis-patches to the correct documented API rather than reimplementing equivalent logic in the host language. 
+
+• Output-contract rules : whether the pro-gram’s final emitted value conforms to the expected shape and type—e.g., a raw scalar rather than a labeled string, or a parsed count rather than a serialized con-tainer. 
+
+• Call-signature rules : whether each tool invocation matches its documented signature—correct argument names, positional-vs-keyword usage, and arity. 
+
+• Data-provenance rules : whether val-ues consumed by downstream calls can be traced back to legitimate sources (tool re-turn values or task-specified literals) rather than fabricated or hallucinated by the agent. These four categories delimit the failure space that semantic verification must cover. Prior mechanisms cover only subsets: wrong call sig-natures raise runtime exceptions when the type mismatch is immediate, and are caught at parse time by AST-plus-signature checking. Wrong tool selection, wrong output shape, and bro-ken argument provenance run to completion without raising and are invisible to syntactic checks—the code executes successfully but pro-duces the wrong answer. These three are the silent contract violations that motivate seman-tic verification: RubricRefine’s rubric checks all four categories against the task instruction and tool documentation, catching contract failures before any live execution. 
+
+3.2.2 Static Scoring 
+
+At refinement round r, candidate code cr is scored against R:
+
+(sr, f r) = V (cr, R), sr ∈ { 1, . . . , 10 }. (1) 
+
+fr is structured item-level feedback consisting of PASS/FAIL judgments, reasons, and revision directives. 
+
+Scoring Policy and Failure Gating Rubri-cRefine uses an ordinal 1–10 score with explicit gating: 
+
+• 1–4 : incomplete intent coverage or missing core calls. 
+
+• 5–7 : major intent present, but critical contract errors remain (ordering/dataflow, arguments, grounding). 
+
+• 8–9 : execution-ready core logic with only minor non-critical issues. 
+
+• 10 : fully grounded, contract-compliant, and robust for expected edge cases. 
+
+3.2.3 Iterative Repair 
+
+At each round, generator G receives 
+
+(I, T , R, c r−1, f r−1) and emits a revised candidate cr. The rubric remains fixed for a given task so that the target objective does not drift across rounds. The loop terminates when the max score is reached, patience P is exhausted, or the round budget runs out; the best-scoring candidate is then selected as the task’s single executable action. Algorithm 1 RubricRefine (single-attempt preflight) 
+
+Require: instruction I, tool registry T , gen-erator G, rubric generator VR, verifier V ,max rounds R, patience P 
+
+> 1:
+
+R ← VR(I, T ) 
+
+> 2:
+
+s∗ ← 0, c∗ ← None , stale ← 0 
+
+> 3:
+
+for r = 1 to R do  
+
+> 4:
+
+cr ← G(I, T , R, c r−1, f r−1) 
+
+> 5:
+
+(sr, f r) ← V. score (cr, R) 
+
+> 6:
+
+if sr > s ∗ then  
+
+> 7:
+
+s∗ ← sr, c∗ ← cr, stale ← 0 
+
+> 8:
+
+else  
+
+> 9:
+
+stale ← stale + 1  
+
+> 10:
+
+end if  
+
+> 11:
+
+if sr = 10 or stale ≥ P then  
+
+> 12:
+
+break  
+
+> 13:
+
+end if  
+
+> 14:
+
+end for  
+
+> 15:
+
+return c∗
+
+Key implementation details, including prompt structure, generator/verifier configu-ration, decoding settings, and the values of N ,
+
+R, and P , are provided in Appendix D. The verbatim prompt templates for rubric gener-ation, scoring, and repair are reproduced in Appendix E. 
+
+4 Experiments 
+
+4.1 Experimental Setup 
+
+We evaluate under the single-attempt proto-col on two complementary CodeAct-aligned benchmarks. To estimate variance, we run 10 independent trials per model–method pair; cross-trial variation comes from the genera-tor’s sampling temperature ( T = 0 .7). We evaluate seven models spanning four fron-tier OpenAI APIs (GPT-4.1-mini , GPT-4o ,
+
+o3-mini , GPT-4.1 ), two recent open-weight systems ( Gemma-4-26B-A4B-it (Google Deep-Mind, 2026), abbreviated Gemma-4-26B ; and 
+
+Qwen3.6-27B-FP8 , abbreviated Qwen3.6-27B ), and a recent Anthropic Claude model (Claude-Sonnet-4.6 ) to test whether findings transfer across backbones. M3ToolEval is the main-text benchmark because it directly measures end-to-end executable task success in code-as-action settings. Specifically, on M3ToolEval, success is the fraction of instances where the code-mode agent produced code that yields the ground truth value when executed. We record wall-clock latency, LM calls, and tokens alongside success rate on M3ToolEval. 
+
+API-Bank provides a complementary step-level view by measuring exact API-call correct-ness (Section 4.3, Appendix J). 
+
+4.2 Baseline and Competitive Methods 
+
+All methods share the same code-as-action format and underlying model; they differ only in inference-time strategy. CodeAct (Baseline) (Wang et al., 2024) is single-pass code-mode generation without any CodeAct-specific post-training. Self-Refine (Madaan et al., 2023) iteratively critiques and revises in free-form natural language—the same loop as RubricRefine but without a rubric. Self-Debug (Chen et al., 2023) executes the candi-date, observes the output or error, and revises iteratively—using real environment interaction that RubricRefine is not allowed. Best-of-N
+
+samples N candidates and selects the highest self-rated one. Best-of-N +fixed rubric and 
+
+Best-of-N +rubric (ours) select via a fixed or sample-dependent rubric score respectively, isolating the effect of sample dependence in the selection setting. Fixed RubricRefine 
+
+(ours) uses the iterative repair loop with a fixed rubric; comparing it against RubricRefine 
+
+(ours, full method from Section 3) isolates the effect of sample-dependent rubric generation in the refinement setting. All iterative methods (Self-Refine, Self-Debug, Fixed RubricRefine, RubricRefine) are allowed up to 5 rounds; Best-of-N variants use N = 5 candidates. Logprob-weighted variants (Kwok, 2026) are evaluated in Appendix S. 
+
+4.3 Main Results (M3ToolEval) 
+
+Table 1 reports M3ToolEval success rates av-eraged across 10 independent trials for each of seven models spanning frontier OpenAI APIs, two open-weight backbones, and a re-cent Anthropic model. RubricRefine achieves the highest success rate on every model tested. Post-method success rates cluster tightly in 
+
+[0 .85 , 0.88] despite wide variation in CodeAct baselines ( 0.47 –0.74 ): on this benchmark, the method appears to saturate near 0.86 regardless of baseline, with the magnitude of lift scaling with baseline weakness. Averaging across mod-1○ Task + Tool Docs                                  
+
+> fly E→B,3nights, hotel w/ gym not
+> pool , cheapest.
+> 2○Rubric Generator VR
+> on (I,T)
+> 3○Task-Specific Rubric R
+> Required:
+> find_flights("E","B","2023-11-10") ;
+> book_hotel("B","gym") ;
+> budget_calculator(...,nights=3) .
+> Critical: cheapest flight; exclude
+> "pool" by post-call filter.
+> 4○Gen-erator G
+> on
+> (I,T, c r−1, f r−1)
+> 5a ○Round 1 candidate
+> c1
+> ... hotels = book_hotel("B", "gym","-pool") ...
+> 5b ○Round 2 candidate
+> c2
+> ... hotels = book_hotel("B","gym") filtered = [h for h in hotels if "pool" not in h["prefs"]] ...
+> 6○
+> Verifier
+> V
+> applied each round on (cr,R)
+> 7a ○Round 1 feedback
+> 5/10
+> FAIL: “-pool” is not a valid
+> book_hotel arg; exclusion re-quires a post-call filter.
+> Fix: call
+> book_hotel("B","gym") ; filter out "pool" .
+> 7b ○Round 2 feedback
+> 10/10
+> All PASS — every rubric item satisfied.
+> Early stop triggered.
+
+Figure 1: RubricRefine overview. Setup (top row): the task instruction and tool documentation ( 1○)are passed to the rubric generator VR ( 2○), which produces a task-specific rubric R ( 3○) of itemized contract checks. Refinement loop (bottom row): the generator G ( 4○) produces a candidate cr each round; the candidate flows through the verifier V ( 6○), which scores it against R and emits that round’s score, item-level PASS/FAIL directives, and revision suggestions. Worked example: round-1’s c1 ( 5a ○) passes 
+
+"-pool" as a hotel-preference argument — a contract violation that would run without raising an exception — which V flags as a FAIL in round-1 feedback ( 7a ○), along with a fix (“call book_hotel("B","gym") and filter out "pool" via a post-call filter”). This round-1 feedback feeds back into the generator as the revision prompt driving round 2. Round-2’s c2 (5b ○) applies the suggested fix, replacing the invalid argument with a post-call filter. The verifier grades c2 at 10/10 against the rubric in round-2 feedback ( 7b ○), triggering early stopping and execution of c2. Each round’s candidate is drawn with surrounding “ ... ” to indicate omitted code. 
+
+Method GPT-4.1-mini GPT-4o o3-mini GPT-4.1 Gemma-4-26B Qwen3.6-27B Sonnet-4.6 
+
+CodeAct (Baseline) .64 ± .02 .67 ± .01 .66 ± .01 .65 ± .02 .50 ± .01 .46 ± .01 .74 ± .00 
+
+Self-Refine .60 ± .02 .62 ± .02 .60 ± .02 .60 ± .02 .71 ± .01 .67 ± .01 .71 ± .01 
+
+Self-Debug .75 ± .02 .73 ± .01 .75 ± .01 .75 ± .01 .65 ± .01 .76 ± .01 .79 ± .01 
+
+Best-of-N .65 ± .02 .65 ± .02 .61 ± .01 .62 ± .01 .53 ± .01 .51 ± .00 .75 ± .00 
+
+BoN+fixed rubric (Ours, Ctrl) .74 ± .01 .75 ± .01 .75 ± .02 .73 ± .01 .52 ± .01 .51 ± .02 .75 ± .00 
+
+BoN+rubric (Ours, Ctrl) .75 ± .01 .75 ± .01 .77 ± .01 .76 ± .01 .50 ± .01 .51 ± .01 .76 ± .01 
+
+Fixed RubricRefine (Ours, Ctrl) .80 ± .01 .75 ± .01 .78 ± .01 .80 ± .01 .73 ± .01 .76 ± .01 .83 ± .00 
+
+RubricRefine (Ours) .86 ± .01 .86 ± .01 .85 ± .01 .85 ± .01 .85 ± .01 .84 ± .01 .88 ± .01 
+
+Table 1: M3ToolEval success rates (mean ± SE across trials) for seven models. M3ToolEval tasks require multi-step tool composition with dataflow between coordinated API calls. Bolded cells mark each model’s best method; RubricRefine is best on every model tested. Rows marked “(Ours, Ctrl)” are our own control methods for factorial decomposition. Per-model paired t-test p-values, Wilcoxon robustness checks, trial SDs, and minimum gaps are reported in Appendix F. Logprob-weighted scoring variants are reported separately in Table 11 (Appendix S). 
+
+els, RubricRefine ( 0.86 ) improves over CodeAct (0.62 ) by +0 .24 absolute; per-model two-sided paired t-tests on the 10 matched trials yield 
+
+p < 0.001 on every model (per-model SDs, ranges, and minimum gaps in Appendix F). RubricRefine also outperforms Self-Refine on every model, with per-model paired t-tests all significant at α = 0 .01 ; the decomposition be-low explains where that advantage comes from. Self-Debug—which executes real code, observes the output or error, and revises iteratively— improves over single-pass CodeAct on every model (mean 0.74 vs. 0.62 ; all p < 0.02 ), con-firming that execution feedback provides useful signal, yet RubricRefine with zero execution still beats it by +0 .12 absolute (all p < 0.001 ). Self-Debug’s retry mechanism explains the gap: it triggers only on runtime exceptions, but the dominant failure mode—inter-tool contract vi-olations such as wrong output shape, incorrect tool routing, and broken argument provenance— runs to completion without raising, so Self-Debug’s retry loop never engages on these fail-ures. A worked example is in Appendix Q. The per-task breakdown makes the mech-anism concrete (see Appendix O for the full per-task results). RubricRefine improves over CodeAct on every task family on every model, but the magnitude scales with how much inter-tool contract structure the task contains. Travel itinerary planning—three coordinated API calls with cross-call argument provenance— improves by +0 .41 to +0 .48 on the OpenAI models, by +0 .77 to +0 .81 on Gemma-4-26B 
+
+and Qwen3.6-27B , and by a smaller +0 .06 on 
+
+Sonnet-4.6 where the CodeAct baseline is al-ready strong ( 0.73 ). Message decoder and DNA sequencer, which involve lighter multi-step composition, improve by moderate mar-gins across all seven models ( −0.02 to +0 .48 ). Trade calculator, the arithmetic-heavy fam-ily with minimal inter-tool dataflow, is mixed: flat or within noise on the OpenAI models (−0.01 to +0 .02 ), but meaningfully positive on 
+
+Gemma-4-26B (+0 .12 ), Qwen3.6-27B (+0 .11 ), and Sonnet-4.6 (+0 .27 ). This dataflow-to-gain relationship is the sharpest mechanism evidence in the paper: rubric-guided contract checks help in proportion to how much inter-tool contract structure the task actually con-tains. A corollary of this claim is that RubricRe-fine should not help on single-step benchmarks where there are no inter-tool contracts to check. API-Bank is such a benchmark, and Rubri-cRefine is indeed flat or within noise of Code-Act on all four OpenAI models (Appendix J); sample-dependent rubrics can additionally hurt by over-specifying API choices from dialogue context, while Fixed RubricRefine avoids this with a generic rubric (Appendix J.5). We can decompose RubricRefine’s gains over unstructured baselines on M3ToolEval by walk-ing the ladder of comparisons visible in Table 1. 
+
+Structured semantic contract verification beats unstructured critique. Fixed Rubri-cRefine improves over Self-Refine on every model tested directionally. On six of seven models, the gap is large ( +0 .09 to +0 .20 ) and highly significant (per-model paired t-tests all 
+
+p < 0.001 ), showing that contract-structured feedback substantially outperforms free-form critique in the same generate-verify-revise loop. On Gemma-4-26B , the gap is small and not significant ( +0 .02 , p = 0 .14 ): free-form self-critique already extracts enough revision sig-nal there to narrow the incremental gain from adding structure. 
+
+Sample-dependent rubrics beat fixed rubrics for repair. RubricRefine improves over Fixed RubricRefine on every model ( +0 .04 
+
+to +0 .12 absolute; all per-model paired t-tests 
+
+p < 0.02 ). Both methods use the same itera-tive loop, PASS/FAIL verification format, and score aggregation; they differ only in whether the rubric’s checks are conditioned on the cur-rent task instance. The consistent significance of this gap across models isolates sample depen-dence in the rubric criteria themselves as the component that matters specifically for revision signal, not for scalar ranking. 
+
+Rubric structure helps selection on fron-tier and Anthropic backbones but not on smaller open-weight models. Adding a rubric to Best-of-N selection (BoN →
+
+BoN+rubric) improves success by +0 .10 –+0 .14 
+
+on the four frontier API models and by +0 .01 
+
+on Sonnet-4.6 , but produces no gain on 
+
+Gemma-4-26B (−0.03 ) or Qwen3.6-27B (0.00 ). The two null cases are the smallest open-weight models we evaluate; this pattern is consistent with rubric-based selection requiring the veri-fier’s ranking to be monotone in quality, a prop-erty that frontier and large proprietary models meet but that smaller open-weight verifiers ap-pear not to, in our sample. Appendix P.7 ex-plains why Gemma-4’s calibration profile is de-structive for selection, and Section 4.5 unpacks why the same profile does not disrupt Rubri-cRefine’s early stopping behavior. Iterative repair, by contrast, uses the rubric’s itemized PASS/FAIL structure as a revision directive rather than as a scalar, and remains effective on Gemma-4-26B and Qwen3.6-27B precisely be-cause the PASS/FAIL diagnosis is informative even when the aggregate score is not. A sepa-rate observation in the selection setting is that 
+
+sample-dependent rubrics add little over fixed 
+
+rubrics (BoN+fixed rubric vs. BoN+rubric dif-Method Succ. Rate Wall-Clk (s/task) Tokens (/task) CodeAct (Baseline) 0.65 1.7 814 Self-Refine 0.60 29.6 18,375 Self-Debug 0.75 3.1 2,483 Best-of-N 0.62 10.1 5,987 BoN+fixed rubric (Ctrl) 0.73 55.7 42,282 BoN+rubric (Ctrl) 0.76 76.6 53,476 Fixed RubricRefine (Ctrl) 0.80 14.1 12,748 RubricRefine (Ours) 0.85 30.0 27,877         
+
+> Table 2: Efficiency on M3ToolEval ( GPT-4.1 ). RubricRefine outperforms all methods while requir-ing 2.6×lower latency and 48% fewer tokens than BoN+rubric. At April 2026 GPT-4.1 API pric-ing ($2/M input, $8/M output tokens, assuming a roughly 1:1 input/output split), RubricRefine costs approximately $0.14/task vs. $0.27/task for BoN+rubric and $0.004/task for single-pass Code-Act.
+
+fers by ≤ 0.02 on six of seven models, and by 0.03 on GPT-4.1 ): sample dependence is what pays off in iterative repair, not in scalar reranking. Logprob-weighting further improves selection (Appendix S, consistent with Kwok, 2026), but RubricRefine’s iterative repair re-mains the strongest method on every model tested. 
+
+4.4 Efficiency Analysis 
+
+The main practical result is not just that Rubri-cRefine performs well on M3ToolEval, but that it reaches a stronger accuracy-latency point than the strongest non-iterative rubric-guided baseline. Table 2 summarizes the key efficiency metrics on M3ToolEval for GPT-4.1 .A natural concern is that RubricRefine im-proves only because it spends more inference-time compute. The relevant comparison is not compute used, but compute converted into suc-cess: Appendix P shows RubricRefine lies on a stronger success-cost frontier against wall-clock time, LM calls, and total tokens. A budget-scaling analysis (Appendix P.8) shows nearly all gains materialize in the first refinement round, while Best-of-N +rubric improves more gradu-ally and has not reached RubricRefine’s level at N = 5 .RubricRefine averages 30 .0s per task—a 2.6×
+
+wall-clock reduction over Best-of-N +rubric while also achieving higher accuracy. At com-parable latency to Self-Refine ( 29 .6s, both run-ning at most 5 iterative rounds), RubricRefine achieves substantially higher accuracy ( 0.85 vs. 
+
+0.60 ). Self-Debug is fast ( 3.1s) because most tasks succeed or fail on turn 1, but its +0 .10 
+
+gain over CodeAct is half of RubricRefine’s 
+
++0 .20 : pre-execution semantic contract verifi-cation converts compute into accuracy more ef-fectively than execution turns. The mechanism behind RubricRefine’s efficiency over rubric-guided reranking is early stopping : when the rubric score reaches the maximum, the refinement loop terminates immediately. Ap-pendix P.9 shows this yields substantially lower LM-call usage than rubric-guided reranking on all seven models, because ≈ 90% of tasks reach a perfect rubric score within the first two rounds (Appendix P.10). 
+
+4.5 Calibration and Early Stopping 
+
+RubricRefine’s early stopping depends on rubric scores being reliable enough that a high score indicates an execution-ready candidate. We verify this empirically in two regimes. 
+
+Globally calibrated verifiers. On held-out RubricRefine trajectories for GPT-4.1-mini 
+
+and GPT-4.1 , the normalized rubric score (as-signed score divided by maximum) yields AU-ROC 0.796 and 0.764 respectively for predicting binary execution success, and ECE (Niculescu-Mizil and Caruana, 2005; Guo et al., 2017) of 0.063 and 0.090 —reasonably calibrated in every bin without any post hoc transforma-tion, consistent with prior findings that LLMs can produce calibrated self-assessments (Ka-davath et al., 2022). Figure 2 (left) shows 
+
+GPT-4.1-mini ’s top-confidence bin (score = 10 ,the early-stopping trigger) closely aligned with the diagonal, so candidates reaching the maxi-mum rubric score are in fact execution-ready at the rate the score implies. The GPT-4.1 
+
+diagram is similar and is reproduced in Ap-pendix C.3. 
+
+Top-bin-only calibrated verifiers. Global calibration is sufficient but not necessary for early stopping: what the method actually re-quires is that the score = 10 bin be reliable, because that is the only bin that triggers ter-mination. Gemma-4-26B satisfies this weaker property. Its aggregate calibration is worse (ECE 0.165 , Figure 2 right)—consistent with prior findings that smaller models tend to pro-duce less calibrated self-assessments (Kadavath Figure 2: Reliability diagrams for normalized rubric scores on M3ToolEval. Left: GPT-4.1-mini               
+
+> (ECE =0.063 ), well-calibrated across all bins. Right: Gemma-4-26B (ECE = 0 .165 ), poorly cal-ibrated in the middle bins but retaining meaningful top-bin separation (accuracy 0.87 at score = 10 ,
+> n= 329 ). RubricRefine’s early stopping depends only on the top bin, so the method remains effec-tive on Gemma despite the verifier being unreliable as a scalar ranker due to poor calibration in the middle bins. The GPT-4.1 reliability diagram, also well-calibrated, is in Appendix C.3.
+
+et al., 2022), and Gemma-4-26B is the smallest model we evaluate—but iterative repair uses the rubric’s item-level PASS/FAIL directives to fix specific failures round-over-round, driv-ing candidates toward the top bin where the verifier is more reliable (top-bin accuracy 0.87 ,a deviation of 0.13 from the score, less than the global ECE of 0.165 ). Switching the same 
+
+Gemma-4-26B verifier from RubricRefine trajec-tories to BoN+rubric trajectories makes relia-bility noticeably worse (AUROC 0.795 → 0.700 ,ECE 0.165 → 0.210 ), because the base model struggles to produce candidates that satisfy the rubric without structured iterative repair, so cold parallel samples concentrate in the mis-calibrated middle bins. Appendix P.6 develops this joint-mechanism argument. Full calibra-tion protocol and formal definitions are in Ap-pendix C.3. 
+
+4.6 Rubric Category Ablation 
+
+To identify which components of the verifier’s prompt instructions contribute most to Rubri-cRefine’s gains, we partition the rule content of all three system prompts (rubric design, scor-ing, and repair) into the four thematic groups from Section 3.2.1 and measure the effect of removing each group while keeping the rest intact. We run the ablation on RubricRefine across all four frontier models ( GPT-4.1-mini ,
+
+GPT-4o , o3-mini , GPT-4.1 ) on M3ToolEval un-der the same single-attempt protocol. As shown in Table 6 in Appendix M, output-contract rules are consistently load-bearing: removing them decreases success rate on all four mod-els (mean ∆ = −0.090 ). Call-signature rules are materially negative on three of four models. Tool-choice and data-provenance rules show capability-dependent effects: on GPT-4o and 
+
+GPT-4.1-mini removing them hurts substan-tially, but on the two stronger models ( GPT-4.1 ,
+
+o3-mini ) the effects are within noise or very small. This pattern is consistent with stronger models handling tool selection and argument provenance more reliably from documentation alone, while output-shape and call-signature checks remain load-bearing even at the frontier. A non-LLM static checker (AST parsing plus signature matching), evaluated on the same four OpenAI models in Appendix N, recovers only a fraction of RubricRefine’s gain, confirm-ing that LLM-based semantic verification is load-bearing. 
+
+5 Conclusion 
+
+Iterative self-refinement is only as good as its feedback signal. If RubricRefine operates through semantic contract verification, four convergent predictions follow, and we observe all four. First, it should outperform unstruc-tured critique—RubricRefine beats Self-Refine on every model tested. Second, it should out-perform execution feedback on silent failures— RubricRefine’s gain over Self-Debug is sharpest where Self-Debug’s retry loop never engages because the failing code produced the wrong answer without raising. Third, gains should scale with inter-tool contract complexity—per-task lifts scale with dataflow richness (travel planning +0 .42 to +0 .81 vs. trade calculator 
+
+≈ 0). Fourth, gains should collapse where con-tracts are absent—RubricRefine is flat on the predominantly single-step API-Bank. The key finding is not the iterative loop but the contract structure: sample-dependent rubrics that de-compose tool-use correctness into individually checkable criteria transform an unreliable revi-sion process into an effective one, at 2.6× lower latency than rubric-guided reranking. Extend-ing this finding to domains beyond code-mode tool use and evaluating on longer-horizon tasks with richer tool registries are natural next steps. 6 Limitations 
+
+RubricRefine improves pre-execution reliability, but it does not eliminate all sources of fail-ure. Because the method reasons over the task prompt, tool documentation, and generated code before execution, it cannot fully anticipate failures that depend on latent runtime state or external environment properties that are not ob-servable at generation time. Examples include stale sessions, hidden preconditions, changing world state, or tool behaviors that are under-specified in the documentation. In such cases, even a strong rubric may certify code that later fails when exposed to the live environment. The method is also bounded by verifier qual-ity. If the generated rubric omits an important constraint, encodes a misleading decomposition, or scores candidates inaccurately, the resulting feedback can push revisions in the wrong di-rection. More broadly, RubricRefine inherits the limits of document-grounded checking: it is strongest when tool contracts and task re-quirements are well specified in the prompt and tool docs, and weaker when key correct-ness conditions are implicit, ambiguous, or only discoverable through execution. RubricRefine currently assumes the code-mode setting with an explicit tool registry, and is not intended as a drop-in replace-ment for broader free-form generation. The core generate-verify-revise loop is not inher-ently tied to code-mode, but adapting it to other settings would require replacing the code-mode-specific system prompts with domain-appropriate rubric criteria encoding the rel-evant correctness dimensions for each target domain. RubricRefine additionally requires extra inference-time compute for rubric generation, scoring, and iterative repair. In settings where execution is cheap and reversible, that preflight cost may not be justified; the tradeoff is at-tractive when failed executions are expensive, stateful, or safety sensitive. Finally, our empirical validation is limited to M3ToolEval and API-Bank. These bench-marks capture two important views of reliabil-ity, namely whole-program executable success and exact API-call fidelity. These are the stan-dard benchmarks for this setting (Wang et al., 2024), but they do not exhaust the broader space of real-world tool-use constraints. Other tool-use benchmarks such as ToolBench (Qin et al., 2024) and BFCL (Yan et al., 2024) evalu-ate JSON function-calling rather than code-as-action, so they do not directly apply to the code-mode setting this paper targets; the scarcity of multi-step code-mode benchmarks beyond M3ToolEval is a limitation of the current evalu-ation ecosystem, not only of this paper. Results should therefore be interpreted as evidence for the value of pre-execution rubric-guided refine-ment in these executable tool-use settings, not as a complete characterization of deployment behavior in all agent environments. 
+
+Acknowledgements 
+
+The authors used AI assistance (Claude, An-thropic) for editing and revision of manuscript text and for coding assistance in the implemen-tation of experiments. References 
+
+Yinghui He, Simran Kaur, Adithya Bhaskar, Yongjin Yang, Jiarui Liu, Narutatsu Ri, Liam Fowl, Ab-hishek Panigrahi, Danqi Chen, and Sanjeev Arora. Self-distillation zero: Self-revision turns binary re-wards into dense supervision. arXiv:2604.12002, 2026. URL: https://arxiv.org/abs/2604.12002 .Xingyao Wang, Yangyi Chen, Lifan Yuan, Yizhe Zhang, Yunzhu Li, Hao Peng, and Heng Ji. Executable code actions elicit better LLM agents. In Proceedings of ICML , 2024. arXiv:2402.01030. URL: https: //proceedings.mlr.press/v235/wang24h.html .Minghao Li, Yingxiu Zhao, Bowen Yu, Feifan Song, Hangyu Li, Haiyang Yu, Zhoujun Li, Fei Huang, and Yongbin Li. API-Bank: A comprehensive benchmark for tool-augmented LLMs. In Proceed-ings of EMNLP , 2023. DOI: https://doi.org/ 10.18653/v1/2023.emnlp-main.187 . URL: https: //aclanthology.org/2023.emnlp-main.187/ .Aman Madaan et al. Self-refine: Iterative refine-ment with self-feedback. In Proceedings of NeurIPS ,2023. URL: https://openreview.net/forum?id= S37hOerQLB .Saurav Kadavath et al. Language models (mostly) know what they know. arXiv:2207.05221, 2022. URL: 
+
+https://arxiv.org/abs/2207.05221 .Alexandru Niculescu-Mizil and Rich Caruana. Pre-dicting good probabilities with supervised learn-ing. In Proceedings of ICML , 2005. DOI: https: //doi.org/10.1145/1102351.1102430 .Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. On calibration of modern neural net-works. In Proceedings of ICML , 2017. URL: https: //proceedings.mlr.press/v70/guo17a.html .Meelis Kull, Telmo Silva Filho, and Peter Flach. Beta calibration: a well-founded and easily implemented improvement on logistic calibration for binary classi-fiers. In Proceedings of AISTATS , 2017. URL: https: //proceedings.mlr.press/v54/kull17a.html .Loubna Ben Allal, Benjamin Piwowarski, and Hugging Face. smolagents. GitHub repository, 2024. URL: 
+
+https://github.com/huggingface/smolagents .Cloudflare. Introducing code mode for AI agents. Cloudflare blog, 2024. URL: https://blog. cloudflare.com/code-mode/ .Charlie Snell, Jaehoon Lee, Kelvin Xu, and Aviral Ku-mar. Scaling LLM test-time compute optimally can be more effective than scaling model parameters. arXiv:2408.03314, 2024. URL: https://arxiv.org/ abs/2408.03314 .Hunter Lightman et al. Let’s verify step by step. In Pro-ceedings of ICLR , 2024. URL: https://openreview. net/forum?id=v8L0pN6EOi .Ryo Kamoi, Yixuan Zhang, Nuo Zhang, Jiawei Han, and Rui Zhang. When can LLMs actually correct their own mistakes? A survey of self-correction. 
+
+TACL , 2024. DOI: https://doi.org/10.1162/ tacl_a_00713 . URL: https://aclanthology.org/ 2024.tacl-1.78/ .Haonan Wang et al. PreFlect: From retrospec-tive to prospective reflection in language agents. arXiv:2602.07187, 2026. URL: https://arxiv.org/ abs/2602.07187 .Zhibin Gou et al. CRITIC: Large language models can self-correct with tool-interactive critiquing. In Pro-ceedings of ICLR , 2024. URL: https://openreview. net/forum?id=Sx038qxjek .Wei Liu et al. ToolACE: Winning the points of function calling. arXiv:2409.00920, 2024. URL: https:// arxiv.org/abs/2409.00920 .Mingzhe Chen et al. BUTTON: Multi-turn function calling via compositional instruction tuning. In Pro-ceedings of ICLR , 2025. URL: https://openreview. net/forum?id=owP2mymrTD .Ziyu Ma et al. Advancing tool-augmented LLMs via meta-verification and reflection learning. In Pro-ceedings of KDD , 2025. DOI: https://doi.org/10. 1145/3711896.3736835 .Bo Hao et al. FunReason: Enhancing function calling via self-refinement and data refinement. arXiv:2505.20192, 2025. URL: https://arxiv.org/ abs/2505.20192 .Shuo Zhang et al. Nemotron-Research-Tool-N1: Ex-ploring tool-using language models with reinforced reasoning. arXiv:2505.00024, 2025. URL: https: //arxiv.org/abs/2505.00024 .Jiahao Feng et al. ReTool: Reinforcement learning for strategic tool use in LLMs. In Proceedings of ICLR ,2026. URL: https://openreview.net/forum?id= tRk1nofSmz .Yining Lu, Haoping Yu, and Daniel Khashabi. GEAR: Generalizable and efficient tool resolution. In 
+
+Proceedings of EACL , 2024. URL: https:// aclanthology.org/2024.eacl-long.7/ .Minghao Wu et al. Chain-of-Tools: Utilizing mas-sive unseen tools in chain-of-thought reasoning. arXiv:2503.16779, 2025. URL: https://arxiv.org/ abs/2503.16779 .Ethan Lumer et al. GraphRAG-ToolFusion. arXiv:2502.07223, 2025. URL: https://arxiv.org/ abs/2502.07223 .Yujia Qin, Shihao Liang, Yining Ye, Kunlun Zhu, Lan Yan, Yaxi Lu, Yankai Lin, Xin Cong, Xiangru Tang, Bill Qian, Sihan Zhao, Lauren Hong, Runchu Tian, Ruobing Xie, Jie Zhou, Mark Gerstein, Dahai Li, Zhiyuan Liu, and Maosong Sun. ToolLLM: Facili-tating large language models to master 16000+ real-world APIs. In Proceedings of ICLR , 2024. URL: 
+
+https://openreview.net/forum?id=dHng2O0Jjr .Fanjia Yan, Huanzhi Mao, Charlie Cheng-Jie Ji, Tian-jun Zhang, Shishir G. Patil, Ion Stoica, and Joseph E. Gonzalez. Berkeley function calling leaderboard. 2024. URL: https://gorilla.cs.berkeley.edu/ leaderboard.html .Yuntao Bai et al. Constitutional AI: Harmlessness from AI feedback. arXiv:2212.08073, 2022. URL: 
+
+https://arxiv.org/abs/2212.08073 .Lianmin Zheng et al. Judging LLM-as-a-judge with MT-Bench and Chatbot Arena. In Proceedings of NeurIPS , 2023. URL: https://proceedings. neurips.cc/paper_files/paper/2023/hash/ 91f18a1287b398d378ef22505bf41832-Paper-Datasets_ and_Benchmarks.pdf .Seungone Kim et al. Prometheus: Inducing fine-grained evaluation capability in language models. In Pro-ceedings of ICLR , 2024. URL: https://openreview. net/forum?id=8euJaTveKw .Mansi Sharma et al. ResearchRubrics: Prompt-specific rubrics for deep research agent evaluation. arXiv:2511.07685, 2025. URL: https://arxiv.org/ abs/2511.07685 .Akshay Gunjal et al. Rubrics as Rewards: Re-inforcement learning beyond verifiable domains. arXiv:2507.17746, 2025. URL: https://arxiv.org/ abs/2507.17746 .Madhav Raghavendra et al. Agentic Rubrics as contex-tual verifiers for software agents. arXiv:2601.04171, 2026. URL: https://arxiv.org/abs/2601.04171 .Morris H. DeGroot and Stephen E. Fienberg. The com-parison and evaluation of forecasters. Journal of the Royal Statistical Society: Series D (The Statisti-cian) , 32(1-2):12–22, 1983. DOI: https://doi.org/ 10.2307/2987588 .Mahdi Pakdaman Naeini, Gregory F. Cooper, and Milos Hauskrecht. Obtaining well calibrated probabilities using Bayesian binning into quantiles. In Proceed-ings of AAAI , 2015. URL: https://ojs.aaai.org/ index.php/AAAI/article/view/9602 .Will LeVine, Benjamin Pikus, Pranav Raja, and Fer-nando Amat Gil. Enabling calibration in the zero-shot inference of large vision-language mod-els. In Proceedings of ICLR (Tiny Papers) , 2023. arXiv:2303.12748. URL: https://openreview.net/ forum?id=na1T7ZGYb4 .Alexandru Niculescu-Mizil and Rich Caruana. Pre-dicting good probabilities with supervised learning. In Proceedings of the 22nd International Conference on Machine Learning , pages 625–632, 2005. DOI: 
+
+https://doi.org/10.1145/1102351.1102430 .Vickram Rajendran and William LeVine. Accurate layerwise interpretable competence estimation. 
+
+Advances in Neural Information Processing Sys-tems , 32, 2019. URL: https://proceedings. neurips.cc/paper_files/paper/2019/file/ a11da6bd58b95b334f8cd49f00918f16-Paper.pdf .Meelis Kull, Miquel Perello Nieto, Markus Kängsepp, Telmo Silva Filho, Hao Song, and Peter Flach. Be-yond temperature scaling: Obtaining well-calibrated multi-class probabilities with Dirichlet calibra-tion. Advances in Neural Information Processing Systems , 32, 2019. URL: https://proceedings. neurips.cc/paper_files/paper/2019/file/ 8ca01ea920679a0fe3728441494041b9-Paper.pdf .Matthias Minderer, Josip Djolonga, Rob Romijn-ders, Frances Hubis, Xiaohua Zhai, Neil Houlsby, Dustin Tran, and Mario Lucic. Revisiting the calibration of modern neural networks. Ad-vances in Neural Information Processing Systems ,34:15682–15694, 2021. URL: https://proceedings. neurips.cc/paper_files/paper/2021/file/ 8420d359404024567b5aefda1231af24-Paper.pdf .Xinyun Chen, Maxwell Lin, Nathanael Schärli, and Denny Zhou. Teaching large language models to self-debug. In Proceedings of ICLR , 2024. arXiv:2304.05128. URL: https://openreview.net/ forum?id=KuPixIqPiq .Bei Chen, Fengji Zhang, Anh Nguyen, Daoguang Zan, Zeqi Lin, Jian-Guang Lou, and Weizhu Chen. CodeT: Code generation with generated tests. arXiv preprint ,2022. arXiv:2207.10397. URL: https://arxiv.org/ abs/2207.10397 .Tal Ridnik, Dedy Kredo, and Itamar Friedman. Code generation with AlphaCodium: From prompt engi-neering to flow engineering. arXiv preprint , 2024. arXiv:2401.08500. URL: https://arxiv.org/abs/ 2401.08500 .Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao. Re-flexion: Language agents with verbal re-inforcement learning. In Proceedings of NeurIPS , 2023. URL: https://proceedings. neurips.cc/paper_files/paper/2023/file/ 1b44b878bb782e6954cd888628510e90-Paper-Conference. pdf .Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and Karthik Narasimhan. Tree of thoughts: Deliberate problem solving with large language models. In Proceedings of NeurIPS , 2023. URL: https://proceedings. neurips.cc/paper_files/paper/2023/file/ 271db9922b8d1f4dd7aaef84ed5ac703-Paper-Conference. pdf .Google DeepMind. Gemma 4. 2026. URL: https: //deepmind.google/models/gemma/gemma-4/ .Jie Huang, Xinyun Chen, Swaroop Mishra, Huaixiu Steven Zheng, Adams Wei Yu, Xinying Song, and Denny Zhou. Large language models cannot self-correct reasoning yet. In Proceedings of ICLR ,2024. URL: https://openreview.net/forum?id= IkmD3fKBPQ .Junkai Zhang, Zihao Wang, Lin Gui, Swarnashree Mysore Sathyendra, Jaehwan Jeong, Victor Veitch, Wei Wang, Yunzhong He, Bing Liu, and Lifeng Jin. Chasing the tail: Effective rubric-based reward mod-eling for large language model post-training. In Pro-ceedings of ICLR , 2026. arXiv:2509.21500. URL: 
+
+https://arxiv.org/abs/2509.21500 .Jacky Kwok. LLM-as-a-Verifier: A general-purpose verification framework. GitHub repository, 2026. URL: https://github.com/llm-as-a-verifier/ llm-as-a-verifier .Hung Le, Yue Wang, Akhilesh Deepak Gotmare, Silvio Savarese, and Steven C.H. Hoi. CodeRL: Mastering code generation through pretrained models and deep reinforcement learning. In Proceedings of NeurIPS , 2022. URL: https://proceedings. neurips.cc/paper_files/paper/2022/hash/ 8636419dea1aa9fbd5aa0cf977903d9a-Paper-Conference. html .Ansong Ni, Srini Iyer, Dragomir Radev, Veselin Stoy-anov, Wen-tau Yih, Sida I. Wang, and Xi Victo-ria Lin. LEVER: Learning to verify language-to-code generation with execution. In Proceedings of ICML , 2023. URL: https://proceedings.mlr. press/v202/ni23b.html .Yujia Li et al. Competition-level code generation with AlphaCode. Science , 378(6624):1092–1097, 2022. DOI: https://doi.org/10.1126/science. abq1158 .Andy Zhou, Kai Yan, Michal Shlapentokh-Rothman, Haohan Wang, and Yu-Xiong Wang. Language agent tree search unifies reasoning, acting, and planning in language models. arXiv:2310.04406, 2023. URL: 
+
+https://arxiv.org/abs/2310.04406 .Will LeVine and Bijan Varjavand. Relevance isn’t all you need: Scaling RAG systems with inference-time compute via multi-criteria reranking. arXiv:2504.07104, 2025. URL: https://arxiv.org/ abs/2504.07104 .A Extended Background and Motivation 
+
+A.1 Code Mode and CodeAct Foundation A.1.1 What “Code Mode” Means 
+
+In this paper, code mode means that the model emits executable code as the action payload. That code can call tools directly, branch on ob-served values, maintain intermediate state, and compute derived quantities before producing an answer. The resulting action semantics are therefore substantially richer than those of pure natural-language plans or single-call JSON ac-tions. Recent open-source agent frameworks and production documentation use this same idea as a first-class implementation pattern (Al-lal et al., 2024; Cloudflare, 2024). 
+
+A.1.2 What CodeAct Established 
+
+CodeAct made three foundational contributions that this paper builds on (Wang et al., 2024): 
+
+• Action-format evidence: code actions can outperform text and JSON action for-mats on tool-use tasks. 
+
+• Evaluation substrate: executable-action evaluation was operationalized on benchmarks including M3ToolEval and API-Bank. 
+
+• Data and agent artifacts: CodeActIn-struct and CodeActAgent provide a con-crete training-and-evaluation workflow for code-mode agents. Taken together, these contributions did more than propose a new interface: they established code mode as an experimentally grounded set-ting with data, agents, and benchmarks. The paper and repository materials describe this ecosystem at scale, including broad model benchmarking and a CodeActInstruct corpus of roughly 7k multi-turn trajectories spanning hundreds of tasks and APIs (Wang et al., 2024). 
+
+A.1.3 Why Reliability Becomes the Next Bottleneck 
+
+Code mode improves expressivity and often im-proves success rates, but it also changes where failures concentrate. Once the action repre-sentation is powerful enough, many remaining errors are no longer high-level planning failures; they are contract-execution failures. A model can be “almost right” in ways that still cause the program to fail: 
+
+• selecting the right tool but grounding to the wrong real-world entity, 
+
+• using parameters with mismatched seman-tics (units, timezones, currencies, enums), 
+
+• making invalid state assumptions (miss-ing preconditions, stale sessions, expired auth), 
+
+• violating policy, safety, or compliance con-straints specified at inference time but not present in the training set. These are near-miss failures that can look per-fectly plausible in text while remaining wrong in execution. Reliability therefore becomes the next bottleneck: the system often discovers the problem only after an execution attempt has al-ready consumed interaction budget, API quota, or side-effect risk. A common mitigation is to retry after ob-serving an execution error. That can recover some failures, but it is not a free repair mech-anism. For stateful actions, the first attempt may already have changed the world before failing later in the program. Re-execution can therefore duplicate effects, create inconsistent state, or compound an error that was initially only partial. Worse, once the environment has been modified, later generations may be rea-soning from an incomplete picture of the new state: not all relevant consequences are avail-able in the prompt, and recovering them may require additional tool calls, time, or human intervention. In some settings, full recovery is impossible, and full observability into the post-execution state is also impossible. In high-consequence settings such as medicine, legal workflows, or systems that interact with the physical world, that combination of irreversibil-ity and partial observability is operationally serious. This motivates the single-attempt set-ting we evaluate: the system should do as much checking and repair as possible before the first live action. Another way to address the bottleneck is post-training, as in the broader CodeAct line of work built around CodeActInstruct and Code-ActAgent (Wang et al., 2024). That path is important, but it requires collecting and curat-ing trajectories, annotating or filtering training data, and rerunning training as registries evolve. Those steps are expensive, slow to refresh, and often impractical when the deployment prob-lem is adaptation to a specific new registry rather than improvement of a base model in the abstract. RubricRefine targets the same bottleneck from the deployment side. Its goal is to move failure detection earlier through registry-conditioned, pre-execution checks, so that fewer errors reach state-changing execution in the first place. This is particularly attractive in high-cost environments such as clinical opera-tions, legal and financial workflows, and sys-tems that interact with the physical world, where the marginal cost of an incorrect action can easily exceed the marginal cost of additional pre-execution reasoning. We cite these domains as motivation for reliability-first design, not as claims of direct deployment validation. 
+
+B Extended Related Work 
+
+Inference-Time Refinement Self-Refine (Madaan et al., 2023) is a canonical execution-free self-correction baseline in which the same model generates an answer, critiques it in natural language, and revises it. That baseline is directly relevant here because Rubri-cRefine also spends inference-time compute on revision without relying on execution feedback, but replaces free-form critique with registry-conditioned, rubric-structured verification. We also compare against parallel sampling because RubricRefine spends inference-time compute on sequential revision with a verifier, whereas a natural alternative is to spend that same budget on multiple independent samples and then select the best one. Snell et al. (Snell et al., 2024) show that this tradeoff depends strongly on verifier quality, which makes Best-of-N +rubric the most direct control for whether RubricRefine’s gains come from targeted repair rather than from extra test-time compute alone. CRITIC (Gou et al., 2024) is an especially relevant adjacent method: it uses tool-interactive critique rather than registry-conditioned, execution-free program verification, but it shares the core intuition that critique is more useful when it is grounded in external task-relevant information than when it is based on self-reflection alone. Tree of Thoughts (Yao et al., 2023) is another approach to structured inference-time search, but uses branching exploration rather than a generate-verify-repair loop. Broader inference-time systems are discussed in Appendix R. 
+
+Tool-Use Post-Training and Unseen-Tool Adaptation Recent competitive function-calling systems usually improve tool use through better synthetic data, reflection tuning, reinforcement learning, or retrieval and plan-ning mechanisms for unseen-tool adaptation rather than through inference-time verification alone (Liu et al., 2024; Chen et al., 2025; Ma et al., 2025; Hao et al., 2025; Zhang et al., 2025; Feng et al., 2026; Lu et al., 2024; Wu et al., 2025; Lumer et al., 2025). RubricRefine targets a different problem: deployment-time adaptation to a specific tool registry without any additional training. This also makes the method directly applicable to API-only pro-prietary models, whereas registry adaptation through post-training is less directly available when the deployed model is closed-weight or exposed only through an inference API. Within the CodeAct framing, the CodeLlama-based CodeActAgent variants in Wang et al. (2024) are representative examples of post-training de-signed explicitly for code mode. We use that family as the relevant post-training context while focusing our contribution on inference-time reliability. A more detailed competitive positioning summary appears in Appendix R. 
+
+C Extended Evaluation Design 
+
+C.1 Benchmark Rationale M3ToolEval (CodeAct-Aligned Exe-cutable Actions) M3ToolEval evaluates end-to-end tool-use completion in executable-action mode. In the repository configuration used here, each task is rendered with tool documentation and an output contract, and correctness is calculated by exact matching between the execution output and the anno-tated ground truth, where the match status is recorded as is_correct .
+
+API-Bank (Step-Level API Correctness) 
+
+Whereas M3ToolEval evaluates an entire code-mode program at once, API-Bank provides ex-act string matching at the single API-call level, with strict checks on API identity and parame-ter correctness under the task context. 
+
+Why Both Are Needed M3 and API-Bank encode complementary notions of correctness. M3 asks whether the generated executable ac-tion solves the full task end to end. API-Bank asks whether each predicted API step is struc-turally and semantically correct. Looking at only one of these views can conceal important weaknesses: a method may achieve good call-level precision while still failing whole work-flows, or it may occasionally complete work-flows while remaining brittle at the level of call contracts. Reporting both therefore supports a stronger reliability claim for pre-execution veri-fication than either benchmark alone. Detailed benchmark semantics and criterion differences are provided in Appendix I, Appendix J, and Appendix K. 
+
+C.2 Additional Metrics and Baselines Dual-View Reporting We report M3 and API-Bank separately. An optional mean can be included for compact comparison, but interpre-tation remains benchmark specific and should not collapse the difference between whole-task success and call-level fidelity. 
+
+Pre-Execution Efficiency Metrics Be-cause RubricRefine emphasizes pre-execution reliability, we report pre-execution efficiency statistics including wall-clock latency, total LM calls, and total token usage, and we addition-ally compare observed LM-call usage against rubric-guided reranking in Appendix P.9. 
+
+Baselines Our comparison set includes: 
+
+• single-pass code mode, 
+
+• Self-Refine (Madaan et al., 2023), 
+
+• Best-of-N ,
+
+• Best-of-N with a fixed rubric, 
+
+• Best-of-N with a sample-dependent rubric, 
+
+• Fixed RubricRefine, 
+
+• RubricRefine. Three additional logprob-weighted scoring vari-ants are reported in Appendix S. 
+
+Single-Attempt Deployment Regime We intentionally do not evaluate post-execution retries in the main setting. The target use case is the single-attempt regime motivated in Section 1, where runtime correction is too costly because even a partial execution may have already consumed scarce budget, triggered side effects, or altered external state in ways that are expensive or impossible to fully audit, reverse, or observe. All methods are therefore compared under the same constraint: unlimited pre-execution reasoning within the method’s allotted inference budget, but only one live execution attempt per task. 
+
+C.3 Calibration of Rubric Scores 
+
+The calibration experiment is run on candi-date trajectories produced by RubricRefine on M3ToolEval. Confidence is defined as the nor-malized rubric score, i.e., the assigned rubric score divided by the maximum possible rubric score for that task. Accuracy is the binary indicator of whether execution produced the correct ground-truth answer. To avoid leak-age across sibling candidates, all candidates from the same task instance are kept in the same split. We compute AUROC for ranking quality and ECE using 10 confidence bins. For both GPT-4.1-mini and GPT-4.1 , the calibra-tion analysis uses 240 scored candidate trajec-tories. The main text reports the resulting AUROC and ECE values. 
+
+Reliability Diagrams We visualize calibra-tion through reliability diagrams (DeGroot and Fienberg, 1983; Niculescu-Mizil and Caru-ana, 2005). Following the exposition of LeVine et al. (2023), these diagrams group points by their predicted confidence scores into M
+
+equally spaced bins, and then compute the true and estimated accuracies in each bin as follows: let Bm be the test samples whose confidence (i.e. estimated accuracy) falls into the interval Im =  (m − 1) /M, m/M  for 
+
+m = 2 , . . . , M , and I1 = [0 , 1/M ]. The true accuracy is acc ( ˆf , B m) and the estimated ac-curacy (i.e. average confidence) within Bm is 
+
+ˆp( ˆf , B m) = 1
+
+> |Bm|
+
+P 
+
+> i∈Bm
+
+ˆpi. The reliability dia-gram plots the difference between true accuracy and estimated accuracy for all M bins, and deviations from the line f (x) = x represent miscalibrations: areas where there is a signifi-Figure 3: Reliability diagram for GPT-4.1 on M3ToolEval (ECE = 0 .090 ). 
+
+cant difference between the estimated and true accuracy. 
+
+Expected Calibration Error (ECE) We quantify miscalibration with the Expected Calibration Error (ECE) (Naeini et al., 2015). ECE, aimed at summarizing the mis-calibration visualized in reliability diagrams, is calculated as ECE =
+
+> M
+
+X
+
+> m=1
+
+|Bm||D| ˆp( ˆf , B m)−acc ( ˆf , B m) . (2) Lower ECE means the reported confidence is more interpretable as a probability of success. For all experiments we use M = 10 bins, as is standard (Guo et al., 2017). 
+
+GPT-4.1 Reliability Diagram Figure 3shows the reliability diagram for GPT-4.1 
+
+on M3ToolEval. The pattern mirrors 
+
+GPT-4.1-mini in the main-text Figure 2: well-calibrated across all bins ( ECE = 0 .090 ), with the top bin closely aligned with the diagonal. 
+
+D Method Implementation Details 
+
+This appendix makes the inference-time pro-cedure concrete enough to reproduce the re-ported comparisons. Because RubricRefine’s contribution is primarily procedural rather than architectural, we make the generator/verifier roles, prompting structure, stopping criteria, and score-capping policy explicit here. 
+
+Generator and Verifier Roles For each model block in Table 1, we use the named model family as the base generator. The verifier is instantiated with the same model family as the corresponding generator so that the compari-son isolates the effect of rubric-structured veri-fication rather than a stronger external judge. RubricRefine therefore differs from Self-Refine primarily in the structure of the verifier feed-back, not in access to a different backbone. 
+
+Prompt Structure We use three fixed prompt templates (reproduced verbatim in Ap-pendix E). 
+
+• Rubric-generation prompt (Ap-pendix E.1): input the task instruction together with the tool registry and ask the verifier to produce a task-specific checklist covering intent/tool choice, ordering/dataflow, argument and call-shape constraints, execution-critical logic, final-answer grounding, and robustness checks. 
+
+• Scoring prompt (Appendix E.2): input the fixed rubric together with candidate code and require a structured response containing a scalar score in {1, . . . , 10 },PASS/FAIL judgments for each rubric item, a list of critical failures, and con-crete revision directives. 
+
+• Repair prompt (Appendix E.3): input the original task, tool docs, fixed rubric, previous candidate code, and the verifier’s structured feedback; instruct the generator to fix critical failures first and only then address secondary issues. In implementation, each repair round is prompted from scratch with the original task context plus the most recent verifier feedback, rather than relying on a long accumulated chat history. 
+
+Best-of-N and Refinement Budgets For the main comparison, Best-of-N uses N = 5 in-dependently sampled candidates. RubricRefine uses a maximum of R = 5 refinement rounds with early-stopping patience P = 2 . The same fixed rubric is reused across all rounds of a task instance so that the optimization target does not drift during revision. 
+
+Sampling Settings Generator-side decod-ing is stochastic in the selection and refinement baselines in order to permit diverse candidates and meaningful revisions; verifier-side decoding is run near-deterministically so that rubric scor-ing is stable across repeated evaluations of the same candidate. In the current implementation, we use temperature 0.7 for generator calls and temperature 0.0 for verifier calls, with default nucleus settings for the underlying API. 
+
+Critical-Failure Caps The verifier enforces score caps directly from the item-level rubric judgments. Missing required intent steps or re-quired tool calls caps the scalar score in the 1–4 range. If major intent is present but any crit-ical ordering/dataflow, argument/call-shape, execution-critical, or final-answer-grounding check fails, the score is capped at 7. Scores of 8–9 are reserved for candidates whose core logic is execution-ready and whose remaining issues are minor or robustness-related. A score of 10 is only available once all critical items pass and the program is judged grounded and robust. These caps are implemented at the prompt level by explicitly instructing the verifier not to as-sign higher scores when any upstream critical condition remains unsatisfied. 
+
+E Verbatim Prompt Templates 
+
+This appendix reproduces the three core prompt templates used in RubricRefine: the rubric-generation prompt (Section E.1), the rubric-scoring prompt (Section E.2), and the repair prompt (Section E.3). Each template consists of a system message (defining the role and rules) and a user message (providing the task-specific inputs). Placeholder variables are shown as {instructions} , {tool_docs} ,
+
+{rubric} , {code} , etc. These templates are used verbatim in all experiments. 
+
+E.1 Rubric-Generation Prompt System Message The verifier receives the following system prompt when generating a rubric: 
+
+You are a meticulous verifier that writes dense, prompt-conditioned rubrics for tool-using programs. Your job is to anticipate failures that would produce the wrong answer, wrong API call, or wrong execution path. Rules: - Write a task-specific checklist, not generic advice. - Prefer many narrow, testable checks over a few broad ones. - Explicitly cover ordering, cross-tool dataflow, argument provenance, literal constraints, execution-critical control flow, final-answer grounding, and tool-choice justification. - Explicitly cover task-detail coverage: every semantically binding instruction detail (entities, qualifiers, literals, filters, exclusions, relationships) should appear in checks. - Distinguish intermediate artifacts from the requested final output. If the task asks for a derived value or structured object, the rubric must require that the emitted final value be exactly that requested object, not an explanatory wrapper or a bundle of extra intermediate data. - Add a type/shape contract section for data passed across tools. - Include syntax/call-shape checks for correctness-impacting issues. - Assume tool implementations are correct black boxes; evaluate only the candidate’s call choices/arguments/dataflow against tool docs. - Add explicit checks that tool/API calls follow documented signatures exactly and that argument names/values match task constraints. - Never invent keyword argument names. Names must match the documented signature exactly. - Do not assume Python built-in operations are available as admissible task operations. When an operation overlaps with a documented tool, require the documented tool semantics. - When numeric combination is needed, route it through documented tools rather than free-form Python arithmetic. - For non-variadic signatures (no *args), require documented parameters to be passed by named keyword arguments. - For mixed signatures like f(x, *args), enforce fully positional call shapes for that tool call. - Require the minimal instruction-grounded tool subset. Do not force a tool when the instruction does not supply the needed literals. - High scores should require correctness and grounding, not stylistic conformity. 
+
+The full system prompt additionally contains detailed rules for variadic signature handling, structured positional schemas, built-in-name tool disambiguation, multi-leg workflow de-composition, entity-selection provenance, and final-output-shape enforcement. The complete prompt ( ≈200 lines) is available in the supple-mentary code. 
+
+User Message Template Generate a dense correctness-focused evaluation checklist for the following coding task. <task> {instructions} </task> <available_tools> {tool_docs} </available_tools> Write a rubric that distinguishes: - superficial code that mentions tools - genuinely correct code that reaches the right result with grounded values Requirements: - Make the rubric prompt-dependent and tool-doc-dependent. - Only require documented tools that actually appear in <available_tools>. - Mention concrete function names, values, fields, variable provenance, and ordering constraints. - Include cross-tool provenance checks where one call consumes another’s output. - Include type/shape compatibility checks where values flow across calls. [... additional requirements as in system prompt ...] Output this exact format (one line per item, no prose before or after): Intent: A. <tool_call() -> purpose> B. <tool_call() -> purpose> ... Ordering/dataflow checks: D1. <ordering or provenance requirement> ... Argument/format checks: a. <tool_call -> required args / provenance / format constraint> ... Type/shape contract checks: S1. <documented return type -> required downstream consumer shape/type> ... Execution-critical checks: E1. <execution-critical requirement> ... Final-answer checks: F1. <final answer must be grounded in retrieved outputs> ... Tool-choice checks: T1. <why this documented tool is required> ... 
+
+E.2 Rubric-Scoring Prompt System Message The verifier receives the following system prompt when scoring a candi-date: 
+
+You are a strict verifier for tool-using Python programs. Your job is to score whether the code would actually succeed, not whether it merely sounds plausible. Principles: - Prioritize semantic correctness: correct API/tool sequence, argument values, and final answer correctness. - Missing required calls, wrong ordering, wrong literal/parameter values, or incorrect final answer are major failures. - Prefer evidence-based PASS/FAIL judgments with concrete cited code/call strings. - If output format is benchmark-defined, check that contract; avoid extra style policing beyond that contract. - If the benchmark expects a raw emitted value/object, treat labeled or descriptive print wrappers as final-answer failures. - When in doubt, prioritize likely correctness impact on final task outcome. - Do not mark FAIL because tool internals are not visible; judge based on documented behavior and visible call text. - If a call uses undocumented argument names, positional arguments where named args are expected, or value/format mismatches, mark argument checks FAIL. - For non-variadic signatures, positional arguments instead of keyword arguments should fail argument checks. - For signatures containing *args, fully positional calls in declared order are valid. - Do not mark FAIL solely because the code was not executed. - Evaluate all rubric items first, then assign the final score. - Score must be monotonic with correctness: more PASS items and fewer FAIL items should produce a higher score. - If all required rubric items are PASS and critical_failures is empty, the score must be exactly 10. - Return exactly one top-level numeric score field named "score". 
+
+The full system prompt additionally contains detailed rules for built-in-name tool scoring, variadic signature validation, multi-leg task evaluation, structured variadic schemas, and mixed-signature canonicalization. The com-plete prompt ( ≈70 lines) is available in the supplementary code. 
+
+User Message Template Evaluate this code against the rubric. Do NOT execute the code --evaluate by reading it. <task> {instructions} </task> <available_tools> {tool_docs} </available_tools> <rubric> {rubric} </rubric> <code> {code} </code> Scoring rules: 1 = No meaningful progress 2 = Minimal progress 3 = Partial plan; major required calls missing 4 = Most major steps recognizable but incomplete 5 = All major steps appear but critical issues remain 6 = Mostly complete but at least one critical issue 7 = All required calls, mostly ordered, but critical checks fail 8 = Critical checks largely pass; minor gaps remain 9 = Execution-ready; only minor non-critical issues 10 = Fully grounded and execution-ready For each rubric item, provide PASS/FAIL with a brief concrete reason citing code/call evidence. Then summarize critical_failures and revision_instructions (highest-impact fixes first). Respond with JSON: {"feedback": {"item_results": {"intent": [...], "ordering_dataflow": [...], "argument_format": [...], "type_shape_contract": [...], "execution_critical": [...], "final_answer": [...], "tool_choice": [...]}, "critical_failures": ["..."], "revision_instructions": ["..."]}, "score": <1-10>} 
+
+E.3 Repair Prompt System Message The generator receives the following system prompt during repair rounds: 
+
+You are a careful Python tool-use generator. Rules: - Treat verifier feedback as binding requirements, not optional suggestions. - When revising, preserve only code that is still consistent with the verifier feedback and rubric. - Fix every listed critical failure before making cosmetic or secondary changes. - Do not keep fabricated placeholders, guessed constants, or unjustified tool choices. - Do not introduce extra tool calls that require guessed constants or missing instruction literals. - Use documented signatures literally. Do not invent keyword names. - If a later tool call depends on an earlier tool output, make that dependency explicit in code. - Ensure every intermediate value has the shape/type expected by whatever consumes it next. - Ensure the final answer is derived from validated tool outputs. - Emit only the requested final object/value. Do not print explanatory labels or extra intermediate results. - For non-variadic tool/API signatures, pass documented parameters via named keyword arguments. - For any signature containing *args, fully positional calls in declared order are valid. - Do not use keyword expansion (**...) in tool/API calls. 
+
+The full system prompt additionally contains rules for built-in-name tool handling, multi-leg workflow decomposition, variadic signature con-ventions, string-expression tool scoping, and mixed-signature canonicalization. The com-plete prompt ( ≈55 lines) is available in the supplementary code. 
+
+User Message Template 
+
+Improve the candidate answer below according to the rubric and feedback. Return only the improved assistant response, preserving the expected format (Action/Answer). Rubric: {rubric} Previous candidate: {current_candidate} Feedback: {current_feedback} 
+
+F Evaluation Configuration Details 
+
+This appendix documents the evaluation-side configuration choices that are specific to the reported comparison rather than to the Rubri-cRefine procedure itself. 
+
+Budget Matching Across Methods The main comparison is budget-matched in the number of pre-execution reasoning opportu-nities. Single-pass CodeAct uses one gener-ator call. Self-Refine and RubricRefine are each allowed up to five sequential generator at-tempts, with RubricRefine additionally spend-ing verifier calls on rubric generation and scor-ing. Best-of-N and Best-of-N +rubric use five parallel candidate generations. We therefore interpret Best-of-N +rubric as the strongest non-iterative control: it spends comparable candidate-generation budget, but allocates that budget to parallel search rather than targeted repair. This is why the latency comparison is important: on M3ToolEval, RubricRefine matches or exceeds Best-of-N +rubric while re-ducing average wall-clock time from 62 .4 sec-onds to 24 .2 seconds. 
+
+Significance Tests For each model, we com-pute the trial-level gap ∆t = RR t − CodeAct t
+
+on matched trial t (where both methods use the same sampling seed on the same task in-stances), and test H0 : ¯∆ = 0 with a two-sided paired t-test over the 10 trials. This is the pairing structure behind every per-model p-value reported in Section 4.3. For cross-model claims we additionally run a paired test on the N =7 trial-averaged per-model gaps. The significance claim does not rely on normality of the per-trial gap distribution: every one of the 10 matched trial-level gaps is positive on every model, with minimum observed gap 
+
++0 .083 (Table 3). A Wilcoxon signed-rank test on 10 strictly-positive paired differences yields 
+
+p ≤ 0.002 (the minimum achievable two-sided 
+
+p-value with 10 paired observations), so the test is significant at p < 0.01 on every model without any distributional assumption. Per-model Wilcoxon statistics are reported in Ta-ble 4. For API-Bank, standard errors already show that no method is reliably separated from the baseline, so we do not additionally report significance tests. 
+
+Variance Decomposition (Run-to-Run Stability) Because the generator uses stochastic decoding ( T = 0 .7), we examine trial-level stability of both absolute RubricRe-fine success and the RubricRefine–CodeAct gap across the 10 matched trials per model. The per-trial aggregate M3ToolEval success rate for RubricRefine has a standard deviation of 0.011 –0.040 across trials depending on the model, meaning a single trial shifts the headline number by roughly 1–4 percentage points. The RubricRefine–CodeAct gap is similarly stable:                                                  
+
+> RubricRefine RR −CodeAct gap
+> Model Mean SD Range Mean SD Min
+> GPT-4.1-mini 0.858 0.036 .792–.917 +0.221 0.067 +0.146
+> GPT-4o 0.860 0.039 .812–.917 +0.194 0.056 +0.125
+> o3-mini 0.848 0.033 .792–.917 +0.190 0.044 +0.125
+> GPT-4.1 0.852 0.040 .792–.938 +0.198 0.064 +0.104
+> Gemma-4-26B 0.854 0.022 .812–.875 +0.358 0.047 +0.292
+> Qwen3.6-27B 0.842 0.011 .833–.854 +0.381 0.020 +0.354
+> Sonnet-4.6 0.875 0.035 .833–.917 +0.128 0.040 +0.083
+
+Table 3: Run-to-run stability analysis for RubricRe-fine on M3ToolEval across 10 independent trials per model. Left block: trial-level success-rate statis-tics for RubricRefine. Right block: matched-trial RubricRefine −CodeAct gap statistics (RubricRe-fine outperforms CodeAct on every matched trial for every model).                                    
+
+> Model npositive / ntotal Wilcoxon Wp(two-sided)
+> GPT-4.1-mini 10 / 10 0≤0.002
+> GPT-4o 10 / 10 0≤0.002
+> o3-mini 10 / 10 0≤0.002
+> GPT-4.1 10 / 10 0≤0.002
+> Gemma-4-26B 10 / 10 00.002
+> Qwen3.6-27B 10 / 10 0≤0.002
+> Sonnet-4.6 10 / 10 0≤0.002
+
+Table 4: Per-model Wilcoxon signed-rank test for RubricRefine vs. CodeAct on M3ToolEval (10 matched trials per model). All 10 trial-level gaps are positive on every model (see Table 3, “Min gap” row), so the Wilcoxon rank-sum statistic W is at its minimum ( 0) and the two-sided p-value is at its floor for n = 10 . For Gemma-4-26B we report the explicitly computed value; the remaining rows report the bound implied by all-positive gaps. 
+
+on every matched trial across all seven models, RubricRefine outperforms CodeAct, with a per-model gap standard deviation of 0.020 –0.067 
+
+and a minimum observed gap of +0 .083 (Ta-ble 3). No single run produces a result where the improvement disappears. 
+
+G Positioning 
+
+G.1 What Is Novel Relative to CodeAct 
+
+CodeAct’s core innovation is action representa-tion: use executable code as the action inter-face (Wang et al., 2024). RubricRefine targets a different axis, namely the reliability of gener-ated code under strict tool contracts. The two contributions are therefore best understood as complementary rather than competing: 
+
+• CodeAct: make code mode effective and measurable. 
+
+• RubricRefine: make code mode more execution-ready before runtime. 
+
+G.2 Why This Matters in High-Cost Environments 
+
+Pre-execution error detection is particularly valuable when failed actions carry high marginal cost: 
+
+• rate-limited or paid APIs, 
+
+• operations with side effects (state updates, transactions, downstream triggers), 
+
+• regulated workflows requiring traceable de-cision logic, 
+
+• safety-sensitive operations that favor con-servative execution policies. These contexts include enterprise automa-tion, healthcare operations, legal and financial workflows, and systems that interact with the physical world. We invoke them to motivate reliability-first design, not to claim direct de-ployment validation from our benchmark re-sults. 
+
+H Extended CodeAct Grounding 
+
+This appendix provides additional context for readers who are new to code mode and to the CodeAct framing. 
+
+H.1 Action Representation in CodeAct 
+
+CodeAct compares three action formats under shared tasks: text-as-action, JSON-as-action, and code-as-action (Wang et al., 2024). In the code-as-action setting, one turn can express a complete multi-step tool plan in executable form, including branches, intermediate state, and derived computations. 
+
+H.2 CodeAct Data and Agent Artifacts 
+
+CodeAct introduces CodeActInstruct and Code-ActAgent (Wang et al., 2024). Public materials report roughly 7k multi-turn code-action tra-jectories with broad tool and task coverage, providing a concrete substrate for training and evaluating executable-action behavior. 
+
+H.3 Why We Use This as the Base Context 
+
+RubricRefine does not argue for code mode over other action interfaces. Instead, it assumes CodeAct’s action-interface conclusion and asks what additional mechanism is needed to make that interface more reliable in deployment. 
+
+I Detailed Benchmark Dossier: M3ToolEval 
+
+I.1 Task Shape 
+
+M3 tasks provide: 
+
+• natural-language instruction, 
+
+• tool registry with signatures and descrip-tions, 
+
+• output contract (often deterministic ex-pected value), 
+
+• action-format contract requiring an 
+
+Action: ... End Action block. 
+
+I.2 Evaluator Semantics in This Repository 
+
+For each instance, generated code is exe-cuted and task-level correctness is logged via 
+
+is_correct . This is a genuinely end-to-end measure: call structure alone is not enough if the final program output is wrong. 
+
+I.3 Why M3 Is Essential for This Paper 
+
+RubricRefine’s main claim is pre-execution reli-ability for executable code. M3 is therefore the most direct benchmark view for that claim, be-cause success is defined at the level of full-task execution rather than isolated call correctness. 
+
+J Detailed Benchmark Dossier: API-Bank 
+
+J.1 API-Bank Results 
+
+Table 5 reports API-Bank success rates across the four frontier models. On API-Bank, all methods cluster within a narrow 0.68 –0.74 
+
+band, and RubricRefine slightly underperforms the CodeAct baseline on every model (mean gap 
+
+−0.03 ). This is consistent with the mechanism that drives RubricRefine’s M3ToolEval gains: inter-tool contract checks have little room to help on predominantly single-step tasks. Aqualitative error analysis (Appendix J.5) re-veals that the sample-dependent rubric actively hurts in this setting— 69% of regressions in-volve the rubric redirecting the generator to the wrong API, because the rubric over-specifies Method GPT-4.1-mini GPT-4o o3-mini GPT-4.1                                                                                     
+
+> CodeAct (Baseline) .72 ±.01 .72 ±.00 .72 ±.00 .72 ±.01
+> Self-Refine .68 ±.01 .71 ±.01 .73 ±.01 .71 ±.01
+> Best-of-N.73 ±.00 .73 ±.00 .73 ±.00 .73 ±.00
+> BoN+fixed rubric (Ctrl) .72 ±.00 .72 ±.01 .73 ±.01 .72 ±.01
+> BoN+rubric (Ctrl) .73 ±.00 .73 ±.00 .74 ±.00 .74 ±.00
+> Fixed RubricRefine (Ctrl) .72 ±.01 .72 ±.00 .72 ±.01 .71 ±.01
+> RubricRefine (Ours) .69 ±.01 .70 ±.01 .68 ±.01 .69 ±.01
+
+Table 5: API-Bank success rates (mean ± SE across trials) for four models. Tasks are predominantly single-step API calls. Logprob-weighted scoring variants are reported in Table 12 (Appendix S). 
+
+which API to call from the full dialogue context without knowledge of the current conversation step. Fixed RubricRefine, which uses a generic rubric without task-specific API enumeration, avoids most of these regressions and matches the baseline. 
+
+J.2 Task Shape 
+
+API-Bank evaluates stepwise tool-use behavior, where each step requires the correct next API call under the current dialogue or task context. 
+
+J.3 Evaluator Semantics in This Repository 
+
+The evaluator parses predicted API calls, val-idates API name agreement, executes calls against the tool manager, and computes cor-rectness according to API-specific checks. Ag-gregate score is: 
+
+API Accuracy = correct_api_calls total_api_calls . (3) 
+
+J.4 Why API-Bank Is Essential for This Paper 
+
+RubricRefine emphasizes contract fidelity, and API-Bank offers the cleanest lens on call iden-tity, argument shape, and sequencing correct-ness. 
+
+J.5 API-Bank Regression Analysis 
+
+Section 4.3 reports that RubricRefine scores be-low the CodeAct baseline on three of four mod-els. This subsection investigates why the full iterative loop with sample-dependent rubrics actively hurts on API-Bank rather than merely showing no improvement. 
+
+Regression Counts Across all four frontier models and 10 trials, we identified 62 total regression instances (cases where CodeAct pro-duced the correct API call but RubricRefine did not). This averages to 3.0–3.8 regressions per trial per model, against 2.0–2.2 improvements, yielding a net negative of roughly 1–2 calls per trial out of ≈ 50 predictions—consistent with the ≈ 3-point accuracy drop observed in Table 5. 
+
+Root Cause: Rubric Over-Specification in Multi-Turn Dialogues Of the 62 regres-sion instances, 69% involve the rubric redirect-ing the generator to the wrong API entirely ,while 31% involve parameter changes to the correct API. The dominant failure pattern is rubric over-specification in multi-turn dialogues. API-Bank instances are drawn from multi-turn conversations where several APIs are available (e.g., ModifyRegistration , QueryHealthData ,
+
+CancelRegistration ), and each evaluation step asks for the correct next API call given the current dialogue context. The sample-dependent rubric, conditioned on the full task description and tool registry, enumerates all APIs mentioned in the dialogue context and can misidentify which API is appropriate at the current step. 
+
+Illustrative Examples Two recurring pat-terns account for the majority of regressions: 
+
+• CancelRegistration → ModifyRegis-tration (17 of 62 instances): The ground truth requires CancelRegistration , and CodeAct correctly calls it. The sample-dependent rubric, seeing the full dia-logue context that includes prior modifi-cation steps, scores the correct cancella-tion call as a failure and revises toward 
+
+ModifyRegistration .
+
+• ForgotPassword → GetUserToken (12 of 62 instances): The ground truth re-quires ForgotPassword , but the rubric, conditioned on a dialogue involving mul-tiple account-management APIs, directs the generator toward GetUserToken as the expected first step. 
+
+Fixed RubricRefine Avoids Most Re-gressions Fixed RubricRefine, which uses a generic rubric without task-specific API enu-meration, avoids 50 –91% of the regressions that affect the full RubricRefine method (depending on model), and scores at or above the CodeAct baseline on API-Bank (Table 5). This con-firms that the regression is caused by sample-dependent rubric over-specification rather than by the iterative repair loop itself. 
+
+Interpretation The failure mode is specific to settings where (1) the evaluation unit is a single step within a multi-turn dialogue, and (2) the rubric generator does not have access to the current dialogue state (only the task de-scription and tool registry). In such settings, the sample-dependent rubric cannot reliably de-termine which API is appropriate at the current step, and its task-specific criteria become coun-terproductive. This contrasts with M3ToolEval, where the full task is evaluated as a single exe-cutable program and the rubric’s task-specific criteria correctly target inter-tool contract vio-lations. 
+
+K Why Success Criteria Differ and Why That Is Good 
+
+Dimension M3ToolEval API-Bank Unit of scoring Whole task in-stance Next API step Primary question “Did the program solve the task?” “Was the API call correct?” Error visi-bility Integration + exe-cution effects Call-level schema & sequencing Best use End-to-end reliabil-ity Contract-level fidelity 
+
+The criteria are intentionally different. If a method improves on both, the resulting re-liability claim is substantially stronger than improvement on either view alone. 
+
+L Execution Accounting in the Single-Attempt Regime 
+
+Definition Used in This Paper One task instance permits at most one live execution attempt. 
+
+Implication If a method performs five re-finement rounds and then executes once, that sequence still counts as a single execution at-tempt. 
+
+Why This Definition Is Important This accounting separates reasoning and editing com-pute from environment interaction cost , which is the more meaningful unit in stateful or expen-sive environments where retrying after failure is operationally unattractive.                                                 
+
+> Condition GPT-4.1-mini GPT-4o o3-mini GPT-4.1
+> Full RubricRefine (baseline) 0.86 0.86 0.85 0.85
+> −Tool-choice rules ( ≈20% )0.79 (−.07 )0.69 (−.17 )0.83 (−.02 )0.88 (+.03 )
+> −Output-contract rules ( ≈13% )0.79 (−.07 )0.71 (−.15 )0.81 (−.04 )0.75 (−.10 )
+> −Call-signature rules ( ≈35% )0.75 (−.11 )0.73 (−.13 )0.83 (−.02 )0.79 (−.06 )
+> −Data-provenance rules ( ≈18% )0.85 (−.01 )0.79 (−.07 )0.85 (+.00 )0.88 (+.03 )
+
+Table 6: Rubric category ablation on M3ToolEval across four frontier models. Each row removes one rubric category (see Section 3.2.1) from all three system prompts. Values are success rates with ∆
+
+from the full-system baseline in parentheses. 
+
+M Rubric Category Ablation Details 
+
+Table 6 reports the full ablation results sum-marized in Section 4.6. Each row removes one rubric category from all three system prompts (rubric generation, scoring, and repair) while keeping the rest intact. All ablations use the full RubricRefine pipeline on M3ToolEval under the same single-attempt protocol, across four frontier models. Baselines are the full-system RubricRefine success rates from Table 1. Each reported number is a single 48-task run; per-condition SEs are ≈ 0.05 –0.07 , so individual differences within ±0.05 should be interpreted as within noise. Two patterns emerge from Table 6: 
+
+Consistently load-bearing rubric cate-gories Output-contract rules produce a neg-ative ∆ on every model (mean ∆ = −0.090 ,range −0.04 to −0.15 ), making them the sin-gle most consistently load-bearing rubric cat-egory. Call-signature rules are materially neg-ative on three of four models ( −0.11 and 
+
+−0.13 on GPT-4.1-mini and GPT-4o ; −0.06 
+
+on GPT-4.1 ; within noise on o3-mini ), with a mean ∆ = −0.080 . These two groups encode the most structural dimensions of the rubric (what shape the final emitted value must take, and how calls must conform to documented signatures) and remain load-bearing even at the frontier. 
+
+Capability-dependent rubric categories 
+
+Tool-choice and data-provenance rules show a different pattern: large negative effects on the weaker frontier models ( GPT-4o : −0.17 and 
+
+−0.07 ; GPT-4.1-mini : −0.07 and −0.01 ) but near-zero or slightly positive effects on the stronger models ( GPT-4.1 : +0 .03 and +0 .03 ;
+
+o3-mini : −0.02 and +0 .00 ). The two positive points on GPT-4.1 are each ≈ 1–2 tasks out of 48 and are within per-condition SE, so we interpret this as the rubric categories becom-ing redundant rather than harmful on stronger models. This is consistent with a capability-gradient interpretation: tool-choice and data-provenance describe semantic decisions (which tool to call and what data flows where) that stronger models handle reliably from documen-tation alone, so enumerating them in the rubric yields diminishing returns. Output-contract and call-signature, by contrast, describe struc-tural contracts that remain useful to enforce explicitly even when the model can recover the underlying intent. 
+
+Takeaway The ablation supports a refined claim: rubric structure matters (no ablated con-dition beats the full system on any model by more than 0.04 , within SE), but which rubric categories are load-bearing depends on verifier capability. Output-contract and call-signature are the robust dimensions across all four frontier models; tool-choice and data-provenance have their largest impact on weaker verifiers. This also clarifies why a purely structural checker (AST parsing plus signature matching) is insuf-ficient: output-contract checking is a semantic rather than structural dimension — knowing whether the emitted value matches the task’s expected shape requires understanding the task, not just the code — and it is the one dimension that is load-bearing even at the frontier. 
+
+N Static Checker Baselines 
+
+The static checker is a deterministic, non-LLM auditor that scores candidate code by parsing it with ast.parse and walking the AST to check tool-call sites against documented signa-tures extracted from the prompt. Specifically, it checks: (1) response-format conformance (Action:/End Action structure, bracket for-mat); (2) Python syntax validity of the action block; (3) call-shape conformance for each tool call—positional vs. keyword usage matching the documented signature, no undocumented keyword arguments, no starred or dict expan-sion in non-variadic calls, no missing required parameters; and (4) ambiguous binding pat-terns (keyword followed by positional). Each violation incurs a penalty that is subtracted from the maximum score. Crucially, the checker makes no judgment about semantic correctness: Method GPT-4.1-mini GPT-4o o3-mini GPT-4.1                                         
+
+> CodeAct (Baseline) .64 .67 .66 .65
+> Static Refine .71 ±.01 .72 ±.01 .73 ±.01 .70 ±.02
+> BoN+Static .54 ±.01 .56 ±.01 .57 ±.01 .55 ±.01
+> RubricRefine (Ours) .86 ±.01 .86 ±.01 .85 ±.01 .85 ±.01
+
+Table 7: Static checker baselines on M3ToolEval. Static Refine uses AST parsing and signature match-ing without LLM semantic reasoning. BoN+Static uses static scores for candidate selection. Rubri-cRefine included for reference. 
+
+it does not verify whether the correct tools are called, whether argument values are correct, whether call ordering or dataflow is sound, or whether the final answer is grounded in tool outputs. Table 7 reports M3ToolEval success rates for two baselines using this checker across all four frontier models: (1) Static Refine , which uses the static score and its issue descriptions as the revision signal in the same iterative repair loop as RubricRefine; and (2) BoN+Static ,which uses static scores to select among five candidates. Static Refine improves over CodeAct by 
+
++0 .06 –0.08 across models, capturing a fraction of RubricRefine’s +0 .18 –0.22 gain. This gap demonstrates that structural checking alone is insufficient: the higher-leverage verification dimensions (output-contract, tool-choice) re-quire semantic reasoning about the task and tool contracts, not just syntactic conformance. BoN+Static scores below CodeAct on every model (−0.08 –0.12 ), consistent with static scores being a noisy selection signal that ac-tively misleads the ranker in the multi-step setting. 
+
+O Per-Task Frontier-Model Breakdown 
+
+Table 8 reports the per-task M3ToolEval suc-cess rates for the narrative-critical compari-son between baseline CodeAct and RubricRe-fine across all seven evaluated models. This view makes the heterogeneity behind the ag-gregate results explicit. Travel itinerary plan-ning shows the largest and most consistent gains, improving by +0 .41 to +0 .48 on the four frontier OpenAI models, by +0 .81 on 
+
+Gemma-4-26B , by +0 .77 on Qwen3.6-27B , and by +0 .06 on Sonnet-4.6 (where the CodeAct baseline on travel is already 0.73 ). On the Model Method Travel (n=15 )Message (n=8 )DNA (n=8 )Trade (n=17 )                                                                                                         
+
+> GPT-4.1-mini CodeAct 0.45 0.74 0.61 0.77
+> GPT-4.1-mini RubricRefine 0.93 0.93 0.86 0.76
+> GPT-4.1-mini ∆+0.48 +0.19 +0.25 −0.01
+> GPT-4o CodeAct 0.43 0.78 0.80 0.76
+> GPT-4o RubricRefine 0.91 0.94 0.88 0.78
+> GPT-4o ∆+0.47 +0.16 +0.08 +0.02
+> o3-mini CodeAct 0.46 0.75 0.75 0.75
+> o3-mini RubricRefine 0.87 0.89 0.94 0.77
+> o3-mini ∆+0.41 +0.14 +0.19 +0.02
+> GPT-4.1 CodeAct 0.47 0.75 0.69 0.75
+> GPT-4.1 RubricRefine 0.89 0.89 0.95 0.75
+> GPT-4.1 ∆+0.42 +0.14 +0.26 +0.00
+> Gemma-4-26B CodeAct 0.03 0.54 0.75 0.77
+> Gemma-4-26B RubricRefine 0.83 0.78 0.90 0.89
+> Gemma-4-26B ∆+0.81 +0.24 +0.15 +0.12
+> Qwen3.6-27B CodeAct 0.03 0.52 0.70 0.71
+> Qwen3.6-27B RubricRefine 0.80 1.00 0.78 0.82
+> Qwen3.6-27B ∆+0.77 +0.48 +0.08 +0.11
+> Sonnet-4.6 CodeAct 0.73 0.90 0.75 0.69
+> Sonnet-4.6 RubricRefine 0.79 0.88 0.85 0.96
+> Sonnet-4.6 ∆+0.06 −0.02 +0.10 +0.27
+
+Table 8: Per-task M3ToolEval success rates for baseline CodeAct versus RubricRefine across all seven evaluated models. ∆ denotes RubricRefine minus CodeAct. Gemma-4-26B and Qwen3.6-27B 
+
+show the largest absolute gains on travel planning (+0 .81 and +0 .77 , vs. +0 .41 –+0 .48 on the frontier models), reflecting much weaker CodeAct baselines on this family and RubricRefine’s effectiveness at repairing inter-tool contract violations. 
+
+frontier models, message decoder and DNA se-quencer show moderate positive gains ( +0 .14 
+
+to +0 .26 ) and trade calculator is flat or within noise (range −0.01 to +0 .02 ). On the two open-weight models, the per-task pattern is similar in shape but larger in magnitude on every family ( Gemma-4-26B : message +0 .24 ,DNA +0 .17 , trade +0 .12 ; Qwen3.6-27B : mes-sage +0 .48 , DNA +0 .08 , trade +0 .11 ), reflect-ing the weaker CodeAct baselines on these mod-els rather than a qualitatively different mecha-nism. On Sonnet-4.6 , lifts are smaller on the easier families (message −0.02 , DNA +0 .10 )but the largest single-task-family gain comes on trade calculator ( +0 .27 ), the only family where the CodeAct baseline is weakest for this model. This pattern is consistent with the main-text interpretation that RubricRefine helps most where multi-step inter-tool contracts are richest, while leaving cases with already-strong base-lines relatively unchanged. 
+
+Figure 4: Success rate vs. wall-clock la-tency on M3ToolEval (GPT-4.1 ; same 
+
+method_eval_fixed_story run as the main tables). 
+
+Figure 5: Success rate vs. total LM calls on M3ToolEval (GPT-4.1 ; same 
+
+method_eval_fixed_story run as the main tables). 
+
+P Additional Scaling Analyses 
+
+P.1 Success vs. Wall-Clock Latency 
+
+Figure 4 provides the appendix wall-clock com-parison with the full method set and any ad-ditional budget sweeps. We use this plot to check that the main-paper comparison between RubricRefine and Self-Refine is not driven by a single reporting point. If RubricRefine traces a stronger success–latency frontier across mul-tiple operating points, then the improvement reflects a better use of inference time rather than merely more inference time. 
+
+P.2 Success vs. LM Calls 
+
+Figure 5 reports success against total LM calls. This controls for a different notion of budget than wall-clock latency: call count abstracts away from serving noise and asks how effec-tively each method turns model invocations into successful trajectories. Figure 6: Success rate vs. total to-kens on M3ToolEval (GPT-4.1 ; same     
+
+> method_eval_fixed_story run as the main tables).
+
+P.3 Success vs. Total Tokens 
+
+Figure 6 reports success against total token usage. This is the cleanest accounting view for prompt-length and verifier-overhead con-cerns because it directly measures how much language-model computation each method con-sumes. 
+
+P.4 Other Inference-Cost Views 
+
+The main paper reports success versus wall-clock latency because that is the cleanest deployment-facing measure. We additionally report success against total LM calls and to-tal tokens in the appendix using the same 
+
+method_eval_fixed_story run as the main ta-bles. These plots help distinguish whether a method’s gains arise from a better use of com-parable inference budget or simply from much larger token expenditure. 
+
+P.5 Inference Tradeoffs on Gemma-4-26B 
+
+The frontier-model tradeoff plots in the previ-ous subsections use API latency, which mixes model compute with network overhead. To check that RubricRefine’s efficiency advantage transfers to a different serving regime, we also report the same three views for Gemma-4-26B 
+
+served locally via vLLM (Figure 7). The quali-tative pattern matches the frontier-model plots exactly: RubricRefine achieves the highest success rate while using substantially fewer wall-clock seconds, LM calls, and tokens than Best-of-N +rubric. Combined with the round-stopping statistics in Table 10—where 
+
+Gemma-4-26B terminates at round 2 in 65 .5% of tasks and never exceeds round 3—this confirms that the early-stopping mechanism that drives      
+
+> Figure 7: Inference-cost tradeoffs on M3ToolEval for Gemma-4-26B (served locally via vLLM). Top: success vs. wall-clock latency per task. Middle: success vs. LM calls per task. Bottom: success vs. total tokens per task. RubricRefine achieves the highest success rate while consuming strictly less of each inference-cost axis than Best-of-N+rubric, matching the qualitative pattern seen on the frontier API models.
+
+RubricRefine’s efficiency is not specific to the OpenAI family. 
+
+P.6 Why Gemma-4-26B Fails at Rubric-Guided Ranking but Succeeds at Rubric-Guided Repair 
+
+The main-text results in Table 1 show a striking dissociation on Gemma-4-26B : rubric-guided se-lection (BoN+rubric) drops to 0.50 —below un-structured Best-of-N —while rubric-guided iter-ative repair (RubricRefine) reaches 0.85 , match-ing the strongest backbones evaluated. The two methods use the same model, the same rubric-generation prompt, and the same PASS/FAIL scoring protocol; they differ only in how the verifier’s output is consumed. This appendix reports the calibration evidence that explains the dissociation. Figure 2 (right panel) shows the reliability diagram for Gemma-4’s normalized RubricRe-fine scores on M3ToolEval (pooled across 10 trials; n = 580 candidate trajectories). The overall calibration is materially worse than on frontier models: ECE = 0 .165 versus 0.063 –
+
+0.090 on GPT-4.1-mini and GPT-4.1 (Sec-tion 4.5). This is consistent with prior findings that smaller models tend to produce less cali-brated self-assessments (Kadavath et al., 2022); 
+
+Gemma-4-26B is the smallest model we evalu-ate. The middle bins are the culprit. Scores in the 0.5–0.8 range show non-monotone accuracy: the 0.6 bin has accuracy 0.60 , but the 0.8 bin has accuracy 0.00 . A candidate scored 0.8 is therefore not reliably better than a candidate scored 0.6; mid-range scores convey ordinal noise rather than ordinal signal. The top bin of the RubricRefine reliability diagram tells a different story. The score-= 10 
+
+bin contains 329 of the 580 pooled trajectories (57% ) and has accuracy 0.87 despite confidence 
+
+1.0—a 0.13 calibration gap, worse than the frontier models’ top-bin alignment but still far better than any middle bin, and well-separated from the second-highest bin (accuracy 0.60 at 
+
+0.65 ). The corresponding AUROC is 0.795 , es-sentially identical to the frontier models ( 0.796 –
+
+0.764 ). On these trajectories, the verifier is a capable ranker. 
+
+But the AUROC on RubricRefine tra-jectories overstates what the verifier can do in general. To see why, we run the same calibration analysis on BoN+rubric trajecto-ries from the same model: same verifier, same rubric-generation prompt, same PASS/FAIL protocol, but the scored candidates come from 5 parallel samples of CodeAct rather than from iterative refinement. Figure 8 shows the result-ing reliability diagram. The verifier’s AUROC drops from 0.795 on RubricRefine trajectories to 0.700 on BoN+rubric trajectories, and ECE worsens from 0.165 to 0.210 . The top bin is also less reliable: the accuracy in the score-= 10 bin is 0.77 on BoN+rubric trajectories versus 0.87 
+
+on RubricRefine trajectories, and on the hard-est task family (travel itinerary planning) the BoN+rubric top bin is wrong 100% of the time              
+
+> Figure 8: Reliability diagram for Gemma-4-26B ’s normalized rubric scores on BoN+rubric trajecto-ries on M3ToolEval (10 trials; n= 2 ,160 ). Com-pare with Figure 2 (right panel), which shows the same model and verifier on RubricRefine trajec-tories. Overall ECE = 0 .210 , AUROC = 0 .700 ,and top-bin accuracy is only 0.77 —strictly worse on every metric than the RubricRefine-trajectory version.
+
+(0/13 across all trials; see inspection below). This is not a property of the verifier alone— the verifier is identical in both experiments. It is a property of what candidates the verifier is scoring . Inspection of the BoN+rubric trajec-tories on travel itinerary planning makes the mechanism concrete: across 135 BoN+rubric task instances (9 trials × 15 tasks), only 10% 
+
+of 5-candidate sets contain any candidate that reaches score 10 , and even among those 13 sets the selected top-scored candidate is never cor-rect at execution time. The underlying reason is that Gemma-4 ’s CodeAct baseline on travel plan-ning is 0.02 (Appendix O): five parallel CodeAct samples almost never contain a correct program, so no ranking strategy, however well-calibrated, can recover one. On easier task families (dna sequencer, trade calculator), where CodeAct al-ready produces mostly-correct candidates, the BoN+rubric top bin is more reliable ( 100% and 
+
+82% accuracy when score = 10 respectively). 
+
+The mechanism argument, stated care-fully. The apparent dissociation between BoN+rubric and RubricRefine on Gemma-4 
+
+therefore has two components, not one. First, the calibration-ranking component : middle-bin scores are non-monotone as a ranker (e.g., the 
+
+0.8 bin has accuracy 0.00 while the 0.6 bin has accuracy 0.60 on RubricRefine trajectories), so any method that consumes the full score distri-bution as a ranking signal inherits this noise. Second, the candidate-supply component : par-allel sampling from a weak-baseline generator rarely contains a correct candidate on hard tasks, so selection cannot recover what was never sampled. Iterative repair sidesteps both components because it does not rank across candidates—it uses the verifier’s PASS/FAIL decomposition to construct a candidate that meets each criterion. When a RubricRefine tra-jectory reaches score 10 , the candidate has been shaped by the rubric’s item-level directives, not merely selected from a pre-existing pool. This is why the top-bin accuracy is higher on Rubri-cRefine trajectories than on BoN+rubric tra-jectories even though the verifier is the same: the distribution of candidates being scored is qualitatively different. This observation also explains why AUROC alone is not a sufficient metric for the calibra-tion thesis. The AUROC of 0.795 on RubricRe-fine trajectories reflects the verifier’s ability to rank the specific candidates RubricRefine pro-duces , many of which have been refined to the top bin by construction. The AUROC of 0.700 
+
+on BoN+rubric trajectories reflects the same verifier’s ability to rank cold-sampled CodeAct candidates , which it handles less well because the signal is dominated by middle-bin miscal-ibration on flawed candidates. Section 4.5’s claim that RubricRefine needs only top-bin re-liability is therefore correct but narrower than it sounds: the top-bin reliability it relies on is 
+
+top-bin reliability on refinement-loop trajecto-ries specifically , which is produced jointly by the verifier’s recognition capability and the refine-ment loop’s ability to drive candidates toward rubric-passing forms. The practical implication is that a verifier need not be a good general-purpose ranker to support effective rubric-guided repair; it needs only to reliably recognize candidates that the refinement loop has shaped to pass its own criteria. This is a weaker and more plausible re-quirement than global calibration, and is what makes RubricRefine effective on models whose aggregate verifier calibration is poor. 
+
+P.7 Why Middle-Bin Calibration Matters for Ranking but Not for Top-Bin Stopping 
+
+This appendix makes explicit why rubric-guided selection (Best-of-N +rubric) and rubric-guided stopping (RubricRefine’s score-= 10 trigger) place fundamentally different demands on the verifier’s calibration profile, independent of any specific model. 
+
+What rubric-guided selection needs. 
+
+Best-of-N +rubric samples N candidates, scores each against a rubric, and picks the highest-scoring one. The selection is correct whenever the candidate with the highest execution accu-racy also has the highest rubric score. Formally, for any pair of candidates (ci, c j ) with rubric scores (si, s j ), the verifier must satisfy 
+
+P[correct (ci)] > P[correct (cj )] = ⇒ si > s j
+
+everywhere the two candidates’ scores land— including the middle bins. This is a mono-tone ranking requirement: the score function must preserve the order of candidate quality across the full score range. When the middle bins are miscalibrated—i.e., when two candi-dates scored 0.6 and 0.8 have accuracies 0.60 
+
+and 0.00 respectively, as on Gemma-4 in this evaluation—the monotone-ranking assumption is violated in exactly the region where most candidates’ scores actually fall. Selection then systematically picks worse candidates and can underperform random selection. 
+
+What RubricRefine’s early-stopping needs. RubricRefine does not rank candi-dates against each other. It generates a sin-gle candidate per round and asks the verifier one binary question: is the rubric score at its maximum? If yes, stop; if no, use the item-ized PASS/FAIL feedback to drive a revision and produce the next candidate. The only cal-ibration property required is that the top bin 
+
+be accurate—i.e., P[correct (c) | s(c) = smax ] is high enough to make stopping safe. No assump-tion is made about scores below the maximum, because no decision depends on them. Scores of 0.5, 0.6, or 0.8 all trigger the same action: revise. A candidate scored 0.4 and a candi-date scored 0.8 are treated identically by the early-stopping rule, so the fact that their true accuracies are swapped relative to their scores (on Gemma-4) has no effect on the method’s behavior. 
+
+The asymmetry in one sentence. Selec-tion is a ranking problem and requires scores to be monotone in quality across the full range; early stopping is a thresholding problem at the maximum score and requires only that the maximum-score bin be reliable. This is why the same verifier can fail as a ranker while still serving as an effective stopping signal, and is the structural reason RubricRefine remains effective on models like Gemma-4-26B whose ag-gregate calibration is poor. 
+
+Itemized PASS/FAIL versus scalar score. 
+
+A second, complementary property helps itera-tive repair but not selection. RubricRefine’s re-vision step consumes the verifier’s per-criterion PASS/FAIL judgments rather than the scalar score; even when the aggregate score is noisy, the specific failing criteria can be informative (“output is a string but should be a float” is a useful directive regardless of whether the overall score is 5 or 7). Selection, by contrast, collapses the full rubric output into a single scalar for ranking and therefore cannot exploit criterion-level diagnostic information. This compounds the calibration asymmetry above: iterative re-pair recovers useful signal from exactly the di-mension that selection throws away. 
+
+P.8 Budget-Parameter Scaling 
+
+The main experiments fix the two primary bud-get parameters—maximum refinement rounds 
+
+R = 5 for RubricRefine and number of candi-dates N = 5 for Best-of-N +rubric—at a sin-gle operating point. To assess sensitivity to these choices, we reconstruct per-round and per-candidate trajectories from saved candidate-level data across the four frontier models. Figure 9 reports the results. Panel (a) shows RubricRefine success rate as a function of the maximum refinement round R. Nearly all gains materialize in the first refinement round (R = 1 → R = 2 ): averaged across models, suc-cess jumps by +0 .17 absolute in a single round and then plateaus. This confirms that the early-stopping mechanism (Section 4.5) captures most of the available improvement and that increasing R beyond 2–3 yields negligible addi-tional benefit. One alternative interpretation of the R=2 saturation is that the generator’s     
+
+> Figure 9: Budget-parameter scaling on M3ToolEval. (a) RubricRefine success rate by maximum refine-ment round R. (b) Best-of-N+rubric success rate by number of candidates N. Shaded regions show
+> ±1 SE across available trials. Dotted lines indicate per-model CodeAct baselines.
+
+revision capacity is exhausted after one repair round regardless of verifier feedback quality— that the model cannot produce meaningfully different code on subsequent rounds. We cannot fully rule this out from the scaling curve alone; however, the calibration result (Section 4.5) provides indirect evidence against it: when the rubric score already reaches 10 at R = 1 (early stopping), the candidate is genuinely execution-ready at a higher rate than lower-scoring can-didates, suggesting that the verifier’s signal is informative and that saturation reflects success-ful repair rather than revision fatigue. A per-task-family breakdown of the R-scaling curve (Figure 10, Appendix P.8) further shows that saturation is not uniform: travel planning and message decoder saturate at R = 2 , while trade calculator—the most arithmetic-heavy family— does not improve with additional rounds and in fact degrades, consistent with the verifier’s con-tract checks being less effective for arithmetic-intensive tasks. Panel (b) shows Best-of-N +rubric success rate as a function of the number of candidates 
+
+N . In contrast to the sharp saturation of it-erative refinement, rubric-guided selection im-proves more gradually: each additional can-didate helps, but the curve is still rising at 
+
+N = 5 and has not yet reached the level that RubricRefine achieves at R = 2 . This compar-ison illustrates why iterative repair is a more compute-efficient use of rubric-structured veri-fication than parallel selection in this setting: one refinement round with targeted feedback achieves a larger gain than four additional in-dependently sampled candidates scored by the same rubric. Figure 10: Per-task-family breakdown of RubricRe-fine success rate by maximum refinement round R
+
+(o3-mini ). Travel planning and message decoder saturate at R = 2 . Trade calculator does not benefit from additional rounds and degrades beyond R = 2 ,consistent with rubric-guided contract checks being less effective for arithmetic-heavy tasks. Error bars show ±1 SE.                      
+
+> Model RubricRefine Avg. LM Calls BoN+rubric Avg. LM Calls Relative Reduction
+> GPT-4.1-mini 8.71 15.16 42.6%
+> GPT-4o 7.26 16.79 56.8%
+> o3-mini 7.88 16.07 51.0%
+> GPT-4.1 8.13 17.33 53.1%
+> Gemma-4-26B 4.47 11.10 59.7%
+> Qwen3.6-27B 5.07 11.33 55.3%
+> Sonnet-4.6 5.02 11.95 58.0%
+
+Table 9: Observed average total LM calls per M3ToolEval task for RubricRefine versus Best-of-
+
+N +rubric across the seven evaluated models, aver-aged over 10 trials per model. 
+
+P.9 Operational LM-Call Statistics 
+
+RubricRefine’s main efficiency claim can be stated directly in terms of observed inference us-age. Table 9 compares the observed average to-tal LM calls per M3ToolEval task for RubricRe-fine against the strongest non-iterative rubric-guided baseline (Best-of-N +rubric with N = 5 )across all seven evaluated models, averaged over 10 trials. Across models, RubricRefine reduces ob-served LM-call usage by 43 –60% relative to rubric-guided reranking while also improving or matching task success. The open-weight 
+
+Gemma-4-26B shows the largest relative reduc-tion ( 59 .8% ), indicating that the early-stopping behavior underlying RubricRefine’s inference efficiency is not specific to any particular model family. This direct LM-call reduction, together with the corresponding token and wall-clock                                     
+
+> Round GPT-4.1-mini GPT-4o o3-mini GPT-4.1 Gemma-4-26B Qwen3.6-27B Sonnet-4.6
+> 133% 38% 35% 35% 31% 0% 0% 257% 52% 56% 56% 66% 97% 99% 37% 6% 6% 6% 4% 3% 1% 4+ 2% 4% 2% 2% 0% 0% 0% Mean rounds 1.79 1.76 1.76 1.76 1.73 2.03 2.01
+
+Table 10: Fraction of M3ToolEval tasks terminating at each RubricRefine round, averaged across 10 trials. ≈ 90% of tasks reach score 10 by round 2. 
+
+reductions, is the operational evidence behind RubricRefine’s inference-efficiency advantage. Because the current logs do not always map cleanly onto a strict per-round call accounting, we treat lower observed LM-call usage as the primary evidence and interpret it as consistent with adaptive stopping rather than as an exact round-by-round execution trace. 
+
+P.10 Round-by-Round Stopping Distribution 
+
+Table 10 reports the fraction of M3ToolEval tasks that terminate at each refinement round for RubricRefine, averaged across 10 trials per model. The method’s early-stopping behavior is tight across every model tested: ≈ 90% or more of tasks terminate by round 2, mean round counts fall in [1 .73 , 2.03] , and no model averages more than 2.03 rounds per task. Tasks stopping at rounds 1–2 achieve score 10 in nearly all cases, confirming that early stopping at score 10 
+
+is tightly aligned with the verifier’s maximum-confidence judgment. Fewer than 10% of tasks require three or more rounds on any model. This indicates that rubric-guided early stopping is a generic property of the method rather than an artifact of a particular backbone. 
+
+Q Qualitative Example: A Rubric-Caught Silent Contract Failure 
+
+This appendix shows a concrete case drawn from our gpt-4.1 M3ToolEval run where RubricRefine’s rubric diagnoses a contract vi-olation that would be invisible to execution-based feedback. The failure is not an exception or crash; the initial candidate runs to com-pletion and produces a wrong answer silently. Execution feedback therefore offers no diagnos-tic signal, which is the failure mode Section 4.3 identifies as the dominant one in this setting. 
+
+Task. The task (message_decoder/ hex_caesar_combined_decoding ) asks the agent to “decode a message that was first converted to hexadecimal, then en-coded with a Caesar cipher with a shift of 2” from the hex-and-Caesar-shifted input 
+
+’4d4f5252’ . The tool registry exposes 
+
+convert_hex_to_ascii and caesar_decode ,among others. Ground-truth output: KMPP .
+
+Initial candidate (round 0, rubric score 3/10). The generator reverses the required operation order: 
+
+Action: decoded_caesar = caesar_decode( ’4d4f5252’, 2) ascii_message = convert_hex_to_ascii( decoded_caesar) print(ascii_message) End Action 
+
+This code is executable : every call has a valid signature, every argument has the right type, and the program terminates normally, produc-ing a garbage string rather than KMPP . An execution-feedback system (Self-Debug) sees a successful run that emits a wrong answer it cannot re-diagnose; there is no stack trace or error message to repair from. 
+
+Rubric feedback (verbatim PASS/FAIL items). The task-specific rubric generated for this instance explicitly encodes the inter-tool ordering and dataflow constraints. The verifier’s round-0 feedback marks: 
+
+• intent A (fail ): “The candidate reverses the order of operations, attempting to de-code the Caesar cipher first instead of decoding the hex-encoded message into ASCII.” 
+
+• ordering_dataflow D1 (fail ): “The candidate calls caesar_decode before 
+
+convert_hex_to_ascii , violating the re-quired order of operations.” 
+
+• ordering_dataflow D2 (fail ): “The output of convert_hex_to_ascii is not passed as the ’message’ argument to 
+
+caesar_decode .” 
+
+• execution_critical E1/E2 (fail ): “The hex-encoded message ’4d4f5252’ is not de-coded using convert_hex_to_ascii first, as required by the task.” 
+
+• final_answer F2 (fail ): “The emitted answer is not the correct decoded mes-sage derived from the hex-encoded, Caesar-shifted input.” Several other items (type-shape contracts, Cae-sar shift value, print format) are correctly marked pass , localizing the failure to the or-dering and dataflow dimensions rather than to syntactic or surface concerns. 
+
+Repair (round 1, rubric score 10/10). 
+
+The repair prompt receives the item-level PASS/FAIL structure and rewrites the can-didate so that the hex-to-ASCII step precedes the Caesar decoding, with the output of the first call feeding the message argument of the second: 
+
+Action: ascii_message = convert_hex_to_ascii( hex_string=’4d4f5252’) decoded_message = caesar_decode( message=ascii_message, shift=2) print(decoded_message) End Action 
+
+The verifier scores this 10/10, triggering early stopping. On execution, the program emits 
+
+KMPP , matching the ground truth. 
+
+Why execution feedback cannot catch this. The round-0 program is contract-violating but not exception-raising: it calls documented tools with documented signatures and produces a printed string that is merely semantically wrong. Self-Debug observes the execution trace—a successful run and a printed answer—but not the ground-truth comparison. Because Self-Debug retries only in response to runtime exceptions, silent wrong-answer fail-ures like this one terminate with no repair at-tempt: there is no error for execution feedback to act on. The rubric, in contrast, encodes the ordering and dataflow contract before execution and surfaces the violation as a specific item-level directive that the generator can act on. This is the mechanism behind the main-text finding that pre-execution contract-structured feedback recovers failures that execution feed-back cannot. 
+
+R Extended Related-Work Notes 
+
+This appendix expands the broader competitive positioning summarized in Appendix B. The key distinction is methodological. RubricRe-fine is an inference-time, registry-conditioned verification-and-repair framework that does not require additional training for a new tool reg-istry. This makes it directly usable with both open-weight models and API-only proprietary models. By contrast, many high-performing tool-use systems improve through post-training, synthetic data expansion, or execution-heavy feedback pipelines, and registry adaptation through post-training is less directly available when the deployed model is closed-weight or exposed only through an inference API. We view these directions as complementary rather than mutually exclusive. In particular, post-trained code-mode generators, including CodeActAgent-style setups, can still benefit from inference-time preflight verification when tool contracts change. 
+
+R.1 LLM-Based Code Verification and Execution Feedback 
+
+A substantial body of work uses LLMs or learned models to verify or filter generated code, but the dominant paradigm relies on execu-tion outcomes rather than pre-execution static checking. We situate RubricRefine within this landscape. 
+
+Execution-based filtering and verification. 
+
+CodeRL (Le et al., 2022) trains an actor-critic framework for code generation where a critic model scores candidate programs; the critic is trained on execution outcomes and used to guide beam search. LEVER (Ni et al., 2023) verifies LLM-generated programs by executing them on sampled inputs and using a learned verifier to aggregate execution signals. Alpha-Code (Li et al., 2022) uses large-scale sampling followed by clustering and execution-based fil-tering to select final outputs. These methods achieve verification through execution: they require live interaction with the environment to obtain the signal used for selection or repair. RubricRefine operates before any execution, making it applicable precisely in settings where these methods cannot be used — when execu-tion is rate-limited, stateful, costly, or unsafe to attempt on candidate code. 
+
+Execution-feedback refinement. Self-Debug (Chen et al., 2023) and Reflexion (Shinn et al., 2023) use execution error messages as feedback for iterative code revision. LATS (Zhou et al., 2023) performs tree search over agent trajectories using execution outcomes as the evaluation signal. We evaluate Self-Debug with real execution feedback as a direct baseline (Section 4.3): it improves modestly over single-pass generation but RubricRefine with zero execution outperforms it by a further +0 .10 absolute, suggesting that the dominant contract failures in this setting do not produce informative runtime errors. 
+
+Static and hybrid verification. Pre-Flect (Wang et al., 2026) uses prospective reflec-tion to anticipate failures before acting, which is the closest conceptual precedent for pre-execution checking in agent settings. Unlike RubricRefine, PreFlect operates on natural-language plans rather than executable code and does not use a structured rubric condi-tioned on tool documentation. The distinction between structural checking (call signatures, ar-gument types) and semantic checking (correct tool choice, output shape, data provenance) is relevant here: a purely structural checker can approximate the former but not the lat-ter. The rubric-category ablation (Section 4.6) shows that output-contract checking — a se-mantic rather than structural dimension, since it requires knowing what shape the task expects — is the most consistently load-bearing rubric dimension across models, which is precisely the dimension a structural checker cannot capture. 
+
+S Logprob-Weighted Scoring Variants 
+
+This appendix reports the full results for logprob-weighted scoring variants, which use the token-probability-weighted expected-value scoring mechanism of LLM-as-a-Verifier (Kwok, 2026). Because o3-mini does not expose token-level logprobs, these variants are evaluated on three models. 
+
+Method Descriptions 
+
+• Best-of-N (logprob) samples N can-didates and scores each using token-probability-weighted expected-value scor-ing (from top-k token logprobs) over a discrete 20-point letter-grade scale (A–T). The verifier is prompted to emit a sin-gle letter grade; the score is computed as Method GPT-4.1-mini GPT-4o GPT-4.1                                              
+
+> Best-of-N.65 ±.02 .65 ±.02 .62 ±.01
+> BoN (logprob) .70 ±.02 .66 ±.01 .68 ±.01
+> BoN+fixed rubric logprob .74 ±.01 .76 ±.01 .73 ±.02
+> BoN+rubric logprob .78 ±.01 .76 ±.01 .76 ±.01
+> RubricRefine (Ours) .86 ±.01 .86 ±.01 .85 ±.01
+
+Table 11: M3ToolEval success rates (mean ± SE across trials) for logprob-weighted scoring variants. Plain Best-of-N and RubricRefine are included for reference. Logprob variants are not available for 
+
+o3-mini (no token-level logprob support). 
+
+the probability-weighted mean of all valid grade tokens in the top-k logprobs, nor-malized to [0 , 1] . This variant isolates the effect of logprob-based scoring without any rubric structure. 
+
+• Best-of-N +fixed rubric (logprob) 
+
+combines the fixed, task-independent rubric with logprob-weighted scoring. This isolates the effect of rubric specificity within the logprob scoring family. 
+
+• Best-of-N +rubric (logprob) combines sample-dependent rubric verification with token-probability-weighted scoring: each candidate is scored against the task-specific rubric using the same expected-value mechanism derived from top-k to-ken logprobs. This tests whether rubric structure provides additional value beyond improved scoring calibration. 
+
+Results Tables 11 and 12 report success rates for the logprob variants alongside the non-logprob baselines and RubricRefine for refer-ence. On M3ToolEval, logprob scoring con-sistently improves over plain Best-of-N , and adding rubric structure on top of logprob scor-ing yields further gains. On API-Bank, logprob variants cluster near the baseline, consistent with the main-text pattern. 
+
+T Reproducibility Notes 
+
+The repository already contains scripts for M3 and API-Bank method-comparison runs. For the scope of this paper, we recommend: 
+
+• use M3 + API-Bank only for main report-ing, 
+
+• report both native metrics (M3 success, API accuracy),                                                 
+
+> Method GPT-4.1-mini GPT-4o GPT-4.1
+> Best-of-N.73 ±.00 .73 ±.00 .73 ±.00
+> BoN (logprob) .75 ±.01 .76 ±.01 .77 ±.01
+> BoN+fixed rubric logprob .75 ±.01 .77 ±.01 .77 ±.01
+> BoN+rubric logprob .76 ±.01 .76 ±.01 .77 ±.01
+> RubricRefine (Ours) .69 ±.01 .70 ±.01 .69 ±.01
+
+Table 12: API-Bank success rates (mean ± SE across trials) for logprob-weighted scoring variants. Plain Best-of-N and RubricRefine are included for reference. 
+
+• report single-attempt success together with pre-execution efficiency statistics.

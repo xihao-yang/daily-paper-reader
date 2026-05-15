@@ -1,0 +1,1009 @@
+Title: FuzzAgent: Multi-Agent System for Evolutionary Library Fuzzing
+
+URL Source: https://arxiv.org/pdf/2605.14431v1
+
+Published Time: Fri, 15 May 2026 00:59:00 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# FuzzAgent: Multi-Agent System for Evolutionary Library Fuzzing 
+
+Yunlong Lyu 
+
+The University of Hong Kong yunlong.lyu97@gmail.com 
+
+Peng Chen 
+
+Independent Researcher spinpx@gmail.com 
+
+Fengyi Wu 
+
+Southeast University fengyiwucs@gmail.com 
+
+Junzhe Yu 
+
+The University of Hong Kong junzheyu1@connect.hku.hk 
+
+Kit Long Hon 
+
+The University of Hong Kong j2004nol@gmail.com 
+
+Hao Chen 
+
+The University of Hong Kong chenho@hku.hk 
+
+Abstract —Library fuzzing is essential for hardening the software supply chain, but adopting it at scale remains expensive. Practitioners still spend substantial effort on environment setup, struggle to generate harnesses that respect intricate API constraints, and lack reliable means to tell genuine library bugs from harness-induced crashes. Recent LLM-based systems automate parts of this pipeline, yet they typically operate as one-shot code generators that ignore runtime feedback, which limits both the depth of code they reach and the validity of the bugs they report. We argue that effective library fuzzing is iterative by nature: each campaign exposes new coverage bottlenecks and crashes, and the next campaign should evolve from these signals rather than restart from scratch. Building on this insight, we present FuzzAgent , a multi-agent system that turns library fuzzing into an evolutionary process, in which a team of specialized agents collaborates over the full fuzzing lifecycle and grounds every decision in concrete runtime evidence, so that the harness suite is successively refined toward deeper coverage and higher-fidelity crash analysis across rounds. We evaluate FuzzAgent on 20 real-world C/C++ li-braries against four state-of-the-art baselines (OSS-Fuzz ,
+
+OSS-Fuzz-Gen , PromptFuzz , and PromeFuzz ). FuzzAgent 
+
+completes the full fuzzing lifecycle for all 20 libraries without human intervention and reaches 179,619 branches, exceeding 
+
+OSS-Fuzz , PromptFuzz , PromeFuzz , and OSS-Fuzz-Gen by 45.1%, 73.2%, 92.1%, and 191.2%, respectively. FuzzAgent also identifies 102 genuine library bugs, 78 of which have already been acknowledged and fixed by upstream maintainers. 
+
+I. I NTRODUCTION 
+
+Fuzzing is a widely adopted automated software testing technique. It generates and executes a large number of random inputs to uncover vulnerabilities in software systems [ 1], [ 2], [ 3], [ 4 ]. Over the years, fuzzing has advanced substantially through coverage guidance [ 5], [ 6], grammar-based input generation [ 7], [ 8], and hybrid techniques that combine fuzzing with symbolic analysis [ 9], [ 10 ]. As of 2025, the continuous fuzzing platform OSS-Fuzz [ 11 ] has reported over 50,000 bugs in open-source software. With community maintenance and integration into development workflows, OSS-Fuzz helps projects routinely detect regressions and improve software security and reliability. As fuzzing matures, improving results by only generating new inputs for well-tested targets becomes increasingly difficult, because further code coverage gains are often blocked [ 12 ]. This has motivated growing interest in library fuzzing , which focuses on synthesizing new fuzz targets (harnesses) rather than only mutating inputs [ 13 ], [ 14 ], [ 15 ], [ 16 ], [ 17 ], [ 18 ], [ 19 ], [ 20 ], [21 ], [ 22 ]. Library fuzzing aims to broaden test coverage by analyzing a library and composing Application Programming Interface (API) invocations into new targets. Such targets can expose vulnerabilities that are missed by existing, manually integrated harnesses. For example, PromptFuzz [20 ] achieves over 60% higher code coverage than OSS-Fuzz on the same set of libraries. Library fuzzing has evolved from manual harness develop-ment [ 11 ], [ 23 ] to a spectrum of approaches that increasingly automate harness generation [ 13 ], [ 14 ], [ 15 ], [ 16 ], [ 17 ], [ 18 ], [19 ], [ 20 ], [ 21 ]. Traditional approaches (e.g., LibFuzzer [23 ]and OSS-Fuzz [ 11 ]) relied heavily on human expertise to write harnesses and configure fuzzing environments. In contrast, more recent work aims to reduce this burden by automat-ically synthesizing API-invocation sequences into fuzzing harnesses. Consumer-based approaches (e.g., Fudge [13 ], 
+
+FuzzGen [ 14 ], APICraft [ 16 ], and UTOpia [ 24 ]) primarily utilize static and dynamic analysis techniques. They extract API usage patterns from existing codebases, enabling the generation of harnesses that reflect real-world usage scenarios. To eliminate reliance on existing codebases, producer-based ap-proaches (e.g., GraphFuzz [17 ], AFGen [19 ], Nexzzer [25 ], and Hopper [18 ]) focus on generating harnesses from scratch. They analyze API specifications to explore possible API combinations. Recently, LLM-based approaches (e.g., 
+
+OSS-Fuzz-Gen [ 26 ], CKGFuzzer [ 27 ], PromptFuzz [20 ], and PromeFuzz [ 22 ]) have achieved notable progress by leveraging the code comprehension capabilities of LLMs. Unlike rule-based approaches, LLMs can reason about API semantics, infer parameter constraints, and produce valid harnesses that respect the calling conventions. Despite these advances in harness generation, deploying library fuzzing at scale remains challenging: executing existing fuzzing tools still requires substantial manual effort for envi-ronment setup, struggles to produce valid harnesses efficiently, and provides limited support for crash validation. 
+
+> arXiv:2605.14431v1 [cs.SE] 14 May 2026
+
+Environment setup and configuration remain labor-intensive [ 28 ], [ 29 ], [ 30 ], [ 31 ], [ 32 ], [ 33 ]. In practice, de-velopers must get many components to work together, in-cluding instrumentation [ 23 ], [ 34 ], [ 35 ], library builds [ 36 ], dictionary preparation [ 37 ], seed corpus construction [ 38 ], harness development, fuzzer execution, and result triage. Zhao et al. [ 33 ] report that even experienced developers struggle with configuration tasks such as compiling libraries, constructing dictionaries, and preparing seed corpora and harnesses, often requiring multiple rounds of manual adjustments. In a user study with 32 CS students and 6 Capture the Flag (CTF) players [ 29 ], only two participants completed the setup for a small library (120k lines of code) within 20 hours, and none succeeded for a complex library (600k lines of code). Even with the guidelines and templates provided by OSS-Fuzz [11 ], onboarding a new library is often fragile as dependencies and build tooling evolve over time [ 32 ], [ 31 ]. Nourry et al. [ 32 ] found that 82 of 171 OSS-Fuzz issues were related to build failures, and Pl ¨oger et al. [ 31 ] report that 53% of participants failed at the build stage when setting up fuzzing for new libraries. The challenge is amplified when adopting newer fuzzers that require custom builds, instrumentation, and configuration, pushing users into repeated trial-and-error iterations [ 33 ]. Even recent systems [ 18 ], [ 20 ], [ 22 ] still require manual effort to write custom build scripts and prepare environments; in our evaluation (Section V-A ), integrating a new library into 
+
+PromptFuzz and PromeFuzz took 8 hours and 12 hours on average, respectively. Designing effective fuzzing harnesses is non-trivial. A harness is a small driver program that maps the fuzzer-generated byte stream into API arguments and executes a sequence of library calls. The chosen APIs, their call order, and how inputs are mapped to arguments largely determine which internal checks and code paths can be reached. However, modern li-braries often expose many APIs with intricate interdependencies and strict parameter constraints. Harnesses that violate these constraints either fail early and explore only shallow paths or trigger false positive crashes [ 18 ], [ 20 ]. Producing valid and coverage-effective harnesses therefore requires capturing non-trivial relationships among APIs and their parameters, which often requires substantial domain knowledge [ 39 ], [ 33 ]. State-of-the-art systems such as Hopper [ 18 ], PromptFuzz [ 20 ], and PromeFuzz [ 22 ] show that automated harness generation can improve coverage, but they often rely on attempt-intensive heuristics to obtain valid and effective harnesses. Hopper [ 18 ]uses rule-based inference of API constraints, yet it can miss higher-order interactions among APIs. PromptFuzz [ 20 ] mu-tates API compositions to prompt LLMs and then filters outputs, which can yield many invalid harnesses and shallow exploration. Although PromeFuzz [ 22 ] pre-generates a full codebase summary to supply context, but this O(n2) summarization becomes prohibitively costly on large libraries, and the resulting context can be redundant or noisy since LLMs are continuouly upgrading and already extensively pretrained on open-source code [40], [41], [42], [43], [44]. Crash reports from library fuzzing are often harder to interpret than those from standalone programs or OSS-Fuzz in-tegrated targets. They can be triggered by invalid API sequences or unmet preconditions in generated harnesses rather than true defects in the library implementation [ 39 ], [ 33 ]. Determining whether a crash reflects a real vulnerability therefore requires reasoning about library semantics and execution context, often through step-by-step debugging with tools such as GDB or Valgrind, which is time-consuming and error-prone [ 32 ], [ 33 ]. Many library fuzzing approaches [ 13 ], [ 14 ], [ 15 ], [ 16 ], [ 17 ], [18 ], [ 19 ], [ 20 ], [ 21 ], [ 22 ] provide limited support for crash validation, which can lead to a high rate of false positives. Current crash filters are often based on coarse heuristics and lack sufficient semantic context [ 18 ], [ 20 ], [ 22 ]. For example, 
+
+Hopper [18 ] labels crashes outside inferred constraints as false positives, PromptFuzz [ 20 ] relies on short executions that may miss issues that manifest later, and PromeFuzz [22 ] asks LLMs to judge crashes from stack traces and API summaries with limited runtime information. Recent advances in large language models (LLMs) and multi-agent systems offer a new path toward addressing these challenges. LLMs have demonstrated remarkable capabilities in code generation, program analysis, and decision-making, while multi-agent systems provide a principled way to decompose complex tasks into smaller, manageable components and coordinate them step by step [ 45 ], [ 46 ], [ 47 ]. Inspired by these advances, we propose FuzzAgent , a novel multi-agent approach to evolutionarily solve bottlenecks encountered in library fuzzing. The core insight of FuzzAgent is to transition LLM-based library fuzzing from open-loop code generators to closed-loop reasoning agents, which can iteratively refine their actions based on feedback from the library fuzzing lifecycle. By equipping them with specialized interfaces, we bridge the gap between static analysis and dynamic fuzzing feedback, allowing the model to ground its generative capabilities in concrete runtime evidence and iteratively refine its inputs based on execution states. Specifically, 1) We design a set of library-fuzzing-specific interfaces and a multi-agent architecture that gives LLMs the ability to gather comprehensive, runtime-grounded information and take concrete actions throughout the full fuzzing lifecycle (Section III). 2) Building on this foundation, we introduce an evolutionary, agent-driven strategy that closes the loop between execution feedback and harness refinement, allowing FuzzAgent to progressively test deeper library code in a fully automated, end-to-end manner (Sec-tion IV). We evaluate FuzzAgent on 20 real-world C/C++ li-braries against four state-of-the-art baselines ( OSS-Fuzz ,
+
+OSS-Fuzz-Gen , PromptFuzz , and PromeFuzz ). FuzzA-gent completes the full fuzzing lifecycle for all 20 libraries without any human intervention while achieving 179,619 branch coverage, surpassing OSS-Fuzz , PromptFuzz ,
+
+PromeFuzz , and OSS-Fuzz-Gen by 45.1%, 73.2%, 92.1%, and 191.2%, respectively. In terms of bug detection, FuzzAgent 
+
+identifies 102 genuine library bugs, of which 78 have been acknowledged and fixed by upstream maintainers. 2II. B ACKGROUND                                
+
+> 1 extra_cmake_flags=’’ 2 if [[ $CFLAGS = *sanitize=memory* ]]; then 3extra_cmake_flags+="-DAOM_TARGET_CPU= generic" 4 fi 5 if [[ $CFLAGS = *sanitize=address* ]]; then 6extra_cmake_flags+=" -DSANITIZE=address" 7 fi 89 cmake -DCMAKE_INSTALL_PREFIX="$WORK" \10 -DCMAKE_C_COMPILER="$CC" \11 -DCMAKE_CXX_COMPILER="$CXX" \12 -DCONFIG_AV1_ENCODER=1 \13 -DCONFIG_AV1_DECODER=1 \14 ... 15 ${extra_cmake_flags} \16 "$SRC" 17 18 make -j$(nproc) 19 make install
+> Fig. 1. An example build script snippet for compiling libaom with fuzzer instrumentation.
+
+A. Library Fuzzing Workflow 
+
+Library fuzzing follows the standard fuzzing workflow but requires an additional step: writing a harness to call library APIs and mitigate the false positives. In practice, setup typically involves the following phases [33], [29], [31], [28]: 1) Building and Instrumentation : The target must be compiled with instrumentation to support (i) feedback-driven fuzzing (e.g., LibFuzzer [ 23 ] and AFL [ 5]) and (ii) bug detection (e.g., ASAN [ 34 ], UBSAN [ 35 ], and MSAN [ 48 ]). This step often requires specialized compiler flags, nontrivial build configurations, and careful dependency management. 2) Dictionary and Seed Preparation : To bootstrap a fuzzing campaign, users often prepare token dictionar-ies [ 49 ], [ 37 ] and seed corpus [ 38 ], [ 50 ]. These artifacts guide mutations toward format-aware inputs and improve early exploration, but producing high-quality dictionaries and seeds typically requires domain knowledge of the expected input structure. 3) Harness Generation : Library fuzzing requires a harness that drives the library through its exposed APIs. In practice, libraries may provide dozens or hundreds of interdependent functions, so an effective harness must respect API preconditions, object lifetimes, and calling sequences. Writing such harnesses is time-consuming and error-prone, and it often requires deep understanding of the target library[18], [25], [20], [22] . 4) Fuzzer Execution : With the prepared harnesses, dic-tionaries, and seed inputs, users can start the fuzzing campaign using their chosen fuzzing engines [ 51 ], [ 23 ]. During execution, users should monitor code coverage metrics and anomalous behaviors, such as crashes, memory violations, assertion failures, or timeouts. 5) Crash Validation : Once crashes or anomalies are de-tected, users need to analyze the results and identify the root cause. This phase often requires manual inspection and iterative debugging using tools like GDB or Valgrind to triage and confirm the issues. Each of these phases is non-trivial and demands substantial manual effort and domain expertise. Take the instrumention phase as an example, participants in the study by Zhao et al. [ 33 ] reported that the overall process is overly complex, noting that “they treat configuration as an iterative, trial-and-error process: run the tool, observe what breaks, adjust the harness or flags, and try again.” As shown in the example build script in Figure 1, users must not only understand how to build the library itself (lines 9-16) but also carefully handle instrumentation flags that may conflict with the library configuration (lines 1-7). In this case, users must account for project-specific build flags; otherwise, the build will fail because the -Wl,-z,defs flag enabled in libaom conflicts with ASAN [34 ] and MSAN [ 48 ]. Furthermore, the complexity of the fuzzing setup increases significantly when attempting to use new fuzzers, as many require custom compilers or instrumentation flags. As observed in the study, “these extra steps may fail if you enabled certain optimization flags, or even fail by themselves, since open-source and legacy programs can be surprisingly fragile” [33 ]. To address these challenges, our work focuses on automating the entire library fuzzing workflow, thereby reducing the manual effort and expertise required. Environment   
+
+> Agents
+> Tasks
+> Tools
+> Actions Execution
+> Observation
+> Fig. 2. Multi-agent System
+
+B. Multi-Agent Systems 
+
+Multi-agent systems are computational frameworks where multiple autonomous agents interact to solve problems that are difficult for individual agents to tackle alone [ 45 ]. Recent advances in Large Language Models (LLMs) have signifi-cantly enhanced the capabilities of these systems by enabling agents to understand complex contexts, generate sophisticated responses, and make nuanced decisions [ 52 ]. These systems are particularly effective for complex tasks that benefit from 3Delegate 
+
+> Library Builder
+> Dictionary Generator
+> Fuzzing Setup Agents
+> Seed Generator
+> Harness
+> Generator
+> Fuzzer
+> Executor
+> Fuzzer-specified Agents
+> Crash
+> Analyzer
+> Coverage
+> Analyzer
+> Analysis Agents
+> Manager Agent
+> Setup
+> Fuzzing
+> Inspection
+> Delegate
+> Delegate
+> C/C++ Libraries
+> Input
+
+Agent Pool  Actions 
+
+> Feedback and Observation
+
+Interfaces    
+
+> Computer Use Interface
+> Web Search Interface
+> Coverage Analysis Interface
+> Crash Debugging Interface
+> Fuzzing Artifacts
+> Building
+> Artifacts Dictionary Seeds
+> Fuzzing Harnesses Fuzz Targets
+> Fuzzer Instances
+
+Environment    
+
+> Hierarchical
+> Code Coverage Crashes
+> Fuzzing Outcomes
+> Execution
+> Call
+> Call
+> Call Fig. 3. Multi-agent architecture of FuzzAgent .
+
+decomposition into specialized subtasks, each handled by agents with specific expertise. With these advancements, LLM-powered agents can now perform complex reasoning, compre-hend domain-specific knowledge, and generate high-quality outputs across various domains, including code generation and program analysis [47]. A typical multi-agent system workflow, often utilizing techniques like ReAct [53 ] for reasoning and acting, is illustrated in Figure 2. In this framework, tasks are distributed to an agent pool where agents are designed with specific roles and capabilities. These agents collaborate to achieve the overall objective. Agents utilize provided tools as interfaces to interact with the external environment, allowing them to gather information, perform computations, or manipulate data as needed. The observations collected from the environment are then fed back to the agents, enabling them to refine their strategies and actions iteratively. This dynamic interaction between agents and their environment allows the system to adapt its strategies and improve performance over time. III. A RCHITECTURE OVERVIEW 
+
+FuzzAgent is a multi-agent system that performs fully automated library fuzzing and evolves its performance over time. It takes only the target library’s source code as input. As shown in Figure 3, the architecture of FuzzAgent consists of three primary components: the Agent Pool , the Interfaces , and the Environment . The Agent Pool hosts a set of specialized agents, each handling a distinct phase of the fuzzing lifecycle. To support these agents, FuzzAgent provides four dedicated 
+
+Interfaces for computer usage, web searching, code coverage analysis, and crash debugging. Each interface offers a high-level abstraction over the capabilities needed for library fuzzing, so agents can concentrate on strategic decisions and guiding the evolutionary process instead of handling low-level system operations. The Environment maintains a stateful workspace in which agents execute tasks and persist their results, ensuring data consistency and effective resource management throughout the fuzzing campaign. Within this environment, agents act through the interfaces and receive feedback and observations to iteratively refine their decisions. Built on this architecture, FuzzAgent orchestrates a sys-tematic workflow that drives evolutionary library fuzzing. The workflow follows a set of specialized strategies (detailed in Section IV), each encoded as agent prompts paired with interface tools that translate fuzzing feedback into the next concrete action. This design decomposes the complex library fuzzing task into manageable subtasks, each handled by an agent with specific expertise. The following subsections describe each component in detail. 
+
+A. Agent Pool 
+
+The Agent Pool groups specialized agents along the three phases of library fuzzing: setup, execution, and outcome analysis. Each agent owns one aspect of the process, which keeps the system modular and lets every agent operate within its area of expertise. A Manager Agent [ 45 ], [ 46 ] coordinates the pool by picking the next agent to run based on the current workspace state and the latest feedback signals. The remainder of this subsection describes each agent’s role and outputs. 
+
+1) Fuzzing Setup Agents: Setup agents lay the groundwork for effective library fuzzing by preparing the build environment, the dictionary, and the initial seeds. 
+
+Library Builder: This agent produces reliable build artifacts (e.g., headers, static and dynamic libraries) with the required instrumentation (e.g., sanitizers, coverage tracking). It inspects the source code and build configurations, and then automates the build process to keep the result reproducible and correct. 4Dictionary Generator: This agent builds a compact and effective fuzzing dictionary tailored to the target library by combining domain-specific knowledge with existing materials acquired from the Web. 
+
+Seed Generator: This agent collects example files as initial fuzzing inputs that conform to the target library’s specification, protocol, or data format. 
+
+2) Fuzzer-Specific Agents: Building on the artifacts from the setup agents, fuzzer-specific agents follow the optimization instructions from the analysis agents to drive targeted fuzzing exploration. They generate targeted harnesses and run the corresponding fuzzing campaigns to explore the library code. 
+
+Harness Generator: This agent generates targeted fuzzing harnesses for the coverage bottlenecks reported by the Coverage Analyzer . Each harness specifies the APIs or code regions to exercise, along with the required dependencies and invocation sequences. The agent also validates the harness through compilation to ensure correctness. 
+
+Fuzzer Executor: This agent runs the fuzzing campaign on a generated harness in a blocking manner and monitors the process for crashes and coverage metrics. 
+
+3) Analysis Agents: Analysis agents inspect fuzzing out-comes to locate the bottlenecks that limit effectiveness, and turn their findings into optimization instructions for the other agents so that the process continuously improves. 
+
+Crash Analyzer: This agent investigates the root cause of each crash by interactively inspecting source code and debugging the crash program. It triages every crash as either a genuine library bug or a harness error. It then either provides feedback to fix the harness or produces a detailed report for the bug. 
+
+Coverage Analyzer: This agent identifies the most critical coverage gaps left by the current fuzzing effort. It then derives concrete API invocation sequences that, if exercised correctly, are expected to yield the largest coverage gain, and uses them to guide the generation of the most promising harnesses. 
+
+B. Interfaces 
+
+FuzzAgent provides four dedicated interfaces that give agents the capabilities required for library fuzzing while shielding them from low-level complexity. Each interface is a collection of tools that exposes a high-level abstraction of one functional area needed to fulfill library fuzzing objectives. We design these interfaces by following common practices from the fuzzing community [ 5], [ 23 ], [ 11 ], [ 29 ], [ 31 ], [ 32 ], [ 33 ] and by automating the error-prone low-level operations behind them (e.g., file manipulation, instrumentation, fuzzer compilation, web searching, coverage extraction, and crash debugging). The abstraction exposes actions that map directly to library fuzzing tasks, but still preserves the flexibility agents may need (e.g., passing extra flags during fuzzer compilation). With this design, agents can issue concise and purposeful actions instead of orchestrating brittle low-level steps, which are a common source of incorrect or unexpected results in agentic systems [54], [55]. We detail each interface below. 
+
+Computer Use Interface. This interface lets agents perform file operations (reading, writing, and searching) and execute both system and specialized commands. The file operation tools are adapted from SWE-Agent [ 47 ] and tailored to library fuzzing for simplicity, providing robust and efficient file manipulation. The specialized command tools abstract recurring procedures such as library building, harness compilation, and fuzzing execution; each tool encapsulates a routine task sequence drawn from common fuzzing practices, which improves correctness and hides incidental complexity. Overall, the interface lets agents interact with the underlying system to retrieve and manipulate files, examine library specifications, and manage fuzzing processes, mirroring the workflow of human experts and enabling the fully automated execution of library fuzzing. 
+
+Web Search Interface. This interface lets agents reach online resources and documentation when needed. It exposes tools for querying search engines, extracting relevant information, and downloading materials from the Web. With these tools, agents can gather external knowledge about the target library, such as API usage examples, common pitfalls, and best practices, and break out of otherwise unrecoverable error loops during library building and harness generation. The same tools also retrieve example files used to prepare the fuzzing dictionary and seeds, which are hard to generate by LLMs alone, especially for libraries that require specific binary formats. The Web Search Interface therefore extends agent capabilities to the broader knowledge available on the Web and helps address problems that LLMs cannot solve on their own. 
+
+Coverage Analysis Interface. This interface provides tools for in-depth analysis of code coverage data, giving agents a comprehensive view of the current coverage status. This goes beyond the simple metrics produced by the lightweight instrumentation in standard fuzzers (e.g., basic-block transitions in AFL [ 5]). Inspired by FuzzIntrospector [ 56 ], we organize coverage data into a hierarchy that spans from the coarse-grained project level to the fine-grained branch level, and present it in a compact, human-readable form so that agents can locate bottlenecks at the appropriate granularity. From this view, agents can pinpoint the most severe coverage gaps and reason about concrete remediation strategies, which in turn drives the generation of targeted harnesses for maximum coverage gain. The hierarchy is organized as follows:  
+
+> •
+
+Project-Level : Overall library coverage status  
+
+> •
+
+Module-Level : Component-specific coverage  
+
+> •
+
+File-Level : File-by-file coverage  
+
+> •
+
+API-Level : API function-specific coverage  
+
+> •
+
+Internal-Function-Level : Internal function-specific cover-age and blockage status  
+
+> •
+
+Branch-Level : Code branch blockage status 
+
+Crash Debugging Interface. This interface provides tools for in-depth crash context analysis, so that agents can determine the actual root cause of a crash instead of guessing from the call trace. Its capabilities cover analyzing crash dumps and stack traces, inspecting source code, and debugging crash programs. Using CASR [57 ], the interface automatically correlates crash traces with the corresponding source snippets to assemble the crash context. In parallel, custom scripts running in GDB ’s 5non-interactive batch mode [ 58 ] let agents reproduce crashes and inspect runtime states at the crash point in a systematic way. Together, these tools enable accurate crash triage through evidence-based root cause analysis. 
+
+C. Environment 
+
+The Environment maintains a stateful workspace for the library fuzzing workflow. In agentic systems, agents act dynamically and can easily drift from the intended workflow, causing stability issues [ 59 ], [ 60 ]. Prior automated library fuzzing approaches sit at the opposite extreme: they are predefined and rigid, gaining stability and reproducibility at the cost of adaptability [ 61 ]. The Environment bridges these two extremes by imposing structural constraints on an otherwise flexible workflow. Concretely, the Environment defines a strict directory layout for the fuzzing workspace, covering source code, build artifacts, fuzzing inputs and outputs, and analysis results. Agents are not allowed to read or write outside this layout, and any violating action is rejected. Before an agent exits, the Environment validates the current directory state to confirm that the agent followed the expected execution trace and produced the required results. By continuously monitoring this directory state, the Environment also tracks the overall progress of the campaign, guiding the workflow to iterative targeted exploration and outcome analysis. IV. E VOLUTIONARY LIBRARY FUZZING 
+
+Section III presents the architecture of FuzzAgent , namely the specialized agents, interfaces, and environment that enable automated library fuzzing. These components alone, however, are not enough. As in prior library fuzzing work [ 18 ], [ 20 ], [25 ], [ 27 ] that relies on custom analyses or heuristics to drive the process, FuzzAgent still needs well-defined strategies that turn feedback into concrete next actions. Building on FuzzAgent ’s multi-agent architecture, we organize the fuzzing process into the workflow shown in Figure 4, with each phase guided by a dedicated strategy: 1) Fuzzing Environment Setup. FuzzAgent builds and instruments the target library in a trial-and-error manner and prepares the initial fuzzing dictionary and seeds to set up the fuzzing environment for effective exploration. 2) Targeted Fuzzing Exploration. FuzzAgent assembles a targeted harness under the guidance of the Coverage An-alyzer and Crash Analyzer , and runs fuzzing campaigns on this harness as well as collects the resulting data. 3) Coverage-driven Evolution. If no crashes are found, 
+
+FuzzAgent inspects the hierarchical coverage data to locate the most critical gaps and proposes new harnesses to reach them under thorough analysis of API relations. 4) Crash-driven Evolution. If crashes are observed, Fuz-zAgent triages them through iterative debugging: harness-induced crashes yield feedback to fix the harness, while genuine library bugs are recorded for reporting. Whereas prior approaches encode their analyses and heuris-tics in hard-coded logic, agentic systems steer LLMs through textual instructions. In FuzzAgent , each strategy is therefore realized as a tailored prompt together with the interface tools the agent may invoke to carry out its task. The system prompt of every agent is listed in Appendix F. The remainder of this section details these strategies and explains how they let 
+
+FuzzAgent fuzz libraries effectively. 
+
+A. Fuzzing Environment Setup 
+
+FuzzAgent starts a campaign by scheduling Library Builder ,
+
+Dictionary Generator , and Seed Generator to set up the fuzzing environment. Library Builder first builds the target library with the required instrumentation (e.g., sanitizers, coverage tracking) and produces the headers and library binaries needed for later harness compilation. Dictionary Generator and Seed Generator 
+
+then prepare a domain-specific dictionary and an initial seed corpus to bootstrap the subsequent fuzzing campaigns. 
+
+Library Building. Rather than building the target blindly, 
+
+Library Builder first inspects the source code to identify the build requirements. It then writes a build script that accepts custom instrumentation flags (Figure 1 in Appendix F), in the spirit of OSS-Fuzz [ 11 ]. The agent runs this script through the build tools to produce artifacts instrumented with sanitizers (e.g., ASAN [34 ], UBSan [ 35 ]), coverage tracking ( source-based code coverage [ 62 ]), and custom passes (e.g., wllvm [63 ]). During this process, the build tools actively monitor the execution and verify the results. Any errors or unsatisfactory outcomes are returned to Library Builder 
+
+for resolution. This build-verify-fix loop continues until all verifications are successful. 
+
+Dictionary Generation. A fuzzing dictionary is a set of grammar tokens commonly used in the target library’s input space; these tokens speed up path exploration by steering the fuzzer toward meaningful input regions [ 5 ], [ 23 ]. Producing such a dictionary is hard, as it requires a deep understanding of the target’s input formats and protocols, and is therefore usually written by library developers. Existing automatic extraction methods [ 37 ], [ 64 ] rely on heavy static or dynamic analysis and still miss much of the format and protocol semantics. To avoid such heavy analysis, Dictionary Generator instead retrieves existing dictionaries from the Web. It searches GitHub for open-source projects that share the same protocol or format as the target (Figure 7 in Appendix F), and follows a retrieval-and-understanding approach. It inspects each project’s source layout and build scripts (e.g., Dockerfile , build.sh ) to locate dictionary files, including those reached through download links embedded in complex build steps. After collecting the candidates, the agent prunes tokens that do not match the target’s specification and assembles the remainder into a structured dictionary file. 
+
+Seed Generation. Fuzzing seeds are the initial inputs that bootstrap the fuzzer and help it reach deeper code paths sooner [ 5 ], [ 23 ], [ 38 ]. Generating valid seeds for complex input formats and protocols is hard for LLMs, especially when the library expects binary inputs. Seed Generator therefore collects example files from the Web instead, an approach prior work has shown to be the most effective way to prepare seeds [ 50 ]. It searches publicly available datasets and repositories related 6Harness      
+
+> Generator
+> Seed
+> Generator
+> Fuzzer Executor
+> Hierarchical Coverage
+> Crashes
+> Coverage
+> Analyzer
+> Coverage
+> Analyzer
+> Harnesses
+> Phase5: Crash-Driven Evolution
+> Phase3: API-Surface Exploration
+> Phase4: Deep Stated Exploration
+> Generate new
+> Debug & Triage
+> Analyze Coverage Bottlenecks
+> Execute
+> Library
+> Bugs
+> Modify
+> existing
+> Has
+> crashes?
+> Is
+> Stagnating?
+> Is library
+> bug?
+> Yes
+> No
+> Yes
+> No
+> Yes
+> No
+> Phase2: Targeted Fuzzing Exploration
+> Library
+> Builder
+> Dictionary
+> Generator
+> Phase1: Fuzzing Environment Setup
+> Building Artifacts Dictionary
+> Fuzz Targets Test Cases
+> Seeds
+> Compile
+> Compile Mutate
+> Augment
+> Feed Feed
+> Analyze
+> Prepare Prepare Build
+> Suggest fixes
+> Suggest new Analyze API relations
+> Analyze blockers Suggest new
+
+Fig. 4. Workflow of Evolutionary Library Fuzzing. 
+
+to the target’s domain (Figure 8 in Appendix F), examines the results to identify relevant sources such as test data or user-contributed content, and downloads them as the initial seed corpus for the fuzzing campaigns. 
+
+B. Targeted Fuzzing Exploration 
+
+Unlike traditional fuzzing approaches that drive the fuzz loop by mutating inputs, FuzzAgent focuses on exploring library code by generating fuzzing harnesses and subsequently executing fuzzing campaigns using them. Existing library fuzzing approaches [ 18 ], [ 25 ], [ 20 ], [ 22 ] adopt a brute-force strategy, generating harnesses by mutating API combinations or invocation sequences. However, complex dependencies within libraries often cause these approaches to generate invalid or low-quality harnesses that fail to effectively explore the library code. Consequently, this brute-force method requires a large number of attempts, leading to significant inefficiency. Built upon our multi-agent architecture, we generate harnesses in a feedback-driven manner. This approach achieves a deep understanding of library usage by iteratively retrieving source code and applying fixes to ensure harness validity. Furthermore, it specifically targets identified coverage bottlenecks to ensure fuzzing effectiveness. 
+
+Harness Generation. 
+
+1) Coverage-guided Generation: When specific guidance is provided, the agent first interprets the instructions to understand the targeted APIs or code regions that need to be exercised. It then incrementally retrieves relevant source code files and documentation to gather necessary context about these APIs, including their declarations, dependencies, and usage patterns. Based on this understanding, it constructs a fuzzing harness that correctly invokes the targeted APIs in accordance with their expected usage patterns. 2) Compilation & Verification : Each generated harness is compiled against the instrumented library using compila-tion tools (detailed in Appendix E) to verify its validity. Compilation errors trigger iterative refinement of the harness until it meets quality criteria. 
+
+Fuzzer Execution. Fuzzer Executor runs the actual fuzzing campaign on the target harness using the prepared fuzzing dictionary and seeds. It executes the campaign in a blocking manner and monitors primary fuzzing metrics (e.g., code coverage and crash signals) using execution tools (detailed in Appendix E). The agent ensures that the process continues until specific termination conditions are met: crashes are detected, code coverage reaches a plateau [ 65 ], or the time budget is exhausted. Specifically, we set a default time budget of 1 hour for each fuzzing campaign. This duration is typically sufficient for fuzzers to explore most reachable code paths in practice [ 12 ]. Within the time budget, we monitor the code coverage growth rate Rt over time, calculated as: 
+
+Rt = Nt − Nt−1
+
+Nt−1
+
+(1) 
+
+Nt is the total number of unique runtime features covered at 7time t. If the coverage increase rate Rt falls below a predefined threshold (e.g., 0.01%) for a certain duration (e.g., 1 minutes), it indicates that the fuzzer has likely reached a plateau in discovering new code paths. This prompts the termination of the fuzzing campaign. After execution, the tools collect the results, including code coverage statistics and crashes, and store them in the Environment for later analysis. Test cases that exercise new runtime features are merged into the seed corpus for augmentation. 
+
+C. Coverage-Driven Evolution 
+
+After each targeted fuzzing exploration campaign, if no crashes are found, Coverage Analyzer analyzes the hierarchical code coverage data. It identifies the most critical coverage gaps and suggests new harnesses to further improve coverage. In contrast to previous library fuzzing approaches that rely on simplistic feedback (e.g., API coverage) to guide harness generation [ 18 ], [ 20 ], [ 25 ], [ 22 ], which rarely consider the deep semantics of libraries, FuzzAgent employs a comprehensive coverage analysis methodology that systematically guides effective harness generation. This process corresponds to Phases 3 and 4 in Figure 4. It employs a two-phase methodology to systematically identify and address coverage bottlenecks: the API Surface Exploration Phase focuses on uncovering unreachable APIs to rapidly expand the overall coverage , while the Deep State Exploration Phase targets specific runtime blockers that hinder deeper exploration of already reachable code paths. By iteratively applying these two complementary strategies, the agent drives the evolutionary fuzzing process to improve code coverage substantially. 
+
+API Surface Exploration Phase : Coverage Analyzer adopts a group-based API relation reasoning strategy (Figure 10 in Section F) to identify high-impact unreachable APIs for harness generation. Instead of treating each uncovered API in isolation and inferring their relations, which is adopted by 
+
+PromeFuzz [22 ], the system first identifies group dependen-cies among APIs. It does this by analyzing module level and file level coverage to pinpoint under-explored code regions within similar components that share functional relations. Then, it ana-lyzes the dependencies among these uncovered APIs to identify clusters of related functions that, when exercised together, can unlock significant portions of the library’s functionality. In addition to focusing on uncovered APIs, the analyzer identifies necessary helper functions (e.g., initialization, cleanup, and validation functions) required to construct proper invocation sequences. These targeted API invocation sequences, combined with the intended functionality and necessary helper functions, are then provided as guidance for harness generation to maximize code coverage improvement. 
+
+Deep Stated Exploration Phase : PromptFuzz [ 20 ] has already demonstrated that expanding the API surface alone is insufficient for achieving deep code coverage. The process quickly encounters a plateau because many runtime coverage blockers require specific input formats or API call sequences to trigger deeper code paths [ 12 ]. To enable deeper exploration of library code, Coverage Analyzer employs a targeted blocker resolution strategy (Figure 11 in Section F) to identify and overcome specific runtime coverage blockers. In this phase, the agent analyzes internal-function level and branch level coverage data to pinpoint specific functions and code branches that contain a large amount of unexecuted code despite existing fuzzing efforts. For each identified blocker, it performs a detailed analysis of the associated source code to understand the API constraints required to trigger these paths. Based on this analysis, it formulates targeted API invocation sequences, along with the expected API parameter values designed to satisfy these conditions and unlock the blocked code paths. This information is then provided as guidance for harness generation to facilitate deeper exploration of the library’s internal states. 
+
+D. Crash-Driven Evolution 
+
+When crashes are detected during targeted fuzzing explo-ration, Crash Analyzer first minimizes the harness code [ 18 ] and then analyzes them through iterative debugging to determine their root causes (Figure 12 in Section F). This process corresponds to Phase 5 in Figure 4. The primary goal of this phase is to triage crashes into genuine library bugs or harness errors, enabling focused remediation efforts. First, the agent utilizes the Crash Debugging Interface to reproduce crashes, minimize the harness code, collect call traces, and correlate them with corresponding source code snippets. Then, through systematic source code retrieval and crash program debugging, it analyzes the crash context to identify root causes. In addition, it enhances this triage with explicit evidence derived from source code or documentation. Based on this analysis, the agent classifies each crash accordingly and provides actionable feedback for harness fixes or generates detailed reports for genuine library bugs. V. E VALUATION 
+
+This section presents a comprehensive evaluation of 
+
+FuzzAgent across 20 widely-used C/C++ libraries. To rigorously assess FuzzAgent ’s efficiency and effective-ness, we compare it against four representative baselines: 
+
+OSS-Fuzz [ 11 ], OSS-Fuzz-Gen [ 26 ], PromptFuzz [20 ], and PromeFuzz [22 ], covering the spectrum from an industrial continuous fuzzing infrastructure to state-of-the-art LLM-driven harness generators. The evaluation targets two complementary groups of libraries: 17 representative libraries previously evaluated by PromptFuzz and PromeFuzz , enabling direct and fair comparison, and 3 large-scale, industrially critical libraries ( protobuf , OpenSSL , and OpenCV ) whose complex codebases and build systems pose the challenges of real-world deployment. The experimental setup is detailed below. All experiments were conducted on a server equipped with two Intel Xeon Platinum 8580 processors (120 physical cores / 240 threads, 2.0 GHz), 8 NVIDIA H200 GPUs, and 2TB of RAM, running Ubuntu 24.04 LTS. To ensure a controlled and reproducible experimental environment, we self-hosted 
+
+DeepSeek V3.2 [66 ] via vLLM [67 ] for all LLM-dependent components, eliminating variability introduced by external API rate limits or service-side changes. The inference was 8TABLE I OVERVIEW OF THE EVALUATION RESULTS ACROSS 20 LIBRARIES .          
+
+> cJSON libmagic RE2 pugixml zlib c-ares liblouis libpng libpcap libtiff lcms tinygltf libjpeg -turbo curl libvpx SQLite3 libaom protobuf OpenSSL OpenCV Total
+
+Library Statistics 
+
+Language C C C++ C++ C C C C C C C C++ C C C C C C++ C C++ -Version b2890 772f2 972a1 71005 09a15 2870f e90a9 7c67f a516c 5fe20 36039 bdc37 466c3 e8415a cb5a5 db4d8 16a97 b56a4 c8b4a 01f9b -LoC 13K 19K 33K 42K 44K 52K 65K 108K 122K 150K 154K 194K 212K 314K 501K 580K 857K 1.26M 1.58M 3.19M 9.49M #APIs 78 18 108 352 88 138 34 271 108 191 296 466 146 156 37 298 47 3149 6728 4236 16945 #Branches 1060 7802 5060 4448 3038 9172 7338 7810 7394 15466 9180 7584 11388 19980 33082 54600 63124 25498 130338 237392 660754 
+
+Metric 1: # Fuzzer Instances 
+
+OSS-Fuzz 1 3 1 2 11 2 3 8 3 1 15 1 32 18 8 1 1 1 152 9 273 
+
+OSS-Fuzz-Gen 17 16 14 23 26 14 18 25 22 21 30 15 4 10 13 50 28 12 19 2 379 
+
+PromptFuzz 34 26 2 - 82 46 39 42 50 22 69 - 29 58 62 67 58 - 44 - 730 
+
+PromeFuzz 52 52 43 111 49 62 15 47 53 91 130 32 36 58 25 141 24 - - - 1021 
+
+FuzzAgent 25 18 16 17 21 16 18 20 19 14 17 19 12 19 14 15 13 12 15 10 330 
+
+Metric 2: Branch Coverage 
+
+OSS-Fuzz 489 3833 2602 2489 1959 3340 4687 1575 3106 3078 4110 1101 7363 5126 11677 17690 11122 477 35983 1985 123792 
+
+OSS-Fuzz-Gen 694 4103 2396 2786 2040 2025 1778 1378 2428 3673 1976 157 1944 892 2915 15458 9459 696 1805 3075 61678 
+
+PromptFuzz 831 4639 1780 - 2368 5326 4428 3361 3804 7049 4138 - 3360 5699 9290 18454 18382 - 10777 - 103686 
+
+PromeFuzz 805 3905 3253 3316 1985 5091 3624 1849 4239 7586 3673 1925 4975 5596 6558 13041 22086 - - - 93507 
+
+FuzzAgent 880 4484 4069 3582 2598 5182 4911 4921 5120 8212 4537 3056 7541 6699 15680 26197 33308 7664 18227 12751 179619 
+
+FuzzAgent † 882 4927 4174 3757 2613 5387 5078 5342 5455 9139 4681 3631 7713 6117 16400 26160 33832 7789 18374 13389 184840 
+
+Metric 3: LLM Cost 
+
+OSS-Fuzz-Gen $21.62 $11.90 $11.37 $3.59 $3.44 $14.22 $11.51 $13.71 $10.45 $12.53 $14.98 $3.56 $6.42 $2.88 $13.94 $12.85 $9.17 $22.49 $1.08 $1.73 $203.44 
+
+PromptFuzz $0.41 $0.86 $2.78 - $0.44 $2.63 $1.46 $2.84 $0.54 $2.68 $1.45 - $1.18 $1.90 $0.73 $1.24 $0.35 - $1.66 - $23.15 
+
+PromeFuzz $0.22 $0.05 $0.34 $0.62 $0.28 $1.08 $0.38 $2.66 $0.34 $1.13 $2.11 $0.22 $0.37 $0.46 $0.33 $5.39 $0.68 $223.06 $221.80 $214.49 $676.01 
+
+FuzzAgent $3.51 $2.65 $2.34 $2.50 $3.13 $3.31 $3.27 $3.83 $2.66 $3.54 $3.51 $3.60 $3.57 $3.31 $3.36 $3.12 $2.98 $3.73 $2.77 $2.75 $63.44 
+
+Metric 4: Detected Bugs 
+
+OSS-Fuzz 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0OSS-Fuzz-Gen 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0PromptFuzz 1 0 0 - 0 0 1 0 0 0 0 - 1 0 2 0 0 - 0 - 5PromeFuzz 1 0 0 1 0 0 1 0 0 1 1 0 0 0 0 1 2 - - - 8FuzzAgent 3 2 0 3 1 1 8 3 2 7 3 0 3 0 28 1 21 2 6 8 102 LoC : Lines of Code, counted by scc ; libraries are sorted by LoC in ascending order. Fuzzer Instances reflects the number of harnesses that were successfully compiled and actually executed during the fuzzing phase. FuzzAgent †: additional 24-hour fuzzing results on merged harnesses generated by 24-hour end-to-end execution of FuzzAgent . PromptFuzz does not support C++ ( RE2 is evaluated through its cre2 C wrapper); PromeFuzz could not complete its codebase summarization phase within 24 hours for protobuf , OpenSSL , and OpenCV ;unsupported entries are marked “-”. 
+
+configured with a temperature of 1.0 and top-p of 0.95, following the official recommendations of DeepSeek [ 68 ]. The fuzzer engine used across all experiments was AFL++ [ 51 ], and code coverage was measured using Source-based Code Coverage [ 62 ] instrumentation with llvm-cov [ 69 ]. The code coverage of third-party libraries (e.g., absl for RE2 ) was excluded from the reported results to ensure a fair comparison focused on the target libraries. ASAN and UBSAN sanitizers were enabled for all fuzzing campaigns to detect memory safety and undefined behavior bugs. Since FuzzAgent is designed as an end-to-end evolutionary library fuzzing system, we evaluate it under a 24-hour per-library budget that covers the full workflow in Figure 4, includ-ing environment preparation, harness generation, fuzzing, cover-age analysis, and feedback-driven refinement. For OSS-Fuzz ,each existing fuzzer instance was assigned one dedicated CPU core and executed for 24 hours. For the LLM-based baselines, 
+
+OSS-Fuzz-Gen , PromptFuzz , and PromeFuzz , we follow the evaluation protocol of PromeFuzz [22 ]: five parallel LLM threads generate harnesses for up to 24 hours, after which all valid harnesses are merged into a single composite harness and fuzzed for another 24 hours. We preserve tool-specific requirements where necessary. PromeFuzz requires a codebase summarization phase before harness generation, for which we use 50 parallel LLM threads, consistent with the original paper. 
+
+OSS-Fuzz-Gen covers only a limited API subset by default; for fairness, we extend its configuration to include all available APIs. The dictionaries and seed corpus collected by OSS-Fuzz 
+
+are used for all baseline approaches, while FuzzAgent starts without dictionaries and seed corpus. As shown in Appendix C, coverage results can vary substan-tially across independent runs due to both fuzzing randomness and LLM generation randomness, with harness generation contributing the dominant source of variation. Following best practices for fuzzing evaluation [ 70 ], we repeat every harness-generation phase across five independent trials and repeat every 24-hour fuzzing phase across five independent trials, reporting the mean throughout the evaluation. To further align 
+
+FuzzAgent with the merged-harness protocol used by the generation-based baselines, we also conduct an additional experiment in which all harnesses generated by FuzzAgent 
+
+across the five independent trials are pooled into a single merged harness and fuzzed for five independent 24-hour trials. Table I summarizes the overall results across all 20 libraries. 
+
+A. Automation and Efficiency 
+
+In our evaluation, FuzzAgent demonstrated strong automa-tion capability, completing the full fuzzing lifecycle for all 20 libraries without human intervention. Averaged over the 9five independent 24-hour trials, FuzzAgent autonomously generated and executed 330 fuzzing harnesses and achieved a cumulative coverage of 179,619 branches. This end-to-end process was also cost-efficient: per trial, FuzzAgent consumed 12.6M completion tokens and 864M input tokens on average, 85% of which were served from the cache. Based on the official DeepSeek V3.2 pricing model, this corresponds to an average LLM cost of $63.44 across the 20 libraries per trial 1,as detailed in Table I. Across all five trials, it detected 102 genuine library bugs in total, yielding an LLM cost of only $3.11 per genuine bug under a full automated setting. In sharp contrast, the generation-based baselines remain only partially automated: they automate harness synthesis, but still rely on human operators to prepare build configurations, resolve dependencies, and establish executable fuzzing environments. For libraries already included in their original evaluations, this manual preparation required approximately 1 hour per library on average. For the newly added targets in our evaluation (curl , OpenSSL , and OpenCV for OSS-Fuzz-Gen ; liblouis 
+
+and OpenSSL for PromptFuzz ; and protobuf , OpenSSL ,and OpenCV for PromeFuzz ), the effort increased substan-tially, averaging 5 hours, 8 hours, and 12 hours per library, respectively. These increases were primarily caused by complex build systems, dependency conflicts, and the preparation of required materials (e.g., consumer code and documentation). The need for such manual intervention is also reflected in comments from the PromptFuzz developers [ 71 ]. Beyond setup cost, PromeFuzz further exhibited severe scalability bottlenecks during its codebase summarization phase on large projects such as protobuf , OpenSSL , and OpenCV . In our experiments, this phase failed to complete within 24 hours even after incurring more than $200 in LLM cost, consistent with the O(n2) complexity of its summary generation in the number n of API functions [ 72 ]. These results underline 
+
+FuzzAgent ’s distinctive advantage: it provides a genuinely end-to-end automated fuzzing workflow that removes the human setup bottleneck while scaling to large, real-world libraries. To understand how FuzzAgent orchestrates this high level of automation, we analyzed the agent-time distribution across the 24-hour end-to-end executions. As shown in Table II and vi-sualized by the execution trajectories in Figure 13, FuzzAgent 
+
+devotes most of its runtime to the two agents that directly drive coverage growth: the Harness Generator (34.05%) and the 
+
+Fuzzer Executor (33.08%). Together, they account for 67.13% of the overall activity time, indicating that the system spends roughly two-thirds of its budget generating executable harnesses and exercising them under fuzzing, rather than on coordination overhead. At the same time, the feedback agents consume a substantial fraction of the budget: the Coverage Analyzer 
+
+(13.30%) identifies unexplored code regions, while the Crash Analyzer (13.11%) triages failures and feeds corrective signals back into the workflow. In contrast, environment and auxiliary-input preparation remain lightweight, with the Library Builder ,
+
+> 1
+
+The official DeepSeek V3.2 pricing is $0.028 per 1M cached input tokens, $0.28 per 1M non-cached input tokens, and $0.42 per 1M output tokens. TABLE II AGENT -TIME DISTRIBUTION ACROSS THE 24-HOUR END -TO -END EXECUTION OF FUZZ AGENT .                                                                                                                                                           
+
+> Library Builder Dict. Seed Harness Fuzzer Crash Coverage
+> cJSON 0.32% 1.00% 1.33% 36.92% 37.96% 10.56% 11.91% libmagic 8.26% 1.33% 1.38% 34.26% 38.87% 6.16% 9.74% RE2 11.38% 0.80% 1.18% 21.81% 47.81% 6.13% 10.90% pugixml 1.22% 1.79% 1.82% 37.03% 41.16% 6.80% 10.16% zlib 1.52% 1.15% 1.71% 27.22% 42.02% 14.02% 12.35% c-ares 2.05% 1.46% 2.16% 33.43% 40.06% 8.98% 11.87% liblouis 2.06% 0.70% 0.99% 45.31% 26.66% 13.56% 10.72% libpng 0.59% 0.78% 1.47% 32.41% 32.90% 20.49% 11.36% libpcap 4.05% 1.00% 1.11% 35.81% 34.40% 9.98% 13.65% libtiff 13.85% 0.85% 1.31% 27.28% 28.83% 16.98% 10.91% lcms 4.26% 0.83% 1.04% 29.10% 26.69% 22.21% 15.87% tinygltf 1.21% 0.78% 0.74% 39.76% 33.90% 11.79% 11.82% libjpeg-turbo 4.68% 0.81% 1.11% 37.03% 27.99% 19.64% 8.74% curl 5.59% 1.28% 0.89% 27.27% 34.97% 13.77% 16.23% libvpx 0.76% 0.60% 1.29% 43.65% 19.22% 17.13% 17.35% SQLite3 4.29% 0.70% 1.64% 43.29% 30.76% 9.88% 9.45% libaom 3.75% 0.86% 1.46% 34.03% 34.64% 8.13% 17.12% protobuf 6.55% 0.99% 1.24% 33.05% 26.14% 19.60% 12.44% OpenSSL 3.52% 1.07% 1.60% 28.11% 27.90% 13.04% 24.77% OpenCV 2.92% 0.74% 1.39% 34.19% 28.78% 13.26% 18.72%
+> Average 4.14% 0.98% 1.34% 34.05% 33.08% 13.11% 13.30% Note: Percentages denote the fraction of agent activity time within a 24-hour execution. Rows sum to 100% up to rounding.
+
+Seed Generator , and Dictionary Generator together accounting for only 6.46% of the activity time. This distribution indicates that FuzzAgent effectively leverages LLM-driven agents to diagnose and overcome library fuzzing bottlenecks as they arise, enabling the system to continuously evolve its performance while preserving end-to-end automation. 
+
+TABLE III THE NUMBER OF TOOLS EXECUTED FOR DIFFERENT AGENTS .
+
+Tool Categories Agents Files Bash SFTs Web Coverage Crash Total Build 178 207 49 52 0 0 485 Dict 146 177 0 370 0 0 693 Seed 19 563 0 416 0 0 998 Harness 11343 1962 1125 60 0 0 14490 Fuzzer 1552 3386 612 0 0 0 5550 Coverage 562 330 0 0 3282 0 4174 Crash 1913 982 0 0 0 1213 4108 Total 15714 7605 1786 898 3282 1213 30499 
+
+Note: SFTs stands for specialized fuzzing tools. Files, Bash and SFTs are the three representative collection of tools for FuzzAgent ’s computer-use interface. The names of Agents are the agents in FuzzAgent for short. 
+
+Finally, we examined the tool interfaces that allow Fuz-zAgent ’s agents to operate on real software environments rather than merely produce text. Table III reports 30,499 tool invocations across the evaluation on 20 libraries per trial. File-system operations and Bash commands dominate the interaction pattern, accounting for 15,714 and 7605 invocations, respectively. Also, 1786 invocations of specialized fuzzing tools were used to build the libraries, compile harnesses and execute fuzzing. Together, these computer-use actions represent 82.3% of all tool calls, showing that autonomous library fuzzing depends heavily on the ability to inspect source trees, edit build artifacts and harnesses, invoke compilers, launch fuzzers, 10 and diagnose execution failures. The distribution across agents further supports this interpretation: the Harness Generator 
+
+alone accounts for 14,490 tool calls, mostly file operations, indicating LLMs can automatic retrieve necessary knowledge required for high-quality harness generation. In addition to these environment-manipulation interfaces, FuzzAgent actively uses specialized fuzzing tools ( 1786 calls), coverage-analysis tools ( 3282 calls), and crash-debugging tools ( 1213 calls), enabling the system to close the loop between execution feedback and subsequent refinement. Web search is used more selectively (898 calls), primarily by the Dictionary Generator and Seed Generator , where external examples and documentation help construct domain-specific inputs. Overall, these metrics show that FuzzAgent ’s automation comes from tool-grounded interaction with the codebase: the LLM agents continuously inspect, build, execute, measure, and debug the target libraries, thereby approximating the workflow of human fuzzing experts in a self-contained manner. 
+
+B. Effectiveness on Code Coverage 
+
+As shown in Table I, FuzzAgent achieves the strongest overall branch coverage across the 20 evaluated libraries using only its standard 24-hour end-to-end execution bud-get. In this setting, FuzzAgent covers 179,619 branches, exceeding OSS-Fuzz ( 123,792 branches), PromptFuzz 
+
+( 103,686 branches), PromeFuzz ( 93,507 branches), and 
+
+OSS-Fuzz-Gen ( 61,678 branches) by 45.1%, 73.2%, 92.1%, and 191.2%, respectively. These gains are statistically robust: as detailed in Appendix D, Mann–Whitney U tests show that 
+
+FuzzAgent ’s improvements are significant for most available library-baseline pairs. The advantage is also consistent at the per-library level, with FuzzAgent achieving the highest coverage on 17 of the 20 targets. Extending the experiment with an additional 24 hours of fuzzing on the harnesses produced by the end-to-end runs ( FuzzAgent †) further raises total coverage to 184,840 branches (+2.9%), confirming that the gains stem from FuzzAgent ’s evolutionary workflow rather than from a longer fuzzing budget. The remaining per-library gaps and baseline failures can be explained by resource allocation, harness validity, and scalability. For OSS-Fuzz , it substantially exceeds other systems on OpenSSL because it assigns 152 parallel fuzzer instances to this target, while FuzzAgent runs with a sequential manner. In contrast, PromptFuzz and PromeFuzz rely mainly on large-scale parallel harness generation, which produces many candidates but not necessarily executable or coverage-effective fuzzers. For example, PromptFuzz generated 11K harnesses across the 20 libraries, but 87.42% were ultimately eliminated due to syntax errors or API misuse, and 654 additional harnesses were filtered out because they contributed no unique coverage. Compared with this brute-force generation strategy, 
+
+FuzzAgent adopts an evolutionary process that achieves substantially higher coverage with only 330 harnesses. For 
+
+PromeFuzz , codebase summarization can introduce redundant or noisy context; as modern LLMs already show decreasing hallucination rates with model upgrades (88% for Llama 2, 69% for GPT-3.5, and 58% for GPT-4) [ 40 ], [ 41 ]. Since LLMs are already trained extensively on these open-source codebase, excessive generated or retrieved context may distract rather than help generation [ 42 ], [ 43 ], [ 44 ]. FuzzAgent avoids this issue by retrieving project knowledge on demand through agents. The dictionaries and seed corpora generated by FuzzAgent 
+
+are constructed from reusable input-format knowledge gathered from related projects. As illustrated in Figure 14, FuzzAgent 
+
+consults 4.3 related libraries per target on average when prepar-ing these auxiliary inputs. To quantify how these generated dictionaries and seeds contribute to code coverage, we conduct an ablation study on dictionary and seed generation using five one-hour fuzzing runs. As shown in Table IV, the empty configuration, which uses neither dictionaries nor seed corpora, covers 106,772 branches across the 20 libraries. Adding OSS-Fuzz dictionaries and seeds provides a modest improvement of 2.0% and 7.1% over the empty setting, respectively. When using the dictionaries and seeds generated by FuzzAgent , the improvement increases to 3.6% and 13.1%, respectively. These results indicate that the dictionaries and seed corpora collected by FuzzAgent play an important role in improving coverage and accelerating the exploration of library code. We further evaluate the contribution of the Coverage Analyzer by disabling it and running FuzzAgent on all 20 libraries for five independent 24-hour fuzzing trials. As shown in Figure 5, removing the Coverage Analyzer reduces branch coverage to 146,508 , descrease 18.5% compared with the standard setting. With coverage guidance enabled, FuzzAgent 
+
+achieves the highest coverage among 18 libraries and the most stable performance. This substantial degradation highlights the importance of coverage feedback in FuzzAgent ’s evolu-tionary workflow. By identifying under-explored code regions and informing subsequent harness generation, the Coverage Analyzer enables FuzzAgent to continuously expand coverage and exercise deeper library code. 
+
+C. Effectiveness on Bug Detection 
+
+Across the five 24-hour end-to-end runs of FuzzAgent on the 20 libraries, the Crash Analyzer flagged a total of 1098 unique crashes after de-duplication by call stack with CASR [ 57 ]. Of these, 128 were triaged as candidate library bugs and the remainder as harness errors. To enable responsible disclosure, four PhD students spent two weeks manually reproducing each candidate, performing root-cause analysis, and preparing detailed reports for upstream maintainers, averaging roughly two hours per bug. This validation confirmed 108 of the 128 candidates (84.38%) as genuine library bugs, with the remaining 20 attributable to LLM hallucination and weak instruction-following in DeepSeek V3.2, where 12 stemmed from the agent failing to retrieve the relevant API constraints from library documentation, and the other 8 from incorrect root-cause reasoning. Replacing the underlying model with Claude Sonnet 4.6 reclassified 14 of these 20 false positives correctly as harness errors, indicating that the bottleneck lies in model capability rather than agent design. As summarized in Table VII, all confirmed bugs were 11 TABLE IV ABLATION STUDY OF DICTIONARY AND SEED GENERATION ACROSS 20 LIBRARIES .
+
+Configuration cJSON libmagic RE2 pugixml zlib c-ares liblouis libpng libpcap libtiff lcms tinygltf libjpeg -turbo curl libvpx SQLite3 libaom protobuf OpenSSL OpenCV Total Gain 
+
+Empty 854 2680 4780 3012 2029 4607 896 1998 3955 2547 1983 2237 3638 5052 13837 6783 17092 14303 6201 8290 106772 –OSS dictionary 867 3160 4778 3082 2057 4387 1037 2113 3995 2969 1791 2126 4173 5006 14634 6956 17454 14408 5960 7959 108913 2.0% 
+
+Agent dictionary 868 3342 4860 3248 2167 4798 1074 2020 4637 3056 1698 2233 4162 5171 14223 7995 16305 14312 6101 8377 110648 3.6% 
+
+OSS seeds 866 3020 4659 3288 2065 4686 950 2964 4369 4137 2517 2174 4232 5344 14169 8645 17207 14801 6263 8027 114383 7.1% 
+
+Agent seeds 863 3260 4725 3268 2158 4615 1135 2542 4240 4117 2511 2279 4651 5542 14899 8494 21381 14934 6269 8895 120777 13.1% Note: Each cell reports branch coverage after one hour of fuzzing. Empty uses no dictionary and no seed corpus. Gain is computed relative to the empty configuration. 0 6 12 18 24                                                                             
+
+> 0
+> 300
+> 600
+> 900
+> Branches covered
+> cJSON
+> 0612 18 24
+> 0
+> 1500
+> 3000
+> 4500
+> libmagic
+> 0612 18 24
+> 0
+> 1500
+> 3000
+> 4500
+> RE2
+> 0612 18 24
+> 0
+> 1000
+> 2000
+> 3000
+> pugixml
+> 0612 18 24
+> 0
+> 800
+> 1600
+> 2400
+> zlib
+> 0612 18 24
+> 0
+> 1500
+> 3000
+> 4500
+> Branches covered
+> c-ares
+> 0612 18 24
+> 0
+> 1500
+> 3000
+> 4500
+> liblouis
+> 0612 18 24
+> 0
+> 1500
+> 3000
+> 4500
+> libpng
+> 0612 18 24
+> 0
+> 1500
+> 3000
+> 4500
+> libpcap
+> 0612 18 24
+> 0
+> 2500
+> 5000
+> 7500
+> libtiff
+> 0612 18 24
+> 0
+> 1500
+> 3000
+> 4500
+> Branches covered
+> lcms
+> 0612 18 24
+> 0
+> 1000
+> 2000
+> 3000
+> tinygltf
+> 0612 18 24
+> 0
+> 2500
+> 5000
+> 7500
+> libjpeg-turbo
+> 0612 18 24
+> 0
+> 2500
+> 5000
+> 7500
+> curl
+> 0612 18 24
+> 0k
+> 10k
+> 20k
+> 30k
+> SQLite3
+> 0612 18 24
+> Time (h)
+> 0k
+> 6k
+> 12k
+> 18k
+> Branches covered
+> libvpx
+> 0612 18 24
+> Time (h)
+> 0k
+> 10k
+> 20k
+> 30k
+> libaom
+> 0612 18 24
+> Time (h)
+> 0k
+> 6k
+> 12k
+> 18k
+> OpenSSL
+> 0612 18 24
+> Time (h)
+> 0
+> 3000
+> 6000
+> 9000
+> protobuf
+> 0612 18 24
+> Time (h)
+> 0k
+> 8k
+> 16k
+> 24k
+> OpenCV
+
+Branch Coverage Growth Over Time Ablation Study: Coverage Guidance (5 Rounds × 20 Libraries) 
+
+w/ coverage guidance w/o coverage guidance 
+
+Fig. 5. Branch coverage growth over time for the 20 evaluated libraries. 
+
+submitted upstream with summaries and root-cause analyses; to date, 84 reports have received maintainer responses, and 78 have been acknowledged and fixed. For the crashes triaged as library bugs by the baseline approaches, we performed a similar manual validation process. 
+
+OSS-Fuzz and OSS-Fuzz detected no genuine bugs in the 20 library bugs, while PromptFuzz and PromeFuzz 
+
+reported 26 and 21 potential library bugs, respectively. Upon manual validation, only 5 and 8 of them are genuine libraries. 
+
+PromptFuzz only classify crashes by rules, hence causing high false positives, whereas PromeFuzz infers root cause by LLMs but misses concrete runtime evidence. To investigate whether these bugs were unique to the baselines or also detected by FuzzAgent , we cross-referenced the confirmed bugs of 
+
+FuzzAgent with the crash stacks generated by CASR , and the results show in Table VII. We found that all 5 and 8 bugs detected by PromptFuzz and PromeFuzz , respectively, were also detected by FuzzAgent , indicating that these bugs were not unique to the baselines but rather represent common vulnerabilities that multiple fuzzing approaches can uncover. The 102 library bugs span a wide range of types, with integer overflows (31) and buffer overflows (25) dominating the population. To assess the real-world impact of these defects, we took a closer look at the 21 confirmed bugs in libaom , the AV1 specific codec shipped in Chromium and many downstream media stacks. After careful source-code review and debugging, 12 we found that 7 of the 21 bugs are directly reachable through 
+
+libaom ’s own command-line binaries ( aomenc and aomdec )using a crafted input file or command-line argument, without requiring any custom harness. This indicates that the issues are not artifacts of an over-permissive fuzzing harness but lie on genuine, externally exposed code paths, and they would therefore be triggerable in any application that feeds untrusted media data into libaom , including web browsers and video-processing pipelines. We then performed a deeper analysis of the 8 buffer-overflow bugs in this set. One of them turns out to be an arbitrary-write primitive: an attacker-controlled index escapes the intended buffer bounds and is used as the destination of a store, allowing writes to attacker-chosen addresses. When chained with one of the out-of-bounds read bugs identified by FuzzAgent ,which leaks pointers from adjacent heap structures and can be used to defeat ASLR, the two primitives compose into a remote-code-execution exploit chain reachable through AV1 encoding enabled with the SVC feature. This concrete chain demonstrates that the bugs uncovered by FuzzAgent are not merely shallow crashes but include exploitable vulnerabilities with realistic attack surfaces, underscoring the security value of fully automated, end-to-end library fuzzing. VI. D ISCUSSION 
+
+Statistical variance in library fuzzing. Library fuzzing is inherently stochastic, and LLM-based harness generation introduces a second, often dominant source of randomness on top of the fuzzer itself. Our nested experiment in Appendix C quantifies both sources. This finding directly motivated our evaluation protocol. Prior work such as PromeFuzz generates harnesses once and repeats only the fuzzing phase across multiple trials, which controls for fuzzer randomness but leaves LLM randomness unaddressed. To mitigate both sources, we repeat harness generation and the 24-hour fuzzing phase independently five times each, reporting the mean over all trials. To further guard against distributional assumptions, we apply the non-parametric Mann–Whitney U test (Appendix D). The per-library p-values confirm that FuzzAgent ’s improvements are statistically significant for most library-baseline pairs. 
+
+False positives. Among the 108 identified potential bugs from Section V-C , 84 received maintainer responses and 78 were acknowledged or fixed; the remaining 6 were rejected. We examined each rejected report to characterize the residual error modes. Three were declared expected behavior under undocumented contracts, e.g., a libvpx OOM closed with the explanation that “the format allows for large resolutions (65536 × 65536 ); if an environment does not have enough memory, then an OOM is expected.” Two were acknowledged as genuine robustness issues but deferred as out-of-scope for the current release. The last was a harness-side API misuse missed in our inspection. This analysis suggests that future crash analysis improvements should focus on better understanding of API contracts under real-world conditions. VII. R ELATED WORK 
+
+A. Automated Library Fuzzing 
+
+Library fuzzing has evolved from manual approaches to increasingly automated techniques. OSS-Fuzz [11 ] pioneered large-scale library fuzzing but required substantial manual effort. Researchers have developed various approaches to automate harness generation. Static analysis based approaches, like Fudge [13 ], 
+
+FuzzGen [14 ], GraphFuzz [ 17 ], and AFGen [19 ], lever-age static analysis to extract API usage patterns and generate fuzzing harnesses. Fudge identifies API entry points, FuzzGen extracts patterns from client applications, 
+
+GraphFuzz builds dataflow graphs for dependencies, and 
+
+AFGen focuses on whole-function fuzzing. Dynamic analysis approaches, like APICraft [16 ] and Hopper [18 ], incorporate dynamic analysis to improve harness generation. APICraft 
+
+records API interactions during execution, while Hopper 
+
+uses interpretative execution to understand API behaviors. Hybrid approaches, like RULF [ 73 ] and UTopia [24 ], combine multiple techniques. RULF traverses API dependency graphs to generate comprehensive harnesses for Rust libraries. UTopia 
+
+leverages existing unit tests to generate effective fuzz drivers. Despite these advances, existing approaches have limitations. Static analysis tools struggle with complex dependencies, while dynamic approaches may miss rare code paths. Most impor-tantly, these approaches use fixed strategies that cannot adapt based on fuzzing feedback or evolve to overcome coverage barriers. They typically focus only on harness generation while neglecting other aspects of the fuzzing workflow. 
+
+B. Fuzzing with Large Language Models 
+
+The emergence of powerful LLMs has opened new pos-sibilities for automating and enhancing fuzzing processes. LLM-based harness generation, like OSS-Fuzz-Gen [26 ], 
+
+PromptFuzz [ 20 ] and PromeFuzz [ 22 ], pioneered us-ing LLMs to generate fuzzing harnesses from API doc-umentation and code. TitanFuzz [ 74 ] specifically targets deep learning libraries, showing LLMs can handle complex, domain-specific APIs. LLM-enhanced fuzzing components, like 
+
+CodaMosa [65 ], use LLMs to overcome coverage plateaus in test generation. Universal Fuzzing [ 75 ] demonstrates fuzzing across diverse domains without domain-specific customization. 
+
+Xu et al. [76 ] explore using LLMs for directed greybox fuzzing toward specific targets or code regions. These approaches treat the LLM as a single component within a traditional fuzzing pipeline rather than as part of an integrated, adaptive system. In contrast, our work introduces a multi-agent architecture where specialized agents collaborate across all fuzzing phases and provides comprehensive automa-tion while enabling continuous evolution through feedback-driven learning. VIII. C ONCLUSION 
+
+We presented FuzzAgent , a multi-agent system that turns library fuzzing into an evolutionary process driven by runtime feedback. By letting specialized agents collaborate over the 13 full fuzzing lifecycle and ground their decisions in concrete execution evidence, FuzzAgent successively refines its harness suite toward deeper coverage and higher-fidelity crash analysis. Across 20 real-world C/C++ libraries, it outperforms state-of-the-art baselines in both branch coverage and bug discovery, pointing to a practical path toward fully automated, feedback-adaptive library fuzzing. ETHICAL CONSIDERATIONS 
+
+This work investigates FuzzAgent , a multi-agent system that performs end-to-end library fuzzing fully autonomously. Given only a target library’s source repository, FuzzAgent 
+
+builds the project, generates harnesses, runs fuzzing, analyzes coverage, and triages crashes without any expert intervention. 
+
+While this dramatically lowers the barrier to high-quality vulnerability discovery for defenders, it equally lowers the barrier for malicious actors, who could in principle point such a system at widely deployed open-source libraries and obtain exploitable bugs at scale. We have therefore carefully weighed the dual-use implications of this research and followed the conference’s ethics guidelines throughout the project. 
+
+Responsible disclosure. We followed a responsible-disclosure policy for all bugs uncovered in this study. Across the 20 evaluated libraries, FuzzAgent produced 128 candidate library bugs. Manual triage by four PhD students, averaging two hours per bug, confirmed 108 as genuine library bugs. We reported each confirmed bug to the upstream maintainers with a reproducer, root-cause analysis, and a suggested fix where applicable. To date, 84 reports have received responses and 78 have been acknowledged or fixed. The remaining bugs are under review or pending coordinated disclosure. For high-impact targets such as libaom , OpenSSL , and libpng , including the 
+
+libaom buffer-overflow chain that yields an arbitrary-write primitive, we are coordinating with upstream maintainers and downstream consumers (e.g., browser vendors) and withholding technical details until patches are widely deployed. 
+
+Risk mitigation and release plan. Because FuzzAgent can be operated by non-experts, we will not release its source code or model artifacts at this time. Instead, we plan to deploy 
+
+FuzzAgent as a gated service. In the next 3–6 months, we will build a curated platform (https://fuzzany.org/) that runs FuzzAgent on behalf of open-source maintainers and OSS-Fuzz-eligible projects. The platform returns only vetted bug reports and patch suggestions through standard disclosure channels; raw crashes and candidate exploits are not exposed. Access is restricted to verified project maintainers and established security responders. This deployment model retains the defensive benefits of FuzzAgent and avoids placing a fully automated vulnerability-discovery tool in arbitrary hands. 
+
+Other considerations. No human subjects, personal data, or proprietary code were used in this study; all evaluated libraries are open source and were fuzzed in an isolated, self-hosted environment. The LLM components of FuzzAgent were also self-hosted, so no source code, crash data, or candidate exploits were transmitted to third-party model providers. We will continue to monitor downstream impacts after publication and adjust the release policy in consultation with the maintainer communities of the affected libraries. REFERENCES [1] V. J. M. Man `es, H. Han, C. Han, S. K. Cha, M. Egele, E. J. Schwartz, and M. Woo, “The art, science, and engineering of fuzzing: A survey,” IEEE Transactions on Software Engineering , vol. 47, no. 11, pp. 2312–2331, 2021. [2] C. Daniele, S. B. Andarzian, and E. Poll, “Fuzzers for stateful systems: Survey and research directions,” ACM Comput. Surv. , vol. 56, no. 9, Apr. 2024. [Online]. Available: https://doi.org/10.1145/3648468 [3] C. Beaman, M. Redbourne, J. D. Mummery, and S. Hakak, “Fuzzing vulnerability discovery techniques: Survey, challenges and future directions,” Computers & Security , vol. 120, p. 102813, 2022. [Online]. Available: https://www.sciencedirect.com/science/article/pii/S016740482 2002073 [4] K. Hu, Q. Chen, Z. Lu, W. Zhang, B. Chen, Y. Lu, H. Jiang, B. Sun, X. Peng, and W. Zhao, “A survey of fuzzing open-source operating systems,” 2025. [Online]. Available: https://arxiv.org/abs/2502.13163 [5] M. Zalewski, “American fuzzy lop,” http://lcamtuf.coredump.cx/afl/, Accessed 2026. [6] M. B ¨ohme, V.-T. Pham, and A. Roychoudhury, “Coverage-based greybox fuzzing as markov chain,” in Proceedings of the 2016 ACM SIGSAC Con-ference on Computer and Communications Security , 2016, p. 1032–1043. [7] Z.-M. Jiang, J.-J. Bai, and Z. Su, “DynSQL: Stateful fuzzing for database management systems with complex and valid SQL query generation,” in 32nd USENIX Security Symposium (USENIX Security 23) . Anaheim, CA: USENIX Association, Aug. 2023, pp. 4949–4965. [Online]. Available: https://www.usenix.org/conference/usenixsecurity23 /presentation/jiang-zu-ming [8] J. Liang, Z. Wu, J. Fu, Y. Bai, Q. Zhang, and Y. Jiang, “WingFuzz: Implementing continuous fuzzing for DBMSs,” in 2024 USENIX Annual Technical Conference (USENIX ATC 24) . Santa Clara, CA: USENIX Association, Jul. 2024, pp. 479–492. [Online]. Available: https://www.usenix.org/conference/atc24/presentation/liang [9] S. Poeplau and A. Francillon, “Symbolic execution with SymCC: Don’t interpret, compile!” in 29th USENIX Security Symposium (USENIX Security 20) . USENIX Association, Aug. 2020, pp. 181–198. [Online]. Available: https://www.usenix.org/conference/usenixsecurity20/presentat ion/poeplau [10] H. Tu, S. Lee, Y. Li, P. Chen, L. Jiang, and M. B ¨ohme, “Cottontail: Large Language Model-Driven Concolic Execution for Highly Structured Test Input Generation,” in 2026 IEEE Symposium on Security and Privacy (SP) . Los Alamitos, CA, USA: IEEE Computer Society, 2026, pp. 2064–2082. [Online]. Available: https://doi.ieeecomputersociety.org/10.1109/SP63933.2026.00110 [11] K. Serebryany, “OSS-Fuzz-google’s continuous fuzzing service for open source software,” in Proceedings of the 26th USENIX Conference on Security Symposium (technical sessions) . USENIX Association, 2017. [12] W. Gao, V.-T. Pham, D. Liu, O. Chang, T. Murray, and B. I. Rubinstein, “Beyond the coverage plateau: A comprehensive study of fuzz blockers (registered report),” in Proceedings of the 2nd International Fuzzing Workshop , ser. FUZZING 2023. New York, NY, USA: Association for Computing Machinery, 2023, p. 47–55. [Online]. Available: https://doi.org/10.1145/3605157.3605177 [13] D. Babi ´c, S. Bucur, Y. Chen, F. Ivan ˇci ´c, T. King, M. Kusano, C. Lemieux, L. Szekeres, and W. Wang, “Fudge: fuzz driver generation at scale,” in 
+
+Proceedings of the 2019 27th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering , 2019, pp. 975–985. [14] K. Ispoglou, D. Austin, V. Mohan, and M. Payer, “FuzzGen: Automatic fuzzer generation,” in 29th USENIX Security Symposium (USENIX Security 20) , 2020, pp. 2271–2287. [15] M. Zhang, J. Liu, F. Ma, H. Zhang, and Y. Jiang, “Intelligen: Automatic driver synthesis for fuzz testing,” in 2021 IEEE/ACM 43rd International Conference on Software Engineering: Software Engineering in Practice (ICSE-SEIP) . IEEE, 2021, pp. 318–327. [16] C. Zhang, X. Lin, Y. Li, Y. Xue, J. Xie, H. Chen, X. Ying, J. Wang, and Y. Liu, “APICraft: Fuzz driver generation for closed-source SDK libraries,” in 30th USENIX Security Symposium (USENIX Security 21) ,2021, pp. 2811–2828. 
+
+14 [17] H. Green and T. Avgerinos, “Graphfuzz: Library api fuzzing with lifetime-aware dataflow graphs,” in 2022 IEEE/ACM 44th International Conference on Software Engineering (ICSE) , 2022, pp. 1070–1081. [18] P. Chen, Y. Xie, Y. Lyu, Y. Wang, and H. Chen, “Hopper: Interpretative fuzzing for libraries,” in ACM Conference on Computer and Communi-cations Security (CCS) , Copenhagen, Denmark, 2023. [19] Y. Liu, Y. Wang, T. Bao, X. Jia, Z. Zhang, and P. Su, “Afgen: Whole-function fuzzing for applications and libraries,” in 2024 IEEE Symposium on Security and Privacy (SP) , 2024, pp. 11–11. [20] Y. Lyu, Y. Xie, P. Chen, and H. Chen, “Prompt fuzzing for fuzz driver generation,” in Proceedings of the 2024 on ACM SIGSAC Conference on Computer and Communications Security , ser. CCS ’24. New York, NY, USA: Association for Computing Machinery, 2024, p. 3793–3807. [Online]. Available: https://doi.org/10.1145/3658644.3670396 [21] Y. Deng, C. S. Xia, H. Peng, C. Yang, and L. Zhang, “Large language models are zero-shot fuzzers: Fuzzing deep-learning libraries via large language models,” in Proceedings of the 32nd ACM SIGSOFT Interna-tional Symposium on Software Testing and Analysis , 2023, p. 423–435. [22] Y. Liu, J. Deng, X. Jia, Y. Wang, M. Wang, L. Huang, T. Wei, and P. Su, “Promefuzz: A knowledge-driven approach to fuzzing harness generation with large language models,” in Proceedings of the 2025 ACM SIGSAC Conference on Computer and Communications Security , ser. CCS ’25. New York, NY, USA: Association for Computing Machinery, 2025, p. 1559–1573. [Online]. Available: https://doi.org/10.1145/3719027.3765222 [23] LLVM, “libfuzzer – a library for coverage-guided fuzz testing,” https: //llvm.org/docs/LibFuzzer.html, Accessed 2026. [24] B. Jeong, J. Jang, H. Yi, J. Moon, J. Kim, I. Jeon, T. Kim, W. Shim, and Y. H. Hwang, “Utopia: Automatic generation of fuzz driver using unit tests,” in 2023 IEEE Symposium on Security and Privacy (SP) . IEEE Computer Society, 2022, pp. 746–762. [25] J. Lin, Q. Zhang, J. Li, C. Sun, H. Zhou, C. Luo, and C. Qian, “Automatic library fuzzing through API relation evolvement,” in 32nd Annual Network and Distributed System Security Symposium, NDSS 2025, San Diego, California, USA, February 24-28, 2025 . The Internet Society, 2025. [Online]. Available: https://www.ndss-symposium.org/nds s-paper/automatic-library-fuzzing-through-api-relation-evolvement/ [26] Google, “oss-fuzz-gen,” https://github.com/google/oss- fuzz- gen, Accessed 2026. [27] H. Xu, W. Ma, T. Zhou, Y. Zhao, K. Chen, Q. Hu, Y. Liu, and H. Wang, “Ckgfuzzer: Llm-based fuzz driver generation enhanced by code knowledge graph,” in Proceedings of the IEEE/ACM 47th International Conference on Software Engineering: Companion Proceedings , ser. ICSE ’25. IEEE Press, 2025, p. 243–254. [Online]. Available: https://doi.org/10.1109/ICSE-Companion66252.2025.00079 [28] “Oss-fuzz guide: Setting up a new project,” https://google.github.io/oss-f uzz/getting-started/new-project-guide/, Accessed 2026. [29] S. Pl ¨oger, M. Meier, and M. Smith, “A qualitative usability evaluation of the clang static analyzer and libfuzzer with cs students and ctf players,” in 
+
+Proceedings of the Seventeenth USENIX Conference on Usable Privacy and Security , ser. SOUPS’21. USA: USENIX Association, 2021. [30] Q. Yan, M. Huang, and H. Cao, “A survey of human-machine collabora-tion in fuzzing,” in 2022 7th IEEE International Conference on Data Science in Cyberspace (DSC) , 2022, pp. 375–382. [31] S. Pl ¨oger, M. Meier, and M. Smith, “A usability evaluation of afl and libfuzzer with cs students,” in Proceedings of the 2023 CHI Conference on Human Factors in Computing Systems , ser. CHI ’23. New York, NY, USA: Association for Computing Machinery, 2023. [Online]. Available: https://doi.org/10.1145/3544548.3581178 [32] O. Nourry, Y. Kashiwa, B. Lin, G. Bavota, M. Lanza, and Y. Kamei, “The human side of fuzzing: Challenges faced by developers during fuzzing activities,” ACM Trans. Softw. Eng. Methodol. , vol. 33, no. 1, Nov. 2023. [Online]. Available: https://doi.org/10.1145/3611668 [33] Y. Zhao, W. Guo, H. Goldstein, D. Votipka, K. R. Fulton, and M. L. Mazurek, “A qualitative analysis of fuzzer usability and challenges,” in Proceedings of the 2025 ACM SIGSAC Conference on Computer and Communications Security , ser. CCS ’25. New York, NY, USA: Association for Computing Machinery, 2025, p. 2504–2518. [Online]. Available: https://doi.org/10.1145/3719027.3765055 [34] K. Serebryany, D. Bruening, A. Potapenko, and D. Vyukov, “Address-sanitizer: A fast address sanity checker,” in Proceedings of the 2012 USENIX Conference on Annual Technical Conference , ser. USENIX ATC’12. USENIX Association, 2012, p. 28. [35] LLVM, “Undefined behavior sanitizer - official documentation,” https: //clang.llvm.org/docs/UndefinedBehaviorSanitizer.html, Accessed 2026. [36] “Oss-fuzz guide: Setting up a new project (builds),” https://google.githu b.io/oss-fuzz/getting-started/new-project-guide/#buildsh, Accessed 2026. [37] A. A. Ebrahim, M. Hazhirpasand, O. Nierstrasz, and M. Ghafari, “Fuzzingdriver: the missing dictionary to increase code coverage in fuzzers,” in 2022 IEEE International Conference on Software Analysis, Evolution and Reengineering (SANER) , 2022, pp. 268–272. [38] Google, “How to prepare the seed corpus for oss-fuzz,” https://goog le.github.io/oss-fuzz/getting-started/new-project-guide/#seed-corpus, Accessed 2026. [39] M. Boehme, C. Cadar, and A. ROYCHOUDHURY, “Fuzzing: Challenges and reflections,” IEEE Software , vol. 38, no. 3, pp. 79–86, 2021. [40] M. Dahl, V. Magesh, M. Suzgun, and D. E. Ho, “Large legal fictions: Profiling legal hallucinations in large language models,” 
+
+Journal of Legal Analysis , vol. 16, no. 1, 2024. [Online]. Available: http://dx.doi.org/10.1093/jla/laae003 [41] Y. Bang, Z. Ji, A. Schelten, A. Hartshorn, T. Fowler, C. Zhang, N. Cancedda, and P. Fung, “HalluLens: LLM hallucination benchmark,” in Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) . Association for Computational Linguistics, 2025. [Online]. Available: https: //aclanthology.org/2025.acl-long.1176/ [42] X. Guan, J. Zeng, F. Meng, C. Xin, Y. Lu, H. Lin, X. Han, L. Sun, and J. Zhou, “DeepRAG: Thinking to retrieve step by step for large language models,” in The Fourteenth International Conference on Learning Representations , 2026. [Online]. Available: https://openreview.net/forum?id=VI2YaggHIF [43] S. Jeong, J. Baek, S. Cho, S. J. Hwang, and J. C. Park, “Adaptive-rag: Learning to adapt retrieval-augmented large language models through question complexity,” in Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) , 2024, pp. 7036–7050. [44] H. Tan, F. Sun, W. Yang, Y. Wang, Q. Cao, and X. Cheng, “Blinded by generated contexts: How language models merge generated and retrieved contexts when knowledge conflicts?” in Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , 2024, pp. 6207–6227. [45] T. Guo, X. Chen, Y. Wang, R. Chang, S. Pei, N. V. Chawla, O. Wiest, and X. Zhang, “Large language model based multi-agents: A survey of progress and challenges,” in Proceedings of the Thirty-Third International Joint Conference on Artificial Intelligence, IJCAI-24 ,K. Larson, Ed. International Joint Conferences on Artificial Intelligence Organization, 8 2024, pp. 8048–8057, survey Track. [Online]. Available: https://doi.org/10.24963/ijcai.2024/890 [46] X. Li, S. Wang, S. Zeng, Y. Wu, and Y. Yang, “A survey on llm-based multi-agent systems: workflow, infrastructure, and challenges,” 
+
+Vicinagearth , 2024. [47] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. R. Narasimhan, and O. Press, “SWE-agent: Agent-computer interfaces enable automated software engineering,” in The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. [Online]. Available: https://arxiv.org/abs/2405.15793 [48] LLVM, “Memorysanitizer - official documentation,” https://clang.llvm.o rg/docs/MemorySanitizer.html, Accessed 2026. [49] B. Mathis, R. Gopinath, and A. Zeller, “Learning input tokens for effective fuzzing,” in Proceedings of the 29th ACM SIGSOFT International Symposium on Software Testing and Analysis , ser. ISSTA 2020. New York, NY, USA: Association for Computing Machinery, 2020, p. 27–37. [Online]. Available: https://doi.org/10.1145/3395363.3397348 [50] A. Herrera, H. Gunadi, S. Magrath, M. Norrish, M. Payer, and A. L. Hosking, “Seed selection for successful fuzzing,” in Proceedings of the 30th ACM SIGSOFT International Symposium on Software Testing and Analysis , ser. ISSTA 2021. New York, NY, USA: Association for Computing Machinery, 2021, p. 230–243. [Online]. Available: https://doi.org/10.1145/3460319.3464795 [51] A. Fioraldi, D. Maier, H. Eißfeldt, and M. Heuse, “AFL++ : Combining incremental steps of fuzzing research,” in 14th USENIX Workshop on Offensive Technologies (WOOT 20) , 2020. [52] D. Guo, D. Yang, H. Zhang, J. Song, P. Wang, Q. Zhu, R. Xu, R. Zhang, S. Ma, X. Bi, X. Zhang, X. Yu, Y. Wu, Z. F. Wu, Z. Gou, Z. Shao, Z. Li, Z. Gao, A. Liu, B. Xue, B. Wang, B. Wu, B. Feng, C. Lu, C. Zhao, C. Deng, C. Ruan, D. Dai, D. Chen, D. Ji, E. Li, F. Lin, 
+
+15 F. Dai, F. Luo, G. Hao, G. Chen, G. Li, H. Zhang, H. Xu, H. Ding, H. Gao, H. Qu, H. Li, J. Guo, J. Li, J. Chen, J. Yuan, J. Tu, J. Qiu, J. Li, J. L. Cai, J. Ni, J. Liang, J. Chen, K. Dong, K. Hu, K. You, K. Gao, K. Guan, K. Huang, K. Yu, L. Wang, L. Zhang, L. Zhao, L. Wang, L. Zhang, L. Xu, L. Xia, M. Zhang, M. Zhang, M. Tang, M. Zhou, M. Li, M. Wang, M. Li, N. Tian, P. Huang, P. Zhang, Q. Wang, Q. Chen, Q. Du, R. Ge, R. Zhang, R. Pan, R. Wang, R. J. Chen, R. L. Jin, R. Chen, S. Lu, S. Zhou, S. Chen, S. Ye, S. Wang, S. Yu, S. Zhou, S. Pan, S. S. Li, S. Zhou, S. Wu, T. Yun, T. Pei, T. Sun, T. Wang, W. Zeng, W. Liu, W. Liang, W. Gao, W. Yu, W. Zhang, W. L. Xiao, W. An, X. Liu, X. Wang, X. Chen, X. Nie, X. Cheng, X. Liu, X. Xie, X. Liu, X. Yang, X. Li, X. Su, X. Lin, X. Q. Li, X. Jin, X. Shen, X. Chen, X. Sun, X. Wang, X. Song, X. Zhou, X. Wang, X. Shan, Y. K. Li, Y. Q. Wang, Y. X. Wei, Y. Zhang, Y. Xu, Y. Li, Y. Zhao, Y. Sun, Y. Wang, Y. Yu, Y. Zhang, Y. Shi, Y. Xiong, Y. He, Y. Piao, Y. Wang, Y. Tan, Y. Ma, Y. Liu, Y. Guo, Y. Ou, Y. Wang, Y. Gong, Y. Zou, Y. He, Y. Xiong, Y. Luo, Y. You, Y. Liu, Y. Zhou, Y. X. Zhu, Y. Huang, Y. Li, Y. Zheng, Y. Zhu, Y. Ma, Y. Tang, Y. Zha, Y. Yan, Z. Z. Ren, Z. Ren, Z. Sha, Z. Fu, Z. Xu, Z. Xie, Z. Zhang, Z. Hao, Z. Ma, Z. Yan, Z. Wu, Z. Gu, Z. Zhu, Z. Liu, Z. Li, Z. Xie, Z. Song, Z. Pan, Z. Huang, Z. Xu, Z. Zhang, and Z. Zhang, “Deepseek-r1 incentivizes reasoning in llms through reinforcement learning,” Nature , vol. 645, no. 8081, p. 633–638, Sep. 2025. [Online]. Available: http://dx.doi.org/10.1038/s41586-025-09422-z [53] S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. Narasimhan, and Y. Cao, “React: Synergizing reasoning and acting in language models,” arXiv preprint arXiv:2210.03629 , 2022. [54] OpenAI, “A practical guide to building agents,” https://cdn.openai.com/b usiness-guides-and-resources/a-practical-guide-to-building-agents.pdf, Accessed 2026. [55] M. team., “Writing effective tools for agents,” https://modelcontextprot ocol.info/docs/tutorials/writing-effective-tools/, Accessed 2026. [56] O. S. S. F. (OpenSSF), “Fuzz introspector – introspect, extend and optimise fuzzers,” Accessed 2022. [Online]. Available: https: //github.com/ossf/fuzz-introspector [57] G. Savidov and A. Fedotov, “Casr-Cluster: Crash clustering for linux applications,” in 2021 Ivannikov ISPRAS Open Conference (ISPRAS) .IEEE, 2021, pp. 47–51. [58] I. Free Software Foundation, “Gdb non-interactive batch mode,” https: //www.sourceware.org/gdb/current/onlinedocs/gdb.html/Mode-Options .html, Accessed 2026. [59] B. Liu, X. Li, J. Zhang, J. Wang, T. He, S. Hong, H. Liu, S. Zhang, K. Song, K. Zhu, Y. Cheng, S. Wang, X. Wang, Y. Luo, H. Jin, P. Zhang, O. Liu, J. Chen, H. Zhang, Z. Yu, H. Shi, B. Li, D. Wu, F. Teng, X. Jia, J. Xu, J. Xiang, Y. Lin, T. Liu, T. Liu, Y. Su, H. Sun, G. Berseth, J. Nie, I. Foster, L. Ward, Q. Wu, Y. Gu, M. Zhuge, X. Liang, X. Tang, H. Wang, J. You, C. Wang, J. Pei, Q. Yang, X. Qi, and C. Wu, “Advances and challenges in foundation agents: From brain-inspired intelligence to evolutionary, collaborative, and safe systems,” 2025. [Online]. Available: https://arxiv.org/abs/2504.01990 [60] S. Han, Q. Zhang, Y. Yao, W. Jin, and Z. Xu, “Llm multi-agent systems: Challenges and open problems,” 2025. [Online]. Available: https://arxiv.org/abs/2402.03578 [61] C. S. Xia, Y. Deng, S. Dunn, and L. Zhang, “Demystifying llm-based software engineering agents,” Proc. ACM Softw. Eng. , vol. 2, no. FSE, Jun. 2025. [Online]. Available: https://doi.org/10.1145/3715754 [62] LLVM, “Source-based code coverage,” Accessed 2026. [Online]. Available: https://clang.llvm.org/docs/SourceBasedCodeCoverage.html [63] travitch, “Whole program llvm (wllvm),” https://github.com/travitch/wh ole-program-llvm, Accessed 2026. [64] C. Aschermann, S. Schumilo, T. Blazytko, R. Gawlik, and T. Holz, “Redqueen: Fuzzing with input-to-state correspondence,” in Symposium on Network and Distributed System Security (NDSS) , 2019. [65] C. Lemieux, J. P. Inala, S. K. Lahiri, and S. Sen, “Codamosa: Escaping coverage plateaus in test generation with pre-trained large language models,” in 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) , 2023, pp. 919–931. [66] DeepSeek-AI, A. Liu, A. Mei, B. Lin, B. Xue, B. Wang, B. Xu, B. Wu, B. Zhang, C. Lin, C. Dong, C. Lu, C. Zhao, C. Deng, C. Xu, C. Ruan, D. Dai, D. Guo, D. Yang, D. Chen, E. Li, F. Zhou, F. Lin, F. Dai, G. Hao, G. Chen, G. Li, H. Zhang, H. Xu, H. Li, H. Liang, H. Wei, H. Zhang, H. Luo, H. Ji, H. Ding, H. Tang, H. Cao, H. Gao, H. Qu, H. Zeng, J. Huang, J. Li, J. Xu, J. Hu, J. Chen, J. Xiang, J. Yuan, J. Cheng, J. Zhu, J. Ran, J. Jiang, J. Qiu, J. Li, J. Song, K. Dong, K. Gao, K. Guan, K. Huang, K. Zhou, K. Huang, K. Yu, L. Wang, L. Zhang, L. Wang, L. Zhao, L. Yin, L. Guo, L. Luo, L. Ma, L. Wang, L. Zhang, M. S. Di, M. Y. Xu, M. Zhang, M. Zhang, M. Tang, M. Zhou, P. Huang, P. Cong, P. Wang, Q. Wang, Q. Zhu, Q. Li, Q. Chen, Q. Du, R. Xu, R. Ge, R. Zhang, R. Pan, R. Wang, R. Yin, R. Xu, R. Shen, R. Zhang, S. H. Liu, S. Lu, S. Zhou, S. Chen, S. Cai, S. Chen, S. Hu, S. Liu, S. Hu, S. Ma, S. Wang, S. Yu, S. Zhou, S. Pan, S. Zhou, T. Ni, T. Yun, T. Pei, T. Ye, T. Yue, W. Zeng, W. Liu, W. Liang, W. Pang, W. Luo, W. Gao, W. Zhang, X. Gao, X. Wang, X. Bi, X. Liu, X. Wang, X. Chen, X. Zhang, X. Nie, X. Cheng, X. Liu, X. Xie, X. Liu, X. Yu, X. Li, X. Yang, X. Li, X. Chen, X. Su, X. Pan, X. Lin, X. Fu, Y. Q. Wang, Y. Zhang, Y. Xu, Y. Ma, Y. Li, Y. Li, Y. Zhao, Y. Sun, Y. Wang, Y. Qian, Y. Yu, Y. Zhang, Y. Ding, Y. Shi, Y. Xiong, Y. He, Y. Zhou, Y. Zhong, Y. Piao, Y. Wang, Y. Chen, Y. Tan, Y. Wei, Y. Ma, Y. Liu, Y. Yang, Y. Guo, Y. Wu, Y. Wu, Y. Cheng, Y. Ou, Y. Xu, Y. Wang, Y. Gong, Y. Wu, Y. Zou, Y. Li, Y. Xiong, Y. Luo, Y. You, Y. Liu, Y. Zhou, Z. F. Wu, Z. Z. Ren, Z. Zhao, Z. Ren, Z. Sha, Z. Fu, Z. Xu, Z. Xie, Z. Zhang, Z. Hao, Z. Gou, Z. Ma, Z. Yan, Z. Shao, Z. Huang, Z. Wu, Z. Li, Z. Zhang, Z. Xu, Z. Wang, Z. Gu, Z. Zhu, Z. Li, Z. Zhang, Z. Xie, Z. Gao, Z. Pan, Z. Yao, B. Feng, H. Li, J. L. Cai, J. Ni, L. Xu, M. Li, N. Tian, R. J. Chen, R. L. Jin, S. S. Li, S. Zhou, T. Sun, X. Q. Li, X. Jin, X. Shen, X. Chen, X. Song, X. Zhou, Y. X. Zhu, Y. Huang, Y. Li, Y. Zheng, Y. Zhu, Y. Ma, Z. Huang, Z. Xu, Z. Zhang, D. Ji, J. Liang, J. Guo, J. Chen, L. Xia, M. Wang, M. Li, P. Zhang, R. Chen, S. Sun, S. Wu, S. Ye, T. Wang, W. L. Xiao, W. An, X. Wang, X. Sun, X. Wang, Y. Tang, Y. Zha, Z. Zhang, Z. Ju, Z. Zhang, and Z. Qu, “Deepseek-v3.2: Pushing the frontier of open large language models,” 2025. [Online]. Available: https://arxiv.org/abs/2512.02556 [67] W. Kwon, Z. Li, S. Zhuang, Y. Sheng, L. Zheng, C. H. Yu, J. Gonzalez, H. Zhang, and I. Stoica, “Efficient memory management for large language model serving with pagedattention,” in Proceedings of the 29th Symposium on Operating Systems Principles , ser. SOSP ’23. New York, NY, USA: Association for Computing Machinery, 2023, p. 611–626. [Online]. Available: https://doi.org/10.1145/3600006.3613165 [68] DeepSeek-AI, “Hugging face: Deepseek v3.2 model,” https://huggingfac e.co/deepseek-ai/DeepSeek-V3.2, Accessed 2026. [69] LLVM, “llvm-cov - emit coverage information,” Accessed 2026. [Online]. Available: https://llvm.org/docs/CommandGuide/llvm-cov.html [70] G. Klees, A. Ruef, B. Cooper, S. Wei, and M. Hicks, “Evaluating fuzz testing,” in Proceedings of the 2018 ACM SIGSAC Conference on Computer and Communications Security , ser. CCS ’18. New York, NY, USA: Association for Computing Machinery, 2018, p. 2123–2138. [Online]. Available: https://doi.org/10.1145/3243734.3243804 [71] P. developers, “Promptfuzz author response to its official release,” https: //github.com/FuzzAnything/PromptFuzz/releases/tag/v1.0.0, Accessed 2026. [72] ——, “Can promefuzz be used to fuzz openssl?” https://github.com/pvz 122/PromeFuzz/issues/8, Accessed 2026. [73] J. Jiang, H. Xu, and Y. Zhou, “Rulf: Rust library fuzzing via api dependency graph traversal,” in 2021 36th IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE, 2021, pp. 581–592. [74] Y. Deng, C. S. Xia, H. Peng, C. Yang, and L. Zhang, “Large language models are zero-shot fuzzers: Fuzzing deep-learning libraries via large language models,” in Proceedings of the 32nd ACM SIGSOFT Interna-tional Symposium on Software Testing and Analysis , 2023, pp. 423–435. [75] C. S. Xia, M. Paltenghi, J. L. Tian, M. Pradel, and L. Zhang, “Universal fuzzing via large language models,” arXiv preprint arXiv:2308.04748 ,2023. [76] H. Xu, Y. Zhao, and H. Wang, “Directed greybox fuzzing via large language model,” 2025. [Online]. Available: https: //arxiv.org/abs/2505.03425 [77] “Github rest api,” https://docs.github.com/en/rest?apiVersion=2022-11-2 8, Accessed 2026. [78] Janne, “Agent design lessons from claude code,” https://jannesklaas.gith ub.io/ai/2025/07/20/claude-code-agent-design.html, Accessed 2026. 
+
+APPENDIX 
+
+A. Open Science 
+
+We are committed to reproducible research. However, as discussed in the Ethical Considerations section, the dual-use potential of FuzzAgent precludes an open-source release of its 16 implementation at this time. To allow independent verification of the reported results, we provide the full evaluation dataset, including raw coverage measurements, crash artifacts, bug reports, and harness collections, at: https://github.com/FuzzA nything/FuzzAgent-Artifacts. 
+
+B. Implementation 
+
+FuzzAgent is implemented in 17k lines of Python code. The system architecture is primarily divided into interface implementations and strategies. For the interface implementa-tions, we adhere to the principles of modularity and robustness recommended in prior studies [ 54 ], [ 55 ]. We provide a com-prehensive list of the tools designed for the current prototype in Section E. In the Computer Usage Interface, tools for file navigation and editing are adapted from SWE-Agent [ 47 ], while the remaining tools are custom-designed for library fuzzing tasks. The Web Search Interface is built upon the GitHub API [ 77 ]. The Coverage Analysis Interface relies on source-based code coverage [ 62 ] and llvm-cov [ 69 ]. The Crash Debugging Interface incorporates CASR [57 ] and the non-interactive batch mode of GDB [58 ]. To ensure system stability, we implement agent hooking and validation mechanisms to manage unexpected situations gracefully. Specifically, we added hooking functions at each agent’s exit point to validate outputs within the Environment and remind the agent of the intended results [ 78 ]. Regarding strategies, we designed specialized system prompts for each agent to implement their core capabilities; these are provided in Section F. 
+
+C. Statistical Variance in Library Fuzzing 
+
+Library fuzzing contains inherent randomness: even when the same target and fuzzer are used, different fuzzing runs may explore different paths and produce different coverage results. Prior work therefore recommends repeated fuzzing trials and statistical analysis when evaluating fuzzers [ 70 ]. In LLM-based library fuzzing, this issue becomes more pronounced because randomness is introduced not only by fuzzing, but also by harness generation. Different LLM runs can synthesize different API sequences in harnesses, which may substantially change the reachable code paths before fuzzing even starts. We therefore quantify both sources of variation. We use the coefficient of variation (CV) as a scale-normalized measure of dispersion: 
+
+CV = σμ × 100% ,
+
+where μ and σ denote the mean and standard deviation of branch coverage across repeated trials. CV is preferable to raw variance here because the evaluated libraries differ greatly in size and absolute branch coverage; normalizing by the mean makes variation comparable across libraries. Our variance experiment follows a nested design. For each LLM-based harness generation method and each library, we performed 5 independent harness-generation trials. After each generation trial, the valid harnesses for the library were merged into one composite harness. We then ran 5 independent 24-hour fuzzing trials for each composite harness, resulting in 25 independent 24-hour fuzzing runs per method-library pair. Let ci,j denote the branch coverage from the j-th fuzzing trial of the harness produced by the i-th generation trial, where 
+
+i, j ∈ { 1, . . . , 5}. To measure variation from harness generation, we first average over fuzzing randomness for each generated harness, mi = 15
+
+P5 
+
+> j=1
+
+ci,j , and then compute the CV over 
+
+{m1, . . . , m 5}. To measure variation from fuzzing, we compute the CV over {ci, 1, . . . , c i, 5} within each generation trial and then average these 5 CV values. Table V reports the resulting CV values. Across available libraries, the CV caused by harness generation is consistently larger than the CV caused by repeated fuzzing with a fixed generated harness. This result indicates that LLM harness generation is the dominant source of statistical variation in LLM-based library fuzzing. Consequently, evaluating such systems with only one generation trial can produce unstable and potentially misleading results. Our main evaluation therefore repeats both harness generation and 24-hour fuzzing, so the reported coverage numbers are less sensitive to random outcomes from a single LLM run.                                                                                                                                        
+
+> TABLE V COEFFICIENT OF VARIATION ACROSS INDEPENDENT HARNESS -GENERATION AND FUZZING TRIALS .
+> Library FuzzAgent PromeFuzz PromptFuzz
+> Harness Fuzzing Harness Fuzzing Harness Fuzzing
+> cJSON 2.66% 0.14% 5.01% 3.50% 2.25% 0.05% libmagic 5.57% 2.37% 4.76% 4.97% 16.71% 3.70% RE2 2.71% 0.52% 1.59% 4.59% 8.59% 2.94% pugixml 2.73% 0.42% 4.45% 1.76% N/A N/A zlib 2.04% 0.40% 4.99% 1.01% 3.88% 0.79% c-ares 3.46% 0.66% 4.30% 2.67% 4.87% 0.50% liblouis 10.36% 0.64% 11.48% 1.53% 16.23% 8.31% libpng 4.44% 1.11% 31.09% 6.04% 22.34% 1.97% libpcap 4.02% 2.21% 5.30% 4.56% 18.39% 2.50% libtiff 2.80% 1.27% 12.35% 11.46% 9.22% 4.82% lcms 9.25% 1.38% 5.70% 6.76% 5.72% 1.20% tinygltf 7.61% 2.58% 5.33% 5.46% N/A N/A libjpeg-turbo 7.38% 0.88% 16.98% 12.30% 36.23% 6.74% curl 30.36% 1.59% 18.34% 1.72% 6.90% 1.24% libvpx 24.28% 0.92% 23.54% 8.60% 6.88% 2.64% SQLite3 13.60% 2.94% 4.49% 4.34% 29.31% 3.26% libaom 7.13% 0.92% 12.49% 6.69% 6.96% 0.87% protobuf 15.03% 1.28% N/A N/A N/A N/A OpenSSL 28.46% 1.96% N/A N/A 12.85% 0.51% OpenCV 17.47% 1.45% N/A N/A N/A N/A
+> Mean 10.07% 1.28% 10.13% 5.17% 12.96% 2.63% Note: CV denotes coefficient of variation. The harness columns compute CV over the mean coverage of 5 fuzzing trials for each of 5 independent harness-generation trials. The fuzzing columns compute the within-harness CV over 5 independent 24-hour fuzzing trials and then average the CV across the 5 generated harnesses. N/A indicates unsupported or unavailable settings.
+
+D. Mann-Whitney U Test for Statistical Significance 
+
+Because coverage values are not guaranteed to follow a normal distribution, we use the non-parametric Mann–Whitney U test to assess whether the observed coverage differences between FuzzAgent and each baseline are statistically signifi-cant. Table VI reports the per-library p-values. These results complement the mean coverage numbers in Table I by showing that FuzzAgent ’s improvements are statistically significant for most available library-baseline pairs. 17 TABLE VI MANN –W HITNEY U-TEST P -VALUES COMPARING FUZZ AGENT WITH BASELINE FUZZERS .                                                                                              
+
+> Library PromeFuzz PromptFuzz OSS-Fuzz OSS-Fuzz-Gen
+> cJSON 1.37E-08 2.04E-08 8.85E-11 8.85E-11 libmagic 2.37E-09 0.132644 9.73E-11 9.73E-11 RE2 1.41E-09 1.41E-09 9.73E-11 9.73E-11 pugixml 1.39E-09 N/A 9.49E-11 9.49E-11 zlib 1.39E-09 2.25E-09 9.56E-11 9.56E-11 c-ares 4.61E-05 0.196896 9.73E-11 9.73E-11 liblouis 1.39E-09 0.00216183 0.19826 9.54E-11 libpng 1.41E-09 1.41E-09 9.69E-11 9.69E-11 libpcap 1.41E-09 1.41E-09 9.71E-11 9.71E-11 libtiff 1.84E-08 1.42E-09 9.73E-11 9.73E-11 lcms 2.55E-09 1.16E-06 9.61E-11 9.61E-11 tinygltf 1.41E-09 N/A 9.71E-11 9.71E-11 libjpeg-turbo 1.40E-09 1.40E-09 0.00447948 9.61E-11 curl 0.0074139 0.000444748 0.000105049 9.72E-11 libvpx 1.39E-09 1.39E-09 9.50E-11 9.50E-11 SQLite3 3.02E-07 0.019891 0.198457 0.0711539 libaom 1.42E-09 1.41E-09 9.73E-11 9.73E-11 protobuf N/A N/A 9.73E-11 9.73E-11 OpenSSL N/A 3.90E-05 9.73E-11 9.73E-11 OpenCV N/A N/A 9.73E-11 9.73E-11
+> p < 0.05 17 14 18 19 Note: Each entry reports the p-value of a two-sided Mann–Whitney U test comparing the coverage distribution of FuzzAgent against the corresponding baseline on the same library. N/A indicates unavailable baseline results. The final row counts libraries where the difference is statistically significant at p < 0.05 .
+
+E. Interface Implementations 
+
+We built the interfaces to facilitate agents’ interaction with the working environment. These interfaces are implemented as a set of tools abstract the tasks in library fuzzing workflow. The url https://github.com/FuzzAnything/FuzzAgent-Artifacts/i nterfaces.md contains the detailed descriptions of these tools, including their input/output formats and example usages. 
+
+F. The System Prompt for FuzzAgent 
+
+Each agent in FuzzAgent is driven by a system prompt that consists of three parts: (i) the task responsibility , which states what the agent must accomplish and the success criteria; (ii) the core strategy , which encodes the methodology the agent should follow when invoking the interface tools; and (iii) a small set of few-shot examples that illustrate expected inputs, intermediate reasoning, and outputs. Among them, the core strategy is the part most relevant to the design of FuzzAgent .For brevity, in the figures below we list only the core strategy of each agent’s system prompt. 
+
+Library Builder 
+
+# Role Definition You are a resilient and expert **Build Automation Engineer**. Your goal is NOT just to write a script, but to **guarantee a successful build** that produces valid static (‘.a‘) libraries. ## Core Responsibility You are responsible for the entire **Build-Test-Fix** cycle. 1. **Draft**: Create the initial ‘build.sh‘. 2. **Execute**: Run the build using ‘run_and_check_build_script‘. 3. **Debug**: If the build fails, YOU MUST ANALYZE THE LOGS, FIX THE SCRIPT, AND RETRY. 4. **Deliver**: Only exit when ‘\$WORK/lib‘ contains the required artifacts. 5. **CRITICAL:** Do not exit simply because the build failed. A build failure is a demand for a fix, not a reason to quit. 
+
+Fig. 6. The system prompt for the Library Builder agent in FuzzAgent .
+
+Dictionary Generator 
+
+# Role Definition You are the **Dictionary Acquisition & Optimization Specialist**. Your goal is to provide a *lean, high-impact* fuzzing dictionary. You must locate existing resources from the OSS-Fuzz repository---whether they are stored locally or downloaded dynamically---and rigorously prune them. ### Discovery & Matching 1. **Analyze Target**: Determine the ** Protocol/Format** of the target project (e.g ., "It’s a Video Codec"). 2. **Search**: Run ‘search_web list‘. 3. **Select Source**: - **Exact Match**: Target=‘libaom‘, OSS-Fuzz=‘libaom‘. - **Protocol Match**: Target=‘ my_video_lib‘, OSS-Fuzz=‘ffmpeg‘. - **Select Criteria**: All exact matched and protocol matched projects. Use tool ‘ track_web_retrieve_progress‘ to record matched projects waiting for retrieval. - **Fallback**: If no match found, create a minimal dictionary based on standard protocol knowledge. 
+
+Fig. 7. The system prompt for the Dictionary Generator agent in FuzzAgent .
+
+18 Seed Generator 
+
+# Role Definition You are the **Seed Corpus Acquisition Agent **. Your sole responsibility is to locate, download, and install high-quality fuzzing seed corpora for the target project. ## Discovery & Matching 1. **Analyze Target**: Determine the ** Protocol/Format** of the target project (e.g ., "It’s a Video Codec"). 2. **Search**: Run ‘search_web list‘. 3. **Select Source**: - **Exact Match**: Target=‘libaom‘, OSS-Fuzz=‘libaom‘. - **Protocol Match**: Target=‘ my_video_lib‘, OSS-Fuzz=‘ffmpeg‘. - **Select Criteria**: All exact matched and protocol matched projects. Use tool ‘track_web_retrieve_progress‘ to record matched projects waiting for retrieval.   
+
+> Fig. 8. The system prompt for the Seed Generator agent in FuzzAgent .
+
+Harness Generator 
+
+# New Harness Generation Strategy ## Coverage-guided Principles **Primary Objective**: Generate a harness according CoverageAnalyzerAgent’s guides. **API Selection Strategy** (in priority order): 1. **Manager-Specified Targets**: Always prioritize APIs explicitly mentioned in Manager specifications 2. **Dependency Chain Completion**: Include necessary helper functions for proper API initialization and cleanup **Coverage-Driven Design Rules**: - Call as many target APIs has dependencies as possible to maximize coverage - Include input validation and error handling paths where possible - Implement necessary state setup for complex API sequences - Ensure proper resource management (allocation/deallocation patterns)   
+
+> Fig. 9. The system prompt for the Harness Generator agent in FuzzAgent .
+
+Coverage Analyzer: API-Surface Exploration 
+
+## Analysis Strategy ### PHASE 1: Surface Coverage Exploration ( API Utilizaiton) **Trigger:** High-value public APIs are untouched. **Goal:** Identify a group of related, uncovered APIs to guide the generation of a new, high-impact fuzzing harness. **Workflow:** 1. **Select Targets:** From the Module, File and API-Level coverage data, prioritize the APIs with the highest undiscovered complexity. 2. **Group Clusters:** Look for other uncovered APIs in the same files or modules that share a logical relationship (e.g., ‘ ArrayCreate‘, ‘ArrayInsert‘, ‘ArrayDelete‘). 3. **Reason Relations:** Reasoning relationships among identified APIs and thinking how to organize the related ones into an invocation sequence. 4. **Analyze Dependencies:** Complement the invocation sequence and determine the correct lifecycle: - *Initialization*: What must be called first? (e.g., ‘Init‘, ‘New‘, ‘Parse‘) - *Operation*: The target invocation sequence. - *Cleanup*: What frees the memory? (e.g., ‘Free‘, ‘Destroy‘) - *Helpers*: Do you need ‘CreateString‘ to test ‘DictionaryAdd‘? 5. **Formulate Recommendation:** Formulate these into a single harness request.   
+
+> Fig. 10. The system prompt for the API-Surface Exploration strategic in Coverage Analyzer agent in FuzzAgent .
+
+19 Coverage Analyzer: Deep Stated Exploration 
+
+## Analysis Strategy ### PHASE 2: Deep Coverage (Blocker Resolution) **Condition:** Overall API coverage is high enough (API Coverage >= 90%) or the API coverage growth is stagnant. **Trigger:** Public APIs are hit, but internal functions and code branches are blocked. **Goal:** Analyze the blocker cause and suggest a targeted harness to break this. **Workflow:** 1. **Identify Blocker:** Inspect the Function Level and Branch Level coverage, pick the one with the highest "Blocked Complexity". 2. **Trace Entry Point:** Analyze the call chains on the function containing the blocker. Identify which Public API reaches this code. 3. **Analyze Condition:** Read the source code with coverage hits around the blocker. What condition is failing? Is this caused by unsatisfied API calls? If not, select the next blocker to analyze. 4. **Formulate Recommendation:** Instruct the HarnessAgent to create a specific scenario that satisfies this condition.   
+
+> Fig. 11. The system prompt for the Deep Stated Exploration strategy in Coverage Analyzer agent in FuzzAgent .
+
+Crash Analyzer 
+
+# Role Definition You are the **Crash Analysis & Triage Specialist**. Your sole purpose is to investigate a specific crash artifact, determine the "Blame" (Library Bug vs. Harness Bug), and file a formal report. ## Core Mission You act as a Judge. You have two suspects: 1. **The Library**: Did it fail to handle valid input safe? (Genuine Bug) 2. **The Harness**: Did it violate the API contract or manage memory poorly? (Invalid Bug) ## Mandatory Workflow ### Phase 1: Forensics (Data Gathering) 1. Receive the **Crash Artifact Path** (from user input). 2. Call ‘crash_initial_analysis‘ with the crash artifact path to get call traces. 3. **Identify the "Crash Point"**: The top-most stack frame that belongs to the project (skip standard library frames like ‘libc.so‘ or ‘asan_report‘). ### Phase 2: Debugging (Runtime Information Gathering) 1. Call ‘crash_context_inspection‘ on the suspect API or function to inspect the runtime context frames of this invocation. 2. Analyze the runtime context frames to identify the point of failure iteratively. 3. Read the file/documentation of the suspect API or function to verify the preconditions and postconditions. 4. Repeat the process until the point of failure is identified.   
+
+> Fig. 12. The system prompt for the Crash Analyzer agent in FuzzAgent .
+
+20 build                                       
+
+> dict
+> seed
+> harness
+> fuzzer
+> crash
+> coverage
+> cJSON libmagic RE2 pugixml zlib
+> build
+> dict
+> seed
+> harness
+> fuzzer
+> crash
+> coverage
+> c-ares liblouis libpng libpcap libtiff
+> build
+> dict
+> seed
+> harness
+> fuzzer
+> crash
+> coverage
+> lcms tinygltf libjpeg-turbo curl libvpx
+> 0612 18 24
+> build
+> dict
+> seed
+> harness
+> fuzzer
+> crash
+> coverage
+> SQLite3
+> 0612 18 24
+> libaom
+> 0612 18 24
+> protobuf
+> 0612 18 24
+> OpenSSL
+> 0612 18 24
+> OpenCV
+> build dict seed harness fuzzer crash coverage
+
+Fig. 13. The execution trajectory of one trail of FuzzAgent ’s agents across 24 hours. The horizontal axis represents time, while the vertical axis lists the different agents involved in the library fuzzing process. The agents from top to bottom are: Library Builder, Dictionary Generator, Seed Generator, Harness Generator, Fuzzer Executor, Coverage Analyzer and Crash Analyzer. Each colored block indicates a specific task undertaken by an agent, with the length of the block corresponding to the duration of that task. This visualization highlights how FuzzAgent dynamically allocates tasks among agents over time to optimize fuzzing efficiency and effectiveness. 
+
+Fig. 14. The project relation graph for target libraries in the Dictionary Generator and Seed Generator of our evaluation. The red nodes represent the target projects in our evaluations, and the green nodes represent the related projects FuzzAgent refers to generating the dictionary and seeds. This graph illustrates the interconnectedness of the selected projects, highlighting potential areas where knowledge transfer and shared fuzzing strategies could be beneficial. 
+
+21 TABLE VII: Library bugs discovered by FuzzAgent and detection coverage of baselines ( ✓ detected, ✗ missed). St. : R = reported, C = confirmed/fixed. All bugs in this table were detected by FuzzAgent .
+
+ID Library Crash Location Vulnerability Type St. OSS-Fuzz OSS-Fuzz-Gen PromptFuzz PromeFuzz 
+
+1 cJSON cJSON.c:2524 Integer Overflow R ✗ ✗ ✗ ✗
+
+2 cJSON cJSON.c:2001 Use After Free R ✗ ✗ ✗ ✗
+
+3 cJSON cJSON.c:1963 Type Mismatch R ✗ ✗ ✓ ✓
+
+4 libmagic softmagic.c:771 Null Pointer R ✗ ✗ ✗ ✗
+
+5 libmagic encoding.c:286 Segment Violation R ✗ ✗ ✗ ✗
+
+6 pugixml pugixml.cpp:5207 Buffer Overflow R ✗ ✗ ✗ ✗
+
+7 pugixml pugixml.cpp:232 Segment Violation R ✗ ✗ ✗ ✗
+
+8 pugixml pugixml.cpp:4565 Memory Alignment R ✗ ✗ ✗ ✓
+
+9 zlib gzlib.c:389 Integer Overflow C ✗ ✗ ✗ ✗
+
+10 c-ares ares process.c:1156 Integer Overflow C ✗ ✗ ✗ ✓
+
+11 liblouis pattern.c:801 Segment Violation C ✗ ✗ ✓ ✗
+
+12 liblouis compileTranslationTable.c:430 Segment Violation C ✗ ✗ ✗ ✗
+
+13 liblouis compileTranslationTable.c:296 Segment Violation C ✗ ✗ ✗ ✗
+
+14 liblouis compileTranslationTable.c:4865 Memory Leak C ✗ ✗ ✗ ✗
+
+15 liblouis lou translateString.c:1343 Buffer Overflow C ✗ ✗ ✗ ✗
+
+16 liblouis logging.c:57 Buffer Overflow C ✗ ✗ ✗ ✗
+
+17 liblouis lou backTranslateString.c:257 Buffer Overflow C ✗ ✗ ✗ ✗
+
+18 liblouis lou translateString.c:1343 Buffer Overflow C ✗ ✗ ✗ ✗
+
+19 libpng pngwutil.c:2182 Buffer Overflow R ✗ ✗ ✗ ✗
+
+20 libpng png.c:495 Buffer Overflow R ✗ ✗ ✗ ✗
+
+21 libpng pngrtran.c:1070 Integer Overflow R ✗ ✗ ✗ ✗
+
+22 libpcap pcap-util.c:567 Memory Alignment C ✗ ✗ ✗ ✗
+
+23 libpcap bpf filter.c:112 Abort C ✗ ✗ ✗ ✗
+
+24 libtiff tif unix.c:338 Integer Overflow R ✗ ✗ ✗ ✗
+
+25 libtiff tif write.c:775 Buffer Overflow R ✗ ✗ ✗ ✗
+
+26 libtiff tif unix.c:357 Integer Overflow R ✗ ✗ ✗ ✗
+
+27 libtiff tif dirwrite.c:2159 Buffer Overflow R ✗ ✗ ✗ ✗
+
+28 libtiff tif luv.c:1318 Integer Overflow R ✗ ✗ ✗ ✗
+
+29 libtiff tif dirwrite.c:896 Buffer Overflow R ✗ ✗ ✗ ✗
+
+30 libtiff tif dirinfo.c:606 Integer Overflow R ✗ ✗ ✗ ✓
+
+31 lcms cmsio0.c:1530 Documentation C ✗ ✗ ✗ ✗
+
+32 lcms cmsio0.c:1606 Documentation C ✗ ✗ ✗ ✗
+
+33 lcms cmsnamed.c:808 Null Pointer C ✗ ✗ ✗ ✓
+
+34 libjpeg-turbo turbojpeg.c:937 Type Mismatch R ✗ ✗ ✓ ✗
+
+35 libjpeg-turbo jcarith.c:438 Type Mismatch R ✗ ✗ ✗ ✗
+
+36 libjpeg-turbo cmyk.h:55 Type Mismatch R ✗ ✗ ✗ ✗
+
+37 libvpx vpx image.c:263 Null Pointer C ✗ ✗ ✓ ✗
+
+38 libvpx firstpass.c:678 Integer Overflow C ✗ ✗ ✗ ✗
+
+39 libvpx bitwriter buffer.c:48 Integer Overflow C ✗ ✗ ✗ ✗
+
+40 libvpx encodeframe.c:831 Integer Overflow C ✗ ✗ ✗ ✗
+
+41 libvpx vpx dsp common.h:89 Integer Overflow C ✗ ✗ ✗ ✗
+
+42 libvpx vp9 cx iface.c:349 Integer Overflow C ✗ ✗ ✗ ✗
+
+43 libvpx vp9 svc layercontext.c:468 Integer Overflow C ✗ ✗ ✗ ✗
+
+44 libvpx vp9 ratectrl.c:2172 Integer Overflow C ✗ ✗ ✗ ✗
+
+45 libvpx vp9 svc layercontext.c:1334 Integer Overflow C ✗ ✗ ✗ ✗
+
+46 libvpx vp9 cx iface.c:501 Integer Overflow C ✗ ✗ ✓ ✗
+
+47 libvpx vp9 encoder.h:1079 Integer Overflow C ✗ ✗ ✗ ✗
+
+48 libvpx vp9 quantize.c:324 Buffer Overflow C ✗ ✗ ✗ ✗
+
+49 libvpx onyx if.c:970 Buffer Overflow C ✗ ✗ ✗ ✗
+
+50 libvpx vp9 encodeframe.c:580 Buffer Overflow C ✗ ✗ ✗ ✗
+
+51 libvpx sad4d avx512.c:35 Buffer Overflow C ✗ ✗ ✗ ✗
+
+52 libvpx vp9 bitstream.c:59 Buffer Overflow C ✗ ✗ ✗ ✗
+
+53 libvpx vp9 rd.c:351 Buffer Overflow C ✗ ✗ ✗ ✗
+
+54 libvpx vp9 decoder.c:311 Segment Violation C ✗ ✗ ✗ ✗
+
+55 libvpx highbd sad avx2.c:29 Segment Violation C ✗ ✗ ✗ ✗
+
+56 libvpx vp9 svc layercontext.c:1007 Segment Violation C ✗ ✗ ✗ ✗
+
+57 libvpx highbd variance impl sse2.asm:217 Segment Violation C ✗ ✗ ✗ ✗
+
+continued on next page 
+
+22 Table VII continued from previous page 
+
+ID Library Crash Location Vulnerability Type St. OSS-Fuzz OSS-Fuzz-Gen PromptFuzz PromeFuzz 
+
+58 libvpx variance.c:269 Segment Violation C ✗ ✗ ✗ ✗
+
+59 libvpx vp9 encoder.c:4104 Segment Violation C ✗ ✗ ✗ ✗
+
+60 libvpx onyxd if.c:126 Segment Violation C ✗ ✗ ✗ ✗
+
+61 libvpx vp9 bitstream.c:402 Segment Violation C ✗ ✗ ✗ ✗
+
+62 libvpx vp8 dx iface.c:134 Assertion Fail C ✗ ✗ ✗ ✗
+
+63 libvpx onyx if.c:1233 Assertion Fail C ✗ ✗ ✗ ✗
+
+64 libvpx vp9 encodeframe.c:5471 Assertion Fail C ✗ ✗ ✗ ✗
+
+65 sqlite sqlite3.c:263698 Integer Overflow R ✗ ✗ ✗ ✓
+
+66 libaom firstpass.c:830 Integer Overflow C ✗ ✗ ✗ ✗
+
+67 libaom pass2 strategy.c:308 Integer Overflow C ✗ ✗ ✗ ✓
+
+68 libaom intra mode search utils.h:107 Integer Overflow C ✗ ✗ ✗ ✗
+
+69 libaom var based part.c:419 Integer Overflow C ✗ ✗ ✗ ✗
+
+70 libaom ratectrl.c:508 Integer Overflow C ✗ ✗ ✗ ✗
+
+71 libaom variance.c:280 Integer Overflow C ✗ ✗ ✗ ✗
+
+72 libaom noise model.c:1270 Integer Overflow C ✗ ✗ ✗ ✗
+
+73 libaom psnr.c:65 Integer Overflow C ✗ ✗ ✗ ✗
+
+74 libaom encodetxb.c:615 Buffer Overflow C ✗ ✗ ✗ ✗
+
+75 libaom av1 dx iface.c:1330 Buffer Overflow C ✗ ✗ ✗ ✗
+
+76 libaom svc layercontext.c:444 Buffer Overflow C ✗ ✗ ✗ ✗
+
+77 libaom pass2 strategy.c:1215 Buffer Overflow C ✗ ✗ ✗ ✗
+
+78 libaom svc layercontext.c:315 Buffer Overflow C ✗ ✗ ✗ ✗
+
+79 libaom aq cyclicrefresh.c:237 Buffer Overflow C ✗ ✗ ✗ ✗
+
+80 libaom encodetxb.c:617 Buffer Overflow C ✗ ✗ ✗ ✗
+
+81 libaom av1 fwd txfm2d avx2.c:1450 Buffer Overflow C ✗ ✗ ✗ ✗
+
+82 libaom av1 ext ratectrl.c:186 Segment Violation C ✗ ✗ ✗ ✓
+
+83 libaom av1 dx iface.c:953 Segment Violation C ✗ ✗ ✗ ✗
+
+84 libaom intra mode search.c:358 Assertion Fail C ✗ ✗ ✗ ✗
+
+85 libaom encoder.c:2314 Assertion Fail C ✗ ✗ ✗ ✗
+
+86 libaom bitstream.c:2475 Assertion Fail C ✗ ✗ ✗ ✗
+
+87 protobuf coded stream.cc:243 Null Pointer C ✗ ✗ ✗ ✗
+
+88 protobuf coded stream.cc:735 Segment Violation C ✗ ✗ ✗ ✗
+
+89 openssl ssl ciph.c:1241 Segment Violation C ✗ ✗ ✗ ✗
+
+90 openssl obj lib.c:62 Null Pointer C ✗ ✗ ✗ ✗
+
+91 openssl dh kmgmt.c:89 Null Pointer C ✗ ✗ ✗ ✗
+
+92 openssl md32 common.h:158 Type Mismatch C ✗ ✗ ✗ ✗
+
+93 openssl bsearch.c:28 Type Mismatch C ✗ ✗ ✗ ✗
+
+94 openssl stack.c:443 Type Mismatch C ✗ ✗ ✗ ✗
+
+95 opencv count non zero.dispatch.cpp:148 Type Mismatch C ✗ ✗ ✗ ✗
+
+96 opencv drawing.cpp:1030 Type Mismatch C ✗ ✗ ✗ ✗
+
+97 opencv intrin sse.hpp:3080 Memory Alignment C ✗ ✗ ✗ ✗
+
+98 opencv drawing.cpp:1121 Integer Overflow C ✗ ✗ ✗ ✗
+
+99 opencv mathfuncs.cpp:141 Integer Overflow C ✗ ✗ ✗ ✗
+
+100 opencv types.hpp:1245 Integer Overflow C ✗ ✗ ✗ ✗
+
+101 opencv drawing.cpp:1662 Integer Overflow R ✗ ✗ ✗ ✗
+
+102 opencv tree.cpp:522 Buffer Overflow R ✗ ✗ ✗ ✗
+
+23

@@ -6,61 +6,49 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-14
-- 运行时间：2026-05-14 21:02:33 UTC
+- 最新运行日期：2026-05-15
+- 运行时间：2026-05-15 20:28:48 UTC
 - 运行状态：成功
-- 本次总论文数：13
-- 精读区：3
-- 速读区：10
+- 本次总论文数：9
+- 精读区：4
+- 速读区：5
 
 ### 今日简报（AI）
-今天聚焦自动化程序修复与代码智能体能力提升，共精读3篇、速读10篇论文。  
-最亮点来自《BoostAPR》，提出基于强化学习的双重奖励模型显著提升修复准确率；同时《PYTHALAB-MERA》展示冻结LLM的记忆与验证控制新机制。  
-建议关注强化学习与验证反馈结合的自动修复新思路，适合作为智能编程研究的切入点。
-- 详情：[/202605/14/README](/202605/14/README)
+强化学习助力程序修复，智能代理方法持续优化。  
+重点关注《BoostAPR》的双奖励模型修复策略与符号化补丁影响分析。  
+建议读者下步可追踪智能修复与模型增强在实际软件维护中的落地成效。
+- 详情：[/202605/15/README](/202605/15/README)
 
 ### 精读区论文标签
-1. [BoostAPR: Boosting Automated Program Repair via Execution-Grounded Reinforcement Learning with Dual Reward Models](/202605/14/2605.09134v3-boostapr-boosting-automated-program-repair-via-execution-grounded-reinforcement-learning-with-dual-reward-models)  
+1. [BoostAPR: Boosting Automated Program Repair via Execution-Grounded Reinforcement Learning with Dual Reward Models](/202605/15/2605.09134v3-boostapr-boosting-automated-program-repair-via-execution-grounded-reinforcement-learning-with-dual-reward-models)  
    标签：评分：10.0/10、query:apr-oracle
-   evidence：基于执行落地奖励模型的学习型程序修复
-2. [PYTHALAB-MERA: Validation-Grounded Memory, Retrieval, and Acceptance Control for Frozen-LLM Coding Agents](/202605/14/2605.08468v1-pythalab-mera-validation-grounded-memory-retrieval-and-acceptance-control-for-frozen-llm-coding-agents)  
+   evidence：基于强化学习的程序修复，具有序列和行级评估的双重奖励模型
+2. [Quantitative Symbolic Patch Impact Analysis](/202605/15/2605.13885v1-quantitative-symbolic-patch-impact-analysis)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：用于评估软件补丁影响和正确性的定量符号分析
+3. [Bidirectional Empowerment of Metamorphic Testing and Large Language Models: A Systematic Survey](/202605/15/2605.13898v1-bidirectional-empowerment-of-metamorphic-testing-and-large-language-models-a-systematic-survey)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：蜕变测试解决大语言模型中的测试预言问题
+4. [When Should an AI Workflow Release? Always-Valid Inference for Black-Box Generate-Verify Systems](/202605/15/2605.12947v1-when-should-an-ai-workflow-release-always-valid-inference-for-black-box-generate-verify-systems)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：基于验证的接受控制与执行反馈修复
-3. [Code-Centric Detection of Vulnerability-Fixing Commits: A Unified Benchmark and Empirical Study](/202605/14/2605.13138v1-code-centric-detection-of-vulnerability-fixing-commits-a-unified-benchmark-and-empirical-study)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：评估用于检测漏洞修复补丁的代码语言模型
+   evidence：用于生成-验证系统的始终有效发布包装器，针对失败案例校准评估器分数
 
 ### 速读区论文标签
-1. [Primal Generation, Dual Judgment: Self-Training from Test-Time Scaling](/202605/14/2605.11299v2-primal-generation-dual-judgment-self-training-from-test-time-scaling)  
-   标签：评分：7.5/10、query:apr-oracle
-   evidence：基于相对正确性结构在多个候选方案中进行评判
-2. [SmellBench: Evaluating LLM Agents on Architectural Code Smell Repair](/202605/14/2605.07001v2-smellbench-evaluating-llm-agents-on-architectural-code-smell-repair)  
+1. [Viverra: Text-to-Code with Guarantees](/202605/15/2605.14972v1-viverra-text-to-code-with-guarantees)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估代码异味修复的有效性与误报识别
-3. [Finding a Crab in the C: Assured Translation via Comparative Symbolic Execution](/202605/14/2605.12731v1-finding-a-crab-in-the-c-assured-translation-via-comparative-symbolic-execution)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：通过比较符号执行确保自动代码转换的语义正确性
-4. [SWE-Cycle: Benchmarking Code Agents across the Complete Issue Resolution Cycle](/202605/14/2605.13139v1-swe-cycle-benchmarking-code-agents-across-the-complete-issue-resolution-cycle)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：问题解决周期中的验证测试生成
-5. [Improving Code Translation with Syntax-Guided and Semantic-aware Preference Optimization](/202605/14/2605.13229v1-improving-code-translation-with-syntax-guided-and-semantic-aware-preference-optimization)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：跨语言语义模型用于评估功能等价性
-6. [SieveFL: Hierarchical Runtime-Aware Pruning for Scalable LLM-Based Fault Localization](/202605/14/2605.13491v1-sievefl-hierarchical-runtime-aware-pruning-for-scalable-llm-based-fault-localization)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：连接测试失败与责任方法的故障定位
-7. [RepoZero: Can LLMs Generate a Code Repository from Scratch?](/202605/14/2605.07122v2-repozero-can-llms-generate-a-code-repository-from-scratch)  
+   evidence：为生成代码的正确性提供形式化验证注释
+2. [RubricRefine: Improving Tool-Use Agent Reliability with Training-Free Pre-Execution Refinement](/202605/15/2605.09730v2-rubricrefine-improving-tool-use-agent-reliability-with-training-free-pre-execution-refinement)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：基于执行的仓库级生成验证
-8. [ConCovUp: Effective Agent-Based Test Driver Generation for Concurrency Testing](/202605/14/2605.09573v1-concovup-effective-agent-based-test-driver-generation-for-concurrency-testing)  
+   evidence：使用执行前准则根据契约检查对候选代码进行评分，以提高可靠性。
+3. [Agentic Systems as Boosting Weak Reasoning Models](/202605/15/2605.14163v1-agentic-systems-as-boosting-weak-reasoning-models)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：基于代理的并发测试驱动程序生成
-9. [Decaf: Improving Neural Decompilation with Automatic Feedback and Search](/202605/14/2605.11501v1-decaf-improving-neural-decompilation-with-automatic-feedback-and-search)  
+   evidence：使用执行和测试作为健全性信号的验证器支持委员会搜索
+4. [FuzzAgent: Multi-Agent System for Evolutionary Library Fuzzing](/202605/15/2605.14431v1-fuzzagent-multi-agent-system-for-evolutionary-library-fuzzing)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：通过自动反馈和搜索改进神经反编译
-10. [AI Harness Engineering: A Runtime Substrate for Foundation-Model Software Agents](/202605/14/2605.13357v1-ai-harness-engineering-a-runtime-substrate-for-foundation-model-software-agents)  
+   evidence：利用运行时反馈验证漏洞并提高模糊测试的可靠性
+5. [Documentation-Guided Agentic Codebase Migration from C to Rust](/202605/15/2605.14634v1-documentation-guided-agentic-codebase-migration-from-c-to-rust)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：软件智能体中用于验证和故障归因的运行时基座
+   evidence：利用文档不匹配作为自动迁移中的修复信号
 
 
 <div class="dpr-home-promo-card">
