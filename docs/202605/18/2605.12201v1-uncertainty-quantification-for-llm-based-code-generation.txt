@@ -1,0 +1,1228 @@
+Title: Uncertainty Quantification for LLM-based Code Generation
+
+URL Source: https://arxiv.org/pdf/2605.12201v1
+
+Published Time: Wed, 13 May 2026 01:26:48 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Uncertainty Quantification for LLM-based Code Generation 
+
+Senrong Xu 1 Yuhao Tan 1 Yanke Zhou 1 Guangyuan Wu 1 Zenan Li 2
+
+Yuan Yao 1 Taolue Chen 3 Feng Xu 1 Xiaoxing Ma 1
+
+## Abstract 
+
+Prediction sets provide a theoretically grounded framework for quantifying uncertainty in machine learning models. Adapting them to structured gen-eration tasks, in particular, large language model (LLM) based code generation, remains a chal-lenging problem. An existing attempt proposes PAC prediction sets but is limited by its strong monotonicity assumption on risk and single-label classification framework, which severely limits the space of candidate programs and cannot ac-commodate the multiple valid outputs inherent to code generation. To address these limitations, we propose an approach R IS COSET that lever-ages multiple hypothesis testing to construct risk-controlling predictions for LLM-based code gen-eration. Given a trained code generation model, we produce a prediction set represented by a par-tial program, which is guaranteed to contain a correct solution with high confidence. Extensive experiments on three LLMs demonstrate the ef-fectiveness of the proposed method. For instance, compared with the state-of-the-art, our method can significantly reduce the code removal by up to 24.5%, at the same level of risk. 
+
+## 1. Introduction 
+
+Large language models (LLMs) have been widely adopted by millions of users worldwide due to their strong perfor-mance (Achiam et al., 2023; Team et al., 2023). However, they often hallucinate facts and may generate toxic or bi-ased outputs (Nadeau et al., 2024), limiting their use in high-stakes applications such as code generation and legal analysis (Liu et al., 2024; Dahl et al., 2024). As an uncertainty quantification method, conformal pre-diction (CP) can provide model-agnostic, distribution-free 
+
+> 1
+
+State Key Lab of Novel Software Technology, Nanjing Uni-versity 2ETH Z ¨urich 3Birkbeck, University of London. Corre-spondence to: Senrong Xu <srxu@smail.nju.edu.cn >, Yuan Yao 
+
+<y.yao@nju.edu.cn >.
+
+Preprint. May 13, 2026. 
+
+uncertainty guarantees for machine learning models, and thus has attracted recent attention (Vovk et al., 2005; An-gelopoulos et al., 2022). For example, several studies have applied CP into LLM generation by identifying sound com-ponents within the LLM output (Quach et al., 2024; Cherian et al., 2024). However, these methods assume near inde-pendence among components, an assumption that holds for sentences in NLP but fails for structured outputs like code, where components interact systemically (Casalnuovo et al., 2019; Chen et al., 2022). To address this, Khakhar et al. (2023) proposed PAC (proba-bly approximately correct) prediction sets for code genera-tion, constructing structured prediction sets and providing statistical guarantees via partial programs (Guo et al., 2021). However, this approach suffers from two key limitations: (1) it relies on a strong monotonicity constraint that restricts the space of admissible partial programs, which may lead to a suboptimal solution; (2) it is designed for single-label classification and does not easily accommodate the multiple valid programs (e.g., multiple syntactically different pro-grams with identical, correct semantics) that naturally arise in code generation. In this paper, we introduce a new method, R IS COSET , for constructing risk-controlling prediction sets tailored to code generation. To overcome the limitations in PAC predic-tion sets, we reframe code uncertainty quantification as a multi-label classification problem, and adopt the Learn Then Test (LTT) framework (Angelopoulos et al., 2025), a recent risk-controlling method, to construct structured prediction sets with rigorous statistical guarantees. That is, given an LLM-generated code, R IS COSET yields a partial program (i.e., a subtree of the program’s abstract syntax tree (AST), see Fig. 1), which is guaranteed, with high confidence, to contain a correct solution. However, applying LTT into code generation is still chal-lenging. The first challenge lies in the complexity of code search space. Unlike traditional applications such as clas-sification and regression whose search space is typically one-dimensional, the search space of structured data (such as code) is complex and multi-dimensional (Solar-Lezama, 2008). To this end, we design a tailored risk function and the corresponding optimization problem for obtaining partial 1
+
+> arXiv:2605.12201v1 [cs.SE] 12 May 2026 Uncertainty Quantification for LLM-based Code Generation
+
+root 
+
+return for 
+
+i rang e =
+
+2 n+1 dp[i] 
+
+dp[i -1] 
+
+dp[i -2] 
+
+dp[ n]
+
++
+
+*
+
+2               
+
+> for iin range(2, n+1):
+> dp[i] = dp[i -1] + 2*dp[i -2]
+> return dp[n] for iin range(2, n+1):
+> dp[i] =dp[i -1] –dp[i -2]
+> return dp[n]
+
+root 
+
+return for 
+
+i rang e =
+
+2 n+1 dp[i] 
+
+dp[i -1] dp[i -2] 
+
+dp[ n]
+
+# -  
+
+> Figure 1. An illustrative example from MBPP. The left part is a correct code snippet, and the right part is a generated but incorrect one. RIS COSET removes three nodes in the AST, resulting a prediction set (i.e., a partial program) that contains the correct program.
+
+programs. Furthermore, in multi-label settings, we need to sample additional candidate programs from LLMs and verify their correctness via test-case execution during cali-bration. This is a computationally expensive step. To reduce this cost, we propose a selective execution strategy that ef-ficiently verifies the correctness of sampled programs by using a well-calibrated threshold to decide which programs require test execution. 
+
+Example. Fig. 1 illustrates a real example from the MBPP dataset (Austin et al., 2021). The left code snippet is from a correct program, while the right one is generated by the model and is incorrect. Our method, R IS COSET , removes the uncertain nodes in the AST (highlighted in red), resulting in a partial program (AST subtree) which can be completed to match a correct program. This example also shows the potential implication of our method: R IS COSET can pro-vide an almost-correct partial program of a given generated program, helping to mitigate code hallucinations (Liu et al., 2024) and reduce the cost of manual review (Zhong & Wang, 2017). 
+
+Contributions. The main contributions of the paper are summarized as: (1) we specialize an LTT-based code gener-ation approach R IS COSET for uncertainty quantification of LLM-based code generation, which reframes the construc-tion of prediction sets for code as a multi-label problem with weaker constraints; (2) we propose a selective execution strategy to balance the trade-off between risk-controlling and sampling costs; (3) We conduct comprehensive experi-ments across three LLMs and three code generation datasets, confirming the effectiveness of our method. To the best of our knowledge, this is the first work to introduce the LTT framework into structured code generation tasks. 
+
+Structure. Section 2 briefly introduces the background. Section 3 compares PAC and LTT in code generation. Sec-tion 4 presents the proposed methods and Section 5 reports the experimental results. Section 6 discusses the related work, and Section 7 concludes the paper. 
+
+## 2. Background 
+
+Notations . For any natural number n, let [n] := {1, . . . , n }.Let D denote a distribution over X × Y , and let Dcal =
+
+{(Xi, Y i)}ni=1 i.i.d.
+
+∼ D denote a calibration set. In the single-label case, Yi ∈ Y ; in the multi-label case, Yi ⊆ Y . Let 
+
+(Xn+1 , Y n+1 ) ∼ D be a test sample. An abstract syntax tree (AST) of a program is denoted by T = ( V, E), where 
+
+V and E are the sets of nodes and edges, respectively. 
+
+2.1. PAC Prediction Set 
+
+The objective of a PAC prediction (Park et al., 2020) is to produce a prediction set, instead of a single prediction, that satisfies statistical guarantees while remaining small in size. Formally, for a test input Xn+1 ∈ X , PAC prediction set Cτ (Xn+1 ) ⊆ Y ensures that the true label Yn+1 is contained within the set for at least a 1 − ε fraction of the population, with a probability at least 1 − δ, i.e., 
+
+P
+
+
+
+P(X,Y )∼D 
+
+ Y ∈ Cτ (X) ≥ 1 − ε
+
+
+
+≥ 1 − δ, 
+
+where Cτ (x) is parameterized by τ ∈ R, and the ε and error level δ are chosen in advance by the user. Technically, the prediction set is constructed by fitting the parameter τ on the calibration set Dcal . Existing methods (Park et al., 2020; Khakhar et al., 2023) rely on 2Uncertainty Quantification for LLM-based Code Generation 
+
+the assumption that P(Yn+1 ∈ Cτ (Xn+1 )) is monotone-decreasing in τ , which is typically guaranteed by the mono-tonicity of prediction sets, i.e., 
+
+τ < τ ′ → Cτ (Xn+1 ) ⊇ Cτ ′ (Xn+1 ). (1) Therefore, a standard PAC formulation defines Cτ (Xn+1 )
+
+as the set of all labels whose model-assigned score exceeds the threshold τ :
+
+Cτ (Xn+1 ) := {y ∈ Y | f (y | Xn+1 ) ≥ τ } ,
+
+where f (y | Xn+1 ) is a scoring function (e.g., the softmax output of a trained classifier). 
+
+2.2. LTT Framework 
+
+The Learn Then Test (LTT) framework (Angelopoulos et al., 2025) extends PAC prediction sets by providing control over the expectation of an arbitrary risk function, conditional on the calibration data. It achieves this by reframing the selec-tion of the prediction set parameter as a multiple-hypothesis testing problem. Specifically, for a parameter λ, let Tλ(x) ⊆ Y denote the prediction set returned for an input x ∈ X . For a given Tλ,we define a corresponding risk R(Tλ) ∈ R≥0 that quantifies a problem-specific statistical error rate. The goal of the LTT framework is to learn a parameter ˆλ such that the function 
+
+Tˆλ satisfies the following error-control guarantee for a test instance (Xn+1 , Y n+1 ).
+
+Definition 2.1 (Risk-controlling) . A random variable ˆλ ∈ Λ
+
+is risk-controlling at (α, δ )-level, if it satisfies 
+
+P(R(Tˆλ) ≤ α) ≥ 1 − δ. (2) The risk tolerance α and error level δ ∈ (0 , 1) are user-specified. For brevity, we abbreviate R(λ) = R(Tλ) below. To control target risks, the LTT framework leverages the base model and the calibration set Dcal to identify valid 
+
+λ via multiple hypothesis testing. Each λk ∈ Λ =
+
+{λ1, . . . , λ N } is associated with the null hypothesis Hk :
+
+R(λk) > α and λk is considered valid if Hk is rejected. For each λk, a super-uniform p-value pk is computed. The output of LTT framework is the reject set Λvalid =
+
+A(p1, . . . , p N ) ⊆ Λ, where A is any algorithm that con-trols the family-wise error rate (FWER). With these steps, we have the following theorem. 
+
+Theorem 2.2 (Learn Then Test (Angelopoulos et al., 2025)) .
+
+Suppose each pk has a super-uniform distribution under Hk.Let A be a FWER-controlling algorithm at level δ. Given a test instance (Xn+1 , Y n+1 ), Λvalid satisfies 
+
+P
+
+
+
+sup 
+
+> λ∈Λvalid
+
+R(λ) ≤ α | D cal 
+
+
+
+≥ 1 − δ, (3) 
+
+where the supremum over an empty set is defined as −∞ .
+
+This theorem implies that any λ ∈ Λvalid can be selected to control the risk R(λ) on test instances. In particular, we recover a procedure similar to the PAC prediction set by defining Tλ(Xn+1 ) := {y ∈ Y | f (y | Xn+1 ) ≥ τ } and 
+
+R(λ) := 1{Yn+1 /∈ T λ(Xn+1 )}.
+
+## 3. PAC vs. LTT in Code Generation 
+
+Code generation is a typical structured prediction task with an exponentially large label space, rendering conventional conformal prediction intractable (Vovk et al., 2005). To ad-dress this, Khakhar et al. (2023) proposed to construct pre-diction sets via partial programs. Their method represents a program as an AST, denoted as T = ( V, E), and formulates an optimization problem which selectively prunes nodes and edges from T , yielding a partial program Tp = ( Vp, Ep).The resulting prediction set is defined as the collection of all complete programs that can be obtained by expanding Tp,and a correct program T ′ = ( V′, E′) belongs to this set iff 
+
+Vp ⊆ V ′ and Ep ⊆ E ′. This construction enables the applica-tion of the PAC prediction set framework to code generation, providing statistical guarantees on program correctness. However, PAC prediction sets exhibit two limitations when applied to code generation. First, they impose a mono-tonicity constraint (cf. Eq. (1) ) as a compromise to PAC guarantee (Park et al., 2020) and can lead to suboptimal par-tial programs during optimization. Second, PAC prediction sets are inherently designed for single-label tasks, whereas code generation naturally admits multiple valid outputs (i.e., multiple syntactically different but semantically-identical programs), rendering it a multi-label problem. In contrast, the LTT framework avoids these limitations and is inherently flexible and scalable to multi-label settings. Crucially, LTT does not require defining a scoring function for each program in an exponentially large prediction set; it only requires specifying the prediction set itself and its associated risk without any constraint. We therefore argue that LTT is better suited for quantifying uncertainty in code generation than PAC prediction sets. 
+
+## 4. The Approach 
+
+We now introduce our method, R IS COSET , for constructing structured, risk-controlling prediction sets for LLM-based code generation. At a high level, R IS COSET defines a structured risk function on code prediction sets via solv-ing an optimization problem. For each calibration program 
+
+Xi ∈ D cal , we sample multiple correct programs to obtain the enhanced label set ˜Yi, according to the corresponding generation task of Xi. Finally, we apply multiple hypothesis testing, following the procedure of LTT, to identify valid pa-rameters Λvalid . These parameters are then used to generate risk-controlling prediction sets for the test program Xn+1 .3Uncertainty Quantification for LLM-based Code Generation 
+
+Additionally, we propose a selective execution strategy to lower the computational cost of verifying sample programs’ correctness, by tolerating a controlled rate of labeling errors. 
+
+4.1. Structured Risk Function 
+
+Unlike standard multi-label classification problems where the false discovery rate (FDR) is a common control target, our focus is on the semantic correctness of the structured output. Specifically, given an input program X, we require the prediction set Tλ(X) to contain at least one program that belongs to the set ˜Y of correct programs. Formally, we define the empirical structured risk on the enhanced calibration set {(Xi, ˜Yi)}ni=1 as 
+
+bRsn(λ) := 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+1{T λ(Xi) ∩ ˜Yi = ∅} . (4) Since the label space in code generation is high-dimensional and exponentially large, directly enumerating all complete programs is intractable. Following Khakhar et al. (2023), we construct the prediction set Tλ(X) using partial programs, which provide a compact representation of the candidate program set, as mentioned in Section 3. The remaining problem is to obtain partial programs for Xi
+
+accounting for uncertainty in code generation. Given an AST T = ( V, E) and a parameter λk ∈ Λ, we introduce a binary variable β(k) 
+
+> i,v
+
+for each node v ∈ V , where β(k) 
+
+> i,v
+
+= 1 
+
+indicates that v is removed from T , and β(k) 
+
+> i,v
+
+= 0 otherwise. Let πv ∈ R≥0 denote the negative log probability of v con-ditioned on its ancestors, i.e., πv = − log P(v | v1, . . . , v m).Partial programs can be obtained by optimization. For fixed 
+
+k ∈ [N ] and input program Xi:
+
+min 
+
+> β
+
+X
+
+> v∈V
+
+β(k) 
+
+> i,v
+
+, s.t. X
+
+> v∈V
+
+πv (1 − β(k) 
+
+> i,v
+
+) ≤ λk. (5) In this minimization problem, the goal is to retain as many nodes as possible while ensuring the total uncertainty of the partial programs does not exceed λk. Moreover, the solution must satisfy two additional structure constraints derived from ASTs: 
+
+(SC1) ( β(k) 
+
+> i,v
+
+= 1) → (β(k) 
+
+> i,v ′
+
+= 1) , ∀(v, v ′) ∈ E ,
+
+(SC2) X
+
+> (v,v ′)∈E
+
+β(k) 
+
+> i,v ′
+
+(1 − β(k) 
+
+> i,v
+
+) ≤ tmax ,
+
+(6) where (SC1) enforces tree connectivity and (SC2) imposes an upper-bound tmax ∈ N+ on the number of permissible subtree removals. In contrast to PAC prediction set (Khakhar et al., 2023), our optimization problem for constructing partial programs operates under a less restrictive set of constraints. The most significant relaxation is the removal of the monotonicity condition on prediction sets (cf. Eq. (1) ), which substantially enlarges the feasible label space. 
+
+4.2. Multiple Hypothesis Testing for Code 
+
+With the structured risk defined above, we then employ multiple hypothesis testing to identify the reject set Λvalid .The first step of this procedure is to compute a p-value pk for each null hypothesis Hk. Since the structured risk defined in Eq. (4) is an average of binary losses, a valid p-value can be computed by the following lemma. 
+
+Lemma 4.1 (Binomial trial p-values) . Let bRsn(λk) be the empirical structured risk defined in Eq. (4) , and let Bin( n, α )
+
+denote a binomial random variable with n trials and success probability α. Then, 
+
+pBT k = eP Bin( n, α ) ≤ n bRsn(λk) (7) 
+
+is a valid p-value for Hk : Rs(λk) > α .
+
+In LTT, let A be any FWER-controlling algorithm at level 
+
+δ. Applying A to the p-values {pBT k }Nk=1 yields a set of rejected hypotheses, whose corresponding configurations form Λvalid ⊆ Λ. If Λvalid = ∅, the method abstains (i.e., returns null ). Otherwise, any parameter in Λvalid can be selected. In practice, we select the one that empirically minimizes the number of node removals. Since the number of removals decreases monotonically with λ, this amounts to choosing 
+
+ˆλ = max(Λ valid ). (8) Note that the monotonicity here only affects the number of pruned nodes (i.e., the size of prediction sets), which natu-rally follows from the optimization objective in Section 4.1. This is distinct from and weaker than the explicit mono-tonicity constraint on prediction sets imposed in Eq. (1) .Consequently, the parameter ˆλ selected by Eq. (8) , based on 
+
+Dcal , provides a risk-controlling guarantee for the resulting prediction sets. Algorithm 1 summarizes how to obtain risk-controlling par-tial programs via picking desirable ˆλ. This result ensures that the prediction set Tˆλ(Xn+1 ) constructed by these par-tial programs is also risk-controlling. 
+
+Theorem 4.2 (Structured risk-controlling sets) . The predic-tion set Tˆλ(Xn+1 ), constructed by the partial program from Algorithm 1, satisfies Eq. (2) .
+
+To precisely search and test Λ in the context of code gener-ation, in Appendix B, we discuss three alternative FWER control algorithms: Bonferroni method , Holm–Bonferroni method (Holm, 1979), and fixed sequence testing (Bauer, 1991). 4Uncertainty Quantification for LLM-based Code Generation 
+
+Algorithm 1 Risk-Controlling Partial Program  
+
+> 1:
+
+Input: enhanced calibration set Dcal = {(Xi, ˜Yi)}ni=1 ;test program Xn+1 ; parameters Λ = {λk}Nk=1 ; maxi-mum of subtree removals tmax ; risk tolerance α; error level δ; 
+
+> 2:
+
+Output: partial program βn+1 ,v for Xn+1 . 
+
+> 3:
+
+for k = 1 , . . . , N do  
+
+> 4:
+
+for i = 1 , . . . , n do  
+
+> 5:
+
+β(k) 
+
+> i,v
+
+← Solve Eqs.(5)-(6) for Xi, given λk; 
+
+> 6:
+
+end for  
+
+> 7:
+
+Define bRsn(λk) using Eq. (4);  
+
+> 8:
+
+Compute p-value pBT k for bRsn(λk) using Eq. (7);  
+
+> 9:
+
+end for  
+
+> 10:
+
+Obtain Λvalid = A(pBT  
+
+> 1
+
+, . . . , p BT N ) via controlling FWER;  
+
+> 11:
+
+Select ˆλ = max(Λ valid ); 
+
+> 12:
+
+βn+1 ,v ← Solve Eqs.(5)-(6) for Xn+1 , given ˆλ.
+
+4.3. Selective Execution Strategy 
+
+As mentioned in Section 3, code generation is inherently a multi-label problem. The LTT framework supports label augmentation on the calibration set Dcal . For each genera-tion task of Xi ∈ D cal , we sample additional m programs from the generative code model and execute test cases to identify correct instances. Such a sampling and verifica-tion step is performed only during calibration, incurring no computational overhead at test time. Despite this, in scenarios with severely limited computa-tional resources, we propose a selective execution strategy that maintains high-quality labels while improving sampling efficiency. Given a total of M sampled programs on Dcal ,we use program uncertainty scores {Ui}Mi=1 (e.g., perplex-ity) to decide whether executing test cases is necessary. We learn a threshold ˆu such that programs with Ui < ˆu are directly accepted as correct, while those with Ui ≥ ˆu are verified by executing test cases. This strategy does not re-quire perfectly calibrated models, but better calibration can indeed enhance the precision of ˆu. Formally, we define the cumulative error function conditioned on u as 
+
+L(u) = 1
+
+M
+
+> M
+
+X
+
+> i=1
+
+ℓ(Si)1{Ui < u },
+
+where Si ∈ { 0, 1} is a true indicator ( 1 for a correct pro-gram, 0 otherwise), and ℓ(Si) = 1 − Si computes the error. Our goal is to select a threshold u such that L(u) ≤ ϵ, where 
+
+ϵ is a label error rate. However, directly computing L(u)
+
+by verifying all M sampled programs is computationally expensive. To circumvent this, we instead estimate an er-ror upper bound ˆLu(γ) on L(u) that holds pointwise with probability γ, i.e., satisfies the following inequality: 
+
+P( ˆLu(γ) ≥ L(u)) ≥ 1 − γ. (9) To compute an approximate error bound ˆLu(γ), we pro-pose a procedure analogous to importance sampling, in-spired by Cand `es et al. (2025). We begin by drawing 
+
+h indices {i1, . . . , i h} uniformly with replacement from 
+
+[M ]. For each sampled index ij , whether a test-case execution is performed is determined stochastically by a Bernoulli trial ξij ∼ Bern( ωij ), where {ωi}Mi=1 are predefined sampling weights. This procedure yields a set {Zj (u)}hj=1 of h i.i.d. random variables, defined as 
+
+Zj (u) = ℓ(Sij )( ξij /ω ij )1{Uij ≤ u}.Since E[ξij /ω ij | ij ] = 1 , the expectation of Zj (u) equals the target quantity L(u). Therefore, an unbiased estimate of 
+
+L(u) can be obtained from the sample mean of {Zj (u)}hj=1 .An upper confidence bound for L(u) is then constructed by Hoeffding’s inequality (Hoeffding, 1963), yielding a finite-sample upper bound 
+
+ˆLu(γ) = ˆ μZ (u) + δHB (γ), (10) where ˆμ denotes the empirical mean of {Zj (u)}hj=1 and Hoeffding bound δHB (γ) = plog(2 /γ )/2h/ω min , where 
+
+ωmin = min {ωi}Mi=1 .After obtaining ˆLu(γ), let ˆu = max {u ∈ [0 , 1] : ˆLu(γ) ≤
+
+ϵ} where ϵ ∈ (0 , 1) , and the final predicted label ˆSi is 
+
+ˆSi = Si1{Ui ≥ ˆu} + 1{Ui < ˆu}.
+
+Algorithm 2 describes the selective execution procedure. We have the following error upper bound. 
+
+Lemma 4.3 (Non-asymptotic error upper bound) . If the label set { ˆSi}Mi=1 of sample programs is computed by Algo-rithm 2, then it meets Eq. (9) and ˆLu(γ) ≤ ϵ.
+
+This result provides a non-asymptotic upper bound for L(u),suitable for settings with limited sample sizes (small M ). Alternatively, an asymptotic bound for large M is given in Appendix C. Combining Lemma 4.3 and Theorem 4.2, we obtain the error-controlling guarantee when using the selective execu-tion strategy. 
+
+Proposition 4.4 (Approximately risk-controlling sets) . Let the output of Algorithm 2 be the calibration set Dcal . Then, the parameter ˆλ selected by Eq. (8) satisfies 
+
+P Rs(ˆλ) ≤ α + ϵ(1 − α) ≥ (1 − γ) · (1 − δ).
+
+Remark 4.5 . This guarantee presents a practical trade-off, allowing for controlled relaxation of the risk guarantee in exchange for computational savings by permitting a non-zero label error rate ϵ. When ϵ = 0 , the result reduces to the original guarantee of Theorem 4.2. 5Uncertainty Quantification for LLM-based Code Generation 
+
+Algorithm 2 Selective Execution with Error Bound  
+
+> 1:
+
+Input: unlabeled sampling programs {Xi}Mi=1 ; uncer-tainty scores {Ui}Mi=1 ; test cases {Ci}Mi=1 ; sampling weights {ωi}Mi=1 ; sampling size h; label error rate ϵ;confidence level γ; 
+
+> 2:
+
+Output: labeled sampling programs {Xi, ˆSi}Mi=1 . 
+
+> 3:
+
+for j = 1 , . . . , h do  
+
+> 4:
+
+Sample an index ij ∼ Unif([ M ]) ; 
+
+> 5:
+
+Sample a random variable ξij ∼ Bern( ωij ); 
+
+> 6:
+
+if ξij = 1 then  
+
+> 7:
+
+Execute the test case Cij to get Sij ; 
+
+> 8:
+
+Compute the importance-weighted error using 
+
+Zj = ℓ(Sij )/ω ij ; 
+
+> 9:
+
+else  
+
+> 10:
+
+Zj = 0 ; 
+
+> 11:
+
+end if  
+
+> 12:
+
+end for  
+
+> 13:
+
+Given a threshold u, define Zj (u) = Zj · 1{Uij ≤ u}
+
+for j ∈ [h]; 
+
+> 14:
+
+Compute error upper bound ˆLu(γ) on {Zj (u)}hi=1 for all u ∈ { Ui}Mi=1 using Eq. (10);  
+
+> 15:
+
+Determine ˆu = max {u ∈ [0 , 1] : ˆLu(γ) ≤ ϵ}; 
+
+> 16:
+
+Obtain ˆSi = Si1{Ui ≥ ˆu} + 1{Ui < ˆu} for i ∈ [M ].
+
+## 5. Experiments 
+
+Datasets. We evaluate our approach on three standard Python code generation benchmarks: HumanEval (Chen, 2021), MBPP (Austin et al., 2021) and APPS (Hendrycks et al., 2021). HumanEval consists of 164 hand-written programming problems. We use the sanitized version of the MBPP dataset (nearly 500 problems) as provided by CodeT (Chen et al., 2022), and select the introductory-level problems of the APPS dataset (1,000 problems). Each dataset is then randomly partitioned into calibration and test sets using a 50/50 split. To mitigate variance from random partitioning, we repeat this process over 100 independent random trials. 
+
+Baselines. We compare our method R IS COSET against two state-of-the-art baselines: the PAC prediction set ap-proach (Khakhar et al., 2023) and its greedy variant. The PAC baseline constructs partial programs by solving a com-plex optimization problem, while the greedy baseline it-eratively removes the AST node that reduces the partial program’s negative log-likelihood (NLL) the most. 
+
+Evaluation metrics. To evaluate the structured prediction sets Tˆλ(Xn+1 ) produced by our R IS COSET , we report two metrics: (1) the percentage of nodes removed from AST, and (2) the coverage of code sets that contain at least one correct program. We aim to keep node removals small while ensuring that coverage remains above the target threshold 
+
+1 − α, thereby preserving more useful program information. 
+
+Hyperparameters. To control risk, the key hyperparameter is the search space for λ. We implement a uniform grid search with an increment of 0.02, a simple but effective discretization. Empirically, we observe that outcomes are insensitive to the exact resolution, as long as the grid density is adequate to capture the operative range of λ. We set the maximum subtree removals tmax = 1 and the additional sampling quantity m = 20 for label augmentation on the calibration set by default. For the risk parameter, we fix 
+
+δ = 0 .1 and vary α in our experiments. 
+
+Implementations. We evaluate three open-source LLMs: the code-specialized Deepseek-Coder-33B (Guo et al., 2024) and Qwen2.5-Coder-32B (Hui et al., 2024), along with the general-purpose Llama3.1-70B (Grattafiori et al., 2024). For all LLMs, we use a sampling temperature of 0.8 and a top-
+
+p of 0.95 by default. We choose fixed sequence testing as the FWER algorithm for LTT. Moreover, we solve the optimization problem for generating partial programs using the Z3 solver, enforcing a 24 -second timeout per instance in accordance with SMT - COMP 1 rules. All the experiments are carried out with Python 3.9.19, Pytorch 2.4.0 and vLLM 0.6.1, running on NVIDIA H800 GPUs with CUDA 12.7. 
+
+5.1. Results 
+
+Our main results are presented in Fig. 2. For all plots, the solid line shows the average values over 100 trials, and the shaded regions indicate the standard deviation. Additional experimental results are reported in Appendix D. 
+
+Validity of risk-controlling code generation. We imple-ment our approach R IS COSET for different LLMs on three datasets. The results in Fig. 2 illustrate, with varying risk levels α, the percentage of nodes removed from the pruned AST (top row) and the coverage of constructed prediction sets that contain a correct program (bottom row). Our empirical findings align with Theorem 4.2 in practice, as the average code set coverage consistently exceeds the target bound of 1 − α (the dashed lines). Across all datasets, our method produces prediction sets that remove signifi-cantly fewer AST nodes than the baselines. For instance, as shown in Fig. 2(b) and Fig. 2(c), our approach reduces node removals by 24.5% and 20.3% compared to the best com-petitor when α = 0 .15 on the MBPP and APPS datasets, respectively. Compared to the PAC baseline, the greedy baseline tends to remove more nodes, which is particularly evident on the MBPP dataset in Fig. 2(b), due to its greedy pruning strategy. For the code-specialized models, our approach performs bet-ter with Qwen2.5-Coder than with Deepseek-Coder. This may be attributed to Qwen2.5-Coder’s stronger code gen- 
+
+> 1SMT -COMP is the annual international competition for Satis-fiability Modulo Theories (SMT) solvers.
+
+6Uncertainty Quantification for LLM-based Code Generation 0.05 0.10 0.15 0.20 0.25     
+
+> Risk Level
+> 60
+> 70
+> 80
+> 90
+> Nodes Removed (%)
+> Greedy Baseline PAC Baseline RisCoSet 0.05 0.10 0.15 0.20 0.25
+> Risk Level
+> 80
+> 90
+> 100
+> Satisfying Code Set (%)
+> Target Bound Greedy Baseline PAC Baseline RisCoSet
+
+(a) DeepSeek-Coder on HumanEval 0.05 0.10 0.15 0.20 0.25      
+
+> Risk Level
+> 30
+> 50
+> 70
+> 90
+> Nodes Removed (%)
+> Greedy Baseline PAC Baseline RisCoSet 0.05 0.10 0.15 0.20 0.25
+> Risk Level
+> 80
+> 90
+> 100
+> Satisfying Code Set (%)
+> Target Bound Greedy Baseline PAC Baseline RisCoSet
+
+(b) Qwen2.5-Coder on MBPP 0.05 0.10 0.15 0.20 0.25      
+
+> Risk Level
+> 50
+> 70
+> 90
+> Nodes Removed (%)
+> Greedy Baseline PAC Baseline RisCoSet 0.05 0.10 0.15 0.20 0.25
+> Risk Level
+> 80
+> 90
+> 100
+> Satisfying Code Set (%)
+> Target Bound Greedy Baseline PAC Baseline RisCoSet
+
+(c) Llama3.1 on APPS 
+
+Figure 2. Percentage of node removals (top row) and satisfying code sets (bottom row) w.r.t. risk level α. The results are the mean over 100 random splits. The smaller node removal is better, when the code set coverage exceeds the target bound 1 − α. Our approach constructs prediction sets that remove significantly fewer nodes compared to baselines for three LLMs on all datasets. 0.05 0.10 0.15 0.20 0.25     
+
+> Risk Level
+> 30
+> 50
+> 70
+> 90
+> Nodes Removed (%)
+> Sampling 1 Sampling 5 Sampling 20 Sampling 80 0.05 0.10 0.15 0.20 0.25
+> Risk Level
+> 80
+> 90
+> 100
+> Satisfying Code Set (%)
+> Target Bound Sampling 1 Sampling 5 Sampling 20 Sampling 80
+
+Figure 3. Parameter sensitivity analysis of sampling quantity m w.r.t. risk level α on MBPP. The average results over 100 trials show that a larger value of m leads to fewer node removals, while maintaining the required risk control. 
+
+ERROR ϵ 0.05 0.1 0.2 0.3 REMOVAL 71.8 50.6 27.8 3.39 COVERAGE 88.5 82.9 74.1 66.5 (85.5) (81.0) (72.0) (63.0) SAVE 12.0 29.4 57.6 84.4 
+
+Table 1. Percentage of node removals (%), cov-erage of satisfying code set (%), and fraction of calibration data saved from execution (%) w.r.t. label error ϵ when α = 0 .1 on MBPP. The average results over 100 trials show that the coverage of the satisfying code set is above the target coverage (i.e., the values in ()), and our selective execution strategy effectively reduces the proportion of programs needed to execute. 
+
+eration capability (Hui et al., 2024), suggesting that our method can benefit increasingly from more powerful gener-ative models. Moreover, the proposed method also achieves performance comparable to that of specialized code gen-erators when applied to the general-purpose Llama3.1 in Fig. 2(c), showing its scalability for diverse LLMs. The significant improvement of our method can be attributed to: (1) we define an optimization problem with fewer con-straints, encouraging a better partial program solution with more remaining nodes; (2) our multi-label formalization al-lows for a more complete exploration of the potential correct program space for a specific LLM compared to baselines. 
+
+Parameter sensitivity analysis. We next analyze the sensi-tivity of our method to the sampling quantity m. We sample 
+
+m additional programs for each task in the calibration set with m = {1, 5, 20 , 80 }, and pick correct ones as new labels via verification. The corresponding node removals and code set coverage on the MBPP dataset are given in Fig. 3(a) and Fig. 3(b). We observe a clear trend that a larger m helps reduce the number of pruned AST nodes while preserving the desired risk control. Insufficient exploration of the label space at m = 1 leads to more node removals. Nevertheless, the performance gains diminish for m > 5, demonstrat-ing that our method already performs well with a relatively small sample size. 
+
+Selective execution strategy. We evaluate the effectiveness of the proposed selective execution strategy when α = 0 .1
+
+and m = 80 on the MBPP dataset. In experiments, we set confidence level γ = 0 .01 , sampling size h as 10% of total sample quantity M , and samping weights ω = ωi = 1 .0,for any i ∈ [M ]. We report the average results with varying label error ϵ over 100 trials in Table 1. The key metric for efficiency is the percentage of sample programs saved from execution at the cost of ϵ% error in program labels. First, the 7Uncertainty Quantification for LLM-based Code Generation 
+
+observed coverage of the satisfying code set always exceeds the target coverage, which controls risks, consistent with the theoretical guarantee in Proposition 4.4. Second, our selective execution strategy largely reduces the proportion of verifications by running test cases. For instance, at ϵ = 0 .1,it avoids test-case execution for nearly 30% of generated programs, substantially lowering computational cost. 
+
+## 6. Related Work 
+
+Conformal prediction and risk control. Conformal Pre-diction (CP) (Vovk et al., 2005) is proposed to provide a framework for uncertainty quantification with distribution-free coverage guarantees (Angelopoulos et al., 2023). CP has been applied to a range of tasks, including image classi-fication (Sadinle et al., 2019), object detection (Teng et al., 2023), and regression prediction (Kato et al., 2023). These traditional CP methods, designed for classification or regression, are ill-suited for generative tasks due to the finite output space. Therefore, some risk-controlling frame-works are proposed for generation tasks (Bates et al., 2021; Angelopoulos et al., 2022). However, these methods, such as PAC prediction sets (Park et al., 2020), require an addi-tional monotonicity constraint regarding risk, making them difficult to adapt to multi-label problems. To this end, the Learn Then Test (LTT) framework (Angelopoulos et al., 2025) separates model training from statistical validation and uses multiple hypothesis testing to control risk. Without imposing the monotonicity assumption on the output space, LTT is particularly applicable to multi-label settings like code generation. 
+
+Uncertainty estimation on LLMs. Existing work (Kada-vath et al., 2022; Vasconcelos et al., 2023) has shown that the probability scores produced by LLMs may be poorly cal-ibrated. Current uncertainty calibration methods for LLMs mainly focus on prompting (Lin et al., 2022) or post-hoc logit calibration (e.g., temperature scaling (Guo et al., 2017) and self-consistency (Zhou et al., 2025)), rather than provid-ing theoretical guarantees. Additionally, recent work has investigated the application of CP to LLMs to achieve rigorous statistical guarantees on the correctness of generated outputs. One line of work applies it to produce a set of candidate responses that, with high probability, contains a valid answer (Kumar et al., 2023; Ye et al., 2024). This task -level approach, however, has limited practicality because evaluating a large number of candidates is computationally expensive. Alternatively, sample -level methods apply conformal prediction internally to a single LLM output, identifying its sound components as a prediction set (Quach et al., 2024; Cherian et al., 2024). However, these approaches rely on the assumption of near-independence among components. While this may hold in NLP contexts, it breaks down for structured domains like code, where components are systemically interdepen-dent (Casalnuovo et al., 2019; Chen et al., 2022). 
+
+Reliable code generation. Ensuring code correctness has long been a central concern in software engineering. Con-ventional methods include testing (e.g., unit testing and fuzzing) (Zhu et al., 2022), static analysis (Park et al., 2021), and formal verification (Baier & Katoen, 2008). Neverthe-less, such methods are inadequate for LLM -generated code, as they cannot effectively leverage the probabilistic nature and uncertainty of modern language models. The advancement of LLMs for code generation has spurred interest in reliability methods based on statistical, rather than purely deductive, guarantees (Chen et al., 2022). For example, Guo et al. (2021) propose to complete the un-certain code parts within the program sketches to improve the pass rate. Recently, research has explored constructing PAC prediction sets for code generation (Khakhar et al., 2023). By representing programs via ASTs and building prediction sets defined by partial programs, this method de-livers probabilistic guarantees that the code set contains the ground-truth program. Different from the previous work, our approach introduces LTT framework to eliminate the need for monotonicity constraints and naturally accommo-dates the multi-label essence of code. 
+
+## 7. Conclusion 
+
+This paper addresses the challenge of unreliable LLM out-puts in structured generation tasks like code. We introduce a method for constructing statistically guaranteed prediction sets by reformulating the problem as multi-label classifica-tion, eliminating monotonicity constraints. Our approach applies the LTT framework to ensure a candidate set of programs contains a correct solution with high probability. Furthermore, a selective execution strategy is proposed to augment label sets for efficient and effective calibration. Ex-tensive experiments across multiple models and benchmarks confirm the method’s effectiveness. While our focus is on code generation, we believe the proposed method can be adapted to other structured prediction problems. 
+
+Limitations. Our method requires executing test cases to augment labels during calibration, which adds computa-tional overhead relative to sample-free baselines. However, this overhead is confined to the calibration phase and does not impact inference speed on test data. To further reduce the cost, we introduce a selective execution strategy that allows a bounded label-error rate in exchange for reduced executions. The strategy’s effectiveness is supported theoret-ically (Proposition 4.4) and shown empirically (cf. Table 1). 8Uncertainty Quantification for LLM-based Code Generation 
+
+## Broader Impact 
+
+This paper presents work to advance the field of conformal prediction and code generation. Our work has many poten-tial societal consequences, none of which we feel must be specifically highlighted here. 
+
+## References 
+
+Achiam, J., Adler, S., Agarwal, S., Ahmad, L., Akkaya, I., Aleman, F. L., Almeida, D., Altenschmidt, J., Altman, S., Anadkat, S., et al. Gpt-4 technical report. arXiv preprint arXiv:2303.08774 , 2023. Angelopoulos, A. N., Bates, S., Fisch, A., Lei, L., and Schuster, T. Conformal risk control. arXiv preprint arXiv:2208.02814 , 2022. Angelopoulos, A. N., Bates, S., et al. Conformal predic-tion: A gentle introduction. Foundations and Trends® in Machine Learning , 16(4):494–591, 2023. Angelopoulos, A. N., Bates, S., Cand `es, E. J., Jordan, M. I., and Lei, L. Learn then test: Calibrating predictive al-gorithms to achieve risk control. The Annals of Applied Statistics , 19(2):1641–1662, 2025. Austin, J., Odena, A., Nye, M., Bosma, M., Michalewski, H., Dohan, D., Jiang, E., Cai, C., Terry, M., Le, Q., et al. Program synthesis with large language models. arXiv preprint arXiv:2108.07732 , 2021. Baier, C. and Katoen, J.-P. Principles of model checking. 2008. URL https://api.semanticscholar. org/CorpusID:5302889 .Bates, S., Angelopoulos, A., Lei, L., Malik, J., and Jor-dan, M. Distribution-free, risk-controlling prediction sets. 
+
+Journal of the ACM (JACM) , 68(6):1–34, 2021. Bauer, P. Multiple testing in clinical trials. Statistics in medicine , 10(6):871–890, 1991. Bentkus, V. On hoeffding’s inequalities. 2004. Billingsley, P. The lindeberg-levy theorem for martingales. 
+
+Proceedings of the American Mathematical Society , 12 (5):788–792, 1961. Cand `es, E. J., Ilyas, A., and Zrnic, T. Probably approxi-mately correct labels. arXiv preprint arXiv:2506.10908 ,2025. Casalnuovo, C., Sagae, K., and Devanbu, P. Studying the difference between natural and programming language corpora. Empirical Software Engineering , 24(4):1823– 1868, 2019. Chen, B., Zhang, F., Nguyen, A., Zan, D., Lin, Z., Lou, J.-G., and Chen, W. Codet: Code generation with generated tests. arXiv preprint arXiv:2207.10397 , 2022. Chen, M. Evaluating large language models trained on code. 
+
+arXiv preprint arXiv:2107.03374 , 2021. Cherian, J. J., Gibbs, I., and Cand `es, E. J. Large language model validity via enhanced conformal prediction meth-ods, 2024. URL https://arxiv.org/abs/2406. 09714 .Dahl, M., Magesh, V., Suzgun, M., and Ho, D. E. Large legal fictions: Profiling legal hallucinations in large lan-guage models. Journal of Legal Analysis , 16(1):64–93, 2024. Grattafiori, A., Dubey, A., Jauhri, A., Pandey, A., Kadian, A., Al-Dahle, A., Letman, A., Mathur, A., Schelten, A., Vaughan, A., et al. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 , 2024. Guo, C., Pleiss, G., Sun, Y., and Weinberger, K. Q. On calibration of modern neural networks. In International conference on machine learning , pp. 1321–1330. PMLR, 2017. Guo, D., Svyatkovskiy, A., Yin, J., Duan, N., Brockschmidt, M., and Allamanis, M. Learning to complete code with sketches. arXiv preprint arXiv:2106.10158 , 2021. Guo, D., Zhu, Q., Yang, D., Xie, Z., Dong, K., Zhang, W., Chen, G., Bi, X., Wu, Y., Li, Y., et al. Deepseek-coder: When the large language model meets programming–the rise of code intelligence. arXiv preprint arXiv:2401.14196 , 2024. Hendrycks, D., Basart, S., Kadavath, S., Mazeika, M., Arora, A., Guo, E., Burns, C., Puranik, S., He, H., Song, D., et al. Measuring coding challenge competence with apps. arXiv preprint arXiv:2105.09938 , 2021. Hoeffding, W. Probability inequalities for sums of bounded random variables. Journal of the American statistical association , 58(301):13–30, 1963. Holm, S. A simple sequentially rejective multiple test pro-cedure. Scandinavian journal of statistics , pp. 65–70, 1979. Hui, B., Yang, J., Cui, Z., Yang, J., Liu, D., Zhang, L., Liu, T., Zhang, J., Yu, B., Lu, K., et al. Qwen2. 5-coder technical report. arXiv preprint arXiv:2409.12186 , 2024. Kadavath, S., Conerly, T., Askell, A., Henighan, T. J., Drain, D., Perez, E., Schiefer, N., Dodds, Z., Das-sarma, N., Tran-Johnson, E., Johnston, S., El-Showk, S., Jones, A., Elhage, N., Hume, T., Chen, A., Bai, 9Uncertainty Quantification for LLM-based Code Generation 
+
+Y., Bowman, S., Fort, S., Ganguli, D., Hernandez, D., Jacobson, J., Kernion, J., Kravec, S., Lovitt, L., Ndousse, K., Olsson, C., Ringer, S., Amodei, D., Brown, T. B., Clark, J., Joseph, N., Mann, B., McCan-dlish, S., Olah, C., and Kaplan, J. Language models (mostly) know what they know. ArXiv , abs/2207.05221, 2022. URL https://api.semanticscholar. org/CorpusID:250451161 .Kato, Y., Tax, D. M., and Loog, M. A review of noncon-formity measures for conformal prediction in regression. 
+
+Conformal and probabilistic prediction with applications ,pp. 369–383, 2023. Khakhar, A., Mell, S., and Bastani, O. Pac prediction sets for large language models of code. In International Con-ference on Machine Learning , pp. 16237–16249. PMLR, 2023. Kumar, B., Lu, C., Gupta, G., Palepu, A., Bellamy, D., Raskar, R., and Beam, A. Conformal prediction with large language models for multi-choice question answering. 
+
+arXiv preprint arXiv:2305.18404 , 2023. Lin, S., Hilton, J., and Evans, O. Teaching models to ex-press their uncertainty in words, 2022. URL https: //arxiv.org/abs/2205.14334 .Liu, F., Liu, Y., Shi, L., Huang, H., Wang, R., Yang, Z., Zhang, L., Li, Z., and Ma, Y. Exploring and evaluating hallucinations in llm-powered code generation. arXiv preprint arXiv:2404.00971 , 2024. Nadeau, D., Kroutikov, M., McNeil, K., and Baribeau, S. Benchmarking llama2, mistral, gemma and gpt for fac-tuality, toxicity, bias and propensity for hallucinations. 
+
+arXiv preprint arXiv:2404.09785 , 2024. Park, J., Lee, H., and Ryu, S. A survey of parametric static analysis. ACM Comput. Surv. , 54(7), July 2021. ISSN 0360-0300. doi: 10.1145/3464457. URL https: //doi.org/10.1145/3464457 .Park, S., Bastani, O., Matni, N., and Lee, I. Pac confidence sets for deep neural networks via calibrated prediction. In 
+
+International Conference on Learning Representations ,2020. Quach, V., Fisch, A., Schuster, T., Yala, A., Sohn, J. H., Jaakkola, T. S., and Barzilay, R. Conformal language modeling, 2024. URL https://arxiv.org/abs/ 2306.10193 .Sadinle, M., Lei, J., and Wasserman, L. Least ambiguous set-valued classifiers with bounded error levels. Journal of the American Statistical Association , 114(525):223– 234, 2019. Solar-Lezama, A. Program synthesis by sketching . Univer-sity of California, Berkeley, 2008. Team, G., Anil, R., Borgeaud, S., Alayrac, J.-B., Yu, J., Sori-cut, R., Schalkwyk, J., Dai, A. M., Hauth, A., Millican, K., et al. Gemini: a family of highly capable multimodal models. arXiv preprint arXiv:2312.11805 , 2023. Teng, J., Wen, C., Zhang, D., Bengio, Y., Gao, Y., and Yuan, Y. Predictive inference with feature conformal prediction. In The Eleventh International Conference on Learning Representations , 2023. Vasconcelos, H., Bansal, G., Fourney, A., Liao, Q. V., and Vaughan, J. W. Generation probabilities are not enough: Exploring the effectiveness of uncertainty high-lighting in ai-powered code completions. arXiv preprint arXiv:2302.07248 , 2023. Vovk, V., Gammerman, A., and Shafer, G. Algorithmic learning in a random world . Springer, 2005. Ye, F., Yang, M., Pang, J., Wang, L., Wong, D., Yilmaz, E., Shi, S., and Tu, Z. Benchmarking llms via uncer-tainty quantification. Advances in Neural Information Processing Systems , 37:15356–15385, 2024. Zhong, H. and Wang, X. Boosting complete-code tool for partial program. In 2017 32nd IEEE/ACM International Conference on Automated Software Engineering (ASE) ,pp. 671–681. IEEE, 2017. Zhou, Z., Tan, Y., Li, Z., Yao, Y., Guo, L.-Z., Li, Y.-F., and Ma, X. A theoretical study on bridging inter-nal probability and self-consistency for LLM reason-ing. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https: //openreview.net/forum?id=E0PaeSszLz .Zhu, X., Wen, S., Camtepe, S., and Xiang, Y. Fuzzing: A survey for roadmap. ACM Comput. Surv. , 54(11s), September 2022. ISSN 0360-0300. doi: 10.1145/ 3512345. URL https://doi.org/10.1145/ 3512345 .10 Uncertainty Quantification for LLM-based Code Generation 
+
+## A. Proofs 
+
+A.1. Proof of Lemma 4.1 
+
+Proof. Let A = Bin( n, α ) and B = n bRsn(λk). Since the risk in Eq. (4) is an average of binary outcomes, B is also binomial with sample size n and some (unknown) success probability α′. Let FA and FB denote the CDFs of A and B, respectively. Under the null hypothesis Hk : Rs(λk) > α on test instances, we have α′ > α . This implies that B stochastically dominates 
+
+A, i.e., FA(t) ≥ FB (t) for all t. Let C = pBT k = eF A(B), then 
+
+P(C ≤ c) = P(FA(B) ≤ ce )
+
+≤ P(FB (B) ≤ ce ).
+
+By the definition of a CDF, we have 
+
+P(FB (B) ≤ ce ) = P(B ≤ F −1 
+
+> B
+
+( ce )) = FB
+
+
+
+F −1
+
+> B
+
+ ce
+
+ 
+
+= ce ≤ c. 
+
+Therefore, under Hk, pBT k is super-uniform and hence a valid p-value. Furthermore, by Bentkus inequality (Bentkus, 2004), we obtain 
+
+P( bRsn(λk) ≤ t) ≤ eP Bin( n, α ) ≤ ⌈ nt ⌉.
+
+This inequality is nearly tight and nt = ⌈nt ⌉, because n bRsn(λk) is binomial as discussed above. Therefore, pBT k is a near-tight upper bound for the CDF of bRsn(λk).
+
+A.2. Proof of Theorem 4.2 
+
+Proof. Since the enhanced calibration set is i.i.d., the set losses 1{T λ(Xi) ∩ ˜Yi = ∅} in Eq. (4) are also i.i.d. By Lemma 4.1, each pBT k is a valid p-value under the null hypothesis Hk : Rs(λk) > α . Given a set-valued function Tλ, and a FWER-controlling algorithm at level δ, we can apply Theorem 2.2 to identify Λvalid such that 
+
+P( sup 
+
+> λ∈Λvalid
+
+{Rs(λ)} ≤ α | D cal ) ≥ 1 − δ
+
+on test programs. Therefore, we have 
+
+P(Rs(ˆλ) ≤ α | D cal ) ≥ 1 − δ, 
+
+as Eq. (3) holds for any λ ∈ Λvalid . In particular, it holds for ˆλ selected by Eq. (8). 
+
+A.3. Proof of Lemma 4.3 
+
+Proof. We first analyze the properties of the random variables Zj (u) constructed in Algorithm 2. The random variables 
+
+Z1(u), . . . , Z h(u) are independent, because index ij is uniformly sampled from [M ], and ξij is independent of other random variables. Since binary loss ℓ(Sij ) is bounded by [0 , 1] , if ξij = 1 , we have 
+
+Zj = ℓ(Sij )
+
+ωij
+
+≤ 1min j ωij
+
+= 1
+
+ωmin 
+
+.
+
+If ξij = 0 , Zj = 0 . Let R = 1 /ω min . Then Zj ∈ [0 , R ] for all j ∈ [h].We denote ¯Z(u) = 1
+
+> h
+
+Phj=1 Zj (u), and compute the expected ¯Z(u) as 11 Uncertainty Quantification for LLM-based Code Generation 
+
+E[ ¯Z(u)] = 1
+
+h
+
+> h
+
+X
+
+> j=1
+
+E[Zj (u)] = 1
+
+h
+
+> h
+
+X
+
+> j=1
+
+h
+
+ωij · ℓ(Sij )
+
+ωij
+
+1{Uij ≤ u} + (1 − ωij ) · 0
+
+i
+
+= 1
+
+h
+
+> h
+
+X
+
+> j=1
+
+ℓ(Sij )1{Uij ≤ u} = L(u).
+
+By Hoeffding’s inequality and L(u) = E[ ¯Z(u)] , we obtain 
+
+P |ˆμZ (u) − L(u)| ≥ t ≤ 2 exp 
+
+
+
+− 2ht 2
+
+R2
+
+
+
+, (11) where t > 0 is arbitrary. Setting the right-hand side equal to γ yields 
+
+2 exp 
+
+
+
+− 2ht 2
+
+R2
+
+
+
+= γ ⇒ t = R
+
+r log(2 /γ )2h .
+
+Substituting this value of t into Eq. 11 yields 
+
+P
+
+
+
+ˆμZ (u) − L(u) ≤ − R
+
+r log(2 /γ )2h
+
+
+
+≤ γ
+
+2 ≤ γ. 
+
+Equivalently, 
+
+P
+
+
+
+L(u) ≤ ˆμZ (u) + R
+
+r log(2 /γ )2h
+
+
+
+≥ 1 − γ. 
+
+Let ˆLu(γ) = ˆ μZ (u) + Rplog(2 /γ )/2h. Then 
+
+P(L(u) ≤ ˆLu(γ)) ≥ 1 − γ, 
+
+which completes the proof. 
+
+A.4. Proof of Proposition 4.4 
+
+Proof. We prove Proposition 4.4. In Section 4.3, we select ˆu = max {u ∈ [0 , 1] : ˆLu(γ) ≤ ϵ}, and by Lemma 4.3 we have the following upper bound: 
+
+L(u) ≤ ˆLu(γ) = ϵ. (12) According to Theorem 4.2, for a test instance (Xn+1 , Y n+1 ), we have 
+
+P P(Tˆλ(Xn+1 ) ∩ Yn+1 = ∅) ≤ α) ≥ 1 − δ. 
+
+In this guarantee, let Yn+1 = Y tn+1 ∪ Y fn+1 , where Y tn+1 and Y fn+1 are disjoint sets and |Y tn+1 |/|Yn+1 |≥ 1 − ϵ according to Eq. (12). For any element y ∈ Yn+1 , we assume y ∈ T ˆλ(Xn+1 ) independently with equal probability p. Then, 
+
+P(Tˆλ(Xn+1 ) ∩ Yn+1 = ∅) = (1 − p)|Yn+1 | ≤ α, 
+
+12 Uncertainty Quantification for LLM-based Code Generation 
+
+Consequently, 
+
+P(Tˆλ(Xn+1 ) ∩ Y tn+1 = ∅) = (1 − p)|Y tn+1 | =
+
+
+
+(1 − p)|Yn+1 | |Y tn+1 ||Yn+1 |
+
+≤ α1−ϵ ≤ 1 − (1 − α)(1 − ϵ)= α + ϵ(1 − α)
+
+holds with probability at least (1 − γ) · (1 − δ) (since the bounds involving ϵ and α hold with probabilities at least 1 − γ
+
+and 1 − δ, respectively). Additionally, we use the Bernoulli inequality for α, ϵ ∈ (0 , 1) in the last inequality. 
+
+A.5. Proof of Proposition C.1 
+
+Proof. Let h be the number of sample programs from LLMs. By the Lindeberg–Feller central limit theorem (Billingsley, 1961), we obtain √h(L(u) − ˆμZ (u)) 
+
+σZ (u) → N (0 , 1) 
+
+as h → ∞ , since the Zj (u) are i.i.d. By the weak law of large numbers, we have ˆσZ (u) p
+
+−→ σZ (u), and thus, an application of Slutsky’s theorem gives 
+
+P
+
+ L(u) − ˆμZ (u)
+
+pˆσ2 
+
+> Z
+
+(u)/h ≤ z1−γ
+
+
+
+→ 1 − γ, 
+
+because z1−γ is the (1 − γ)-quantile of the standard normal distribution. Equivalently, when h approaches positive infinity, we have 
+
+P
+
+
+
+L(u) ≤ ˆμZ (u) + z1−γ
+
+q
+
+ˆσ2 
+
+> Z
+
+(u)/h 
+
+
+
+→ 1 − γ, 
+
+which completes the proof. 
+
+## B. FWER-controlling algorithm 
+
+After obtaining valid p-values by Eq. (7) , we discuss procedures for computing Λvalid = A(pBT  
+
+> 1
+
+, . . . , p BT N ) on structured risks. Since evaluating multiple hypotheses simultaneously increases the chance of false positives, we require family-wise error rate (FWER) correction. 
+
+Definition B.1. (FWER control) Let A(pBT  
+
+> 1
+
+, . . . , p BT N ) be an algorithm that outputs a subset Λvalid ⊆ Λ. We say A controls the FWER at (α, δ )-level if 
+
+P
+
+
+
+sup 
+
+> λ∈Λvalid
+
+P(Rs(λ) ≤ α)
+
+
+
+≥ 1 − δ, 
+
+where the supremum over ∅ is defined as −∞ .We provide three alternative FWER-controlling algorithms: the Bonferroni method , the Holm–Bonferroni method (Holm, 1979), and fixed sequence testing (Bauer, 1991). The Bonferroni method defines Λvalid := {λk | pBT k ≤ δ/N }Nk=1 . The Holm–Bonferroni method is an improved version of the Bonferroni method. It sorts p-values as p(1) ≤ · · · ≤ p(N ) and 
+
+Λvalid := {λ(1) , . . . , λ (k)}, where k ∈ [N ] is the minimum index satisfying p(k) ≤ δ/ (N − k + 1) and p(k+1) > δ/ (N − k).For fixed sequence testing, we leverage the prior knowledge that partial programs with more nodes removed correspond to larger prediction sets. This implies that smaller values of λ are more likely to satisfy the target risk. In the extreme case where λ = 0 , the partial program prunes the entire tree, trivially achieving a risk of zero in Eq. (4) . Therefore, a heuristic correction strategy is to test λ in increasing order and stop at the first accepted hypothesis. To broaden the search, this process can be repeated from different predefined starting points (e.g., a coarse uniform grid in Λ). Let the parameter set 
+
+Λ = {λ1, . . . , λ N } be in descending order (i.e., λ1 ≥ · · · ≥ λN ). The full fixed sequence testing procedure for code is summarized in Algorithm 3. 
+
+## C. Asymptotic upper bound based on CLT 
+
+In addition to the non-asymptotic error upper bound used in Lemma 4.3, we also consider an asymptotic bound for settings where the number of sampled programs M is large. 13 Uncertainty Quantification for LLM-based Code Generation 
+
+Algorithm 3 Fixed sequence testing 
+
+1: Input: parameter set Λ = {λ1, . . . , λ N }; error level δ ∈ (0 , 1) ; p-values {pBT k }Nk=1 ; predefined starting points 
+
+I ⊂ [N ];
+
+2: Output: reject set Λvalid .
+
+3: Initialize a reject set Λvalid = ∅;
+
+4: for k ∈ I do 
+
+5: if λk /∈ Λvalid then ▷ Avoid duplicates 
+
+6: while pBT k ≤ δ/ |I| do 
+
+7: Λvalid = Λ valid ∪ { λk};
+
+8: k = k − 1;
+
+9: end while 
+
+10: end if 
+
+11: end for 
+
+In Section 4.3, we estimate an unbiased upper bound for L(u) by constructing a confidence interval for the average of 
+
+{Zj (u)}hj=1 . Based on the central limit theorem (CLT), we obtain the following asymptotic upper bound. 
+
+Proposition C.1 (Asymptotic upper bound) . Given a threshold u and the sample size h, let Zj (u) be the i.i.d. random variables defined in Algorithm 4 for j ∈ [h]. Define the error upper bound based on CLT as 
+
+ˆLu(γ) := ˆ μZ (u) + z1−γ · ˆσZ (u)
+
+√h ,
+
+where ˆμ and ˆσ denote the empirical mean and standard deviation of {Zj (u)}hj=1 , respectively, and z1−γ is the (1 − γ)-quantile of the standard normal distribution. Then, we have 
+
+lim inf  
+
+> m→∞
+
+P(L(u) ≤ ˆLu(γ)) ≥ 1 − γ. 
+
+The proof is provided in Appendix A.5, and the overall procedure is described in Algorithm 4. 
+
+Algorithm 4 Selective Verification with Asymptotic Error Bound 
+
+1: Input: unlabeled sampling programs {Xi}Mi=1 ; uncertainty scores {Ui}Mi=1 ; test cases {Ci}Mi=1 ; sampling weights 
+
+{ωi}Mi=1 ; sampling size h; confidence level γ;
+
+2: Output: error upper bound ˆLu(γ).
+
+3: for j = 1 , . . . , h do 
+
+4: Sample an index ij ∼ Unif([ M ]) ;
+
+5: Sample a random variable ξij ∼ Bern( ωij );
+
+6: if ξij = 1 then 
+
+7: Run the test case Cij to get Sij ;
+
+8: Compute the importance-weighted error using Zj = ℓ(Sij )/ω ij ;
+
+9: else 
+
+10: Zj = 0 ;
+
+11: end if 
+
+12: end for 
+
+13: Given a threshold u, define Zj (u) = Zj · 1{Uij ≤ u} for j ∈ [h];
+
+14: ˆμZ (u) ← 1
+
+> h
+
+Phj=1 Zj (u);
+
+15: ˆσZ (u) ←
+
+q 1
+
+> h
+
+Phj=1 (Zj (u) − ˆμZ (u)) 2;
+
+16: z1−γ ← (1 − γ)-quantile of the standard normal distribution; 
+
+17: ˆLu(γ) ← ˆμZ (u) + z1−γ · ˆσZ (u) 
+
+> √h
+
+.14 Uncertainty Quantification for LLM-based Code Generation 90 95 100 
+
+> Satisfying Code Set (%)
+> FST HBf Bf
+> Target Bound
+
+(a) Coverage distribution 0.05 0.10 0.15 0.20 0.25     
+
+> Risk Level
+> 30
+> 50
+> 70
+> 90
+> Nodes Removed (%)
+> t= 1
+> t= 2
+> t= 3
+
+(b) Sensitivity analysis on tmax 0.05 0.10 0.15 0.20 0.25     
+
+> Risk Level
+> 80
+> 90
+> 100
+> Satisfying Code Set (%)
+> Target Bound
+> t= 1
+> t= 2
+> t= 3
+
+(c) Sensitivity analysis on tmax 
+
+Figure 4. Fig. 4(a) is the distribution of code set coverage over 100 trials for three different FWER algorithms, respectively; Fig. 4(b) and 4(c) are parameter sensitivity results of maximum subtree removals tmax w.r.t risk level α. These experiments are conducted on MBPP. 
+
+Table 2. Performance of our method with different FWER algorithms when α = 0 .1. The results are the average over 100 random splits. The smaller node removal is better, when the code set coverage exceeds the 0.9. 
+
+FWER ALG . BF HB F FST REMOVAL 87 .9±3.1 87 .0±3.3 82 .3±1.9
+
+COVERAGE 94 .7±2.2 94 .4±2.3 92 .1±1.3
+
+## D. Additional Results 
+
+D.1. Different FWER-controlling algorithm 
+
+To evaluate the performance of different FWER algorithms on our method, we plot the distribution of code set coverage (α = 0 .1) as a violin plot over 100 random splits of MBPP in Fig. 4(a), and list the mean results in Table. 2. The results demonstrate that compared to fixed sequence testing (FST), Bonferroni (Bf) and Holm–Bonferroni (HBf) methods are more conservative and remove more nodes, as confirmed by the results in Table 2. This indicates the importance of program prior knowledge used in FST. 
+
+D.2. Parameter sensitivity analysis on tmax 
+
+We next perform parameter sensitivity analysis on the maximum subtree removals tmax . The results on MBPP are shown in Fig. 4(b) and Fig. 4(c). We observe that the best result is achieved when tmax = 1 , and tmax ≥ 2 leads to more node removals than tmax = 1 . A plausible explanation is that when models are not well-calibrated, a larger tmax distributes pruned nodes and may lead to localized errors that cannot be fully corrected. 
+
+D.3. Sample outputs 
+
+15 Uncertainty Quantification for LLM-based Code Generation root 
+
+return =
+
+vowel s
+
+cha r
+
+' '.join() 
+
+for 
+
+cha rvowels = 'aeiou '   
+
+> return ''.join(char for char in text if char not in vowels )
+
+'aeiou '
+
+cha r tex t if
+
+not i n
+
+vowel svowels = 'aeiouAEIOU '    
+
+> return ''.join(char for char in text if char not in vowels )
+
+root 
+
+return =
+
+vowel s
+
+cha r
+
+' '.join() 
+
+for 
+
+cha r
+
+'aeiou 
+
+AEIOU' 
+
+cha r tex t if
+
+not i n
+
+vowel s
+
+Figure 5. An illustrative example from HumanEval. The top part is a correct code snippet, and the bottom part is a generated but incorrect one. R IS COSET removes one node in the AST, resulting a prediction set (i.e., a partial program) that contains the correct program. return str((H - h) * (W - w)) 
+
+root 
+
+return 
+
+str() 
+
+*
+
+# - -
+
+H h W wreturn str((H + h) * (W + w)) 
+
+root 
+
+return 
+
+str() 
+
+*
+
+# + +
+
+H h W w
+
+Figure 6. An illustrative example from APPS. The left part is a correct code snippet, and the right part is a generated but incorrect one. RIS COSET removes seven nodes in the AST, resulting a prediction set (i.e., a partial program) that contains the correct program. 
+
+16 Uncertainty Quantification for LLM-based Code Generation count = 0
+
+i = 2
+
+while x > 1: 
+
+cnt = 0
+
+while x % i == 0: 
+
+x = x // i
+
+cnt += 1
+
+count += cnt 
+
+i += 1
+
+return count 
+
+x
+
+>
+
+1
+
+… …
+
+while += 
+
+i 1
+
+cnt 
+
+=
+
+0
+
++= 
+
+count cnt 
+
+body 
+
+while 
+
+root x
+
+>
+
+1
+
+… …
+
+while += 
+
+i 1
+
+cnt 
+
+=
+
+0
+
++= 
+
+count >
+
+body          
+
+> count = 0
+> i = 2
+> while x > 1:
+> cnt = 0
+> while x % i == 0:
+> x = x // i
+> cnt += 1
+> count += cnt >0
+> i += 1
+> return count
+
+while 
+
+root 
+
+cnt 0
+
+Figure 7. An illustrative example from APPS. The top part is a correct code snippet, and the bottem part is a generated but incorrect one. RIS COSET removes three nodes in the AST (we omit the overlapping AST structures for brevity), resulting a prediction set (i.e., a partial program) that contains the correct program. 
+
+17
