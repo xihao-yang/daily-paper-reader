@@ -1,0 +1,610 @@
+Title: MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale
+
+URL Source: https://arxiv.org/pdf/2606.31368v1
+
+Published Time: Wed, 01 Jul 2026 00:48:51 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 
+
+JIAXI LIANG ∗, The University of Hong Kong, China 
+
+YUANXIANG SHI ∗, The University of Hong Kong, China 
+
+ZEZHOU YANG, The University of Hong Kong, China 
+
+CHENXIONG QIAN †, The University of Hong Kong, China Modern large-scale software systems often suffer from pervasive memory inefficiencies (e.g., bloat, churn), leading to excessive resource costs and performance degradation. Existing optimization workflows lack end-to-end automation, forcing developers to manually synthesize complex tool outputs into actionable and semantics-preserving fixes, precluding scalability in large codebases. To address this, this paper presents 
+
+MOA , an LLM-driven framework that automatically detects and repairs recurring memory inefficiencies across production-scale codebases. Specifically, MOA operates through three agents: an Analyzer that mines anti-patterns from profiling data, a Checker Generator that synthesizes static analyzers through template-guided refinement, and a Patcher that generates optimization patches via state-machine-driven workflows. Our evaluation on OpenHarmony, an open-source operating system with over 100 million lines of C/C++ code, shows that MOA identifies 13 anti-patterns (9 previously unknown) from 3 profiled services, detects over 10,000 inefficiencies across a broader set of 7 services, and generates 769 patches with 92.5% expert acceptance rate, achieving 42.2% heap reduction and 10.6% binary size reduction on average. We envision MOA as a valuable tool for performance engineering at production scale. CCS Concepts: • Software and its engineering → Software maintenance tools .Additional Key Words and Phrases: large language models, performance optimization, dynamic analysis 
+
+ACM Reference Format: 
+
+Jiaxi Liang, Yuanxiang Shi, Zezhou Yang, and Chenxiong Qian. 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale. J. ACM 37, 4, Article 111 (August 2018), 19 pages. https://doi.org/XXXXXXX.XXXXXXX 
+
+1 Introduction 
+
+As production software evolves, memory inefficiencies often accumulate as silent technical debt ,manifesting in memory bloat and degraded responsiveness that are difficult to diagnose and rectify automatically [ 4 , 15 , 31 , 41 ]. Unlike functional bugs that cause crashes or incorrect outputs, memory inefficiencies usually do not break program execution and therefore often remain unnoticed until deployment [ 5 , 31 , 41 ]. Consequently, identifying and rectifying these inefficiencies remains a 
+
+> ∗
+
+Both authors contributed equally to this research. 
+
+> †
+
+Corresponding Author. Authors’ Contact Information: Jiaxi Liang, jiaxi.liang@connect.hku.hk, The University of Hong Kong, Hong Kong, China; Yuanxiang Shi, shiyuanx@hku.hk, The University of Hong Kong, Hong Kong, China; Zezhou Yang, zezhouyang@connect. hku.hk, The University of Hong Kong, Hong Kong, China; Chenxiong Qian, cqian@cs.hku.hk, The University of Hong Kong, Hong Kong, China. Permission to make digital or hard copies of all or part of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for components of this work owned by others than the author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or republish, to post on servers or to redistribute to lists, requires prior specific permission and/or a fee. Request permissions from permissions@acm.org. 
+
+© 2018 Copyright held by the owner/author(s). Publication rights licensed to ACM. ACM 1557-735X/2018/8-ART111 https://doi.org/XXXXXXX.XXXXXXX J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. 
+
+> arXiv:2606.31368v1 [cs.SE] 30 Jun 2026
+
+111:2 Trovato et al. graphic_common.h                                                                                                                              
+
+> graphic_common.h
+> #include "define.h"
+> ···
+> if (GSErrorStr(ret) == "<500 api call failed >···") {
+> return OHOS::SURFACE_ERROR_NOT_SUPPORT;
+> }else if (ret != OHOS::SURFACE_ERROR_OK) {
+> BLOGE("SetHDRMetadata failed!, retVal: %d", ret);
+> return OHOS::SURFACE_ERROR_UNKOWN;
+> }
+> return OHOS::SURFACE_ERROR_OK;
+> namespace {
+> const std ::map <Error, std ::string >ErrorStrs ={
+> {ERROR_OK, "<200 ok >"},
+> {ERROR_INVALID_ARGUMENTS, "<400 invalid args >"},
+> {ERROR_NO_PERMISSION, "<403 no permission >"},
+> {ERROR_CANNOT_CONNECT, "<404 cannot connect >"},
+> ···
+> {ERROR_BINDER, "<504 binder error >"},
+> };
+> }
+> ... Multiple TUs ... reference_1.cpp
+> define.h
+> inline std::string ErrorStr(Error err)
+> {
+> Error diff =static_cast <Error >(err %LOWERROR_MAX);
+> -auto it =ErrorStrs.find( static_cast <Error >(err -diff));
+> -if (it == ErrorStrs.end()) {
+> return "<Error error index out of range >";
+> }
+> -return it -> second +LowErrorStr(diff);
+> }
+> impl.cpp
+> inline const char *ErrorStrs(Error err)
+> {
+> switch (err) {
+> case ERROR_OK: return "<200 ok >";
+> case ERROR_INVALID_ARGUMENTS: return "<400 invalid args >";
+> ···
+> case ERROR_BINDER: return "<504 binder error >";
+> default :return nullptr;
+> }
+> }
+> inline std::string ErrorStr(Error err)
+> {
+> Error diff =static_cast <Error >(err %LOWERROR_MAX);
+> +const char *base =ErrorStrs( static_cast <Error >(err -diff));
+> +if (base == nullptr ){
+> return "<Error error index out of range >";
+> }
+> +return std::string (base) +LowErrorStr(diff);
+> }
+
+Header-initialized heap constant 
+
+> Eliminate redundancies
+> Context-code
+> adjustment
+> Shared among TUs
+> Replicated in multiple TUs
+> define.h
+> impl.cpp
+
+Memory-efficient equivalent function 
+
+Cross-file dependency  Adjusted use-site logic 
+
+Fig. 1. Motivating example of eliminating header-initialized constant map. 
+
+daunting manual task, requiring developers to possess deep system-level expertise to bridge the gap between low-level symptoms and source-code root causes [ 15 , 41 ]. This process is not only labor-intensive but also difficult to scale across production-grade codebases, emphasizing the urgent need for automated and systematic solutions. Large Language Models (LLMs) have recently emerged as a promising avenue for such automation, having significantly expanded the scope of automated software engineering [ 13 , 14 , 38 , 44 ]. However, applying LLMs to memory optimization is far from straightforward and faces several fundamental challenges: 
+
+C1: Large-scale software structures hinder the precise localization of memory inefficiencies. Memory inefficiencies are often workload-dependent and intertwined with complex control flow and data lifetimes, thus locating their root causes without runtime evidence is difficult. While profiling can reveal concrete symptoms, manually bridging profiling data to actionable insights remains slow and error-prone at scale [15, 25], and raw profiling data cannot be directly leveraged by LLMs. 
+
+C2: Localized profiling symptoms do not directly transfer to codebase-wide detection. Profiling captures specific instances under specific executions, but scalable detection requires recognizing the underlying recurring patterns and finding their occurrences across the codebase. Bridging this gap demands lifting symptoms into generalizable patterns and encoding them as static detection rules. 
+
+C3: Complex code dependencies make memory optimization difficult to carry out stably and con-sistently. Memory optimizations in codebases rarely reduce to isolated edits at a single reported location. Instead, they often require understanding surrounding code, tracking related symbol usages, and coordinating multiple changes across files or functions. As a result, even after an inefficiency has been identified, turning it into a stable and reliable code change remains challeng-ing [23, 28]. 
+
+C4: Ensuring reliable and consistent memory optimization remains challenging due to the lack of direct validation oracles. Unlike tasks with clear pass-or-fail outcomes, memory optimization offers no direct oracle for judging whether detections or generated changes are reliable enough to trust [ 24 , 27 ]. This makes automated workflows dependent on additional mechanisms for assessing the quality and consistency of intermediate results. 
+
+Approach. To address these challenges, we propose MOA , a LLM-driven framework for Memory-
+
+Optimization Automation at codebase scale with three stages. 
+
+J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:3 
+
+Stage 1: Pattern Mining. In the first stage, reusable anti-patterns are extracted from specific instances of inefficiency identified from profiling data (C1). By importing execution traces into a database, an Analyzer agent infers anti-patterns through profiling data analysis and source code exploration, generating candidate pattern reports (C2). An automated validation step then checks each candidate pattern against predefined criteria and provides refinement feedback, ensuring only verified anti-pattern reports proceed to checker synthesis (C4). 
+
+Stage 2: Checker Synthesis. Then, we design a Checker Generator to synthesize executable static analyzers from validated anti-patterns, automating the complex pattern rule formalization process through iterative generation and refinement: prototype synthesis creates a compilable checker, then refinement progressively improves detection logic under self-validation (C2). This loop con-tinues until the checker correctly identifies all test cases while eliminating false positives and negatives (C4). 
+
+Stage 3: Patch Generation. Finally, our approach automatically generates optimization patches to resolve the detected inefficiencies. To handle large volumes of detected targets, a Patcher agent first groups related targets into independent chunks, then employs a three-stage workflow that drives the agent through context gathering, edit generation, and validation, automating the complex fixing process (C3). Within the workflow, syntax checking and automatic state transitions enable iterative refinement until all inefficiencies are correctly patched (C4). 
+
+Evaluation. We evaluate MOA on OpenHarmony [ 17 ], an open-source operating system. Lever-aging profiling data collected on 3 system services, MOA identifies 9 previously unknown anti-patterns, synthesizes 13 validated static checkers, detects 10,067 inefficiency instances across the codebase, and generates 769 optimization patches within 7 selected services. After being reviewed by human maintainers, 92.5% of these patches are accepted as valid patches, achieving an average of 42.2% heap size reduction and 10.6% binary size reduction. 
+
+Contributions. In summary, the three main contributions of this paper are as follows: 
+
+• We propose MOA , a fully automated LLM-based framework for codebase-scale memory optimization. By combining runtime profiling with LLM-driven analysis and transformation, 
+
+MOA bridges the gap from localized inefficiency symptoms to codebase-wide detection and fixing. 
+
+• We conduct a comprehensive evaluation on OpenHarmony, a production-scale operating system. MOA successfully validates the complete pipeline from pattern mining through checker synthesis to automated repair, demonstrating substantial memory and binary size reductions with high patch acceptance rates across hundreds of detected instances. 
+
+• To our knowledge, MOA is the first autonomous framework capable of detecting and repairing recurring memory inefficiencies across a production-scale codebase. We will release our implementation to facilitate future research. 
+
+2 Motivation 
+
+A Real-World Case. A pervasive memory anti-pattern in OpenHarmony arises from defining and initializing non-trivial static objects in header files. Due to C++ internal linkage rules, such objects are instantiated independently in every translation unit (TU) that includes the header. Figure 1 illustrates a representative case: a static constant mapping table that is duplicated over 100 times, as revealed by our profiling. This redundancy triggers significant binary-size bloat and redundant heap allocations during program initialization. While replacing the std::map table with an inline lookup function and substituting std::string with character pointers is a conceptually straightforward optimization, carrying out such refactoring safely and in a semantics-preserving manner across a large codebase remains a daunting manual task. 
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018.
+
+111:4 Trovato et al. Found Mismatches 
+
+> Compilable
+> Rejected
+
+Original 
+
+Codebase  
+
+> Comments: The current report
+> does not convincingly show any
+> memory bloat... The analysis of
+> smart pointers is especially weak...
+> Evidence
+> Analysis
+
+Pattern 
+
+Reviewing 
+
+> Preparing Patching Validating
+
+Evidence 
+
+Collecting 
+
+Targets 
+
+Preprocessing 
+
+> Code Context
+> Draft Plans
+> Code
+> Editing
+> Syntax
+> Check
+
+Stage 1: Pattern Mining  Stage 2: Checker Synthesis 
+
+Stage 3: Patch Generation 
+
+> Checker
+> Prototype
+> Triage
+> Feedback
+
+Prototype 
+
+Synthesis 
+
+Checker 
+
+Refinement  
+
+> Static Analysis
+> Checkers
+> History
+> Patterns
+> Review
+> Criteria
+> Test on
+> Examples
+> FN/FP
+> Checks
+> Checker
+> Skeleton Compiler
+> Generate
+> Accepted Anti-
+> Pattern Reports
+> Scan
+> Results
+
+Optimized 
+
+Codebase     
+
+> Codebase-scale Scanning Optimization Strategies
+> Draft Report
+> LLMs Profiling signal : The query highlights...
+> Stack trace : Constructed std::basic_string...
+> Code excerpt : `/path/to/define.h` defined...
+> Description: In this codebase, ...
+> An anti-pattern is to allocate these
+> objects on the heap on every
+> invocation (via smart pointers or ...
+> Chunk 1:
+> [var] ErrorStrs /path/to/define.h:34:38
+> [ref] /path/to/impl.cpp:93:15
+> [ref] /path/to/reference_1.cpp:26:53
+> Chunk 2: ...
+> Related Code Chunking
+> Profiling
+> Patches
+
+Fig. 2. Overview of MOA . The process begins with the original codebase and its profiling data. (1) In Pattern Mining , MOA mines recurring anti-patterns from profiling evidence and code context. (2) In Checker Synthesis ,it converts the mined reports into static checkers for codebase-wide detection. (3) In Patch Generation , the 
+
+Patcher groups detected targets into chunks and iteratively edits and validates patches. The validated patches are then applied to the codebase, producing an optimized codebase. 
+
+Observation 1: Recurrence and Semantic Abstraction. As shown in Figure 1, profiling may identify the mapping table ErrorStrs as a memory hotspot. However, the real issue is not this specific table itself, but the underlying anti-pattern: initializing non-trivial static objects in header files. While profiling reveals the symptom of being replicated across multiple TUs, recognizing it as a recurring inefficiency requires lifting this concrete instance into a semantic rule. An automated approach must infer that any object exhibiting this anti-pattern can introduce redundant heap allocations and binary duplication across the codebase, thereby moving from instance-level symptoms to pattern-level abstraction. 
+
+Observation 2: Coordinated and Context-dependent Repair. The transition from the inefficient version to the optimized version in Figure 1 shows that memory optimization is rarely a purely local fix. The required context-code adjustment involves coordinated modifications: in this example, the definition in define.h is refactored into a lookup function, while call sites in files such as 
+
+impl.cpp are updated accordingly to handle the changed interface. Such non-atomic changes require a broader understanding of program logic across files to ensure that the refactoring remains semantics-preserving and does not introduce regressions in dependent code. These observations suggest that effective automation should focus on higher-level anti-pattern abstraction rather than directly addressing isolated profiling instances, and should support coordi-nated, context-aware code changes rather than local edits alone. To operationalize these insights, a framework must possess three core capabilities: (1) extracting generalizable anti-patterns from dynamic runtime symptoms, (2) scaling detection across the codebase, and (3) synthesizing context-sensitive patches. In the following section, we detail how MOA fulfills these requirements through a structured LLM-driven pipeline. 
+
+J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:5 
+
+3 The MOA Design 3.1 Framework Overview 
+
+Figure 2 illustrates the overall workflow of MOA . Given a dynamic profiling report and the original codebase, MOA uses three stages to automate memory optimization. First, the Pattern Mining stage correlates profiling evidence with program semantics to extract recurring memory anti-patterns and summarize them as structured reports. Subsequently, the Checker Synthesis stage converts these reports into static analysis checkers, enabling scalable, codebase-wide detection of similar inefficiencies. Finally, the Patch Generation stage takes the checker-detected targets together with the optimization strategies provided by anti-pattern reports, and produces semantics-preserving optimization patches. By systematically integrating these stages, MOA transforms transient runtime symptoms into persistent, actionable optimizations, effectively bridging the gap between localized profiling and codebase-wide optimizations. 
+
+3.2 Pattern Mining 
+
+The first stage analyzes profiling results to identify recurring memory anti-patterns. We build the Analyzer , an LLM-based agent that flexibly explores profiling results to mine anti-patterns. Specifically, MOA examines fine-grained runtime events and execution traces, together with source-level code information, to extract evidence from concrete inefficiency symptoms and infer structured anti-pattern reports. 
+
+Evidence Collecting. To support flexible evidence exploration over large profiling traces, we import processed profiling data into a relational database and expose it to the Analyzer through a structured query interface. The database provides a bounded yet flexible environment for evidence exploration: instead of loading full profiling reports into context, the agent retrieves only relevant slices of data and incrementally analyzes them under different views and granularities. This design keeps large traces manageable while making the exploration process reproducible, auditable, and constrained to well-defined database operations. Profiling data alone does not fully explain the source-level semantics behind runtime symptoms. We therefore allow the Analyzer to inspect the target codebase during analysis. Starting from profiling evidence, the Analyzer first infers candidate anti-patterns, then examines relevant source code to confirm their manifestations and understand their semantic causes, and finally summarizes its findings into structured anti-pattern reports. By grounding pattern inference in both runtime observations and source-level analysis, this process links profiling symptoms to program semantics and improves the reliability of the resulting reports. 
+
+Report Drafting. Following the evidence exploration, the Analyzer formulates a structured anti-pattern report, serving as the pivotal intermediary that directs both the static checker synthesis and the patch generation workflows. To ensure its quality and consistency, we define a formatted anti-pattern report template with four essential components: (1) a pattern description with evi-dence linking profiling symptoms to code examples; (2) an explanation of why the pattern causes inefficiency; (3) detection logic that can be translated into static analysis rules; and (4) actionable optimization strategies. This structured template enforces consistency across components: the detection logic is grounded in empirical evidence to reduce false positives, while the optimization strategies are aligned with the diagnosed causes of inefficiency. By imposing these structural constraints, MOA ensures that mined anti-pattern reports are internally consistent and usable by downstream stages. 
+
+Pattern Reviewing. Structured templates alone are insufficient to guarantee that mined anti-pattern reports are suitable for downstream checker synthesis and patch generation. In practice,  
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. 111:6 Trovato et al.
+
+Candidate Report       
+
+> DESCRIPTION: The issue is declaring `static const
+> std::map` in headers... The map multiplies across...
+> EVIDENCE: `graphic_common.h` lines 32‑58 define
+> `GSErrorStrs`...
+> OPTIMIZATION: Replace header-level `static
+> std::map` tables with array or helper functions...
+> DETECTION LOGIC: Match declarations in headers
+> with internal linkage. ..
+
+Review Comments   
+
+> Decision: Accepted.
+> Comments: Well-scoped and general pattern
+> with clear static analysis definition, profiling
+> evidence, code references, and actionable
+> remediation guidance...
+
+Analyzer 
+
+Reviewer 
+
+> Model Context Isolation
+
+Fig. 3. Example of report drafting & reviewing iteration. 
+
+failures arise either from weak report formulation or from flaws in the proposed anti-pattern itself, indicating that quality control must go beyond template compliance. We attribute part of this issue to a broader limitation of long-context LLM reasoning: once the Analyzer has committed to a candidate explanation, it may struggle to critically reassess that result within the same context. Prior work reports similar self-reinforcing behavior in iterative LLM refinement [ 35 ]. This motivates an external review step. To address this, MOA introduces an independent LLM-based Reviewer as a final quality gate for pattern mining. Given a candidate report and a review criteria prompt, the Reviewer independently examines whether the proposed anti-pattern is well supported, whether it overlaps with previously accepted patterns, and whether the report includes enough concrete evidence and code examples. Based on this assessment, it returns a decision with comments indicating whether the report should be accepted or rejected. This process ensures that validated anti-pattern reports provide a unique anti-pattern, representative examples, and actionable optimization guidance. Through repeated analysis and review, the Analyzer distills profiling evidence into reliable and actionable anti-pattern reports. These reports serve as the foundation of MOA , providing the pattern abstractions, examples, and optimization guidance on which subsequent detection and patch generation depend. 
+
+3.3 Checker Synthesis 
+
+Building upon the validated anti-pattern reports, the framework transitions from localized insights to codebase-scale detection by identifying latent instances that mirror the defined inefficiencies. Static analyzers provide a practical substrate for this purpose, as they can encode recurring anti-patterns as reusable detection logic and apply that logic at scale across the codebase. This transition from abstract description to scalable execution is facilitated by a mechanism capable of mapping the reports’ structured guidance, detection logics, and code exemplars into functional checker implementations. For this purpose, we design the Checker Generator , which synthesizes customized static analysis checkers from anti-pattern reports through two phases: prototype synthesis and checker refinement. 
+
+Prototype Synthesis. The first phase focuses on the systematic transformation of an anti-pattern report into an initial compilable checker prototype. In our implementation, we instantiate this design  
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:7
+
+on the Clang Static Analyzer (CSA), which provides a practical substrate for path-sensitive analysis and codebase-wide scanning in C/C++ projects. LLMs can interpret the structured guidance in anti-pattern reports and map it to checker code, but this process is not always reliable: the generated code may violate framework-specific APIs, checker structure, or compilation requirements. To make synthesis more stable, we constrain generation to pattern-specific logic within a predefined checker skeleton. The generated checker is then compiled automatically, and compiler feedback is used to iteratively repair synthesis errors until a compilable prototype is obtained. In this way, prototype synthesis turns high-level anti-pattern reports into basic executable checker implementations. 
+
+Checker Refinement. A merely compilable checker is not necessarily a correct one. The successful synthesis of a compilable prototype does not inherently guarantee functional accuracy or semantic alignment with the target anti-pattern. Such checkers may still exhibit discrepancies in the form of false negatives or false positives, which necessitates a dedicated validation stage to ensure diagnostic reliability. To achieve this, the Checker Generator uses code examples extracted from the anti-pattern report as feedback cases. These examples provide concrete anchors for the intended detection behavior and help expose mismatches between the report’s abstract description and the checker’s actual implementation, such as false negatives on true pattern instances or false positives on superficially similar but irrelevant code. The checker is executed on these examples, and the resulting outputs are compared against the expected behavior implied by the report. Such mismatches reveal underlying limitations in the checker’s completeness or precision, prompting the agent to revise the detection logic and re-initiate the synthesis process within an iterative refinement loop. The culmination of this iterative cycle is the production of validated checkers that are precisely aligned with the mined anti-pattern specifications. By leveraging these specialized implementations, 
+
+MOA extends its diagnostic reach beyond the constraints of the initial profiling data to identify recurring inefficiencies at codebase scale. 
+
+3.4 Patch Generation 
+
+The systematic identification of inefficiencies across the codebase via synthesized checkers estab-lishes the necessary foundation for the subsequent application of optimization strategies to the detected targets. Given that individual detection sites typically serve as entry points to broader ar-chitectural contexts rather than isolated fix locations, we introduce the Patcher , an LLM-based agent that transforms diagnostic findings into stable, semantics-preserving optimization patches through the comprehensive analysis of surrounding dependencies and the coordination of distributed modifications. 
+
+Target Preprocessing. Codebase-wide scan results often require preprocessing before they can serve as effective patching units, as they are typically too numerous and redundant to be used directly as patching tasks. Moreover, a reported detection location does not always provide enough context for deciding how the inefficiency should be addressed. Many memory optimizations involve related code sites, symbol usages, or surrounding implementation details that must be considered together. To make patching tractable, we first preprocess scanned results before passing them to the 
+
+Patcher . Duplicate findings are removed, and each target is expanded with related code context retrieved through language-server support, such as symbol references and associated locations. The resulting targets are then grouped into coherent chunks, typically at the source-file level, so that each patching task remains within the model context while preserving the relevant code context needed for coordinated edits. In this way, preprocessing turns raw scan results into manageable and        
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. 111:8 Trovato et al. IDLE
+> PREPARING PATCHING VALIDATING
+> COMPLETE
+> •Analyze issues .
+> •Outline plans.
+> •Code edits.
+> •Syntax check.
+> •Validate edits .
+> •Final report.
+> Chunk dispatching Request for next
+> Chunk Arrives Validation Passed
+> Plan Done
+> Edits
+> Complete
+> Re fi ne Plans Fix issues
+
+Fig. 4. State machine workflow for the Patcher .
+
+context-rich fixing units, reducing redundancy while providing enough surrounding information for stable patch generation. 
+
+State Machine. The transition from target preprocessing to patch generation is governed by a formalized multi-stage workflow encompassing planning, patching, and validating. This operational structure reflects the divergent requirements of each activity: planning necessitates comprehensive context acquisition, patching involves localized code transformation, and validation ensures the functional integrity of the resulting modifications. Allowing the agent to perform all of these activities in an unconstrained workflow can easily lead to drift, inconsistent edits, or syntax-breaking changes. To address this, the Patcher is implemented as a structured state machine that constrains the agent’s behavior across stages. By formalizing the boundaries between operational stages, this architecture restricts the agent’s actions to contextually valid operations and provides explicit checkpoints for error recovery when the optimization process deviates from the intended plan. 
+
+Patching Workflow. As shown in Figure 4, the workflow consists of three stages: Preparing ,
+
+Patching , and Validating . In Preparing , the Patcher analyzes the anti-pattern report and the current targets, gathers relevant context, and drafts a modification plan. In Patching , it applies concrete code edits guided by that plan. In Validating , it checks the modified code using language-server-based syntax analysis to ensure that no errors have been introduced and that the intended changes are complete. Transitions between these stages are not strictly linear, allowing fallback on failure. The agent normally progresses from preparation to editing and then to validation, while failures in later stages trigger a fallback to earlier ones. In particular, validation failures send the workflow back to patching, and insufficient context or infeasible edit plans trigger a fallback to preparation. Such backward transitions are accompanied by reverting to a previous checkpoint, preventing invalid intermediate edits from contaminating subsequent steps. By separating planning, editing, and validation in this way, MOA makes patch generation more stable, reliable and better suited to large-scale, context-dependent memory optimization. After iterative preparation, patching, and validation, the Patcher stably produces high-confidence optimization patches across the codebase. At this point, the mined anti-patterns are ultimately realized as concrete optimizations. 
+
+4 Evaluation 
+
+We explore the following research questions for MOA :
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018.
+
+MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:9 
+
+Table 1. Tools invoked by MOA                                         
+
+> Tool Description Tool Description State machine control Language Server (clangd)
+> update_state Request a transition between states. clangd_hover/def/ref Return symbol info, definition, or refs.
+> show_state Display current state and transitions. clangd_sync/diag Sync file content and show diagnostics.
+> Profiling data analysis Workspace checkpoints
+> db_list_tables Show available tables and column info. create_checkpoint Create a checkpoint with description.
+> db_describe_table Describe table schema and show rows. list_checkpoints List all checkpoints and tracked files.
+> db_query Run SQL against in-memory tables. restore_checkpoint Restore workspace to a specific point.
+> Task management Checker synthesis
+> read_todo Inspect todo list for active state. write_checker Write generated checker code.
+> write_todo Add todo entries with priority/status. build_checker Run build commands for the checker.
+> update_todo Update todo’s priority/status/results. test_checker Run verification commands.
+> Code review & editing Reporting & execution
+> list_directory List files relative to project root. review_report Write report and invoke review.
+> read_file Read a file with optional line range. report Report the final result.
+> replace_text Replace a literal string in a file. run_shell Execute shell command in project root.
+
+• RQ1 : How effectively can MOA identify actionable and previously unknown memory anti-patterns from profiling data? 
+
+• RQ2 : To what extent can MOA synthesize static checkers with high diagnostic accuracy and practical utility? 
+
+• RQ3 : To what extent can MOA generate effective optimization patches at repository scale? 
+
+• RQ4 : How do the key components of MOA contribute to its overall effectiveness? 
+
+• RQ5 : What are the resource costs of using MOA ?
+
+4.1 Experimental Setup 
+
+We evaluate MOA under the following experimental setup. 
+
+Hardware and Software. Our experiments are conducted on a workstation with 24 cores, 32 GB RAM, running Ubuntu 22.04 LTS. We use LLVM 15.0.4 as the default compilation toolchain. 
+
+Subject System. We evaluate MOA on OpenHarmony 5.0, an open-source operating system comprising over 100 million lines of C/C++ code across dozens of system services [ 26 ]. The compilation configuration and test platform target the Rockchip RK3568 chip. 
+
+Profiling Setup. We use Memoro [ 3] for memory behavior profiling, which builds on the LLVM/Clang AddressSanitizer framework. The profiling data captures heap object sizes, lifecycles, and stack traces, and related runtime metadata. 
+
+LLM Configuration. We use OpenAI GPT-5.1 for pattern mining, and OpenAI GPT-5.1-Codex for checker synthesis and patch generation. The maximum iterations are set to 100 for pattern mining and checker synthesis, and 150 for patch generation per chunk. Table 1 summarizes the tools invoked by MOA across its three stages. 
+
+4.2 RQ1: Pattern Mining Effectiveness 
+
+4.2.1 Overall Results. As shown in Table 2, MOA demonstrates strong capability in automated pattern discovery. From profiling data of just three system services, the framework successfully identified 13 validated anti-patterns, achieving a yield rate of 65% from candidate reports. The low refinement overhead, averaging only 1.5 iterations per pattern, indicates that the Analyzer-Reviewer feedback loop converges efficiently without excessive back-and-forth. More importantly, when compared against Clang-Tidy’s established performance checks, 69.3% of our discovered anti-patterns have no existing coverage, confirming that profiling-guided mining can uncover blind spots missed by traditional rule-based approaches. 
+
+J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. 111:10 Trovato et al. 
+
+Table 2. Categories of validated C/C++ memory anti-patterns.                 
+
+> Pattern Type #Description Impact
+> T1: Static object overuse 4Excessive non-trivial static objects causing copies across translation units Binary size bloat T2: Inefficient strings 2Frequent temporary string construction and concatenation Allocation churn T3: Redundant copying 4Unnecessary implicit copies through pass-by-value and similar mechanisms Copy overhead T4: Const heap structures 3Immutable complex structures persisting on heap throughout program lifetime Persistent heap usage
+> Total 13
+
+Table 3. Patterns overlap between MOA and Clang-Tidy. 
+
+MOA Clang-Tidy 
+
+loop-local-string-concatenation inefficient-string-concatenation 
+
+containers-pass-value-to-read-only-functions unnecessary-value-param 
+
+pass-std-function-parameters-by-value unnecessary-value-param 
+
+container-copy-using-auto-by-value unnecessary-copy-initialization 
+
+4.2.2 Validated Patterns. Table 2 presents the validated pattern categories with their descriptions and prevalence in the codebase. Overall, we categorize them into four types: T1 captures non-trivial static objects that might be replicated across translation units; T2 covers string temporaries and concatenations that drive allocation churn; T3 describes avoidable copy paths (e.g., pass-by-value) that incur extra copying work; and T4 focuses on long-lived immutable heap-resident data structures that unnecessarily occupy heap memory over the program’s lifetime. Among the memory consumption related anti-patterns, Overuse of static object (T1) is the most frequently occurring, accounting for 30.8% of all detected instances. As exemplified in our motivating example (Figure 1), this pattern can cause significant binary size inflation and memory bloat due to redundant object copies and constructor invocations across translation units. 
+
+4.2.3 Comparison with Clang-Tidy. We compare MOA ’s mined anti-patterns against Clang-Tidy’s built-in performance checks ( performance-* rules), which represent the state-of-practice in rule-based detection. 
+
+Overlapping Patterns. Table 3 shows that 4 of our 13 anti-patterns (30.7%) overlap with existing Clang-Tidy rules. These correspond to well-documented inefficiencies: loop-local string concate-nation, unnecessary value parameters, and redundant copy initialization. The overlap validates that MOA can independently rediscover established anti-patterns from runtime evidence alone, without prior knowledge of existing rules. 
+
+Novel Patterns. The remaining 9 anti-patterns (69.3%) have no equivalent Clang-Tidy built-in check. For example, T1 (Static Object Overuse) causes significant binary bloat through redundant copies across translation units, yet no existing rule targets this issue. This gap arises because such anti-patterns manifest at link time or runtime rather than within a single translation unit, making them invisible to solely AST-based heuristics. The result highlights the value of profiling-guided discovery: runtime evidence reveals inefficiencies that static analysis alone cannot capture. We note that MOA and Clang-Tidy are complementary, the former surfaces emergent, project-specific anti-patterns while the latter provides fast detection of known issues with automatic fix-its.  
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:11
+
+Table 4. Detection results by checkers across OpenHarmony system services. 
+
+Pattern Render † Camera † Media Audio † AVSes. Access. Bgtask Total 
+
+P1: Loop str concat 33 6 3 1 27 0 0 70 
+
+P2: Rebuilding str 2,476 771 1,719 1,637 878 339 245 8,065 
+
+P3: Recopy container 48 4 15 16 50 61 0 194 
+
+P4: Non-constexpr str 152 116 241 236 73 152 30 1,000 
+
+P5: Container copy auto 52 6 5 0 5 2 0 70 
+
+P6: Static vector tables 50 40 38 35 6 3 0 172 
+
+P7: Static map tables 45 21 36 114 28 8 5 257 
+
+P8: Static unordered map 26 113 18 13 0 1 0 171 
+
+P9: Static std::function 7 0 0 0 0 0 0 7
+
+P10: Static set tables 3 2 0 10 0 0 1 16 
+
+P11: Pass std::func by val 13 3 0 1 1 0 0 18 
+
+P12: Containers pass val 3 2 6 1 0 2 0 14 
+
+P13: Per-instance str vec 2 1 5 2 1 2 0 13 Total 2,910 1,085 2,086 2,066 1,069 570 281 10,067  
+
+> †Services used for profiling in pattern mining.
+
+Table 5. Patch generation and optimization results for T1 & T4. 
+
+Service LoC Targets/Files Patches Valid Acc PSS ↓ Heap Size ↓ Binary Size ↓
+
+Render Service 477 K 431 / 212 322 286 88.8% 6.3% 39.4% 23.6% Camera Service 96 K 323 / 51 96 90 93.8% 27.6% 65.3% 8.6% Media Service 101 K 352 / 83 109 99 90.8% 25.1% 48.0% 15.1% Audio Service 154 K 412 / 107 136 123 90.4% 11.9% 40.7% 15.1% Avsession Service 49 K 97 / 23 44 43 97.7% 23.8% 53.0% 6.4% Accessibility 73 K 171 / 27 42 36 85.7% 22.9% 47.5% 4.7% Bgtaskmgr Service 18 K 39 / 15 20 20 100% 1.4% 1.4% 0.5% 
+
+Avg. 92.5% 17.0% 42.2% 10.6% 
+
+Finding 1. MOA successfully mines actionable memory anti-patterns from profiling data, with the majority representing novel issues not covered by existing static analysis tools. The automated validation effectively filters low-quality reports, demonstrating reliable and effective pattern discovery. 
+
+4.3 RQ2: Checker Effectiveness 
+
+This research question evaluates how effectively synthesized checkers scale the detection of memory inefficiencies across the codebase. From the 13 validated anti-patterns mined in RQ1, MOA successfully synthesized 13 correspond-ing checkers, all of which passed compilation and validation. We deploy these checkers to scan 7 representative OpenHarmony system services. Table 4 summarizes the scan outcomes. The checkers detected a total of over 10,000 memory inefficiency instances across 7 system services with 971K lines of code. Notably, the anti-patterns are mined from profiling data collected on only 3 services (Render, Audio, and Camera), yet the checkers successfully identified issues in 4 additional services that were never profiled. This demonstrates that the synthesized check-ers generalize beyond the original profiling scope, effectively scaling up the target locations for optimization.  
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. 111:12 Trovato et al.
+
+Finding 2. The synthesized checkers accurately detect memory inefficiencies at scale and effectively generalize beyond the profiled services, enabling systematic propagation of pattern-based detection across the entire codebase without requiring additional profiling. 
+
+4.4 RQ3: Patch Generation and Optimization Effectiveness 
+
+This research question evaluates whether MOA can generate effective optimization patches at scale and whether these patches deliver performance improvements in real-world deployments. 
+
+4.4.1 Overall Results. We select the scan results obtained in RQ2 from 7 checkers in pattern categories T1 and T4 across 7 core services and leverage MOA to generate optimization patches. Table 5 presents the patch generation results. Across all seven services, MOA generates a total of 769 patches addressing 1,825 optimization targets distributed across 518 files. Here, we count patches by file—all modifications within a single file are treated as one patch. Notably, the framework achieves an average accuracy of 92.5% in human validation, with 693 out of 769 patches deemed correct and ready for deployment. This high success rate is particularly significant for codebase-scale optimization efforts, as it substantially reduces the manual review burden that would otherwise be prohibitive when dealing with hundreds of patches across a large codebase. An important observation is that the number of generated patches (769 files) exceeds the number of files containing targets (518 files), even though our preprocessing pipeline already merged multiple targets within each file. This discrepancy arises because many optimization targets require cross-file modifications. The ability of MOA to correctly identify and coordinate these inter-file dependencies demonstrates the effectiveness of our Patch Generation workflow design for repository-level code optimization. 
+
+4.4.2 Memory Impact. To quantify the real-world impact of the optimizations, we measure three key metrics before and after deploying the validated patches: binary size, heap size, and proportional set size (PSS). Table 5 presents the results across all seven services, including both those used for initial profiling and those that were not. The results strongly confirm our core insight: memory inefficiencies manifest as recurring anti-patterns rather than isolated anomalies. Notably, services that are not included in the initial profiling phase still achieved substantial improvements. On average, the optimizations yield a 42.2% reduction in heap size, 17.0% reduction in PSS, and 10.6% reduction in binary size, validating the scalability and effectiveness of our pattern-driven approach. This confirms our key insight that anti-patterns extracted from a small subset of profiled services can be systematically propagated to detect and repair similar inefficiencies across the entire codebase. 
+
+4.4.3 Case Study. During the pattern mining phase, we discover a critical memory bloat pat-tern in OpenHarmony’s service layer (Figure 1): a constant HTTP status code mapping table (std::map<int, std::string> ) defined in an anonymous namespace within a header file. Since this static non-trivial object resides in a header, the C++ compilation model requires each translation unit to instantiate its own initialization function and construct an independent copy at startup. Profiling reveals over one hundred duplicate instances across at least five services, each consuming heap memory for both the map structure and std::string values. As shown in Figure 1, MOA proposes a solution that replaces the map-based lookup with a stateless function using a switch statement, and substitutes std::string objects with const char* pointers to string literals in the patch generation phase. This optimization eliminates all per-translation-unit initialization functions and heap allocations. Additionally, by applying synthesized checkers to systematically detect similar anti-patterns and automatically optimizing them, MOA           
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:13
+> Table 6. Patch Generation Results
+> Method Total Patches Successful Success Rate
+> PatchAgent 165 17 10.3% MOA 322 ( ↑157) 286 ( ↑269) 88.8% ( ↑78.5%)
+
+achieves substantial reductions in both memory consumption and binary size across multiple services. 
+
+4.4.4 Comparison with PatchAgent. To demonstrate the effectiveness of our patch generation work-flow design, we compare MOA ’s Patcher against PatchAgent [ 40 ], one of the most closely related LLM-based autonomous agent frameworks for program repair. It reflects the current capability of LLMs in navigating complex codebases and generating functional patches through iterative tool-use. While PatchAgent is originally designed for functional bug repair, we adapt it as a strong baseline for memory optimization, since its iterative code editing workflow is also applicable to repairing memory inefficiencies. The original workflow of PatchAgent includes git diff patch generation, git apply, compilation, and vulnerability repair. For a fair comparison in the OpenHarmony environ-ment, where full compilation is prohibitively expensive, we retain PatchAgent’s core git diff patch generation component and manually apply the resulting patches to the codebase. Both frameworks are given the same buggy code path: PatchAgent uses its default retrieval database, whereas MOA uses pattern descriptions synthesized during the Pattern Mining stage. We evaluate both systems on a system service with over 200 memory inefficiencies detected by our checkers, and assess the generated patches for syntactic validity, semantic correctness through manual review, and expert acceptance. As shown in Table 6, MOA achieves an 88.8% success rate compared to PatchAgent’s 10.3%, representing a 78.5 percentage point improvement. The advantage is particularly pronounced for complex optimizations: MOA successfully generates 43 multi-location patches that require coordinated changes across multiple code locations, which PatchAgent fails to attempt due to its single-shot generation approach. We attribute MOA ’s superior performance to three key design choices in our workflow: 
+
+• Optimization guidance : MOA provides the Patcher with feasible fix strategies derived from validated anti-patterns. 
+
+• Context exploration : MOA enables the agent to dynamically gather relevant code context through file operations and LSP queries, rather than relying on fixed retrieval that may miss critical dependencies. 
+
+• Iterative validation : The LSP-based syntax checking allows the agent to detect errors early and refine patches through multiple attempts, whereas zero-shot generation lacks feedback mechanisms for self-correction. PatchAgent excels in simplicity and speed—its zero-shot approach requires fewer LLM queries. For simple, single-location fixes, both tools perform comparably. However, for complex opti-mizations requiring contextual understanding, MOA ’s agent-based workflow (with state machine guidance, iterative context gathering, and LSP validation) is essential for effective large-scale memory optimization tasks and demonstrates clear benefits.  
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. 111:14 Trovato et al.
+
+Finding 3. MOA generates optimization patches at repository scale with high accuracy, achieving substantial memory improvements across multiple metrics. The framework successfully handles complex cross-file dependencies and coordinates multi-location modifications, demonstrating effectiveness for real-world deployment. 
+
+4.5 RQ4 & RQ5: Ablation Study and Cost Analysis 
+
+To understand the contribution of stages in MOA ’s pipeline, we conduct ablation studies by systematically removing key components. We also analyze the computational costs of MOA .
+
+4.5.1 Stage Contribution Analysis. We evaluate two ablated configurations against the full MOA 
+
+pipeline to isolate the impact of pattern guidance and precise localization. 
+
+• w/o Pattern Description : The Patcher receives only code locations flagged by checkers, without any description of the memory inefficiency or suggested fix strategy. This tests whether pattern mining provides essential guidance beyond mere localization. 
+
+• w/o Checker Location : The Patcher receives only the pattern description (issue description and fix strategy) without checker-identified target locations. This tests whether the agent can locate optimization targets in a large codebase with only conceptual guidance.                  
+
+> Table 7. Ablation study results on Camera Service.
+> Configuration Patch Acc Binary ↓PSS ↓
+> Full MOA 96 93.8% 8.6% 27.3% w/o Pattern Description 93 91.4% ( ↓2.4%) 8.3% ( ↓2.4%) 27.2% ( ↓0.2%) w/o Checker Location 69 47.8%( ↓46.0%) 5.8%( ↓49.3%) 25.3% ( ↓2.8%)
+
+Table 7 shows the ablation study results. The primary metric is the percentage of memory inefficiencies fixed relative to that achieved by the full MOA baseline. We select Camera Service as the experimental target. Since optimizations across different Open-Harmony services can have cross-dependencies, we employ the following evaluation methodology to isolate the effects: we retain all optimizations for other services while applying different abla-tion configurations only to Camera Service. We define the optimization baseline as the full MOA 
+
+approach, and calculate regression using: Regression = 𝑂𝑝𝑡 full − 𝑂𝑝𝑡 ablated 
+
+𝑂𝑝𝑡 full 
+
+× 100% (1) where 𝑂𝑝𝑡 full is the binary-size or PSS reduction achieved by the full MOA pipeline and 𝑂𝑝𝑡 ablated 
+
+is the corresponding reduction achieved by the ablated configuration, both computed from the underlying absolute measurements. This metric quantifies how much optimization potential is lost when removing each component. 
+
+Impact of Pattern Mining. Removing anti-pattern descriptions results in modest degradation: accuracy drops by 2.4%, while binary size reduction decreases slightly from 8.6% to 8.3% (2.4% regression) and PSS reduction shows a negligible decline from 27.3% to 27.2% (0.2% regression). This relatively small impact suggests that modern LLMs have internalized common memory optimization strategies during pre-training. When presented with flagged code locations, the model can often infer the underlying issue and apply appropriate fixes based on its learned knowledge. However, the presence of explicit pattern descriptions still provides measurable value by reducing ambiguity and improving patch quality.              
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:15
+> Table 8. Cost breakdown by stage (average per instance).
+> Stage Tokens Cost ($) Time
+> Pattern Mining (per pattern) 1,115,242 $1.84 12.1 min Checker Synthesis (per checker) 620,150 $1.49 14.5 min Patch Generation (per patch) 176,689 $0.50 7.8 min
+
+Impact of Checker Synthesis. In stark contrast, removing checker-provided localization causes severe degradation: accuracy plummets to 47.8% (46.0% drop), while binary size reduction falls to 5.8% (49.3% regression) and PSS reduction decreases to 25.3% (2.8% regression). This dramatic decline reveals a critical limitation: even when armed with precise pattern descriptions, the LLM-based agent struggles to autonomously locate optimization targets within a large codebase. The codebase scale overwhelms the agent’s ability to systematically search and identify all relevant code instances matching the pattern. This finding validates Checker Synthesis as a pivotal bridge between Pattern Mining and Patch Generation. Automated checkers facilitate exhaustive and precise localization across the codebase, thereby allowing the agent to dedicate more of its reasoning resources to generating correct fixes. 
+
+4.5.2 Cost Analysis. Table 8 presents the cost breakdown by stage in terms of token consumption, monetary cost, and wall-clock time. As shown in Table 8, the Analyzer costs $1.84 per pattern and takes 12.1 minutes on average, the 
+
+Checker Generator costs $1.49 per checker with 14.5 minutes of processing time on average, and the Patcher costs $0.50 per patch with 7.8 minutes on average. For our entire evaluation pipeline across all services, the total cost of MOA remains under $500 overall. These costs demonstrate that MOA operates within acceptable and manageable resource con-straints for codebase-scale optimization. The modest per-patch cost and reasonable processing time make it practical to apply MOA across large codebases. 
+
+Finding 4. All the key components are essential to MOA ’s effectiveness. Ablation studies confirm that pattern guidance improves patch quality while checker-based localization is critical for scaling optimization across large codebases. The overall pipeline operates within practical cost constraints suitable for industrial adoption. 
+
+5 Discussion 5.1 Limitations 
+
+While MOA demonstrates the viability of LLM-driven automation across pattern mining, checker synthesis, and repair generation, we acknowledge several limitations and open challenges that warrant further investigation. 
+
+Programming Language Support. MOA currently supports only C/C++ codebases, limiting its direct applicability to projects in other languages such as Java, Python, or JavaScript. However, the modular architecture is designed for extensibility. Supporting new languages requires adapting language-specific profiling methods, static analyzers and Language Server, without fundamental changes to the core pipeline. 
+
+Performance Metrics. Our evaluation mainly focuses on memory-related performance ineffi-ciencies identified through Memoro profiling. While this addresses critical concerns in embedded  
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. 111:16 Trovato et al.
+
+systems like OpenHarmony, MOA does not yet directly handle other performance dimensions such as CPU efficiency, cache behavior, or I/O latency. Nonetheless, the SQL-based pattern mining can readily accommodate alternative profiling tools and metrics, provided the data maintains sufficient granularity and structure. 
+
+5.2 Future Directions 
+
+Looking forward, we identify several promising directions for extending MOA ’s capabilities and broadening its impact. 
+
+Functional Optimizations. MOA currently targets non-functional inefficiencies that preserve program semantics, such as redundant allocations and suboptimal data structures, and has demon-strated substantial optimization gains in this domain. However, we believe significant optimization potential also exists in functional aspects of code design, such as architectural refactoring, algorithm selection, and computational complexity reduction. Addressing these opportunities requires deeper semantic reasoning and more sophisticated validation mechanisms to ensure correctness during complex transformations. Future work will explore extending MOA to safely handle such functional optimizations. 
+
+Project Maintainability. MOA optimizes for performance metrics without explicitly considering the impact on code maintainability. Certain optimizations may trade readability or flexibility for performance gains. Future work should incorporate maintainability metrics (cyclomatic complexity, coupling, cohesion) to enable balanced trade-offs, potentially offering developers multiple patches with different performance-maintainability profiles aligned with project-specific priorities. 
+
+6 Related Works 
+
+Performance Bug Analysis and Detection . Performance bugs are prevalent in large-scale software systems and differ significantly from functional bugs. As highlighted in a comprehensive study [ 15 ], performance inefficiencies often do not cause crashes but lead to significant resource inefficiencies, and they frequently stem from recurring suboptimal coding patterns [ 11 ]. Tradition-ally, developers rely on dynamic profiling tools such as Gprof [ 9 ], gperftools [ 8] and Valgrind [ 22 ]to pinpoint performance bottlenecks [ 42 ]. On the other hand, static analysis tools like Clang Static Analyzer [ 20 ] and Infer [ 21 ] offer better coverage but require experts to manually formalize code patterns into checkers. MOA bridges this gap by serving dynamic traces as foundation to automati-cally synthesize static checkers via LLMs, combining the precision of dynamic evidence with the coverage of static analysis. 
+
+LLM-based Bug Detection . Recent research has explored using Large Language Models (LLMs) to automate the creation of static analysis rules. KNighter [ 37 ] represents a significant step in this direction by synthesizing Clang Static Analyzer checkers from documentation and natural language specifications. Several recent works apply LLMs to vulnerability detection and rule synthesis. IRIS [ 18 ] couples LLM inference with repository-wide static reasoning by automatically inferring taint specifications, substantially improving vulnerability recall over CodeQL [ 7] baselines on Java benchmarks. QLCoder [ 33 ] focuses on query synthesis, generating CodeQL queries directly from CVE metadata through an agentic loop with execution feedback and tooling support. QLPro [ 12 ]combines LLM reasoning with static analysis outputs and multi-role voting mechanisms for vulner-ability discovery across open source projects. In supply chain security, RuleLLM [ 45 ] uses LLMs to generate YARA [ 32 ] and Semgrep [ 29 ] rules for detecting malicious packages from code and metadata. While these approaches focus on security vulnerabilities or general bug detection from documentation, MOA targets the system-level memory optimization.  
+
+> J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:17
+
+Autonomous LLM Agents for Program Repair . Automated Program Repair (APR) has tran-sitioned from traditional heuristic-based approaches to LLM-driven conversational and agentic frameworks [ 36 , 43 , 47 ]. ChatRepair [ 34 ] demonstrates the effectiveness of iterative conversations with LLMs to fix functional bugs cost-effectively. To handle more complex reasoning, ThinkRe-pair [ 39 ] introduces a self-directed "thought" process, allowing the model to reason about the bug before generating patches. More recently, the field has moved towards autonomous agents that mimic human debugging workflows. RepairAgent [ 2] and PatchAgent [ 40 ] utilize specialized tools and feedback loops to autonomously navigate the codebase, gather context, and validate patches. 
+
+LLM-based Performance Optimization . A growing body of work focuses specifically on using LLMs to improve code efficiency [ 30 , 44 ]. RAPGen [ 6] investigates the zero-shot capabilities of LLMs in fixing code inefficiencies, showing that LLMs can identify suboptimal patterns without extensive training. In the context of large-scale infrastructure, ECO [ 19 ] provides an LLM-driven optimizer tailored for warehouse-scale computers to reduce resource consumption. Other works focus on specific domains or methodologies; for instance, XRFix [ 16 ] explores performance inefficiencies repair specifically for Extended Reality (XR) applications, while SemOpt [ 46 ] combines LLMs with rule-based analysis to drive optimizations. These approaches largely rely on repository-history mining to distill optimization patterns from historical commits. However, this paradigm is bounded by previously identified fixes and often misses latent inefficiencies without prior PR records [ 1, 10 ]. Conversely, MOA utilizes runtime profiling evidence to expose concrete symptoms, enabling us to uncover and generalize memory anti-patterns that remain undiscovered in the codebase. 
+
+7 Conclusion 
+
+In this paper, we introduced MOA , an LLM-driven framework that bridges the gap between localized profiling symptoms and codebase-wide memory optimization. By combining pattern mining, checker synthesis, and patch generation, MOA automates the full workflow from runtime evidence to deployed fixes. An evaluation on OpenHarmony demonstrates that MOA identifies 13 anti-patterns, of which 69.3% are not covered by existing Clang-Tidy rules, detects over 10,000 instances across the codebase, and generates 769 patches with a 92.5% acceptance rate, yielding 42.2% heap reduction and 10.6% binary size reduction on average. With reasonable costs averaging $0.50 per file, MOA holds strong potential as a practical tool for developers and researchers seeking to optimize memory across large-scale software systems. 
+
+8 Data Availability Statement 
+
+The artifact of this paper is publicly available at https://doi.org/10.5281/zenodo.19248417. 
+
+References              
+
+> [1] Christian Bird, Adrian Bachmann, Eirik Aune, John Duffy, Abraham Bernstein, Vladimir Filkov, and Premkumar Devanbu. 2009. Fair and balanced? bias in bug-fix datasets. In Proceedings of the 7th Joint Meeting of the European Software Engineering Conference and the ACM SIGSOFT Symposium on The Foundations of Software Engineering
+> (Amsterdam, The Netherlands) (ESEC/FSE ’09) . Association for Computing Machinery, New York, NY, USA, 121–130. doi:10.1145/1595696.1595716 [2] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2025. RepairAgent: An Autonomous, LLM-Based Agent for Program Repair. In Proceedings of the IEEE/ACM 47th International Conference on Software Engineering (Ottawa, Ontario, Canada) (ICSE ’25) . IEEE Press, 2188–2200. doi:10.1109/ICSE55347.2025.00157 [3] Stuart Byma and James R. Larus. 2018. Detailed heap profiling (ISMM 2018) . Association for Computing Machinery, New York, NY, USA, 1–13. doi:10.1145/3210563.3210564 [4] Milind Chabbi and John Mellor-Crummey. 2012. DeadSpy: a tool to pinpoint program inefficiencies. In Proceedings of the Tenth International Symposium on Code Generation and Optimization (San Jose, California) (CGO ’12) . Association for Computing Machinery, New York, NY, USA, 124–134. doi:10.1145/2259016.2259033 J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018.
+
+111:18 Trovato et al. 
+
+[5] Ting Dai, Daniel Dean, Peipei Wang, Xiaohui Gu, and Shan Lu. 2019. Hytrace: A Hybrid Approach to Performance Bug Diagnosis in Production Cloud Infrastructures. IEEE Transactions on Parallel and Distributed Systems 30, 1 (2019), 107–118. doi:10.1109/TPDS.2018.2858800 [6] Spandan Garg, Roshanak Zilouchian Moghaddam, and Neel Sundaresan. 2025. RAPGen: An Approach for Fixing Code Inefficiencies in Zero-Shot. In 2025 IEEE/ACM 47th International Conference on Software Engineering: Software Engineering in Practice (ICSE-SEIP) . 124–135. doi:10.1109/ICSE-SEIP66354.2025.00017 [7] Github. 2025. CodeQL. https://codeql.github.com/. Accessed: 2025-01-29. [8] Google gperftools contributors. 2025. gperftools. https://github.com/gperftools/gperftools. Accessed: 2025-01-29. [9] Susan L. Graham, Peter B. Kessler, and Marshall K. Mckusick. 1982. Gprof: A call graph execution profiler. In Proceedings of the 1982 SIGPLAN Symposium on Compiler Construction (Boston, Massachusetts, USA) (SIGPLAN ’82) . Association for Computing Machinery, New York, NY, USA, 120–126. doi:10.1145/800230.806987 [10] Philip J. Guo, Thomas Zimmermann, Nachiappan Nagappan, and Brendan Murphy. 2010. Characterizing and predicting which bugs get fixed: an empirical study of Microsoft Windows. In Proceedings of the 32nd ACM/IEEE International Conference on Software Engineering - Volume 1 (Cape Town, South Africa) (ICSE ’10) . Association for Computing Machinery, New York, NY, USA, 495–504. doi:10.1145/1806799.1806871 [11] Xue Han, Tingting Yu, and David Lo. 2018. PerfLearner: learning from bug reports to understand and generate performance test frames. In Proceedings of the 33rd ACM/IEEE International Conference on Automated Software Engineering (Montpellier, France) (ASE ’18) . Association for Computing Machinery, New York, NY, USA, 17–28. doi:10.1145/3238147.3238204 [12] Junze Hu, Xiangyu Jin, Yizhe Zeng, Yuling Liu, Yunpeng Li, Dan Du, Kaiyu Xie, and Hongsong Zhu. 2025. QLPro: Auto-mated code vulnerability discovery via LLM and static code analysis integration. (July 2025). arXiv:2506.23644 [cs.SE] [13] Juyong Jiang, Fan Wang, Jiasi Shen, Sungju Kim, and Sunghun Kim. 2026. A Survey on Large Language Models for Code Generation. ACM Trans. Softw. Eng. Methodol. 35, 2, Article 58 (Jan. 2026), 72 pages. doi:10.1145/3747588 [14] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik Narasimhan. 2023. SWE-bench: Can language models resolve real-world GitHub issues? (Oct. 2023). arXiv:2310.06770 [cs.CL] [15] Guoliang Jin, Linhai Song, Xiaoming Shi, Joel Scherpelz, and Shan Lu. 2012. Understanding and detecting real-world performance bugs. In Proceedings of the 33rd ACM SIGPLAN Conference on Programming Language Design and Implementation (Beijing, China) (PLDI ’12) . Association for Computing Machinery, New York, NY, USA, 77–88. doi:10.1145/2254064.2254075 [16] Wu Jingwen, Hanyang Guo, Hong-Ning Dai, and Xiapu Luo. 2026. XRFix: Exploring Performance Bug Repair of Extended Reality Applications with Large Language Models. doi:10.1145/3744916.3773120 [17] Li Li, Xiang Gao, Hailong Sun, Chunming Hu, Carolyn Sun, Haoyu Wang, Haipeng Cai, Ting Su, Xiapu Luo, Tegawendé Bissyande, Jacques Klein, John Grundy, Tao Xie, Haibo Chen, and Huaimin Wang. 2025. Software Engineering for OpenHarmony: A Research Roadmap. ACM Comput. Surv. 58, 2, Article 34 (Sept. 2025), 36 pages. doi:10.1145/3720538 [18] Ziyang Li, Saikat Dutta, and Mayur Naik. 2025. LLM-Assisted Static Analysis for Detecting Security Vulnerabilities. In 
+
+International Conference on Learning Representations . https://arxiv.org/abs/2405.17238 [19] Hannah Lin, Martin Maas, Maximilian Roquemore, Arman Hasanzadeh, Fred Lewis, Yusuf Simonson, Tzu-Wei Yang, Amir Yazdanbakhsh, Deniz Altinbüken, Florin Papa, et al . 2025. ECO: An LLM-driven efficient code optimizer for warehouse scale computers. arXiv preprint arXiv:2503.15669 (2025). [20] LLVM Project. 2025. Clang Static Analyzer. https://clang.llvm.org/docs/ClangStaticAnalyzer.html. Accessed: 2025-01-29. [21] Meta Infer contributors. 2025. Infer. https://github.com/facebook/infer. Accessed: 2025-01-29. [22] Nicholas Nethercote and Julian Seward. 2007. Valgrind: a framework for heavyweight dynamic binary instrumentation. In Proceedings of the 28th ACM SIGPLAN Conference on Programming Language Design and Implementation (San Diego, California, USA) (PLDI ’07) . Association for Computing Machinery, New York, NY, USA, 89–100. doi:10.1145/1250734. 1250746 [23] Adrian Nistor, Po-Chun Chang, Cosmin Radoi, and Shan Lu. 2015. CARAMEL: Detecting and Fixing Performance Problems That Have Non-Intrusive Fixes. In 2015 IEEE/ACM 37th IEEE International Conference on Software Engineering ,Vol. 1. 902–912. doi:10.1109/ICSE.2015.100 [24] Adrian Nistor, Linhai Song, Darko Marinov, and Shan Lu. 2013. Toddler: Detecting performance problems via similar memory-access patterns. In 2013 35th International Conference on Software Engineering (ICSE) . 562–571. doi:10.1109/ ICSE.2013.6606602 [25] Oswaldo Olivo, Isil Dillig, and Calvin Lin. 2015. Static detection of asymptotic performance bugs in collection traversals. 
+
+SIGPLAN Not. 50, 6 (June 2015), 369–378. doi:10.1145/2813885.2737966 [26] OpenAtom Foundation. 2025. OpenHarmony: A Comprehensive Open Source Project for All-Scenario, Fully-Connected, and Intelligent Era. https://gitee.com/openharmony. Accessed: 2025-01-29. J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018. MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale 111:19 
+
+[27] Michael Pradel, Markus Huggler, and Thomas R. Gross. 2014. Performance regression testing of concurrent classes. In 
+
+Proceedings of the 2014 International Symposium on Software Testing and Analysis (San Jose, CA, USA) (ISSTA 2014) .Association for Computing Machinery, New York, NY, USA, 13–25. doi:10.1145/2610384.2610393 [28] Marija Selakovic and Michael Pradel. 2015. Automatically fixing real-world JavaScript performance bugs. In Proceedings of the 37th International Conference on Software Engineering - Volume 2 (Florence, Italy) (ICSE ’15) . IEEE Press, 811–812. [29] Semgrep. 2025. Semgrep. https://github.com/semgrep/semgrep. Accessed: 2025-01-29. [30] Ze Sheng, Zhicheng Chen, Shuning Gu, Heqing Huang, Guofei Gu, and Jeff Huang. 2025. LLMs in Software Security: A Survey of Vulnerability Detection Techniques and Insights. ACM Comput. Surv. 58, 5, Article 134 (Nov. 2025), 35 pages. doi:10.1145/3769082 [31] Linhai Song and Shan Lu. 2014. Statistical debugging for real-world performance problems. SIGPLAN Not. 49, 10 (Oct. 2014), 561–578. doi:10.1145/2714064.2660234 [32] The YARA contributors. 2025. YARA. https://github.com/virustotal/yara. Accessed: 2025-01-29. [33] Claire Wang, Ziyang Li, Saikat Dutta, and Mayur Naik. 2025. QLCoder: A query synthesizer for static analysis of security vulnerabilities. (Nov. 2025). arXiv:2511.08462 [cs.CR] [34] Chunqiu Steven Xia and Lingming Zhang. 2024. Automated Program Repair via Conversation: Fixing 162 out of 337 Bugs for $0.42 Each using ChatGPT. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis (Vienna, Austria) (ISSTA 2024) . Association for Computing Machinery, New York, NY, USA, 819–831. doi:10.1145/3650212.3680323 [35] Wenda Xu, Guanglei Zhu, Xuandong Zhao, Liangming Pan, Lei Li, and William Wang. 2024. Pride and Prejudice: LLM Amplifies Self-Bias in Self-Refinement. In Proceedings of the 62nd Annual Meeting of the Association for Computa-tional Linguistics (Volume 1: Long Papers) , Lun-Wei Ku, Andre Martins, and Vivek Srikumar (Eds.). Association for Computational Linguistics, Bangkok, Thailand, 15474–15492. doi:10.18653/v1/2024.acl-long.826 [36] Boyang Yang, Zijian Cai, Fengling Liu, Bach Le, Lingming Zhang, Tegawendé F Bissyandé, Yang Liu, and Haoye Tian. 2025. A survey of LLM-based automated program repair: Taxonomies, design paradigms, and applications. (Dec. 2025). arXiv:2506.23749 [cs.SE] [37] Chenyuan Yang, Zijie Zhao, Zichen Xie, Haoyu Li, and Lingming Zhang. 2025. KNighter: Transforming Static Analysis with LLM-Synthesized Checkers. In Proceedings of the ACM SIGOPS 31st Symposium on Operating Systems Principles 
+
+(Seoul, Republic of Korea) (SOSP ’25) . Association for Computing Machinery, New York, NY, USA. doi:10.1145/3731569. 3764827 [38] Zezhou Yang, Sirong Chen, Cuiyun Gao, Zhenhao Li, Xing Hu, Kui Liu, and Xin Xia. 2025. An Empirical Study of Retrieval-Augmented Code Generation: Challenges and Opportunities. ACM Trans. Softw. Eng. Methodol. 34, 7 (2025), 188:1–188:28. [39] Xin Yin, Chao Ni, Shaohua Wang, Zhenhao Li, Limin Zeng, and Xiaohu Yang. 2024. ThinkRepair: Self-Directed Automated Program Repair. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis (Vienna, Austria) (ISSTA 2024) . Association for Computing Machinery, New York, NY, USA, 1274–1286. doi:10.1145/3650212.3680359 [40] Zheng Yu, Ziyi Guo, Yuhang Wu, Jiahao Yu, Meng Xu, Dongliang Mu, Yan Chen, and Xinyu Xing. 2025. PATCHAGENT: a practical program repair agent mimicking human expertise. In Proceedings of the 34th USENIX Conference on Security Symposium (Seattle, WA, USA) (SEC ’25) . USENIX Association, USA, Article 226, 20 pages. [41] Shahed Zaman, Bram Adams, and Ahmed E. Hassan. 2012. A qualitative study on performance bugs (MSR ’12) . IEEE Press, 199–208. [42] Dmitrijs Zaparanuks and Matthias Hauswirth. 2012. Algorithmic profiling. SIGPLAN Not. 47, 6 (June 2012), 67–76. doi:10.1145/2345156.2254074 [43] Quanjun Zhang, Chunrong Fang, Yang Xie, Yuxiang Ma, Weisong Sun, Yun Yang, and Zhenyu Chen. 2025. A systematic literature review on Large Language Models for automated Program Repair. (Oct. 2025). arXiv:2405.01466 [cs.SE] [44] Quanjun Zhang, Chunrong Fang, Yang Xie, Yaxin Zhang, Yun Yang, Weisong Sun, Shengcheng Yu, and Zhenyu Chen. 2023. A survey on Large Language Models for software Engineering. (Dec. 2023). arXiv:2312.15223 [cs.SE] [45] XiangRui Zhang, XueJie Du, HaoYu Chen, Yongzhong He, Wenjia Niu, and Qiang Li. 2025. Automatically Generating Rules of Malicious Software Packages via Large Language Model. In 2025 55th Annual IEEE/IFIP International Conference on Dependable Systems and Networks (DSN) . 734–747. doi:10.1109/DSN64029.2025.00072 [46] Yuwei Zhao, Yuan-An Xiao, Qianyu Xiao, Zhao Zhang, and Yingfei Xiong. 2025. SemOpt: LLM-Driven Code Optimiza-tion via Rule-Based Analysis. arXiv preprint arXiv:2510.16384 (2025). [47] Fida Zubair, Maryam Al-Hitmi, and Cagatay Catal. 2025. The use of large language models for program repair. Computer Standards & Interfaces 93 (2025), 103951. doi:10.1016/j.csi.2024.103951 J. ACM, Vol. 37, No. 4, Article 111. Publication date: August 2018.

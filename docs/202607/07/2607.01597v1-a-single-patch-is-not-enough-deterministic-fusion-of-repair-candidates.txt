@@ -1,0 +1,455 @@
+Title: A Single Patch Is Not Enough: Deterministic Fusion of Repair Candidates
+
+URL Source: https://arxiv.org/pdf/2607.01597v1
+
+Published Time: Fri, 03 Jul 2026 00:24:28 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# A Single Patch Is Not Enough: Deterministic Fusion of Repair Candidates 
+
+Boyang Yang 1, Xiangliang Hu 2,* , Luyao Ren 3,* , Yanjun Chen 4
+
+Bach Le 5, Tegawend´ e F. Bissyand´ e6, Haoye Tian 7,† 
+
+> 1
+
+Yanshan University; 2Beijing Guoyan Network Data Technology Co., Ltd. 
+
+> 3
+
+Peking University; 4Google; 5University of Melbourne 
+
+> 6
+
+University of Luxembourg; 7Aalto University 
+
+yby@ieee.org , huxiangliang@126.com , rly@pku.edu.cn yanjunch98@gmail.com , bach.le@unimelb.edu.au , tegawende.bissyande@uni.lu tianhaoyemail@gmail.com 
+
+> *
+
+Equal contribution. †Corresponding author. 
+
+Abstract —Modern LLM coding agents are commonly evaluated using pass@ k, but developers typically apply a single final patch in real-world settings. This pass@ k-to-pass@1 gap is a post-generation problem: a candidate patch pool may contain a correct patch, but the system must decide which one to suggest to developers. Existing post-generation approaches mainly rank whole candidates, filter them with tests, or query an LLM judge, but none deterministically reuse shared edit-atom evidence to both select and construct the final patch. Thus, we propose PatchFusion, a deterministic atomic evidence fusion approach for candidate patches that consults no test outcome at decision time. PatchFusion first fuses whole-diff agreement into a repair neighborhood, selects an auditable representative, and then applies evidence-constrained fusion (ECF) to retain repeated edit atoms and prune unsupported parts. To evaluate this setting, we build PatchFuseBench, a fixed-pool benchmark covering SWE-bench Verified, SWE-bench Multilingual, and Defects4J candidate patches. On PatchFuseBench, PatchFusion solves 426/500 bugs on SWE-bench Verified and 236/300 on SWE-bench Multilingual, and reaches 87/371 plausible patches on Defects4J, outperforming every matched candidate-pool selector on all three. PatchFusion recovers 41 and 27 bugs that no single source solves (30 and 18 more over the best single source), repairs that require combining evidence across candidates rather than choosing one patch. It decides in only 3.28 ms per bug, consulting no test or model at decision time. Ablation studies show that ECF adds +5 / + 6 / + 9 
+
+solved bugs by recovering in-pool repairs that selection misses, with no observed regression, and that PatchFusion’s gains remain stable as candidate pools are resampled. On these complementary multi-source pools, cross-candidate evidence recovers more correct patches than the test-based and LLM-based selectors we evaluate, at orders-of-magnitude lower cost, reaching within 96.2% and 89.7% of the candidate-reachable ceiling on the two SWE-bench benchmarks. 
+
+I. I NTRODUCTION 
+
+LLM coding agents have improved rapidly and now resolve a large and growing share of real-world software issues, from bug fixes to repository-level edits [1]–[3]. However, behind each reported result, there is not one answer but many: a coding agent samples k candidate patches per bug and is scored by pass@ k, which counts a bug as fixed when any of the k samples is correct [4]. A developer applies only a single pass@1 patch, because validating and reviewing every candidate is budgeted work [5], [6] that prior repair-targeted studies also quantify [7], [8]. Because pass@ k can far exceed pass@1, repairs that already sit in the sampled pool are lost the moment one patch must be chosen [9]. This loss grows once the pool spans systems: on SWE-bench [10], different agents and models fix overlapping but distinct bugs, and combining their patches covers far more than the best single system [11]– [13], reaching 443 of 500 against 396 on Verified and 263 of 300 against 218 across 7 models of a multilingual pool. A fixed candidate pool therefore already holds many more repairs than the one patch a developer applies; the open problem is how to surface them. 
+
+Correct fix may already be in the attempts. It just has to be pieced together from the parts each of them got right. 
+
+Surfacing them is a post-generation problem: once the pool is fixed, the system must commit to a single patch without re-running the sampling that produced it. This is hard because a candidate that looks plausible is often still wrong [14], [15], while the correct fix is usually present in the pool yet easily mis-selected, and the edits that compose it often recur across several otherwise-imperfect candidates. The common response is to select or rank whole candidates by how far they agree [16], which is cheap enough for a pool whose expensive sampling is already paid for; methods that recover more typically do so by spending test runs or extra model calls per bug. However, existing approaches still face two major limitations :
+
+① Patch selectors are limited to the best whole patch. 
+
+Millisecond-cost selectors treat the pool as a set of whole-diff alternatives and score each submitted diff as one unit: Agentless keeps the patch that the most candidates reproduce exactly [17], medoid and similarity selectors return the diff most central to the pool [11], [18], and rank-aggregation selectors such as Borda, Copeland, and MC4 merge several orderings into one [19]. All of them credit a fix only when an entire candidate already matches, so they cannot exceed the per-bug candidate-reachable ceiling and cannot recover a fix that no single candidate fully expresses; when no whole                                       
+
+> arXiv:2607.01597v1 [cs.SE] 2 Jul 2026 Empty env clears the environ-ment
+> postgresql/client.py
+> return args, env
+> subprocess.run(.., env=env )
+> Each candidate fixes only one side
+> producer fix unresolved
+> -return args, env
+> +return args, env or None
+> consumer fix unresolved
+> -run(.., env=env)
+> +run(.., env=env or None)
+> ×0 / 6 candidates resolved
+> Edits repeated across candi-dates
+> settings_to_cmd_args_env ×3
+> -return args, env
+> +return args, env or None
+> runshell ×3
+> -run(.., env=env)
+> +run(.., env=env or None)
+> Not a submitted candidate
+> fused patch ✓resolved
+> -return args, env
+> +return args, env or None
+> -run(.., env=env)
+> +run(.., env=env or None)
+> buggy behavior
+> failed candidates ECF fusion
+> fused patch
+> Fig. 1. Motivating example ( django__django-14315 ), where PatchFusion fuses repeated edit atoms into a resolved patch no candidate submitted.
+
+candidate is correct, the repair already present in fragments is lost. The correct local edits often recur across several otherwise-failing candidates, evidence that is free because it comes from the diffs already available, yet whole-diff scoring discards it. 
+
+② Effective methods pay for each bug in tests or model calls. 
+
+The selectors that beat simple consensus buy their gains per bug: test and dynamic-impact selectors re-run the suite or measure execution differences [20], [21], learned correctness predictors score each patch with a trained model [22], [23], LLM-as-judge selection prompts a model to rank the candidates [24], and generative fusion such as self-consistency, CodeT, and universal self-consistency asks a model to synthesize a new fused program [25]–[27]. Each adds seconds of inference, a dollar cost, and a dependence on an online model at the step that should add only milliseconds, the marginal decision over a pool that was already paid for. Beyond this cost, generative fusion carries a further risk: the program it emits need not trace to any candidate and is unverified before validation, which is less auditable when the budget allows only one patch. 
+
+This paper. To close these gaps, we propose PatchFusion, a deterministic patch-fusion approach for fixed candidate pools. Unlike free-form generative fusion, PatchFusion recombines only repeated edit evidence and keeps every output auditable against the repository state or the submitted candidates, all at 
+
+decision time , before tests are run or run-quality metadata is available. Deciding without test outcomes is not only cheaper but harder to exploit: passing the provided tests does not imply a correct fix [14], [15], and as repair models increasingly optimize against the evaluation tests, any selector that trusts test outcomes inherits that exploit, whereas PatchFusion’s static cross-candidate agreement never consults a test, so it does not add another test-outcome-dependent selection channel. PatchFusion completes fusion in four steps: it (i) collapses exact duplicates into support counts, (ii) fuses whole-diff agreement into a repair neighborhood, (iii) selects an auditable representative under the pool structure, and (iv) applies evidence-constrained fusion (ECF) to keep edit atoms repeated across candidates and prune unsupported ones. On SWE-bench Verified, SWE-bench Multilingual, and Defects4J, PatchFusion solves 426/500 and 236/300 SWE-bench bugs and produces 87/371 plausible Defects4J patches, repairing 38.0 and 23.7 more bugs than uniform random selection and outperforming consensus and LLM-based se-lectors. Ablation studies show that ECF adds +5 / + 6 / + 9 
+
+solved bugs across the three benchmarks with no observed regression. PatchFusion runs in 3.28 ms per bug, two to three orders of magnitude below the model-based selectors. These results indicate that static cross-candidate agreement, rather than test-based validation or model judgments, can expose most reachable repairs at low cost. The main contributions of our work are as follows:  
+
+> •
+
+Approach. We propose PatchFusion, a deterministic four-step patch-fusion approach that combines exact support, repair-neighborhood fusion, representative selection, and evidence-constrained fusion (ECF) to recombine repeated edit evidence into an auditable patch.  
+
+> •
+
+Benchmark. We construct PatchFuseBench, a reusable patch-fusion benchmark that packages fixed multi-system candidate pools from public leaderboard and repair runs on SWE-bench Verified, SWE-bench Multilingual, and Defects4J together with cached official labels, so any pooled candidate is scored without rerunning tests, while newly generated patches are scored by the official oracle.  
+
+> •
+
+Experiments. On all three pools, PatchFusion solves more bugs than uniform random selection, external rank-ing/consensus baselines, and strong DeepSeek-V4-Pro baselines.  
+
+> •
+
+Analysis. An ablation and a case study show that ECF is a content-fusion layer that recovers mis-selected repairs with no observed regression, constructing the submitted patch from repeated atoms (absent from the pool in 8 SWE-bench cases) rather than copying a candidate. II. M OTIVATING EXAMPLE 
+
+Figure 1 shows a concrete case from SWE-bench Veri-fied, django__django-14315 . The bug is in Django’s 
+
+dbshell : when launching the database shell, the client passes env= {} to subprocess.run , which replaces the child environment with an empty one instead of inherit-ing os.environ . The fix is to pass env or None so the child inherits the parent environment, and it spans 2 scopes: the PostgreSQL client must return env or None 
+
+from settings_to_cmd_args_env , and the base client must forward env or None into subprocess.run in 
+
+runshell .In this candidate pool, no submitted candidate solves the bug : all 6 candidates are unresolved by the official runner. The failures are complementary rather than redundant. Some candi-dates repair only the producer side (the returned environment), others repair only the consumer side (the subprocess.run 
+
+call), and the rest add tests or comments without completing the fix. A ranking or selection method can only return one of these whole diffs unchanged, so it cannot solve the bug: the correct repair exists in the pool only as separated fragments, never as a complete patch. Evidence-constrained fusion (ECF) instead reasons below the whole-diff level. It decomposes candidates into scope-local edit atoms and keeps those repeated across candidates (the producer-side atom return args, env or None and the consumer-side atom env=env or None , each supported by 3 candidates), while dropping unsupported extras such as added tests or comments. Fusing these 2 supported atoms across both scopes reconstructs a single repository-backed patch that the official SWE-bench runner resolves. This patch is not an exact submitted candidate. The pool contained 0 solved patches, yet PatchFusion assembles a solved one from the locally correct edits of several failed candidates. This is what separates patch-level evidence fusion from candidate selection: PatchFusion recovers a repair that no single candidate expresses, while keeping the output auditable, since it is reconstructed against the checked-out repository state and traced back to the supported candidate atoms. The same audit rule holds throughout our evaluation; Defects4J pass@10 pools expose method bodies for atom-level reconstruction, and SWE-bench pools additionally allow scope reconstruction from the checked-out repository, so ECF can submit a new but auditable diff when the static guards are satisfied. III. A PPROACH 
+
+PatchFusion turns a fixed candidate pool into one auditable final patch in four deterministic steps (Figure 2): (1) candi-date view and exact support collapses exact-duplicate diffs into support counts; (2) repair-neighborhood fusion groups candidates that touch related files and share edit vocabulary; (3) representative selection chooses one representative under the pool structure, admitting a local edit only under a same-surface guard; and (4) evidence-constrained fusion (ECF) keeps the edit atoms repeated across candidates and prunes unsupported ones. 
+
+A. Step 1: Candidate View and Exact Support 
+
+Step 1 reduces the raw pool to what the selector may inspect at decision time, and records how often each distinct fix recurs. The input is an unordered candidate pool for a bug, and every evaluated pool exposes unified diffs. From these PatchFusion builds a decision-time view of diff-derived fields, duplicate counts, and unlabeled pool structure only, excluding validation outcomes and run-quality metadata. It then collapses exact-duplicate diffs into a distinct-patch pool ePb, giving each distinct candidate a support count equal to the number of raw candidates that share its canonical diff; content-different diffs stay distinct even when they are semantically similar. 
+
+B. Step 2: Repair-Neighborhood Fusion 
+
+Step 2 groups candidates that agree on what to change into repair neighborhoods, then keeps the grouping the pool most agrees on. Agreement between two candidates is measured on the files they touch and the identifier-like tokens they edit. For a candidate p, let F (p) be its touched-file set and T (p) the identifier-like token set from its unified diff; for a pair pi, p j ,file and token overlap are the Jaccard similarities 
+
+JF (i, j ) = |F (pi) ∩ F (pj )||F (pi) ∪ F (pj )| , JT (i, j ) = |T (pi) ∩ T (pj )||T (pi) ∪ T (pj )| .
+
+(1) Pairs that share no file evidence or no token evidence are never linked. For the rest, PatchFusion avoids a fixed similarity cutoff: it considers only the overlap graphs induced by the distinct overlap levels actually present in this pool, a finite set 
+
+Gb of candidate granularities for bug b. Among these it keeps the granularity whose induced neighborhoods make the Step-3 routing decision most decisive (made precise in Step 3), and takes the connected components of that graph as the repair neighborhoods. PatchFusion then scores each neighborhood. For a neighbor-hood N it computes four static signals, 
+
+Sup( N ) = X
+
+> p∈N
+
+sup( p),
+
+Var( N ) = |N |,
+
+Coh( N ) = 1
+
+|N |(|N | − 1) 
+
+X
+
+> p,q ∈Np̸=q
+
+JT (p, q ),
+
+Conc( N ) = −|{ F (p) | p ∈ N }| ,
+
+(2) with Coh( N ) = 0 for singletons, capturing how much pooled support, how many variants, how cohesive, and how file-concentrated the neighborhood is. Neighborhoods are ranked by a pairwise majority-Copeland vote over the four signals: the neighborhood that is larger on more of them wins each pairwise comparison, scored as wins minus losses, with ties broken by the ordinal signal tuple and a canonical-diff hash. PatchFusion takes the top-ranked neighborhood N ⋆, the repair surface on which all later representative changes must stay. 
+
+C. Step 3: Representative Selection 
+
+Step 3 picks one auditable representative inside the top-ranked neighborhood N ⋆, optionally upgrades it to a stronger local edit, and routes between these two options by pool structure alone. The default representative balances exact support with token centrality; for a candidate p,
+
+CT (p) = 1
+
+| ePb| − 1
+
+X  
+
+> q∈ePb,q ̸=p
+
+JT (p, q ), (3) and PatchFusion ranks members of N ⋆ by a pairwise majority vote over sup( p) and CT (p). It also considers replacing this 1 Candidate View and Exact Support                                  
+
+> 2Repair-Neighborhood Fusion
+> 3Representative Selection
+> 4Evidence-Constrained Fusion
+> runs
+> ABCD
+> exact
+> dedup
+> P1 ×4
+> P2 ×3
+> P3 ×2
+> P4 ×1
+> ¥N⋆
+> Ñvote
+> ✓support
+> ✓size
+> ✓cohesion
+> default rep local edit
+> Ñroute
+> 8same-surface guard
+> ✓representative
+> úedit atoms
+> A✓
+> B✓
+> Cp
+> ✓kept (pool-supported) ppruned
+> Dfinal patch + atom A + atom B
+> ¦audit pass
+> link N⋆atoms
+> Fig. 2. PatchFusion turns a fixed candidate pool into one auditable final patch in four deterministic steps.
+
+representative with a stronger local edit candidate from the same neighborhood, admitted only under the same-surface guard : a local candidate p is eligible only when it stays on the representative’s surface, with its touched-file set contained in that of the current representative c (F (p) ⊆ F (c), an equal surface or a strict contraction) or confined to the same subsystem, so it never moves to an unrelated file. Among eligible local candidates, PatchFusion takes the best under a lexicographic support order (file-surface support, edit-region support, edit-token centrality, exact support, compactness, deterministic hash) and replaces the representative only when that candidate is strictly better. The choice between the neighborhood representative and the local edit is routed by two pool-level confidences. Let μ
+
+be the mean token centrality over the distinct pool and ϕ the repair-neighborhood fragmentation ratio, the number of induced neighborhoods divided by the number of distinct candidates; then 
+
+Cnbr = μ(1 − ϕ), Cloc = (1 − μ)ϕ. (4) 
+
+Cnbr is high when a token-central pool fragments into few neighborhoods, and Cloc when a token-diffuse pool fragments into many. The fragmentation ϕ, and hence both confidences, depends on the overlap graph, so we write Cnbr (G) and 
+
+Cloc (G) when the graph matters. PatchFusion takes the neighborhood-first representative when Cnbr ≥ Cloc and the same-surface local edit candidate otherwise. The same gap also fixes the Step-2 granularity: among the candidate graphs Gb,PatchFusion keeps the view G⋆ = arg max G∈G b |Cnbr (G) −
+
+Cloc (G)|, the one whose routing is most decisive. In this diff-only path the chosen output is still one submitted candidate diff from the pool. 
+
+D. Step 4: Evidence-Constrained Fusion 
+
+Step 4 is the content-level stage: it rebuilds the representative from the edit atoms that recur across candidates, drops the unsupported ones, and accepts the result only when it clears the static acceptance guards. PatchFusion decomposes each candidate into scope-local edit atoms relative to the buggy scope, where an atom a = ( I, R ) pairs a contiguous buggy-scope interval I with its replacement text R. Atoms vote only within the same scope, so edits from different methods, classes, or modules never replace one another. These scopes are built with language-aware parsers from candidate method bodies or AST boundaries in the checked-out repository, a Python AST locator and tree-sitter grammars for the other languages, falling back to a brace-balanced block only when a scope cannot be parsed. Let Sb be the repair scopes for bug b, and for a candidate 
+
+p and scope s ∈ S b let As(p) be its atom set; an atom’s candidate-pool support is 
+
+sup s(a) = |{ p ∈ ePb | a ∈ As(p)}| , (5) and As = S  
+
+> p∈ePb
+
+As(p) is the scope’s atom vocabulary. For the selected representative c, ECF admits an atom from As only when it is scope-compatible with c, meaning it edits a scope already touched by c and does not overlap an accepted atom on the same buggy interval, and is supported by another candidate. The fused atom set is chosen by a lexicographic evidence order rather than a weighted score: ECF first requires compatible, cross-candidate-supported atoms, then prefers larger aggregate support, and uses compactness only to break support-equivalent choices. ECF accepts a reconstructed patch in one of two modes, both keeping only cross-candidate-supported atoms. The default 
+
+contraction mode rewrites a single scope and is accepted only when it is non-expanding, strictly shorter, and evidence-dominant: 
+
+Surf(ECF( c)) ⊆ Surf( c),
+
+tok(ECF( c)) < tok( c),
+
+ASup(ECF( c)) > ASup( c) or Exact(ECF( c)) > 1,
+
+(6) where Surf is the touched scope/file surface, ASup sums edit-atom support, and Exact counts exact candidate support when the reconstruction maps to an existing candidate. When the supported repair instead spans several scopes, ECF forms a 
+
+supported scope-union : it unions up to K = 3 non-overlapping scope bodies whose edit atoms are each repeated across at least 2 candidates, accepted only under a compactness gate (bounded fused tokens and an edit-token overlap with the base revision below 0.8). IV. E XPERIMENTAL SETUP 
+
+A. Task and Decision-Time Boundary 
+
+We study fixed candidate-pool patch fusion after multiple repair runs have already produced candidate patches for the same bug. For a bug b, let R = {r1, . . . , r m} be the fixed set of available repair runs and let Praw  
+
+> b
+
+= {pb,r | r ∈ R} be the raw candidate pool. Because different runs can submit the same unified diff, PatchFusion collapses exact clones into a distinct-patch candidate pool ePb before selecting or reconstructing one final patch ˜p⋆b . At decision time the selector uses no test outcome or run metadata: it may inspect candidate artifacts (unified diffs, hashes, and exposed method bodies), exact duplicate counts, and unlabeled pool structure (file and token overlap and the induced repair neighborhoods), but never test outcomes, official solved labels, leaderboard rank or run pass rate, or run identity and source order. Outcome labels are attached only after the final patch is produced. 
+
+B. Benchmark 
+
+We construct PatchFuseBench, a reusable patch-fusion benchmark that assembles fixed multi-system candidate pools from public leaderboard and repair runs on SWE-bench Verified, SWE-bench Multilingual, and Defects4J, each pool paired with cached official outcome labels that score any pooled candidate without rerunning a test, while patches generated outside the pool are scored by the official oracle. Tables use benchmark-facing names for its three pools: SWE-bench Verified is the 500-bug official Verified pool, SWE-bench Multilingual the 300-bug public multilingual pool, and Defects4J the primary Defects4J pass@10 pool. We evaluate on two fixed cross-run SWE-bench candidate pools. SWE-bench Verified [10] uses the submitted patch predictions from 6 official SWE-bench Verified entries on the public leaderboard [28]: Live-SWE-agent with Claude Opus 4.5 and with Gemini 3 Pro Preview [29], TRAE with Doubao-Seed-Code [30], Atlassian Rovo Dev [31], EPAM AI/Run Developer Agent with Claude 4 Sonnet [32], and ACoder [33]. SWE-bench Multilingual [28] is formed from 7 public repair runs: Gemini 3 Flash, Claude Opus 4.6, Claude Opus 4.5, GLM-5, Gemini 3 Pro, MiniMax 2.5, and Kimi K2.5. These are the first-page leaderboard entries (snapshot April 2026) that provide downloadable, format-compatible patch predictions; first-page entries without usable prediction files are excluded. We additionally evaluate on Defects4J [34] by reusing Defects4J pass@10 candidate pools produced by MORepair [4], which contain 371 Java bugs and 10 generated candidate repairs per bug. We release each source’s candidate count, duplicate rate, and per-source statistics with the artifact; where a source has an empty or missing prediction for an instance, that single entry is dropped only for that source. 
+
+C. Baselines 
+
+Our main comparisons use matched candidate-pool selectors :each receives the same unordered candidate pool as PatchFusion and obeys the same decision-time boundary, so any difference                                              
+
+> TABLE I FAMILIES OF POST -GENERATION PATCH SELECTORS AND THEIR DECISION -TIME PROPERTIES .Family Granularity Test-free Model-free Determ. Representative Minimization whole patch ✓✓✓Minimal-change [35] Consensus whole patch ✓✓✓Token medoid [11] Rank aggregation whole patch ✓✓✓Borda/Copeland/MC4 [19] Learned ranker whole patch ✓×✓LM naturalness [36] LLM-as-judge whole patch ✓××DeepSeek-V4-Pro listwise LLM-generated free-form ✓××DeepSeek-V4-Pro fusion Test-based whole patch ×✓✓Agentless [17]
+> Evidence fusion edit atoms ✓✓✓PatchFusion (ours)
+
+reflects the selection rule rather than the generation stack. Table I groups the baselines into families of post-generation selectors by granularity and decision-time properties; whole-diff selectors dominate, and among the families we evaluate, only PatchFusion fuses edit atoms from within candidate patches while staying test-free, model-free, and deterministic. Two accounting rows frame the pool, the uniform-random expected solved count and the best single source, the latter a post-hoc reference because identifying it needs labels unavailable at decision time. The deterministic selectors are minimal-change (the shortest, new-file-avoiding patch, an APR minimization control [35]), token medoid (the distinct patch most central to the pool by token overlap), hunk consensus (the candidate with the strongest changed-line support, without PatchFusion’s neighborhoods or routing), the Borda, Copeland, and MC4 rank-aggregation controls [19], in which each candidate ranks the others by patch similarity weighted by its run support and the three methods aggregate those rankings (MC4 with a damped Markov chain), and the Agentless exact-identity vote [17]. The LM naturalness ranker is a frozen CodeGen-350M model that picks the candidate with the lowest mean negative log-likelihood over added lines, implementing LM-based patch prioritization [36] under the naturalness hypothesis for software [37]. We deliberately exclude supervised learned patch-correctness predictors [22], [23], [38] from the matched selectors, because training one needs labeled correct and incorrect patches that for these benchmarks would have to come either from the benchmarks themselves (contamination) or from an off-distribution released checkpoint, whereas the naturalness ranker is the learned-model selector that needs no such labels. Two model-based selectors run a DeepSeek-V4-Pro endpoint (temperature 0, candidates in hash order, JSON output): a listwise judge that chooses one submitted candidate, and a free-form fusion baseline that instead asks the model to emit a final patch. As a single test-based reference point, the Agentless row restricts the exact-identity vote to candidates that pass the benchmark’s regression tests (the PASS_TO_PASS tests on SWE-bench and the relevant tests in the reused Defects4J validation), voting over the survivors; its test-free counterpart is the Agentless w/o test row. It is the only row that consults test outcomes (one regression run per candidate), so it sits outside the matched test-free selector family, and we report it only to check whether test access lets a strong baseline beat the test-free PatchFusion. 
+
+D. Evaluation Metrics and Protocol 
+
+Every selector emits one final patch per bug. We evaluate that final patch with each benchmark’s official outcome oracle, never a self-reported one: exact submitted candidates carry the official leaderboard evaluation of their run, and the new patches ECF emits are scored by the same official SWE-bench runner. On SWE-bench, the primary metric is solved count :the number of benchmark instances whose final patch passes the official SWE-bench evaluation. On Defects4J, the primary metric is plausible count : the number of final patches that pass the stored Defects4J validation tests in the reused MORepair artifacts. For a benchmark B with N bugs, let pSb be the patch emitted by selector S for bug b, and let yb(p) ∈ { 0, 1} denote the post-hoc benchmark outcome label. The headline count is: 
+
+Count( S) = X
+
+> b∈B
+
+yb(pSb ). (7) The uniform-random expectation is computed on the same distinct candidate pool: 
+
+E[Rand] = X
+
+> b∈B
+
+1
+
+| ePb|
+
+X 
+
+> p∈ePb
+
+yb(p). (8) In the main fixed candidate-pool comparison, ∆R is the count difference from this expectation: 
+
+∆R(S) = Count( S) − E[Rand] . (9) For paired comparisons, a win is an instance solved by PatchFusion but not by the comparator, and a loss is an instance solved by the comparator but not by PatchFusion. Instances where both methods have the same outcome are paired ties and are excluded from the W/L test statistic. For a comparator 
+
+C, the paired counts are: 
+
+W (S, C ) = |{ b | yb(pSb ) = 1 ∧ yb(pCb ) = 0 }| , (10) 
+
+L(S, C ) = |{ b | yb(pSb ) = 0 ∧ yb(pCb ) = 1 }| . (11) We report W/L counts and use an exact two-sided paired signed test over these outcome-discordant instances. Holm-Bonferroni correction is applied within each planned matched candidate-pool paired-baseline family for each SWE-bench candidate pool, with the corrected per-pool tests released in the artifact. Uniform-random and best-single-source are accounting quantities, not deployable selectors, so they are excluded from the matched candidate-pool paired family; we additionally report a per-instance comparison of PatchFusion against the best single source as a complementarity check (Section V). 
+
+E. Research Questions 
+
+RQ-1: How effective is PatchFusion for final-patch pro-duction from fixed candidate pools? We compare PatchFusion with matched candidate-pool selectors on PatchFuseBench under the same decision-time boundary, reporting whole-benchmark counts and paired W/L tests against the ranking, consensus, Agentless, LM-naturalness, and DeepSeek-V4-Pro baselines, and analyzing why the same model’s free-form fusion underperforms its selection. 
+
+RQ-2: Which components account for the gains, and where do residual misses remain? RQ-2.1 ablates each design choice (repair-neighborhood fusion, local edit evidence, the same-surface guard, pool-level routing, and ECF) one at a time on the same pools. RQ-2.2 diagnoses the candidate-reachable bugs that the routed pre-ECF representative still misses. 
+
+RQ-3: What does the post-generation decision cost, and how does it compare with other selectors? We place every baseline on a cost-versus-repairs plane, comparing the deterministic selectors’ post-generation wall-clock per bug against the latency and dollar cost of the model-based rows. 
+
+RQ-4: How robust is PatchFusion to pool composition? 
+
+We subsample each pool and track the fraction of candidate-reachable bugs solved at each pool size, separating system diversity from sampling randomness. V. E XPERIMENTS & R ESULTS 
+
+A. RQ-1: Overall Fixed-Pool Results 
+
+[Experimental Design] : We run the full PatchFusion and the matched candidate-pool selectors on the three complete PatchFuseBench pools under the decision-time boundary of Section IV, reporting each whole-benchmark solved count with its gain ∆R over uniform-random selection (Table II). We compare PatchFusion against every baseline with W/L counts and exact paired sign tests, noting that the DeepSeek-V4-Pro fusion row generates a final patch rather than selecting one from the pool. 
+
+[Experimental Results] : Three patterns are visible in Table II. First, PatchFusion solves the most bugs among matched candidate-pool selectors across all three benchmark settings, adding 38.0, 23.7, and 39.7 bugs over uniform random selection on SWE-bench Verified, SWE-bench Multilingual, and Defects4J. Its strongest competitor is token medoid, which PatchFusion beats by 23, 17, and 14 bugs, with a combined 60/6 discordant-pair record across the three pools. The margins over the remaining selectors (rank aggregation, hunk consensus, Agentless w/o test, the LM naturalness ranker, and DeepSeek-V4-Pro listwise) are read directly from Table II. Exact two-sided paired sign tests over the outcome-discordant instances pooled across all three benchmarks (the W/L and p columns of Table II) show statistically significant gaps: PatchFusion beats all 9 matched test-free selectors at p < 0.05 on the pooled sign test, and each per-pool gap also holds under Holm-Bonferroni correction (released with the artifact). The per-pool W/L counts and confidence intervals are released with the artifact. The best single-source row is a post-hoc reference, not a deployable selector. PatchFusion is also above this reference on all three benchmark settings, but the main deployable comparison is the gap over random selection and matched candidate-pool selectors. Per instance, PatchFusion solves 41 Verified and 27 Multilingual bugs that the best single source leaves unsolved while losing only 11 and 9 (net +30 and +18 ,
+
+p < 0.05 paired sign test), recovering repairs no single system TABLE II SOLVED COUNTS , DECISION -TIME LATENCY , AND POOLED PAIRED W/L WITH p VERSUS PATCH FUSION ON PATCH FUSE BENCH .                                                                                                                                                                                                               
+
+> Approach Time ms / bug SWE-bench Verified (500 bugs) SWE-bench Multilingual (300 bugs) Defects4J (371 bugs) vs PatchFusion All 300 Java 43 Rust 43 JS/TS 43 PHP 43 Go 42 Ruby 44 C/C++ 42 W/L p
+> Random Expectation –388.0 212.3 34.0 33.3 30.3 30.5 25.1 28.6 30.6 47.3 ––Best single source –396 (+8.0) 218 (+5.7) 35 (+1.0) 35 (+1.7) 28 (-2.3) 30 (-0.5) 26 (+0.9) 30 (+1.4) 34 (+3.4) 62 (+14.7) ––Minimal-change [35] 0.02 382 (-6.0) 209 (-3.3) 33 (-1.0) 31 (-2.3) 32 (+1.7) 30 (-0.5) 24 (-1.1) 28 (-0.6) 31 (+0.4) 62 (+14.7) 120/24 <0.05
+> Token medoid [11] 0.02 403 (+15.0) 219 (+6.7) 37 (+3.0) 35 (+1.7) 30 (-0.3) 32 (+1.5) 25 (-0.1) 30 (+1.4) 30 (-0.6) 73 (+25.7) 60/6 <0.05
+> Hunk consensus 0.03 397 (+9.0) 217 (+4.7) 35 (+1.0) 36 (+2.7) 32 (+1.7) 31 (+0.5) 27 (+1.9) 27 (-1.6) 29 (-1.6) 65 (+17.7) 86/16 <0.05
+> Patch Borda [19] 0.22 403 (+15.0) 219 (+6.7) 37 (+3.0) 35 (+1.7) 30 (-0.3) 32 (+1.5) 25 (-0.1) 30 (+1.4) 30 (-0.6) 70 (+22.7) 63/6 <0.05
+> Patch Copeland [19] 0.25 403 (+15.0) 218 (+5.7) 36 (+2.0) 34 (+0.7) 30 (-0.3) 32 (+1.5) 26 (+0.9) 30 (+1.4) 30 (-0.6) 71 (+23.7) 65/8 <0.05
+> Patch MC4 [19] 0.53 400 (+12.0) 217 (+4.7) 36 (+2.0) 33 (-0.3) 30 (-0.3) 32 (+1.5) 26 (+0.9) 30 (+1.4) 30 (-0.6) 70 (+22.7) 69/7 <0.05
+> LM naturalness ranker [36] 77.1 390 (+2.0) 211 (-1.3) 33 (-1.0) 34 (+0.7) 30 (-0.3) 30 (-0.5) 23 (-2.1) 30 (+1.4) 31 (+0.4) 30 (-17.3) 141/23 <0.05
+> DeepSeek-V4-Pro listwise 1260 396 (+8.0) 214 (+1.7) 35 (+1.0) 34 (+0.7) 28 (-2.3) 35 (+4.5) 26 (+0.9) 28 (-0.6) 28 (-2.6) 74 (+26.7) 90/25 <0.05
+> DeepSeek-V4-Pro fusion 6024 317 (-71.0) 183 (-29.3) 35 (+1.0) 26 (-7.3) 27 (-3.3) 27 (-3.5) 19 (-6.1) 23 (-5.6) 26 (-4.6) 40 (-7.3) 221/16 <0.05
+> Agentless 386108 392 (+4.0) 222 (+9.7) 38 (+4.0) 33 (-0.3) 32 (+1.7) 31 (+0.5) 27 (+1.9) 31 (+2.4) 30 (-0.6) 84 (+36.7) 80/33 <0.05
+> Agentless w/o test [17] 0.07 384 (-4.0) 217 (+4.7) 37 (+3.0) 32 (-1.3) 32 (+1.7) 30 (-0.5) 26 (+0.9) 30 (+1.4) 30 (-0.6) 74 (+26.7) 96/22 <0.05
+> PatchFusion 3.28 426 (+38.0) 236 (+23.7) 40 (+6.0) 38 (+4.7) 33 (+2.7) 33 (+2.5) 27 (+1.9) 33 (+4.4) 32 (+1.4) 87 (+39.7) ––
+
+supplies. For reference, a post-hoc oracle that keeps, for each bug, a candidate carrying the official solved label reaches the candidate-reachable ceiling ( 443 and 263 on the two SWE-bench pools); PatchFusion approaches this ceiling ( 426 and 
+
+236 ) with no label or test consulted at decision time. We further probe whether test access alone would let a strong baseline catch PatchFusion. The Agentless row in Table II keeps only candidates that pass the regression tests before the exact-identity vote, lifting the test-free Agentless w/o test from 
+
+384 /217 /74 to 392 /222 /84 on the three pools. Even with this test signal it trails PatchFusion by 34 , 14 , and 3 bugs and loses the pooled paired test ( 80 /33 , p < 0.05 ); the lift is largest on Defects4J, where roughly half of the candidates fail to compile and regression filtering removes the most failing candidates, yet test-free deterministic fusion still leads. Regression access thus narrows but never closes the gap, while forfeiting the decision-time, test-free property that keeps PatchFusion deployable: the row must run one regression suite per candidate, an estimated 
+
+386 ,108 ms per bug. Second, DeepSeek-V4-Pro rows provide model-based post-generation baselines under the same decision-time boundary. The listwise judge remains below PatchFusion on all three benchmark settings while requiring model inference rather than deterministic candidate-pool evidence fusion. The free-form fusion row asks the model to generate a final patch rather than select one from the pool; even so, PatchFusion beats it 
+
+221 /16 over the pooled discordant instances ( p < 0.05 ). Here, for SWE-bench we use official-runner outcomes for new diffs; for Defects4J, we keep the row candidate-aligned and only reuse cached labels for generated methods that match existing candidates. This is a different operating point from PatchFusion: it spends model inference time generating patches, whereas PatchFusion fuses static candidate evidence into an auditable first patch. Their decision-stage cost, where PatchFusion holds a further advantage, is quantified in RQ-3. Third, the Multilingual language slices serve as a robustness check rather than as a basis for per-language claims. Each slice contains only 42-44 bugs, so we do not consider individual one-or two-bug differences significant. Across the slices, though, one pattern is consistent: PatchFusion is the only method whose per-language ∆R stays positive on every language, whereas every baseline regresses below uniform random on at least one, including the strongest baseline, token medoid, on JS/TS, Go, and C/C++. This uniform sign indicates that PatchFusion’s gain is broad across languages rather than concentrated in a few. 
+
+TABLE III DEEP SEEK -V4-P RO AS A SELECTOR VERSUS A FREE -FORM GENERATOR .DeepSeek-V4-Pro operating mode Verified Multilingual Listwise (selects one candidate) 396/500 214/300 Free-form fusion (generates a patch) 317/500 183/300 
+
+Where fusion loses 
+
+Invalid, non-applying generated diffs 96 38 Just reproduces an existing candidate 87 144 Reachable bugs left unsolved 126/443 80/263 invented a failing novel patch 92 49 
+
+1) Selection versus generation: why free-form fusion loses: 
+
+The DeepSeek-V4-Pro rows let us compare selection and generation with one model held fixed: the listwise judge selects a submitted candidate, while the fusion baseline asks the same model to emit a final patch. Selection wins by 79 and 31 bugs (Table III): the same model solves 396 and 214 by choosing versus 317 and 183 by generating. Fusion loses because generation re-opens failure modes selection eliminates by construction. First, 96 of 500 Verified diffs (and 38 of 300 Multilingual) do not even apply: the model emits malformed or mis-anchored hunks, often wrapped in a markdown or JSON envelope, that a selector can never produce. Second, on bugs a candidate already solves, the model still leaves 126/443 (Verified) and 80/263 (Multilingual) unsolved, and the main cause is self-inflicted: in 92 and 49 of these it generates a new patch that fails rather than choosing the correct candidate already in the pool. apache__druid-14136 is typical: the model wraps its diff in a JSON envelope and proposes a plausible empty-interval guard that the tests reject, while a solving candidate was available. Half the time on Multilingual (144 /300 ) it simply reproduces an existing candidate, so even many of its successes are mere selection. Once correct patches already populate the pool, handing the decision to a strong generator is therefore worse than a deterministic selector: generation adds format errors, hallucinated edits, and the risk of overwriting an available fix. 
+
+[RQ-1] Findings. (1) PatchFusion comes within 17 of the candidate-reachable ceiling on Verified (426/500) and beats every matched selector at p < 0.05 . (2) Per instance it recovers repairs no single source solves (net +30 and +18 
+
+bugs). (3) Given the same decision, the evaluated DeepSeek-V4-Pro baseline does worse, not better: its free-form fusion loses 79 and 31 bugs, mostly by overwriting a correct candidate already in the pool. Insight. When a fixed pool already holds correct patches, the bottleneck moves from generation to selection ; in this setting, a stronger generator does not help and can hurt. 
+
+B. RQ-2: Component Contributions and Residual Misses 
+
+[Experimental Design] : We ablate PatchFusion one internal design choice at a time on the same candidate pools, keeping candidate canonicalization and exact-support counting fixed. The ‘w/o ECF’ row disables the whole content-fusion module, so it measures ECF’s marginal contribution inside the same pipeline; the other rows each alter one pre-ECF decision that supplies ECF with a representative.                                          
+
+> TABLE IV ABLATION OF PATCH FUSION COMPONENTS .
+> Variant Verified Multi. Defects4J PatchFusion 426 236 87
+> Step 2: PatchFusion w/o repair-neighborhood 421 214 62 Step 3: PatchFusion w/o local edit evidence 405 230 78 Step 3: PatchFusion w/o same-surface guard 411 214 65 Step 3: PatchFusion w/o pool-level route 421 230 78 Step 4: PatchFusion w/o ECF 421 230 78
+> TABLE V ECF NET WINS OVER THE PRE -ECF BASELINE ,WITH NO REGRESSION .
+> Setting w/o ECF with ECF Net wins Losses SWE-bench Verified 421/500 426/500 +5 0SWE-bench Multilingual 230/300 236/300 +6 0Defects4J 78/371 87/371 +9 0
+
+1) RQ-2.1: Which components account for the gains?: 
+
+Table IV shows a clear division of labor. Repair-neighborhood fusion is the backbone on Multilingual and Defects4J, the largest single drop there when removed (Table IV). On Verified, by contrast, the local edit path and its guards matter most, and representative selection with pool-level routing adapts the backbone to this per-pool structure. ECF sits on top as a sparse content-fusion layer that lifts the final counts by +5 / + 6 / + 9 ,with no observed regression (Table V). Across the three benchmark settings, ECF makes 20 label-changing corrections. By construction, where the emitted diff is inspectable on the two SWE-bench pools, ECF’s correct outputs are patches it constructs rather than copies: the submitted diff is a supported scope-union or contraction absent from the candi-date pool in 8 cases (including django__django-14315 ), while 4 Multilingual outputs re-derive an already-solving candidate’s edit. Of these 12 inspectable correct outputs, 11 flip a previously unresolved instance and form the +5 and +6 
+
+SWE-bench net wins of Table V, while the 12th re-applies a correct construction on an instance the pre-ECF representative already solved and so leaves the count unchanged rather than adding a win. ECF’s scope localization is not Python-specific: alongside the Python AST locator, which covers 98 .0% of Verified patches, tree-sitter grammars resolve a real AST method or class scope for 94 .1% of the non-Python Multilingual patches (Java, PHP, and Ruby at 100% ; Rust 95 .0% ; Go 92 .5% ; JS/TS 82 .8% ;C/C++ 82 .3% ), leaving a brace-balanced block only as a residual fallback. The small Multilingual takeover count ( 9, all resolved) is therefore bounded by ECF’s conservative support and compactness gates, not by coarse scoping. 
+
+2) RQ-2.2: What does the pipeline still miss?: We inspect pre-ECF candidate-reachable misses, bugs whose pool contains a solved patch while the routed pre-ECF representative is unsolved. Same-neighborhood representative choice dominates: it covers 42/55 of these misses (16/22 Verified, 26/33 Multilin-gual); the remaining 13 are isolated singletons, with none in a different non-singleton neighborhood, so the residual is not a missing repair surface but the wrong close variant chosen within it.                      
+
+> TABLE VI STATIC RELATIONS IN PRE -ECF SAME -NEIGHBORHOOD MISSES .Static relation to solved patch Multi. Verified Same files 23 12 Higher exact support 21Higher signature support 21Solved shorter 15 9Solved longer 19 9More supported atoms 11 8Fewer unsupported atoms 710 Lower token centrality 26 12 Selected dominates 11 5
+
+Table VI breaks these by pre-ECF static relations: a solved alternative usually shares the file surface and is less token-central than the chosen representative, yet in a large share every static criterion still ranks the representative ahead of it. The next distinguishing signal is therefore edit necessity rather than another whole-diff score. 
+
+[RQ-2] Findings. (1) ECF makes 20 label-changing cor-rections with no regression, 8 by constructing a patch that appears in no candidate. (2) The remaining gap is not finding the repair but the choice within it: 42 of 55 residual misses pick the wrong close variant in the right neighborhood. Insight. The last gap is not coverage but a within-neighborhood choice, a single signal ( edit necessity )that no whole-diff score can express. 
+
+C. RQ-3: Post-Generation Cost 
+
+[Experimental Design] : We place every method from Table II on a cost-versus-repairs plane: the x-axis is post-generation wall-clock per bug from Section IV, and the y-axis is the SWE-bench Verified solved count. We also read the dollar cost of the model-based rows from cached prompt sizes and note whether each method requires an online model and whether it is deterministic. 
+
+[Experimental Results] : Figure 3 puts PatchFusion in the top-left corner: it solves the most bugs (426/500) at 3.28 ms per bug with no model call, within 17 of the candidate-reachable ceiling. This 3.28 ms is the decision step in isolation: a median over 7 runs, measured after the candidate pool is loaded and its views are built, and it excludes candidate generation, any model or API call, official-runner execution, and the one-time preprocessing (pool loading, diff normalization, scope building) that precedes the decision; the comparison below is therefore of decision-stage latency, not end-to-end pipeline time, and every method on the plane is timed under the same post-preprocessing convention. The deterministic consensus and rank-aggregation selectors are equally cheap but capped below it (token medoid strongest at 403), while the model-based methods sit two to three orders of magnitude to the right without overtaking PatchFusion, free-form fusion being both the most expensive (6024 ms) and the lowest-scoring (317/500). The dollar gap is wider still: PatchFusion spends no model tokens, whereas each DeepSeek call consumes 4.0k input tokens (and a generated patch for fusion), adding a per-bug API charge and an online-model dependency at a step that should add milliseconds. PatchFusion is also deterministic, returning the same patch from the same pool on every run, while the model-based rows depend on sampling and an external endpoint. With its decision-time constraints relaxed, a frontier model can be pushed toward a higher plausible-patch yield, but that is a different operating point: it is expensive, nondeterministic, and emits an unauditable program rather than a contraction of a submitted candidate. Under the fixed-pool decision-time budget studied here, that option is unavailable. 
+
+[RQ-3] Findings. (1) Accuracy does not cost more: Patch-Fusion is the most accurate selector yet decides in 3.28 ms with no model call. (2) The evaluated model-based rows do not improve accuracy: they cost two to three orders of magnitude more (1260 to 6024 ms vs 3.28 ms) without doing better, and the model-based fusion row is the most expensive (6024 ms) and least accurate (317/500). Insight. 
+
+Under this fixed-pool setting there is no speed-accuracy tradeoff: the evaluated model-based selectors do not choose better, so the decision should stay cheap and deterministic. 
+
+D. RQ-4: Robustness to Pool Composition 
+
+[Experimental Design] : At every subset size k we evaluate all  nk
+
+ subsets of each pool and record PatchFusion’s diff-level solved count as a fraction of that subset’s candidate-reachable ceiling, which rescales the three pools onto one axis. The SWE-bench pools are subsampled by source (Verified 
+
+n = 6 , Multilingual n = 7 , each source a different system); the Defects4J pool is subsampled by pass@ k sample ( n = 10 
+
+stochastic samples of one fine-tuned model), a single-model control where any complementarity comes from sampling alone.                   
+
+> 10 −1110 10 210 310 4
+> 320
+> 340
+> 360
+> 380
+> 400
+> 420
+> 440 candidate-reachable ceiling (443)
+> token medoid
+> cheap deterministic selectors
+> LM naturalness
+> DeepSeek judge
+> DeepSeek fusion
+> PatchFusion
+> Post-generation decision cost (ms/bug, log scale)
+> Verified solved (/500)
+> Fig. 3. Decision-stage cost versus repairs on SWE-bench Verified.
+> 2345678910
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> Pool size
+> Solved  / candidate-reachable
+> PatchFusion (Verified) PatchFusion (Multiling.) PatchFusion (Defects4J)
+> Fig. 4. Fraction of candidate-reachable bugs solved versus pool size.
+
+[Experimental Results] : On the diverse SWE-bench pools PatchFusion captures a near-constant high fraction of the reachable bugs at every pool size (91.9 to 95.0% on Verified TABLE VII SENSITIVITY OF PATCH FUSION .                          
+
+> Constant Default Swept Effect Base-overlap boundary 0.8[0 .60 ,0.95] D4J solved 87 (85 at 0.60 )Atom support 23emitted patches −1
+> Scope-union cap K32,4emitted patches +1 ,0
+> Fused-token budget 160 /180 ±50% emitted patches 0
+
+and 86.5 to 91.0% on Multilingual), so its effectiveness is set by the complementarity the pool contains, not by a particular source count. On the single-model Defects4J pool the captured fraction is much lower and declines as samples accumulate (67.7% at 2 samples down to 57.8% at 10), because added samples of one model grow the reachable set faster than the selector keeps pace. The single-model control isolates the source of that com-plementarity. Defects4J is a single-model pass@10 pool, yet PatchFusion still gains there: it reaches 87/371 plausible patches, well above the best single sample at 62 and uniform random at 47.3, and ECF lifts the pool from 78 to 87. 
+
+[RQ-4] Findings. (1) Complementarity does not require diverse systems: one model’s pass@10 sampling already fuses, lifting the single-model pool from 62 to 87. (2) The single-model pool’s declining captured share (67.7% to 57.8%) is a faster-rising reachable ceiling, not fusion degrading; diverse pools stay at a near-constant high share. 
+
+Insight. Fusion depends on complementarity , not source count: even one model’s repeated sampling supplies it, while diverse systems make far more of it reachable. 
+
+VI. T HREATS TO VALIDITY 
+
+Internal validity. The main threat is decision-time leakage: a selector could exploit test outcomes, labels, or run metadata rather than the patches themselves. We bound it with the candidate view of Section III-A , which exposes only diff-derived fields, duplicate counts, and unlabeled pool structure, with labels attached only after the final patch is fixed. To limit benchmark overfitting, PatchFusion’s few numeric constants were frozen before evaluation with no development set, and the sensitivity sweep (Table VII) shows that no setting regresses. 
+
+External validity. The candidate pool is a public-leaderboard snapshot, so the results could be specific to it. We mitigate this by evaluating complete pools, by exceeding the best single source on all three pools (Table II), and by the RQ-4 complementarity control (Figure 4), which shows that the gain tracks pool complementarity rather than source count; we therefore scope our strongest captured-fraction results to multi-source pools, while the single-model Defects4J control indicates the gain does not require diverse systems. 
+
+Construct validity. On Defects4J, plausible does not imply correct, so we make the SWE-bench official-runner solved counts the primary result and treat Defects4J as a single-model control reported as a plausible count from MORepair’s stored validation. Every final patch, including the new diffs ECF emits, is scored by each benchmark’s official oracle, never a self-reported one. VII. R ELATED WORK 
+
+A. Program Repair, Coding Agents, and Candidate Pools 
+
+Automated program repair (APR) has progressed from search- and heuristic-based generation [35], [39], [40], through template- and pattern-based fixing [41], [42] and semantic or constraint-based synthesis [43], [44], to learning-based transformations [45]–[47]. LLM coding agents have since expanded the scale and diversity of candidate patches. Zero-shot repair [48], pretrained repair models [1], [2], code-completion repair [49], conversational repair [4], [50], retrieval-augmented generation [51], repository-aware repair [52], agent-less pipelines [17], and software agents [3], [53], [54] all improve how candidate patches are produced. These systems define the upstream generators and trajectories from which a candidate pool is obtained. As generators improve, pass@ k
+
+increasingly exposes reachable repairs, but deployment still needs one auditable patch before validation or review. 
+
+B. Patch Selection, Ranking, and Fusion 
+
+Patch correctness assessment and ranking use behavioral or plausibility signals [14], [22], dynamic impact [20], failing-test similarity [21], and naturalness [36]. They also use LLM judging [24], similarity- or history-based reranking [18], learned patch representations [23], [38], and rank aggregation [19]. PatchFusion differs by fusing evidence from exact and near-duplicate variants within a repair neighborhood before selecting an auditable representative. Multi-sample code generation also uses consistency and clustering: AlphaCode clusters generated programs [11], self-consistency marginalizes sampled reasoning paths [25], CodeT selects code with generated tests [26], and Universal Self-Consistency uses an LLM to choose among free-form candi-dates [27]. Validation-aware agents such as CodeMonkeys and SWE-Search add generated tests, validation-aware selection, or search [12], [13]. In contrast, PatchFusion uses repeated edit atoms for evidence-constrained fusion while keeping the final patch auditable against submitted candidates. Patch construction and multi-hunk repair systems synthesize or refine patches during generation: multi-edit synthesis [55], [56], iterative refinement [57], and large-change construc-tion [58], [59]. Repository-scale APR and agent benchmarks then expose fixed multi-run candidate pools [10], [60]. Patch-Fusion starts after generation and turns that pool into one auditable patch. VIII. C ONCLUSION 
+
+We propose PatchFusion, a deterministic approach that fuses a fixed pool of candidate patches into a single auditable final patch via repair-neighborhood fusion, representative selection, and evidence-constrained fusion (ECF). We evaluate PatchFu-sion on PatchFuseBench, covering SWE-bench Verified, SWE-bench Multilingual, and Defects4J, where it solves 426/500 and 236/300 SWE-bench bugs and reaches 87/371 plausible Defects4J patches, outperforming consensus and LLM-based selectors at a 3.28 ms per-bug decision with no model cost. Ablations show that ECF is a content-fusion layer that recovers mis-selected repairs by constructing patches absent from the pool, with no observed regression. Future work can investigate combining our deterministic, test-free patch fusion with an LLM-based agentic workflow to recover more diverse and accurate repairs. REFERENCES [1] Z. Fan, X. Gao et al. , “Automated repair of programs from large language models,” in Proceedings of the 45th International Conference on Software Engineering . Piscataway, NJ, USA: IEEE, 2023, pp. 1469–1481. [2] C. S. Xia, Y. Wei, and L. Zhang, “Automated program repair in the era of large pre-trained language models,” in Proceedings of the 45th International Conference on Software Engineering . Piscataway, NJ, USA: IEEE, 2023, pp. 1482–1494. [3] I. Bouzenia, P. T. Devanbu, and M. Pradel, “RepairAgent: An autonomous, LLM-based agent for program repair,” in Proceedings of the 47th International Conference on Software Engineering , 2025, pp. 2188–2200. [4] B. Yang, H. Tian et al. , “MORepair: Teaching LLMs to repair code via multi-objective fine-tuning,” ACM Trans. Softw. Eng. Methodol. , vol. 35, no. 2, pp. 38:1–38:38, 2026. [5] M. Beller, A. Bacchelli et al. , “Modern code reviews in open-source projects: which problems do they fix?” in Proceedings of the 11th Working Conference on Mining Software Repositories . New York, NY, USA: ACM, 2014, pp. 202–211. [6] S. McIntosh, Y. Kamei et al. , “An empirical study of the impact of modern code review practices on software quality,” Empir. Softw. Eng. ,vol. 21, no. 5, pp. 2146–2189, 2016. [7] F. Huq, M. Hasan et al. , “Review4repair: Code review aided automatic program repairing,” Inf. Softw. Technol. , vol. 143, p. 106765, 2022. [8] S. Kirbas, E. Windels et al. , “On the introduction of automatic program repair in bloomberg,” IEEE Softw. , vol. 38, no. 4, pp. 43–51, 2021. [9] B. Yang, H. Tian et al. , “CREF: An LLM-based conversational software repair framework for programming tutors,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . New York, NY, USA: ACM, 2024, pp. 882–894. [10] C. E. Jimenez, J. Yang et al. , “SWE-bench: Can language models resolve real-world github issues?” in The Twelfth International Conference on Learning Representations . Vienna, Austria: OpenReview.net, 2024. [11] Y. Li, D. Choi et al. , “Competition-level code generation with AlphaCode,” 
+
+Science , vol. 378, no. 6624, pp. 1092–1097, 2022. [12] R. Ehrlich, B. Brown et al. , “CodeMonkeys: Scaling test-time compute for software engineering,” arXiv preprint arXiv:2501.14723 , 2025. [13] A. Antoniades, A. ¨Orwall et al. , “SWE-Search: Enhancing software agents with monte carlo tree search and iterative refinement,” arXiv preprint arXiv:2410.20285 , 2024. [14] Z. Qi, F. Long et al. , “An analysis of patch plausibility and correctness for generate-and-validate patch generation systems,” in Proceedings of the 2015 International Symposium on Software Testing and Analysis .New York, NY, USA: ACM, 2015, pp. 24–36. [15] J. Petke, M. Martinez et al. , “The patch overfitting problem in automated program repair: Practical magnitude and a baseline for realistic bench-marking,” in Companion Proceedings of the 32nd ACM International Conference on the Foundations of Software Engineering . New York, NY, USA: ACM, 2024, pp. 452–456. [16] B. Yang, Z. Cai et al. , “A survey of LLM-based automated program repair: Taxonomies, design paradigms, and applications,” arXiv preprint arXiv:2506.23749 , 2025. [17] C. S. Xia, Y. Deng et al. , “Demystifying LLM-based software engineering agents,” Proc. ACM Softw. Eng. , vol. 2, no. FSE, pp. 801–824, 2025. [18] A. Ghanbari, “Revisiting object similarity-based patch ranking in automated program repair: An extensive study,” in Proceedings of the 3rd IEEE/ACM International Workshop on Automated Program Repair .Piscataway, NJ, USA: IEEE, 2022, pp. 16–23. [19] C. Dwork, R. Kumar et al. , “Rank aggregation methods for the web,” in 
+
+Proceedings of the 10th International Conference on World Wide Web .Hong Kong, China: ACM, 2001, pp. 613–622. [20] A. Ghanbari and A. Marcus, “Patch correctness assessment in automated program repair based on the impact of patches on production and test code,” in Proceedings of the 31st ACM SIGSOFT International Symposium on Software Testing and Analysis . New York, NY, USA: ACM, 2022, pp. 654–665. [21] H. Tian, Y. Li et al. , “Predicting patch correctness based on the similarity of failing test cases,” ACM Trans. Softw. Eng. Methodol. , vol. 31, no. 4, pp. 77:1–77:30, 2022. [22] Y. Xiong, X. Liu et al. , “Identifying patch correctness in test-based program repair,” in Proceedings of the 40th International Conference on Software Engineering . New York, NY, USA: ACM, 2018, pp. 789–799. [23] H. Ye, M. Martinez, and M. Monperrus, “Automated patch assessment for program repair at scale,” Empir. Softw. Eng. , vol. 26, no. 2, p. 20, 2021. [24] X. Zhou, B. Xu et al. , “Leveraging large language model for automatic patch correctness assessment,” IEEE Trans. Software Eng. , vol. 50, no. 11, pp. 2865–2883, 2024. [25] X. Wang, J. Wei et al. , “Self-consistency improves chain of thought reasoning in language models,” in The Eleventh International Conference on Learning Representations . OpenReview.net, 2023. [26] B. Chen, F. Zhang et al. , “CodeT: Code generation with generated tests,” in The Eleventh International Conference on Learning Representations .OpenReview.net, 2023. [27] X. Chen, R. Aksitov et al. , “Universal self-consistency for large language model generation,” arXiv preprint arXiv:2311.17311 , 2023. [28] SWE-bench Team, “SWE-bench official leaderboards,” https://www. swebench.com/, 2026. [29] C. S. Xia, Z. Wang et al. , “Live-SWE-agent: Can software engineering agents self-evolve on the fly?” arXiv preprint arXiv:2511.13646 , 2025. [30] ByteDance, “Trae Agent: An LLM-based agent for general purpose software engineering tasks,” https://github.com/bytedance/trae-agent, 2025. [31] Atlassian, “Rovo Dev: Agentic AI for software teams,” https://www. atlassian.com/software/rovo-dev, 2025. [32] EPAM Systems, “EPAM AI/Run Developer Agent: SWE-bench verified submission,” https://github.com/SWE-bench/experiments, 2025. [33] ACoder Team, “ACoder: Achieving state-of-the-art performance on SWE-bench Verified,” https://github.com/SWE-bench/experiments, 2025. [34] R. Just, D. Jalali, and M. D. Ernst, “Defects4J: A database of existing faults to enable controlled testing studies for Java programs,” in 
+
+Proceedings of the 2014 International Symposium on Software Testing and Analysis . New York, NY, USA: ACM, 2014, pp. 437–440. [35] C. Le Goues, T. Nguyen et al. , “Genprog: A generic method for automatic software repair,” IEEE Trans. Softw. Eng. , vol. 38, no. 1, pp. 54–72, 2012. [36] S. Kang and S. Yoo, “Language models can prioritize patches for practical program patching,” in Proceedings of the 3rd IEEE/ACM International Workshop on Automated Program Repair . New York, NY, USA: ACM, 2022, pp. 8–15. [37] A. Hindle, E. T. Barr et al. , “On the naturalness of software,” in Pro-ceedings of the 34th International Conference on Software Engineering .Piscataway, NJ, USA: IEEE, 2012, pp. 837–847. [38] X. Tang, H. Tian et al. , “Learning to represent patches,” in Companion Proceedings of the IEEE/ACM 46th International Conference on Software Engineering . New York, NY, USA: ACM, 2024, pp. 396–397. [39] F. Long and M. C. Rinard, “Automatic patch generation by learning correct code,” in Proceedings of the 43rd Annual ACM SIGPLAN-SIGACT Symposium on Principles of Programming Languages . New York, NY, USA: ACM, 2016, pp. 298–312. [40] M. Wen, J. Chen et al. , “Context-aware patch generation for better automated program repair,” in Proceedings of the 40th International Conference on Software Engineering . New York, NY, USA: ACM, 2018, pp. 1–11. [41] K. Liu, A. Koyuncu et al. , “TBar: Revisiting template-based automated program repair,” in Proceedings of the 28th ACM SIGSOFT International Symposium on Software Testing and Analysis . New York, NY, USA: ACM, 2019, pp. 31–42. [42] A. Koyuncu, K. Liu et al. , “FixMiner: Mining relevant fix patterns for automated program repair,” Empirical Software Engineering , vol. 25, no. 3, pp. 1980–2024, 2020. [43] H. D. T. Nguyen, D. Qi et al. , “Semfix: program repair via semantic analysis,” in Proceedings of the 2013 International Conference on Software Engineering . Piscataway, NJ, USA: IEEE Press, 2013, pp. 772–781. [44] S. Mechtaev, J. Yi, and A. Roychoudhury, “Angelix: scalable multiline program patch synthesis via symbolic analysis,” in Proceedings of the 38th International Conference on Software Engineering . New York, NY, USA: ACM, 2016, pp. 691–701. [45] Y. Li, S. Wang, and T. N. Nguyen, “DLFix: Context-based code transformation learning for automated program repair,” in Proceedings of the 42nd International Conference on Software Engineering . New York, NY, USA: ACM, 2020, pp. 602–614. [46] T. Lutellier, H. V. Pham et al. , “Coconut: combining context-aware neural translation models using ensemble for program repair,” in Proceedings of the 29th ACM SIGSOFT International Symposium on Software Testing and Analysis . New York, NY, USA: ACM, 2020, pp. 101–114. [47] Z. Chen, S. Kommrusch et al. , “Sequencer: Sequence-to-sequence learning for end-to-end program repair,” IEEE Trans. Softw. Eng. , vol. 47, no. 9, pp. 1943–1959, 2021. [48] C. S. Xia and L. Zhang, “Less training, more repairing please: revisiting automated program repair via zero-shot learning,” in Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . New York, NY, USA: ACM, 2022, pp. 959–971. [49] Z. Li, C. Wang et al. , “CCTEST: Testing and repairing code completion systems,” in Proceedings of the 45th International Conference on Software Engineering . Piscataway, NJ, USA: IEEE, 2023, pp. 1238–1250. [50] C. S. Xia and L. Zhang, “Automated program repair via conversation: Fixing 162 out of 337 bugs for $0.42 each using chatgpt,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . New York, NY, USA: ACM, 2024, pp. 819–831. [51] W. Wang, Y. Wang et al. , “RAP-Gen: Retrieval-augmented patch generation with CodeT5 for automatic program repair,” in Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . New York, NY, USA: ACM, 2023, pp. 146–158. [52] B. Yang, H. Tian et al. , “Enhancing repository-level software repair via repository-aware knowledge graphs,” arXiv preprint arXiv:2503.21710 ,2025. [53] J. Yang, C. E. Jimenez et al. , “SWE-agent: Agent-computer interfaces en-able automated software engineering,” in Advances in Neural Information Processing Systems , vol. 37, 2024. [54] Y. Zhang, J. Ruan et al. , “AutoCodeRover: Autonomous program improvement,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . New York, NY, USA: ACM, 2024, pp. 1592–1604. [55] S. Saha, R. K. Saha, and M. R. Prasad, “Harnessing evolution for multi-hunk program repair,” in Proceedings of the 41st International Conference on Software Engineering . Piscataway, NJ, USA: IEEE / ACM, 2019, pp. 13–24. [56] C.-P. Wong, P. Santiesteban et al. , “Varfix: balancing edit expressiveness and search effectiveness in automated program repair,” in Proceedings of the 29th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . New York, NY, USA: ACM, 2021, pp. 354–366. [57] H. Ye and M. Monperrus, “ITER: Iterative neural repair for multi-location patches,” in Proceedings of the 46th IEEE/ACM International Conference on Software Engineering , 2024, pp. 10:1–10:13. [58] F. Li, J. Jiang et al. , “Hybrid automated program repair by com-bining large language models and program analysis,” arXiv preprint arXiv:2406.00992 , 2024. [59] X. Liu, J. Ren et al. , “Siblingrepair: Sibling-based multi-hunk repair with large language models,” arXiv preprint arXiv:2605.06209 , 2026. [60] Y. Chen, J. Wu et al. , “When large language models confront repository-level automatic program repair: How well they done?” in Proceedings of the 2024 IEEE/ACM 46th International Conference on Software Engineering: Companion Proceedings . New York, NY, USA: ACM, 2024, pp. 459–471.
