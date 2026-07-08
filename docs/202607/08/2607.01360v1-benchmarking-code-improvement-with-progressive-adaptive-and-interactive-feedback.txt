@@ -1,0 +1,636 @@
+Title: Benchmarking Code Improvement with Progressive, Adaptive, and Interactive Feedback
+
+URL Source: https://arxiv.org/pdf/2607.01360v1
+
+Published Time: Fri, 03 Jul 2026 00:06:18 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Benchmarking Code Improvement with Progressive, Adaptive, and Interactive Feedback 
+
+Cuong Chi Le 
+
+University of Texas at Dallas 
+
+Texas, USA cuong.le@utdallas.edu 
+
+Aashish Yadavally 
+
+University of Central Florida 
+
+Florida, USA aashish.yadavally@ucf.edu 
+
+Minh Le-Anh 
+
+FPT Software AI Center 
+
+Vietnam minhla4@fpt.com 
+
+Tien N. Nguyen 
+
+University of Texas at Dallas 
+
+Texas, USA tien.n.nguyen@utdallas.edu 
+
+Abstract —Large language models (LLMs) are typically eval-uated on code generation and program repair using binary functional correctness: a generated program or patch either passes or fails a test suite. This protocol is simple but coarse, as it ignores partial progress, feedback use, regressions, and the refinement trajectory through which models often improve code. We introduce PAIR-B ENCH , a progressive and adaptive benchmark for evaluating code improvement : transforming an incorrect or incomplete program into a more correct one through feedback-guided refinement. PAIR-B ENCH uses progressive hint-ing, a structured feedback protocol with two controls. Failure-region control determines what the feedback targets by grouping hidden failing tests into failure scenarios, while hint-depth control 
+
+determines how much repair-relevant information is revealed, from coarse symptoms to implementation-level guidance. This design enables PAIR-B ENCH to measure whether a model repairs targeted failures, generalizes beyond the hint, preserves already-correct behavior, and how much assistance it requires. By evaluating repair trajectories progressive metrics rather than only final pass/fail outcomes, PAIR-B ENCH provides a finer-grained assessment of LLM code-improvement capability. 
+
+I. I NTRODUCTION 
+
+Large language models (LLMs) have demonstrated strong capabilities across diverse software engineering (SE) tasks, ranging from code generation [1], [2] to automated program repair (APR) [3], [4], [5]. In code generation, models are presented with a natural language problem statement and evaluated on whether the generated program is functionally correct. In the case of APR, they are evaluated on whether the generated patch for a given buggy program restores correct-ness without introducing regressions. Despite their apparent differences in problem formulation, both settings share the same success measurement criterion: a binary, instance-level pass/fail outcome determined by the associated test suite. While a good first-approximation, such binary measures are 
+
+sparse and provide a narrow view of overall performance. A model is considered successful only if its generated solution passes all tests in the associated test suite. In practice, however, test suites are often weak and rarely exhaustive [6], [7]. Thus, a model-generated solution that fixes the reported failure but introduces subtle regressions may still be counted as correct, leading to an inflated assessment of model performance [8]. Even when a model is unsuccessful , pass/fail outcomes are uninformative: a solution that fails one edge case is treated the same as one that fails all tests, nor does a partially correct solution receive any credit for progress. The limitations of binary measures are further exposed in workflows where models operate in iterative refinement 
+
+loops, progressively improving upon an initial solution through compiler feedback [9], [10], execution information [11], [12], [2], or model-generated diagnostics [13], [10]. We refer to this process of transforming an incorrect or incomplete program into a more correct one through feedback-guided refinement as 
+
+code improvement . Despite its inherently incremental nature, evaluation still remains limited to the binary outcome of the final solution, ignoring the refinement trajectory altogether. Such an assessment can therefore be misleading: a stronger model may produce an initial patch that fails the current test suite but moves the program substantially closer to the correct behavior, while a weaker model may pass the available tests by simply making a shallow edit. Under a binary pass-rate metric, the weaker model would be deemed superior, though the stronger model demonstrates more effective use of feedback and better generalization. Accordingly, we position that benchmarking a model’s ability to make progress yields a more fine-grained and faithful measure of its real-world utility .However, measuring progress under code improvement is not straightforward, as model performance is highly sensi-tive to the informativeness of the feedback provided [14], [15]. For instance, a hint that directly reveals the solution provides little evidence of model reasoning, while one that is too abstract to act upon conflates feedback quality with model failure. Therefore, the feedback provided to guide code improvement must itself be model-dependent and calibrated to model capabilities. In particular, a faithful progress-centric evaluation should consider the trajectory of code improvement: 
+
+informativeness of feedback provided at each intermediate step, how much corresponding progress is made, and whether improvement remains monotonic across iterations ?To address these challenges, we introduce PAIR-B ENCH ,a progressive and adaptive benchmark for evaluating code improvement . The central mechanism of PAIR-B ENCH is 
+
+progressive hinting , a structured feedback protocol that con-trols hint difficulty along two dimensions. The first, failure-region control determines what the hint is about. It groups hidden failing tests into failure scenarios, where each scenario corresponds to a region of incorrect program behavior, such as 
+
+> arXiv:2607.01360v1 [cs.SE] 1 Jul 2026
+
+a shared edge case, input pattern, or execution path. By prior-itizing which failing tests are exposed to the candidate model ,PAIR-B ENCH via its feedback model steers the candidate model’s fixing toward specific regions of incorrect behavior. The benchmark can progressively provide hints that expose different failure regions and measure how the model improves within the hidden failure space. The second, hint-depth control 
+
+determines how much repair-relevant information is revealed. Inspired by Item Response Theory (IRT), it starts from coarse-grained symptoms to fine-grained implementation-level feed-back. Together, both dimensions define failure sub-regions se-lected relative to the capabilities of the model under evaluation. Such within-instance adaptability ensures that the trajectory of code improvement better reflects model capability rather than the informativeness of an unstructured feedback oracle. By design, progressive hinting governs how a model is al-lowed to improve. Accordingly, for each instance, we measure progress at each intermediate step, awarding a partial credit 
+
+that reflects the proportion and significance of failures resolved rather than treating every step as a binary success or failure. For this, we have metrics measuring the progress where outcomes are continuous rather than binary. PAIR-B ENCH 
+
+thus achieves both progressivity and adaptivity, yielding a benchmark that is more faithful to a model’s true capabilities. In this paper, we instantiate code improvement as iterative automated program repair (APR). We use “repair” to refer to each concrete code revision within this benchmark, while “code improvement” denotes the broader evaluation task. In this paper, we make the following contributions: 
+
+(1) PAIR-B ENCH : A new progressive and adaptive benchmark paradigm . Data and code is available at [16]. 
+
+(2) A suite of progress-centric metrics that measure different aspects of interactive code improvement. 
+
+(3) A controlled interactive feedback protocol. We pro-pose progressive hinting , a structured feedback protocol that jointly controls failure regions and hint depth .
+
+(4) Empirical study. We instantiate PAIR-B ENCH on inter-active code repair and evaluate multiple state-of-the-art LLMs. II. M OTIVATION AND KEY IDEAS 
+
+A. Binary Pass/Fail Outcomes Mask Improvement Ability 
+
+Code-generation and APR benchmarks often evaluate mod-els through final functional correctness: a generated code or patch is executed against a test suite and marked as either passed or failed. However, this strategy compresses model ca-pability into a single binary outcome. In a one-shot evaluation, a weaker model may achieve a higher hidden-test pass rate than a stronger one, making it appear better under a standard pass-rate metric (Fig. 1). However, after receiving targeted feedback, the stronger model may repair the solution while the weaker model still fails. Pass@k only partially addresses this. Although it samples multiple attempts, each attempt is still evaluated as an independent one-shot generation . Thus, one-shot correctness can misrepresent code-improvement ability ,which depends not only on how many tests a model initially passes, but also on whether it uses feedback to correct the Static              
+
+> Candidate Model
+> Feedback Model
+> Both weak &
+> strong models
+> fail under one-
+> shot evaluation
+> Time 1 -Success w/ 2 turns
+> Input Repair LLM
+> Problem
+> Requirements
+> Buggy
+> Program
+> Interactive
+> ...
+> Pass rate: 25%
+> Pass Rate: 25% Pass Rate: 100%
+> Pass rate: 57% Pass rate: 57%
+> Uncontrolled
+> feedback leads to
+> unstable repair
+> outcomes
+> Time 2 -Fail w/ 10+ turns
+> Pass Rate: 25%
+> Root-Cause,
+> Repair Direction
+> Local, Conceptual
+> Correction
+> Scattered,
+> Fault Location
+> Pass Rate: 43%
+
+Fig. 1. Motivation for progress-centric interactive repair evaluation. Static pass/fail evaluation can hide partial improvement, while uncontrolled feedback can make interactive repair outcomes unstable across runs. 
+
+underlying failure. We call an evaluation progress-centric if it measures not only final correctness, but also the sequence of improvements made during refinement: which failures are fixed, whether already-correct behavior is preserved in amonotonic progress, and how much assistance is needed. 
+
+B. Interactive Feedback Helps, but Must Be Controlled 
+
+A natural way to address the limitation of one-shot evalua-tion is to make the benchmark interactive. Instead of judging only the first candidate solution, an interactive benchmark allows the model to receive feedback, and revise and improve its code. This better matches practical LLM-based interactive refinement workflows. Recent benchmarks have started to move in this direction as they provide execution outputs, compiler/test diagnostics, or natural-language feedback (Sec-tion III). Those existing interactive feedback benchmarks do not fully address the requirements of progress-centric evalu-ation. A faithful evaluation of code improvement should not only ask whether feedback eventually helps, but should also characterize the repair trajectory as defined earlier. In existing settings, there are two uncontrolled factors on the feedback: 1) the underlying failure being targeted or 2) the amount of repair-relevant information being revealed .This limitation may lead to inconsistent evaluation across runs, even with the same model on the same problem. Different feedback runs may thus produce different repair trajectories and benchmark scores. In one run, the feedback may quickly identify the decisive failure mode or provide a highly direct hint, allowing the model to repair the solution after only a few turns. In another run, the feedback may focus on a local, scattered, less informative symptom, target a different failing behavior, or remain too vague to guide the repair, causing the same model to fail even after many turns (Fig. 1). In such cases, the benchmark is no longer measuring only the model’s code-improvement ability; it is also measuring the variability and informativeness of the feedback itself. 
+
+C. Key Ideas 
+
+The instability illustrated in Fig. 1 suggests that interac-tive feedback is necessary but insufficient. To reduce such instability and support faithful progress-centric evaluation, a benchmark must make feedback comparable across runs and models. We argue that feedback should be controlled along two dimensions: the failure region being addressed and the 
+
+hint depth of the feedback. These two dimensions separate the target of feedback from the strength of feedback. 
+
+1) Failure-region control: This dimension determines which part of the hidden failure space the feedback targets. In-stead of generating feedback from an arbitrary failing test case, we group hidden failing tests into failure scenarios, where each scenario corresponds to a related region of incorrect behavior. To make feedback comparable across turns, each hint is anchored to a selected scenario, whose scope can be approximated by the number of covered failing test cases. 
+
+2) Hint-depth Control: This dimension determines how much repair-relevant information the hint reveals. Lower-depth hints expose only external evidence of the failure, e.g., symptoms or input patterns, while higher-depth hints provide increasingly direct repair guidance, e.g., missing state, suspi-cious code regions, conceptual corrections, or implementation directions. We use a six-level hint-depth scale (Table II), rang-ing from symptom-only feedback to implementation direction. 
+
+3) Progressive Evaluation: A code-improvement bench-mark should be progressive . A buggy solution may fail for multiple reasons. If interaction repeatedly focuses on the same unresolved failure, the benchmark may observe many repair attempts without measuring broader improvement. The failure-region control enables progressive evaluation. The benchmark can progressively provide hints that expose different failure regions and measure how the model improves within the hidden failure space. After each hint, the benchmark can evaluate whether the model fixes the targeted scenario, how much progress the model makes after each hint, whether the repair generalizes to other unhinted failures, and whether previously passing tests remain passing. Progressive evaluation thus treats repair as a trajectory over the hidden failure space. 
+
+4) Adaptive Evaluation: A code-improvement benchmark should also be adaptive . Even when two hints target the same failure region, they may reveal very different amounts of repair-relevant information. A shallow hint may describe only the observed symptom, while a more direct hint may reveal the input pattern, missing state, suspicious code region, conceptual correction, or concrete repair direction. Hint-depth control enables adaptive evaluation. Our bench-mark treats hint depth as a way to calibrate feedback difficulty to the model’s demonstrated code-improvement capability. A model that repairs a failure from shallow evidence should receive less direct guidance, while a model that remains stuck can be given deeper hints that reveal more repair-relevant information. This allows the benchmark to estimate not only whether a model eventually fixes the program, but also how much assistance it requires to make progress. III. R ELATED WORK 
+
+We compare existing code-evaluation benchmarks along six dimensions: execution grounding, multi-turn repair, natural-                                                 
+
+> TABLE I COMPARISON WITH REPRESENTATIVE EVALUATION SETTINGS .
+> Evaluation setting Exec. Multi-turn NL Hidden-test Progressive Adaptive grounded repair feedback protected evaluation feedback
+> Static code generation [1], [17], [2]
+> ✓✗✗✓✗✗
+> Static program repair [3] ✓✗✗✓✗✗
+> Interactive execution feedback [18] ✓✓✗✗△✗
+> Feedback-driven repair [10] ✓✓✓△△✗
+> Conversational feedback [14], [15] △✓✓△△△
+> PAIR-B ENCH ✓✓✓✓✓✓
+> Legend: ✓= supported; ✗= not supported; △= partially supported.
+
+language feedback, hidden-test protection, progressive eval-uation, and adaptive feedback. Execution grounding means that generated code is executed and evaluated against tests or an interactive environment. Multi-turn repair means that the model can revise its solution after receiving feedback. Natural-language feedback means that the benchmark can provide verbal guidance beyond raw execution output. Hidden-test pro-tection captures whether the candidate model is shielded from hidden test cases, expected outputs, and raw hidden execution traces. This is crucial because exposing hidden failures makes repair easier but turns the task into test-specific patching. In re-alistic settings, the model only sees the problem requirements and public tests, while hidden tests are for evaluation. Table I summarizes how PAIR-B ENCH differs from repre-sentative benchmarks. Static code-generation and APR bench-marks evaluate if a model can synthesize a correct program from a problem statement or fix a buggy code [1], [17], [19], [20], [21], [22], [23], [24]. LiveCodeBench includes self-repair and execution-related tasks [2]. SWE-bench [3] and SWE-bench Verified [8] move evaluation toward realistic repo-level repair by asking models to resolve real GitHub issues. Another line of work evaluates models in settings where code execution results are returned to the model. InterCode treats code as actions and execution results as observations [18]. Other work on self-editing, self-debugging, and execution-guided code generation studies whether models can use compiler messages, runtime errors, failed tests, or execution information to revise their programs [11], [12], [13]. Recently, FeedbackEval studies how LLMs use different feedback types in code repair [10]. Conversational benchmarks, e.g., ConvCodeWorld and When-Benchmarks-Talk, show that model behavior can change sub-stantially depending on the feedback setting [14], [15]. The comparison shows that the missing capability is not simply interaction, but controlled interaction. IV. PAIR-B ENCH : PROGRESSIVE AND ADAPTIVE 
+
+INTERACTIVE REFINEMENT BENCHMARK 
+
+Based on the above requirements, PAIR-B ENCH opera-tionalizes progress-centric evaluation via the pipeline shown in Fig. 2. The benchmark consists of four components: Hidden     
+
+> Problem
+> Requirements
+> Buggy
+> Program
+> Candidate Model
+> Pass
+> Rate
+> Feedback Model
+> Correct
+> Reference
+> Program
+> Test Cases
+> Failing
+> Test Cases
+> Scenario A
+> Hint Level B
+> Pass
+> Fail Return Program
+> Prompt to Candidate Model Prompt to Feedback Model
+> Generated Program
+> You are an expert program repair
+> assistant. Revise buggy code so it
+> satisfies the problem requirements.
+> You are an expert programmer
+> providing repair hints, using reference
+> solution only to guide hint generation.
+> < Problem Requirement >
+> < Correct Reference Program >
+> Repair the buggy program for the
+> given problem
+> < Problem Requirements >
+> <Buggy Program >
+> Use the following hint to guide the
+> repair: <Hint>
+> Generate a hint for failure scenario
+> shown by these test cases
+> < Current Buggy Program >
+> < Test Case 1 for Scenario A >
+> < Test Case 2 for Scenario A >
+> ....
+> Follow the specified hint depth:
+> < Hint Level B >
+
+Fig. 2. Overview of PAIR-B ENCH . Hidden tests are grouped into failure scenarios, a feedback model generates level-controlled hints, and the candidate model iteratively repairs the buggy program. 
+
+(1) a scenario constructor that groups currently failing hidden tests into failure regions; (2) a hint generator that produces feedback at a specified hint depth for a selected scenario; (3) an adaptive policy that selects the next scenario and hint level based on observed repair behavior; and (4) a trajectory evaluator measuring targeted repair, broader repair, preservation, hint efficiency, and final convergence. An instance in our benchmark is defined as ⟨xi, c i, 0, T ∗ i⟩,where xi is the problem statement, c∗i, 0 is the buggy solution, and Ti is the hidden test suite. Given an instance, the candidate model first produces an initial repaired program from the problem requirements and buggy program (Fig. 2). Hidden tests are hidden from the candidate model but available to the benchmark controller, which evaluates the generated program on the hidden test suite, records the pass rate, and extracts the remaining failing test cases. These failing tests are grouped into a selected failure scenario S, and the controller assigns a hint depth level H. The feedback model then receives the problem requirement, the correct reference program, the current buggy program, the selected scenario test cases, and the requested hint level. It generates only a controlled hint for that scenario and depth. If the program still fails at least one hidden test case, PAIR-B ENCH enters a multi-turn refinement loop. At each turn, the benchmark selects a controlled failure scenario, asks the feedback model to generate a hint at the specified depth, asks the candidate model to revise the code, and re-evaluates the revised program on the hidden test cases. At turn (t), the candidate model receives: ⟨xi, c t−1, h t, H ∗ < t ⟩ where xi is the problem statement, ct−1 is the current code, ht is the controlled hint, and H<t is the prior interaction history. It is 
+
+not given hidden tests, oracle traces/outputs, or reference code. 
+
+A. Scenario Constructor: Scenario-Level Failure Modeling 
+
+Let Ti = {1, . . . , n i} denote the hidden test cases for instance program i. After turn t, let Fi,t ⊆ T i be the set of failing test cases and Pi,t = Ti \ Fi,t be the passing ones. PAIR-B ENCH groups the currently failing test cases into 
+
+failure regions , where each region corresponds to a related behavior that the current program handles incorrectly. For each failing test case, PAIR-B ENCH constructs a failure signature using three signals: 1) the reference execution trace, 2) the expected-output shape, and 3) the candidate failure type. The reference trace records the source lines executed by the correct solution, approximating the behavioral path exercised by the test case. The output-shape signature captures coarse output structure, such as a single token, a binary line, a grid, or a multi-line output. The candidate failure type dis-tinguishes different failure types including timeouts, runtime errors, wrong token counts, line counts, or values. Failing test cases with the same signature are grouped into one scenario: 
+
+G(k) 
+
+> i,t
+
+= {j ∈ Fi,t : σ(j) = k},
+
+where σ(j) is the failure signature of the test case j.The expected-output shape is computed from the oracle output and captures the structural form of the required answer, while the candidate failure type is computed from the com-parison between the candidate output and the oracle output. To avoid over-fragmenting the failure space, we use a hier-archical grouping strategy. We group failing tests into failure scenarios , each representing a region of incorrect behavior. It uses the full signature consisting of trace, output shape, and failure type. If more than Kmax scenarios are produced or if the median scenario size falls below smin , it backs off to output-shape plus failure type, and finally to failure type alone. 
+
+Kmax and smin are predefined. The benchmark prioritizes the active failure region by the number of current failing test cases it covers , using trace coverage as a secondary tiebreaker. Thus, each hint is anchored to a concrete and reproducible region of hidden failure behavior. The benchmark progressively provides hints that expose more failure regions and measure how the candidate model improves within the failure space. We do not claim that the signature perfectly identifies semantic bug causes. Rather, it provides a reproducible approximation of execution-grounded failure regions. The grouping is used to control feedback targets, not to infer oracle root causes. 
+
+B. Scaffolded Hint-Depth Design 
+
+According to the foundation on formative feedback and intelligent tutoring systems, effective feedback should be task-focused, specific enough to support progress [25], [26]. In edu-TABLE II HINT -DEPTH SCALE FOR CONTROLLED FEEDBACK . H IGHER LEVELS REVEAL MORE DIRECT REPAIR INFORMATION .      
+
+> Hint Level Information Revealed and Example
+> L1. Symptom Only the observed incorrect behavior; no input pattern, cause, or code location. Example: “The output is larger than expected, suggesting that something may be counted extra.” L2. Input pattern The type of input or edge case exposing the failure. Example: “This failure occurs when the input contains duplicate values.” L3. State tracking The information that the solution fails to preserve, update, or track correctly. Example: “The solution does not keep enough information about repeated values across iterations.” L4. Fault location The suspicious region of the candidate implementation. Example: “The issue is likely in the loop that updates the count after reading each value.” L5. Concept. correction The missing invariant, condition, or reasoning needed to handle the scenario. Example: “The solution needs to distinguish between seeing a value once and seeing it multiple times.” L6. Repair direction A concrete implementation direction, without giving the full corrected code. Example: “Revise the update logic so repeated values are accumulated rather than overwritten.”
+
+cational scaffolding, assistance is adjusted to the learner’s cur-rent capability and gradually increased or faded as needed [27], [28]. PAIR-B ENCH applies this idea to interactive code im-provement: a model should first be given weak evidence about the failure, and only receive more direct hinting information when weaker feedback is insufficient. We organize hints along an increasing informativeness axis, using the six-level scale shown in Table II. The levels progress from outcome-level feedback to repair-level guidance . L1 describes only the observable symptom, corresponding to min-imal feedback. L2 reveals the input condition under which the failure occurs, making the feedback diagnostic but still implementation-agnostic. L3 identifies the missing state or condition the solution fails to track, moving from external be-havior to internal reasoning. L4 localizes the suspicious part of the candidate implementation, similar to context-specific hints in intelligent tutoring systems. L5 states the missing invariant or conceptual correction, and L6 gives a concrete repair direction without giving code, pseudocode, or exact patch. This hierarchy separates diagnostic evidence from repair disclosure and makes hint depth a controlled assistance vari-able. Lower levels test whether the model can infer the bug from observed behavior, while higher levels reveal increas-ingly direct guidance when weaker feedback is insufficient. Thus, repairing a scenario at a lower level indicates stronger diagnostic and refinement ability, whereas requiring higher-level hints indicates greater dependence on explicit guidance. This design also supports adaptive evaluation: after a suc-cessful repair, the benchmark can reduce the starting hint level for the next scenario, analogous to fading support after demon-strated competence; if the model remains stuck, it escalates the hint level toward the model’s effective capability. In this way, the hint scale operationalizes scaffolded interaction for APR while keeping feedback comparable across models and runs. 
+
+C. Controlled Hint Generator 
+
+To preserve the meaning of the hint-depth scale, we con-strain hint generation through level-specific prompt templates, evidence masks, and leakage validation. Each level is as-sociated with an allowed information boundary that decid-es what evidence the feedback model may observe and what information the generated hint may reveal. E.g., an L2 hint may use failing-input features and observed output mismat-ches, but the feedback model is not given candidate-code lo-cations, suspicious code regions, or repair-relevant invariants. In contrast, an L4 hint may additionally receive candidate-code context since fault localization is allowed at that level. After generation, PAIR-B ENCH validates each hint against level-specific leakage criteria. A hint is rejected if it reveals information reserved for a higher hint level, such as exposing a suspicious code location in an L2 hint or suggesting a concrete repair direction in an L4 hint. Rejected hints are regenerated until they satisfy the requested information boundary or the budget is exhausted. This helps ensure that hint depth functions as a controlled assistance rather than merely a post-hoc label. 
+
+D. Progressive and Adaptive Hint Policy 
+
+PAIR-B ENCH uses a progressive policy over failure regions and adaptive over hint depth (Algorithm 1). 
+
+1) Progressive Policy: Generally, PAIR-B ENCH selects a failure scenario, provides feedback for that scenario, evaluates whether the model fixes it, and moves to another unresolved scenario. At turn t, it re-evaluates the current program and groups the remaining failing tests into scenarios. Next, it must decide which failure region to address. We prioritize scenarios by their current failing-test coverage, since a scenario covering more failing tests represents a larger unresolved portion of the hidden failure space. This choice makes each hint target the largest remaining opportunity for measurable improvement, while completed and deferred scenarios are excluded to ensure that the interaction progresses across distinct failure regions. Formally, let Ui,t denote the set of unresolved selectable scenarios at turn t. The active scenario is selected as follows: 
+
+Gi,t = arg max 
+
+> G∈U i,t
+
+|G|
+
+Ties are broken using trace coverage and then a deterministic scenario identifier. The benchmark then samples up to m
+
+representative failing test cases from G∗ 
+
+> i,t
+
+to ground the hint. These sampled tests are used only for hint generation; scenario completion is evaluated over the full selected scenario. If all tests in G∗ 
+
+> i,t
+
+pass after revision, the scenario is marked as completed. Otherwise, the benchmark continues on the same scenario until either the maximum hint depth or the per-scenario turn limit is reached. A completed scenario is re-opened if any of its tests fail after a later revision, ensuring that regressions remain part of the active failure space. To avoid repeatedly prioritizing large scenarios, PAIR-BENCH excludes completed and deferred scenarios and en-forces a per-scenario turn budget. This ensures that the inter-action progresses across distinct failure regions rather than re-peatedly focusing on one dominant failure mode. We prioritize Algorithm 1 Progressive and adaptive hint policy algorithm                                                                                 
+
+> Require: hidden tests T, program c0, turn budget T, max hint= 6
+> 1: Evaluate c0and obtain failing set F0
+> 2: ℓ←1, completed ← ∅ , deferred ← ∅
+> 3: for t= 1 to Tdo
+> 4: if Ft−1=∅then
+> 5: break
+> 6: Group Ft−1into failure scenarios {G(k)}
+> 7: Select unresolved scenario Gtwith largest remaining fail cov.
+> 8: Select representative failing tests St⊆Gt
+> 9: Generate a level-ℓhint grounded in St
+> 10: Candidate revises ct−1into ct
+> 11: Evaluate ctand obtain Ft
+> 12: if Gt∩Ft=∅then
+> 13: completed ←completed ∪{ Gt}
+> 14: ℓ←max(1 , ℓ −1)
+> 15: else if ℓ= 6 or scenario-turn limit is reached then
+> 16: deferred ←deferred ∪{ Gt}
+> 17: else
+> 18: ℓ←ℓ+ 1
+
+coverage because it maximizes measurable repair opportunity at each turn, while the scenario-turn limit prevents the policy from spending the entire budget on a single unresolved region. 
+
+2) Adaptive Policy: The policy is adaptive because the next hint level depends on the model’s observed repair behavior. Inspired by adaptive testing and IRT-style assessment, PAIR-BENCH treats hint depth as an ordered assistance scale with a deterministic staircase policy as a lightweight operational-ization: success decreases the next starting hint level, while failure increases it. This policy does not require fitting IRT parameters, but preserves the central idea of calibrating item assistance to observed ability. Specifically, each scenario be-gins with the current starting level, initially L1. If the model repairs the selected tests, PAIR-B ENCH treats the model as ca-pable of using the current level of feedback and starts the next scenario with a weaker or equal hint: ℓt+1 = max(1 , ℓ t − 1) .
+
+If the selected test cases still fail, PAIR-B ENCH increases the hint depth: ℓt+1 = min(6 , ℓ t + 1) . The interaction stops when all hidden tests pass, no remaining scenario can be selected, or the max turn budget is reached. In brief, successful repair leads to faded assistance, while failure leads to more direct guidance. 
+
+E. Trajectory-Level Evaluator and Evaluation Metrics 
+
+With the same notations in Section IV-A, we define our met-rics. Turn t = 0 is the initial repair before any hint. The pass rate (PR) is defined as pi,t = |Pi,t ||T i| . Let I be the benchmark instances. At repair turn t, let Gi,t ⊆ Fi,t −1 be the failure scenario targeted by the hint, and let bi=max 0≤t≤B pi,t be the 
+
+best pass rate in the turn budget B.
+
+a) Initial Fix Rate: This measures unaided repair ability before feedback: InitialFix = 1
+
+> |I|
+
+P 
+
+> i∈I
+
+1[pi, 0 = 1] . It sepa-rates one-shot repair capability from interactive improvement. 
+
+b) Targeted Repair Success (TRS): This measures if a model fixes the failure region described by the current hint: 
+
+TRS i,t = |Gi,t ∩ Pi,t ||Gi,t | .
+
+It captures the precise use of controlled feedback. 
+
+c) Broader Repair Gain (BRG): This measures progress beyond the hinted scenario: BRG i,t = |(Fi,t −1\Gi,t )∩Pi,t ||T i| . It captures if a model generalizes a targeted hint to other hidden failures. We normalize by the total number of hidden tests to reflect absolute contribution to overall pass-rate improvement. 
+
+d) Behavior Preservation (BP): This measures whether a revision preserves behavior that was already correct: 
+
+BP i,t = 1 − |Pi,t −1 ∩ Fi,t ||T i| .
+
+It penalizes newly introduced regressions. We use the same total-test normalization so the regression penalty is comparable across instances and directly aligned with pass-rate change. 
+
+e) Progress Monotonicity Rate (PMR): This measures whether the repair trajectory improves monotonically across interaction turns. Since pi,t denotes the hidden-test pass rate after turn t, PMR compares each repaired program with the program from the previous turn. Let τi ≤ B be the last evaluated repair turn for instance i. We define: 
+
+PMR i = 1
+
+τiτiX
+
+> t=1
+
+1[pi,t ≥ pi,t −1].
+
+PMR measures the fraction of refinement steps that preserve or improve the previous pass rate, with higher values indicating a more stable trajectory with fewer regressions. 
+
+f) Hint Efficiency (HE): This measures how much aid a model needs to close targeted failure scenarios. For each attempted scenario g, let ℓi,g ∈ { 1, ..., 6} be the hint level at which the scenario is closed. We assign a scenario-level score 
+
+hi,g =
+
+(
+
+7 − ℓi,g , if scenario g is fully repaired ,
+
+0, otherwise .
+
+The instance-level Hint Efficiency is the average over all attempted scenarios Gi: HE i = 1
+
+> |G i|
+
+P 
+
+> g∈G i
+
+hi,g . Higher HE indicates that a model closes failure scenarios with weaker, less explicit hints; unresolved scenarios get no credit. 
+
+g) Gap Closure: This measures the normalized fraction of remaining repair opportunity that the model closes: GC i = 
+
+> bi−pi, 0
+> 1−pi, 0
+
+. It gives credit for progress. 
+
+h) Final Fix Rate: This measures complete repair within the interaction budget: FinalFix = 1
+
+> |I|
+
+P 
+
+> i∈I
+
+1[∃t ≤ T, p i,t =1] . It preserves the standard end-to-end correctness criterion. 
+
+i) Turns to Fix: This measures convergence speed among initial failing instances that are eventually fixed. Let S = {i ∈I : pi, 0 < 1 ∧ ∃ t ≤ T, p i,t = 1 }. Then 
+
+TurnsToFix = 1
+
+|S| 
+
+X
+
+> i∈S
+
+min {t : pi,t = 1 }.
+
+It distinguishes models that reach the same final success rate but require different numbers of refinement turns. Turn-level metrics are averaged within each initially failing instance and then across initially failing instances. Initial Fix Rate and Final Fix Rate are computed over all instances. TABLE III PROGRESS -CENTRIC LEADERBOARD FOR CONTROLLED INTERACTIVE PROGRAM REPAIR . G REEN MARKS THE TOP -THREE MODELS AND RED MARKS THE BOTTOM -THREE MODELS FOR EACH METRIC , FOLLOWING THE METRIC DIRECTION (RQ1).                                                                                          
+
+> Model Before Feedback Interactive Repair After Feedback / Outcome Initial Fix(%) ↑Targeted Broader Behavior Progress Hint Final Gap Turns Repair(%) ↑Repair(%) ↑Preservation(%) ↑Monotonicity(%) ↑Efficiency(0–6) ↑Fix(%) ↑Closure(%) ↑to Fix ↓
+> DeepSeek V3.2 65.68 71.59 10.19 98.30 90.66 4.79 99.31 +33.63 98.80 2.54
+> Gemini 2.5 Flash Lite 53.18 59.00 10.97 93.65 81.39 3.76 95.45 +42.27 97.51 3.27
+> Qwen3 Coder 30B A3B Instruct 35.90 55.89 8.42 95.21 82.19 3.61 90.90 +55.00 94.25 3.81 GPT-4o-mini 29.77 56.14 7.14 94.92 76.44 3.80 85.45 +55.68 89.08 3.67
+> Llama 3.3 70B Instruct 27.72 53.50 7.59 93.74 71.61 3.21 85.90 +58.18 89.32 4.39
+> Ministral 3 14B 22.95 49.71 10.29 91.25 73.17 3.29 85.90 +62.95 91.73 4.33
+> Mistral Small 3.2 24B 13.40 49.31 8.05 92.74 76.35 3.02 79.77 +66.37 87.92 4.32
+> Gemma 3 27B 10.22 42.56 7.84 90.18 81.24 2.76 72.04 +61.82 80.06 4.31
+
+V. E MPIRICAL EVALUATION 
+
+For evaluation, we seek to answer the following questions: 
+
+RQ1. [Interactive Repair Performance] How effectively do LLMs repair buggy code under controlled feedback, and what aspects of the repair trajectory distinguish stronger models? 
+
+RQ2. [Robustness] Does Controlled Feedback produce more stable interactive repair results than Vanilla Feedback? 
+
+RQ3. [Hyperparameter Sensitivity] Do model rankings re-main consistent when key benchmark parameters are varied? 
+
+Dataset Construction: We collected our dataset from real Codeforces Python submissions in the Hugging Face dataset [29]. We retain only submissions with the ‘Wrong Answer’ verdict, since these programs compile successfully but fail on execution behavior. We further filter for non-trivial instances by requiring each problem to have more than 100 test cases, an initial pass rate between 10% and 55%, 15–80 lines of code, and cyclomatic complexity of at least 8. For each selected buggy submission, we use GPT-OSS 120B to iteratively repair the program with failing test cases as feedback until it passes all tests, producing a validated reference solution that remains close to the original implementation logic. The final dataset contains 440 code-improvement instances, each consisting of 
+
+a problem statement , a wrong-answer Python program , test cases , and a corresponding reference solution .
+
+Model Selection: We select representative models from diverse model families to cover both closed-source and open-source systems with broadly comparable coding capabilities. Specifically, we chose DeepSeek V3.2, Gemini 2.5 Flash Lite, GPT-4o-mini, Qwen3 Coder 30B A3B Instruct, Llama 3.3 70B Instruct, Ministral 14B, Mistral Small 3.2 24B, and Gemma 3 27B. To keep feedback generation consistent across candidate models, we use GPT-OSS 120B as the feedback model, since it provides strong performance on coding and program-repair tasks. For readability, some tables and figures use the model-family name as shorthand; e.g., ‘DeepSeek‘ refers to DeepSeek V3.2, ‘Gemini‘ refers to Gemini 2.5 Flash Lite. 
+
+Evaluation Protocol: For each instance, the model first attempts a zero-hint repair, which is used to compute Initial Fix Rate. If hidden tests still fail, PAIR-B ENCH starts controlled hinting: it selects a failure scenario, provides a hint, asks the model to fix the code, and re-evaluates the result. We use two parameters: α=10 feedback turns per instance and β=3 turns per failure scenario. Sensitivity is reported in Section V-C. 
+
+A. Interactive Repair Performance (RQ1) 
+
+Table III reports the main progress-centric results for con-trolled interactive program repair, while Table IV summarizes the metric-wise rankings across the evaluation dimensions. 
+
+1) How much do models benefit from hints?: Final Fix Rate and Gap Closure (GC) capture complementary aspects of feedback-driven improvement. Final Fix measures whether interaction eventually produces a fully correct program, while GC measures how much of the remaining opportunity the model can close at the end of the repair trajectory. DeepSeek achieves the highest Final Fix Rate, reaching 99.31%, indi-cating the strongest complete-repair capability . Its GC is also the highest. While Gemini starts lower than DeepSeek, it also closes the gap quite well (97.51%), ending with the Final Fix Rate of 95.45%. Thus, high GC reflects responsiveness to feed-back and partial improvement, while high Final Fix reflects the ability to convert that progress into fully correct solutions .As a sanity check, we compare controlled feedback with a no-hint multi-turn baseline . In the no-hint setting, models can revise their code for the same number of turns but receive no scenario-level hints. Gemini 2.5 Flash Lite reaches 78.63% Final Fix Rate without hints, compared with 95.45% under controlled feedback; Qwen3 Coder 30B reaches 57.72%, com-pared with 90.90%. These gains suggest that PAIR-B ENCH ’s improvements are not merely due to repeated prompting, but are driven by repair-relevant hints. This is consistent with prior interactive-feedback benchmarks showing that feedback-guided repair improves over no-feedback interaction [15], [10]. 
+
+2) Do models use targeted hints effectively?: Targeted Re-pair Success (TRS) measures whether a model fixes the failure scenario explicitly described by the current hint. DeepSeek achieves the highest TRS, indicating that it most reliably repairs the hinted failure regions. Gemini, GPT-4o-mini, and Qwen form the next group, suggesting that they can often act on targeted hints but do so less consistently than DeepSeek. In contrast, weaker models obtain lower TRS, showing that scenario-level feedback does not automatically translate into TABLE IV METRIC -WISE RANKING SUMMARY (RQ1). 
+
+Rank Initial Targeted Broader Behavior Progress Hint Final Net Turns Fix Repair Repair Preservation Monotonicity Efficiency Fix Gain to Fix 
+
+1 DeepSeek DeepSeek Gemini DeepSeek DeepSeek DeepSeek DeepSeek Gemini DeepSeek 
+
+2 Gemini Gemini Ministral Qwen Qwen GPT Gemini Qwen Gemini 
+
+3 Qwen GPT DeepSeek GPT GPT Gemini Qwen Mistral GPT 
+
+4 GPT Qwen Qwen Llama Gemini Qwen Llama Ministral Qwen 5 Llama Llama Mistral Gemini Llama Ministral Ministral Gemma Gemma 6 Ministral Ministral Gemma Mistral Ministral Llama GPT DeepSeek Mistral 7 Mistral Mistral Llama Ministral Mistral Mistral Mistral Llama Ministral 8 Gemma Gemma GPT Gemma Gemma Gemma Gemma GPT Llama 
+
+Model Average Rank ↓
+
+DeepSeek 1.56 
+
+Gemini 2.22 
+
+Qwen 2.89 GPT 4.33 Ministral 5.44 Llama 5.78 Mistral 6.33 Gemma 7.44 0 20 40 60 80 100    
+
+> Scenario distribution (%)
+> DeepSeek V3.2
+> Gemini 2.5 Flash Lite
+> Qwen3 Coder 30B
+> GPT-4o-mini
+> Llama 3.3 70B
+> Ministral 14B
+> Mistral Small 3.2 24B
+> Gemma 3 27B
+> 54.5
+> 33.9
+> 28.8
+> 34.5
+> 24.3
+> 25.9
+> 26.2
+> 20.1
+> 14.0
+> 15.9
+> 17.3
+> 15.3
+> 15.6
+> 15.4
+> 16.7
+> 12.5
+> 6.8
+> 8.9
+> 10.0
+> 8.6
+> 11.7
+> 11.0
+> 10.3
+> 7.1
+> 24.7
+> 41.3
+> 43.8
+> 41.7
+> 48.4
+> 47.7
+> 46.8
+> 60.3
+> Solved with L1--L2 Solved with L3--L4 Solved with L5--L6 Unsolved
+
+Fig. 3. Hint-level success and fail distribution (RQ1). 
+
+targeted repair. These results demonstrate the value of sepa-rating targeted feedback use from final correctness .Hint Efficiency (HE) complements TRS by measuring how much assistance is needed to close a targeted scenario. A model with high TRS but low HE can repair hinted scenarios, but only after receiving more explicit guidance. Conversely, a model with high HE can close scenarios using shallower hints, indicating stronger diagnostic and refinement ability. DeepSeek ranks first in both TRS and HE, showing that it not only repairs targeted scenarios most reliably, but also often does so with less direct feedback. This combination distingui-shes strong targeted repair from hint-dependent repair. GPT-4o-mini has slightly higher HE than Qwen, but Qwen has higher Final Fix, BP, and PMR. That contrast would show that needing less assistance on closed scenarios does not necessar-ily imply better overall repair stability or final convergence. 
+
+3) How much assistance do models need?: Fig. 3 pro-vides a finer-grained view of hint dependence by stratifying attempted scenarios according to the hint level at which they are closed. Percentages are computed over all attempted scenarios, including unresolved ones. DeepSeek closes the largest fraction of scenarios with shallow L1–L2 hints and leaves the smallest unresolved portion, showing that it can often infer repairs from weak diagnostic evidence. In contrast, weaker models leave larger unresolved portions or require deeper L5–L6 guidance, indicating greater dependence on explicit repair information. Thus, two models with similar final repair outcomes may still differ substantially in the amount of assistance they require. This stratification supports our key idea of adaptive hint-depth control : PAIR-B ENCH does not 0 5 10 15 20 
+
+> ClosedFailureCoverage (%)
+> Mistral Small 3.2 24B
+> Gemma 3 27B
+> Ministral 14B
+> Gemini 2.5 Flash Lite
+> Llama 3.3 70B
+> GPT-4o-mini
+> Qwen3 Coder 30B
+> DeepSeek V3.2
+> 10.94
+> 15.39
+> 15.47
+> 15.80
+> 17.18
+> 17.72
+> 18.31
+> 20.45
+
+Fig. 4. HintedClosedCoverage by candidate models (RQ1). 
+
+merely record whether feedback helps, but identifies the level of assistance at which each model can make progress. Models that close more scenarios at L1–L2 demonstrate stronger diagnostic repair ability, whereas models that require L5–L6 hints or remain unresolved depend more on explicit guidance. 
+
+4) Do models progressively close failure regions?: We de-fine a new metric, HintedClosedCoverage (HCC), to measure the fraction of initially failing test cases that were both exposed through progressive hints and closed by the final solution. HCC assesses the effect of failure-region control for pro-gressive mechanism, i.e., a model also needs to close the exposed/hinted failure regions. Formally, let F0 denote the set of tests failed by the initial solution, H denote the set of failing tests selected for hints during the interaction, and PT denote the set of test cases passed by the final solution. We define 
+
+HintedClosedCoverage = |F0∩H∩PT ||F0| . Fig. 4 shows that stronger models make more durable progress and close a larger fraction of the initially failing space through hinted regions. DeepSeek achieves the highest HCC at 20.45%, followed by Qwen, GPT, etc. The results show that failure-region control 
+
+provides a measurable way to track how much of the initial failure space is closed through controlled, scenario-level hints .
+
+5) Do targeted repairs generalize to other failures?: 
+
+Broader Repair Gain (BRG) measures whether a repair extends beyond the hinted scenario. BRG is much smaller than TRS for all models, suggesting that most improvements are localized to the targeted failure region. Gemini ranks first on BRG, fol-lowed by Ministral and DeepSeek, showing stronger ability to generalize from controlled hints to other hidden failures. The gap between TRS and BRG supports the need for progressive evaluation: fixing one hinted scenario does not imply that the 0 1 2 3 4 5 6 7 8 9 10 
+
+> Repair Turn
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> Pass Rate (%)
+> DeepSeek-V3.2
+> Gemini-2.5-Flash-Lite
+> Qwen3-Coder-30B
+> GPT-4o-mini
+> Llama-3.3-70B
+> Ministral-14B
+> Mistral-Small-3.2
+> Gemma-3-27B
+
+Fig. 5. Pass-rate trajectories for a single repair instance for candidate models. 
+
+model has solved other failure regions, so the benchmark must expose and evaluate multiple regions over time .
+
+6) Are repair trajectories stable?: Behavior Preservation (BP) and Progress Monotonicity Rate (PMR) measure whether models improve without destabilizing previously correct be-havior. The two metrics are complementary. BP captures test-level regression by measuring if tests that previously passed remain passing after a repair, while PMR captures pass-rate-level stability by measuring if the overall pass rate decreases across turns. A model may maintain a non-decreasing pass rate while still changing which tests pass, so PMR alone can hide behavioral churn; BP helps expose such regressions. DeepSeek and Qwen perform better on both BP and PMR, indicating that their repairs are not only effective but also stable across turns. In contrast, models with weaker preservation or monotonicity may still benefit from feedback, but their repair trajectories are less reliable since later edits can undo previously correct be-havior. This shows that progressive repair should also measure 
+
+whether the improvement is preserved during the interaction .Fig. 5 illustrates how models can follow different repair tra-jectories on an instance. Stronger models reach full correctness in fewer turns: Qwen and GPT-4o-mini reach 100% pass rate by turn 3. Weaker models require more turns and show less stable progress. Llama and Ministral eventually reach 100%, but only after several low-progress or regressive turns. Gemma shows substantial partial progress but then regresses to 0%. This example highlights why PAIR-B ENCH evaluates the full repair trajectory rather than only the final outcome. 
+
+7) How efficiently do models converge?: Because ‘Turns to Fix’ is computed only over initially failing instances that are eventually repaired, it should be interpreted together with Final Fix Rate: a low Turns to Fix indicates fast convergence only among solved instances, not necessarily stronger repair coverage overall. DeepSeek ranks first on Turns to Fix while also achieving the highest Final Fix Rate, indicating that it can translate feedback into complete repairs both reliably and quickly. Gemini and GPT-4o-mini also require relatively few turns, suggesting efficient use of feedback on instances they successfully repair. In contrast, Qwen reaches a high Final Fix Rate but requires more turns, indicating strong final repair abil-ity but weaker convergence efficiency. This distinction matters for progressive repair workflows , where repeated feedback turns impose cost even when the final repair succeeds. Fig. 6 reports the cumulative Final Fix Rate by turn (over 0 1 2 3 4 5 6 7 8 9 10 
+
+> Hint Turn
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> 90
+> 100
+> Cumulative Final Fix Rate (%)
+> DeepSeek-V3.2
+> Gemini-2.5-Flash-Lite
+> Qwen3-Coder-30B
+> GPT-4o-mini
+> Llama-3.3-70B
+> Ministral-14B
+> Mistral-Small-3.2
+> Gemma-3-27B
+
+Fig. 6. Progressive improvement in cumulative Final Fix Rate (RQ1). 
+
+10 feedback turns), showing both convergence speed and final repair coverage: a steeper early rise shows that a model quickly converts feedback into complete repairs. DeepSeek starts from the highest Initial Fix Rate, rises sharply in the first few turns, and approaches near-complete repair by the end of the budget. Gemini follows a similar but lower trajectory, with steady early gains and strong final coverage. The other models improve more gradually. Qwen starts much lower than Gemini but steadily catches up to the third-highest final coverage, indicating strong eventual repair ability. Mistral Small and Gemma remain lower throughout, suggesting that feedback helps them improve but less often leads to complete repair. 
+
+8) Which models are strongest overall?: Table IV summa-rizes the metric-wise ranking. We do not treat the average rank as a principled aggregate score. Instead, we use it to provide a descriptive view of model repair profile . DeepSeek is the strongest all-around model, ranking first in most metrics and combining high initial correctness, effective targeted repair, strong preservation, high hint efficiency, high final repair, and fast convergence. Gemini and Qwen form the next tier with different strengths: Gemini is stronger in broader repair and net improvement, while Qwen is stronger in preservation, monotonicity, and final repair. Other models show substantial Gap Closure but lower Final Fix Rates, weaker stability, or longer convergence, suggesting that they benefit from feedback but less consistently convert partial progress into reliable full repair. Overall, this shows that good interactive repair depends on final correctness, and also on targeted repair, progressive improvement, stability, hint efficiency, and convergence. 
+
+B. Robustness of Controlled Feedback (RQ2) 1) Setting and Metrics: RQ2 evaluates whether controlling feedback generation makes interactive program-repair evalua-tion more stable. We compare two settings that use the same initial candidate programs, evaluated models, turn budget, execution environment, and feedback-generation model; the only difference is the feedback protocol. Controlled Feedback 
+
+is PAIR-B ENCH . Vanilla Feedback is an ablated baseline inspired by prior interactive feedback evaluation [15], where the feedback model generates a hint at each turn without scenario-level testcase selection or hint-depth control. Both settings start from the same initial candidate repairs, so the Initial Fix Rate is identical for each model. The com-parison thus focuses on the interactive stage after feedback is TABLE V ROBUSTNESS COMPARISON BETWEEN CONTROLLED FEEDBACK (O URS ) 
+
+> AND
+
+VANILLA FEEDBACK ACROSS THREE REPEATED RUNS (RQ2).                                                                                                                                                                                                              
+
+> Model Init.Fix ↑Setting Repair Rate ↑Preserve.Rate ↑Final Fix ↑Turns to Fix ↓
+> DeepSeek 65.68 Control 23.91 ±0.18 98.27 ±0.06 99.18 ±0.16 2.57 ±0.05
+> Vanilla 32.70 ±1.24 98.75 ±0.31 96.44 ±0.82 2.05 ±0.14 Gemini 53.18 Control 27.74 ±0.31 93.72 ±0.12 95.31 ±0.21 3.24 ±0.07
+> Vanilla 40.90 ±1.75 95.08 ±0.52 97.50 ±0.65 2.23 ±0.16 Qwen 35.90 Control 23.06 ±0.20 95.14 ±0.10 90.76 ±0.19 3.84 ±0.06
+> Vanilla 33.76 ±0.61 95.73 ±0.58 93.94 ±0.76 2.58 ±0.13 GPT 29.77 Control 18.28 ±0.17 94.86 ±0.09 85.32 ±0.18 3.70 ±0.05
+> Vanilla 28.85 ±0.72 95.69 ±0.61 90.30 ±0.51 2.41 ±0.12 Llama 27.72 Control 20.07 ±0.28 93.68 ±0.14 85.64 ±0.31 4.36 ±0.08
+> Vanilla 30.28 ±1.42 92.06 ±0.70 90.84 ±4.28 2.92 ±0.25 Ministral 22.95 Control 21.39 ±0.23 91.31 ±0.13 85.72 ±0.25 4.29 ±0.07
+> Vanilla 32.67 ±0.94 92.20 ±0.43 91.21 ±0.82 2.78 ±0.12 Mistral 13.40 Control 20.66 ±0.25 92.68 ±0.11 79.94 ±0.28 4.35 ±0.06
+> Vanilla 31.18 ±0.74 95.31 ±0.34 85.30 ±1.52 2.85 ±0.13 Gemma 10.22 Control 17.58 ±0.27 90.26 ±0.15 72.18 ±0.32 4.29 ±0.08
+> Vanilla 27.42 ±1.36 91.47 ±0.78 80.18 ±2.35 2.96 ±0.21
+
+introduced. For each setting, we run the benchmark three times and report the mean and standard deviation. Since Vanilla Feedback does not define targeted scenarios or hint levels, we use metrics shared by both settings: Repair Rate, Preservation Rate, Final Fix Rate, and Turns to Fix. We define the turn-level Repair Rate as the fraction of previously failing tests that become passing after the current repair RepairRate i,t = 
+
+> |Fi,t −1∩Pi,t ||T i|
+
+. Final Fix Rate measures the fraction of instances that are fully repaired within the budget, and Turns to Fix measures convergence speed among fully repaired instances. 
+
+2) Robustness Comparison: Table V reports a repeated-run stability analysis over three runs. While this number of runs limits strong statistical claims about variance, the pattern is consistent: Controlled Feedback yields lower run-to-run varia-tion than Vanilla Feedback in every model-metric comparison across all eight models and four shared metrics. Averaged across models, the standard deviation of Repair Rate decreases from 1.10 to 0.24, Preservation Rate from 0.53 to 0.11, Final Fix Rate from 1.46 to 0.24, and Turns to Fix from 0.16 to 0.07 when moving from Vanilla to Controlled Feedback. These correspond to relative reductions of approximately 78%, 79%, 84%, and 56%, respectively. Thus, the repeated-run results support that controlling the targeted failure region and hint depth improves the stability of interactive repair evaluation. 
+
+3) Statistical Testing: We measure ranking stability with Kendall’s τ by ranking models independently in each repeated run and averaging τ over all run pairs; for Turns to Fix, lower values are ranked higher. From Table VI, Controlled Feedback produces more stable rankings than Vanilla Feedback across all shared metrics, with a higher average τ (0.982 vs. 0.905 ). This indicates that PAIR-B ENCH can reduce metric variance as well as preserve model ordering across repeated evaluations. 
+
+4) Mean performance versus stability: Vanilla Feedback often gives higher mean Repair Rate, higher mean Final Fix Rate, and fewer Turns to Fix. We do not interpret this as evidence that Vanilla Feedback is a better evaluation. Because Vanilla Feedback does not control the targeted failure region or 
+
+TABLE VI RANKING STABILITY BY KENDALL ’S τ STATISTICAL TEST .               
+
+> Setting Repair Preserve Final Turns Avg.
+> Controlled 1.000 1.000 1.000 0.928 0.982
+> Vanilla 0.952 0.952 0.857 0.857 0.905
+
+TABLE VII HYPERPARAMETER SENSITIVITY RESULTS (RQ3). G REEN , BLUE , AND ORANGE MARK THE TOP -1, TOP -2, AND TOP -3 VALUES .                                                           
+
+> Setting Model Initial Fix ↑Final Fix ↑Prog. Mono. ↑Hint Eff. ↑
+> Main setting:
+> α= 10 , β = 3
+> Gemini 53.18 95.45 81.39 3.76
+> Llama 27.72 85.90 71.61 3.21
+> Mistral 13.40 79.77 76.35 3.02
+> Larger budget:
+> α= 15 , β = 4
+> Gemini 53.18 98.18 83.81 3.64
+> Llama 27.72 94.77 73.38 3.07
+> Mistral 13.40 90.22 79.00 2.95
+> Smaller scenario budget:
+> α= 10 , β = 2
+> Gemini 53.18 96.13 79.90 3.45
+> Llama 27.72 79.09 71.68 2.90
+> Mistral 13.40 71.81 78.71 2.65
+> Alternative feedback model: DeepSeek V3.2 Gemini 53.18 92.04 82.54 3.28
+> Llama 27.72 75.00 73.29 2.93
+> Mistral 13.40 67.50 77.81 2.53
+
+hint depth, different runs may expose different failure modes or reveal different levels of repair directness. This can make some runs easier, but also makes the measured outcome more dependent on feedback randomness. In contrast, Controlled Feedback has lower variance and clearer attribution: each repair attempt is tied to a known failure scenario and a known hint-depth level. Thus, RQ2 supports Controlled Feedback as a more stable protocol for measuring interactive APR capability. 
+
+C. Hyperparameter Sensitivity (RQ3) 
+
+RQ3 evaluates whether PAIR-B ENCH ’s model comparisons are robust to varied hyperparameters. We focus on three rep-resentative models from different performance tiers: Gemini, Llama, and Mistral. We vary the total interaction budget ( α), the per-scenario refinement budget (β), and the feedback model (DeepSeek V3.2). As seen in Table VII, the relative or-dering is largely stable across settings: Gemini consistently ranks highest in Final Fix Rate and Hint Efficiency, followed by Llama and Mistral, yielding Kendall’s τ =1.0. This suggests that the ranking is not an artifact of a single budget choice or feedback generator. Increasing the budget improves Final Fix Rate for all models, especially Llama and Mistral, while reduc-ing the per-scenario budget mainly hurts these weaker models and lowers Hint Efficiency. This suggests that additional refinement opportunities help weaker models, whereas limiting scenario-level refinement makes targeted repair harder. Using DeepSeek V3.2 as the feedback model preserves the same relative ordering, but lowers Final Fix Rate and Hint Ef-ficiency compared with the main setting, especially for Llama and Mistral. Interestingly, Progress Monotonicity remains comparable or slightly higher. Overall, these results show that rankings are reasonably stable under the tested parameter changes, while absolute performance reflects the interaction budget and the amount and quality of the feedback source. VI. C ONCLUDING REMARKS 
+
+PAIR-B ENCH reveals that model improvement is multidi-mensional. Models differ not only in whether they eventually pass all tests, but also in how precisely they use targeted hints, how much assistance they require, whether repairs generalize beyond the hinted scenario, and whether progress remains stable across turns. Our future work includes adding the adaptive process to the question level with easy, medium, and hard problems, and adaptively challenging the target model. REFERENCES [1] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. de Oliveira Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman, A. Ray, R. Puri, G. Krueger, M. Petrov, H. Khlaaf, G. Sastry, P. Mishkin, B. Chan, S. Gray, N. Ryder, M. Pavlov, A. Power, L. Kaiser, M. Bavarian, C. Winter, P. Tillet, F. P. Such, D. Cummings, M. Plappert, F. Chantzis, E. Barnes, A. Herbert-Voss, W. H. Guss, A. Nichol, A. Paino, N. Tezak, J. Tang, I. Babuschkin, S. Balaji, S. Jain, W. Saunders, C. Hesse, A. N. Carr, J. Leike, J. Achiam, V. Misra, E. Morikawa, A. Radford, M. Knight, M. Brundage, M. Murati, K. Mayer, P. Welinder, B. McGrew, D. Amodei, S. McCandlish, I. Sutskever, and W. Zaremba, “Evaluating large language models trained on code,” CoRR , vol. abs/2107.03374, 2021. [Online]. Available: https://arxiv.org/abs/2107.03374 [2] N. Jain, K. Han, A. Gu, W.-D. Li, F. Yan, T. Zhang, S. Wang, A. Solar-Lezama, K. Sen, and I. Stoica, “Livecodebench: Holistic and contamination free evaluation of large language models for code,” in 
+
+The Thirteenth International Conference on Learning Representations ,2025. [Online]. Available: https://openreview.net/forum?id=chfJJYC3iL [3] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. R. Narasimhan, “SWE-bench: Can language models resolve real-world github issues?” in The Twelfth International Conference on Learning Representations , 2024. [Online]. Available: https://openreview.net/forum?id=VTF8yNQM66 [4] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury, “Autocoderover: Autonomous program improvement,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis , ser. ISSTA 2024. New York, NY, USA: Association for Computing Machinery, 2024, p. 1592–1604. [Online]. Available: https://doi.org/10.1145/3650212.3680384 [5] C. S. Xia, Y. Deng, S. Dunn, and L. Zhang, “Agentless: Demystifying llm-based software engineering agents,” CoRR , 2024. [6] E. K. Smith, E. T. Barr, C. Le Goues, and Y. Brun, “Is the cure worse than the disease? overfitting in automated program repair,” in 
+
+Proceedings of the 2015 10th Joint Meeting on Foundations of Software Engineering, ESEC/FSE 2015, Bergamo, Italy, August 30 - September 4, 2015 , E. D. Nitto, M. Harman, and P. Heymans, Eds. ACM, 2015, pp. 532–543. [Online]. Available: https://doi.org/10.1145/2786805.2786825 [7] Y. Wang, M. Pradel, and Z. Liu, “Are ”solved issues” in swe-bench really solved correctly? an empirical study,” CoRR , vol. abs/2503.15223, 2025. [Online]. Available: https://doi.org/10.48550/arXiv.2503.15223 [8] OpenAI, “Introducing SWE-bench verified,” https://openai.com/index/introducing-swe-bench-verified/, 2024, accessed: 2026-06-17. [9] M. Yasunaga and P. Liang, “Graph-based, self-supervised program repair from diagnostic feedback,” in Proceedings of the 37th International Conference on Machine Learning, ICML 2020, 13-18 July 2020, Virtual Event , ser. Proceedings of Machine Learning Research, vol. 119. PMLR, 2020, pp. 10 799–10 808. [Online]. Available: http://proceedings.mlr.press/v119/yasunaga20a.html [10] D. Dai, M. Liu, A. Li, J. Cao, Y. Wang, C. Wang, X. Peng, and Z. Zheng, “FeedbackEval: A benchmark for evaluating large language models in feedback-driven code repair tasks,” arXiv preprint arXiv:2504.06939 ,2025. [11] K. Zhang, Z. Li, J. Li, G. Li, and Z. Jin, “Self-edit: Fault-aware code editor for code generation,” in Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), ACL 2023, Toronto, Canada, July 9-14, 2023 ,A. Rogers, J. L. Boyd-Graber, and N. Okazaki, Eds. Association for Computational Linguistics, 2023, pp. 769–787. [Online]. Available: https://doi.org/10.18653/v1/2023.acl-long.45 [12] X. Chen, M. Lin, N. Sch¨ arli, and D. Zhou, “Teaching large language models to self-debug,” in The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 . OpenReview.net, 2024. [Online]. Available: https://openreview.net/forum?id=KuPixIqPiq [13] M. Adnan, Z. Xu, and C. C. N. Kuhn, “Large language model guided self-debugging code generation,” CoRR , vol. abs/2502.02928, 2025. [Online]. Available: https://doi.org/10.48550/arXiv.2502.02928 [14] H. Han, S.-w. Hwang, R. Samdani, and Y. He, “ConvCodeWorld: Benchmarking conversational code generation in reproducible feedback environments,” in International Conference on Learning Representa-tions , 2025. [15] J. Pan, R. Shar, J. Pfau, A. Talwalkar, H. He, and V. Chen, “When benchmarks talk: Re-evaluating code LLMs with interactive feedback,” in Findings of the Association for Computational Linguistics: ACL 2025 ,2025. [16] [Online]. Available: https://pairbench.site [17] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan, E. Jiang, C. Cai, M. Terry, Q. Le, and C. Sutton, “Program synthesis with large language models,” arXiv preprint arXiv:2108.07732 , 2021. [18] J. Yang, A. Prabhakar, K. Narasimhan, and S. Yao, “InterCode: Stan-dardizing and benchmarking interactive coding with execution feed-back,” in Advances in Neural Information Processing Systems , 2023. [19] D. Hendrycks, S. Basart, S. Kadavath, M. Mazeika, A. Arora, E. Guo, C. Burns, S. Puranik, H. He, D. Song, and J. Steinhardt, “Measuring coding challenge competence with APPS,” in Thirty-fifth Conference on Neural Information Processing Systems Datasets and Benchmarks Track (Round 2) , 2021. [Online]. Available: https://openreview.net/forum?id=sD93GOzH3i5 [20] J. Liu, C. S. Xia, Y. Wang, and L. Zhang, “Is your code generated by chatGPT really correct? rigorous evaluation of large language models for code generation,” in Thirty-seventh Conference on Neural Information Processing Systems , 2023. [Online]. Available: https://openreview.net/forum?id=1qvx610Cu7 [21] J. Liu, S. Xie, J. Wang, Y. Wei, Y. Ding, and L. Zhang, “Evaluating language models for efficient code generation,” in 
+
+First Conference on Language Modeling , 2024. [Online]. Available: https://openreview.net/forum?id=IBCBMeAhmC [22] R. Just, D. Jalali, and M. D. Ernst, “Defects4j: a database of existing faults to enable controlled testing studies for java programs,” in 
+
+Proceedings of the 2014 International Symposium on Software Testing and Analysis , ser. ISSTA 2014. New York, NY, USA: Association for Computing Machinery, 2014, p. 437–440. [Online]. Available: https://doi.org/10.1145/2610384.2628055 [23] R. Widyasari, S. Q. Sim, C. Lok, H. Qi, J. Phan, Q. Tay, C. Tan, F. Wee, J. E. Tan, Y. Yieh, B. Goh, F. Thung, H. J. Kang, T. Hoang, D. Lo, and E. L. Ouh, “Bugsinpy: a database of existing bugs in python programs to enable controlled testing and debugging studies,” in Proceedings of the 28th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering , ser. ESEC/FSE 2020. New York, NY, USA: Association for Computing Machinery, 2020, p. 1556–1560. [Online]. Available: https://doi.org/10.1145/3368089.3417943 [24] D. Lin, J. Koppel, A. Chen, and A. Solar-Lezama, “Quixbugs: amulti-lingual program repair benchmark set based on the quixey challenge,” in Proceedings Companion of the 2017 ACM SIGPLAN International Conference on Systems, Programming, Languages, and Applications: Software for Humanity , ser. SPLASH Companion 2017. New York, NY, USA: Association for Computing Machinery, 2017, p. 55–56. [Online]. Available: https://doi.org/10.1145/3135932.3135941 [25] J. Hattie and H. Timperley, “The power of feedback,” Review of Educational Research , vol. 77, no. 1, pp. 81–112, 2007. [26] V. J. Shute, “Focus on formative feedback,” Review of Educational Research , vol. 78, no. 1, pp. 153–189, 2008. [27] D. Wood, J. S. Bruner, and G. Ross, “The role of tutoring in problem solving,” Journal of Child Psychology and Psychiatry , vol. 17, no. 2, pp. 89–100, 1976. [28] L. S. Vygotsky, Mind in Society: The Development of Higher Psycho-logical Processes . Harvard University Press, 1978. [29] MatrixStudio, “Codeforces-python-submissions,” Hug-ging Face dataset, 2024. [Online]. Available: https://huggingface.co/datasets/MatrixStudio/Codeforces-Python-Submissions

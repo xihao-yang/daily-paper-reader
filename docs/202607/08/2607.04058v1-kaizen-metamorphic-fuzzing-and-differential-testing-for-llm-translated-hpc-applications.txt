@@ -1,0 +1,654 @@
+Title: Kaizen: Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications
+
+URL Source: https://arxiv.org/pdf/2607.04058v1
+
+Published Time: Tue, 07 Jul 2026 02:28:46 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# Kaizen: Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 
+
+## OSCAR LUDWIG, Oregon State University, USA 
+
+## NINAD ANKLESARIA, Oregon State University, USA 
+
+## ZHEMING JIN ∗, Oak Ridge National Laboratory, USA 
+
+## SWAROOP POPHALE, Oak Ridge National Laboratory, USA 
+
+## KAUSAR MOSHOOD †, Oregon State University, USA 
+
+## CHRISTIAN J. DEVORE †, Oregon State University, USA 
+
+## BRANDON GILL †, Oregon State University, USA 
+
+## CASSIUS VILLAREAL †, Oregon State University, USA 
+
+## KEITA TERANISHI, Oak Ridge National Laboratory, USA 
+
+## MANISH MOTWANI ✉, Oregon State University, USA 
+
+Large language models (LLMs) are increasingly used to port scientific codes across heterogeneous high-performance computing (HPC) programming models, such as translating CUDA to OpenMP, OpenACC, Kokkos or SYCL. However, current evaluations use compilation success, token-level similarity, or developer-written tests from static benchmarks, which cannot reliably ensure behavioral correctness. We present Kaizen, a metamorphic fuzzing and differential testing framework for evaluating the correctness of LLM-translated HPC code. Kaizen uses metamorphic fuzzing via source-code mutation to generate semantically equivalent programs, grammar-based input fuzzing to explore behavioral diversity, and differential testing to expose semantic divergences between original and translated applications that compile and pass developer-written tests yet produce incorrect scientific results. We evaluate Kaizen on CUDA-to-OpenMP translation of 16 scientific applications from seven domains using three fine-tuned LLMs at kernel-level and full-program granularity. Our evaluation reveals that (1) compilation success is a poor proxy for correctness; (2) LLM-translated programs exhibit systematic compile-time error patterns, with nine categories for kernel-level translation and 27 for full-program translation; (3) semantic errors that survive compilation are often input-dependent and require differential testing to expose; and (4) full-program translation is substantially harder than kernel-level translation. These findings highlight the need for correctness-oriented evaluation of LLM-assisted HPC code translations. CCS Concepts: • Software and its engineering → Software testing and debugging ; Software verification and validation ; •
+
+Computing methodologies → Machine learning ; Artificial intelligence .
+
+1 Introduction 
+
+After the demise of Moore’s law and Dennard scaling, modern high-performance computing (HPC) platforms have evolved primarily by increasing parallelism through multicore CPUs, then manycore architectures, and now accelerator (GPUs) based systems. These architectural shifts have driven continual evolution of programming models and their 
+
+> ∗
+
+Work was completed while affiliated with Oak Ridge National Laboratory 
+
+> †
+
+Authors contributed equally to this research. Authors’ Contact Information: Oscar Ludwig, Oregon State University, Corvallis, Oregon, USA, ludwigo@oregonstate.edu; Ninad Anklesaria, Oregon State University, Corvallis, Oregon, USA, anklesan@oregonstate.edu; Zheming Jin, Oak Ridge National Laboratory, Oak Ridge, USA, zheming.jin@gmail.com; Swaroop Pophale, Oak Ridge National Laboratory, Oak Ridge, USA, pophaless@ornl.gov; Kausar Moshood, Oregon State University, Corvallis, Ore-gon, USA, moshoodk@oregonstate.edu; Christian J. DeVore, Oregon State University, Corvallis, Oregon, USA, devorech@oregonstate.edu; Brandon Gill, Oregon State University, Corvallis, Oregon, USA, gillb3@oregonstate.edu; Cassius Villareal, Oregon State University, Corvallis, Oregon, USA, villarec@oregonstate.edu; Keita Teranishi, Oak Ridge National Laboratory, Oak Ridge, USA, teranishik@ornl.gov; Manish Motwani, Oregon State University, Corvallis, Oregon, USA, motwanim@oregonstate.edu. 
+
+1
+
+> arXiv:2607.04058v1 [cs.SE] 4 Jul 2026
+
+2 Ludwig et al. specifications to sustain performance gains from massive parallelism and emerging hardware features. Realizing these gains when porting scientific applications to accelerator-based systems requires careful translation and adaptation of legacy code-bases that have evolved over decades. Recent advances in LLM- and AI-assisted translation (e.g., CodeRosetta [ 38 ], Fortran2CPP [ 6 ], LASSI [ 10 ], and UniPar [ 4]) and performance-portable programming models and abstractions such as OpenMP [ 26 ], SYCL [ 17 ], OpenACC [ 25 ], and Kokkos [ 5] can reduce developer effort by providing functional, portable code that is not tightly coupled with the underlying hardware. Our developed ChatPORT [ 28 ]raised CUDA →OpenMP kernel translation correctness rates by 43.2% over baseline LLMs, with the best model reaching 79%, and a SYCL extension [ 18 ] achieves up to 81.7% correctness. However, testing and verification remain significant bottlenecks as both, the capabilities of the LLMs and the specifications of these portable programming models evolve. Unlike the sizable literature on performance portability and code modernization [ 1] illustrated by the U.S. DOE Exascale Computing Project’s successful adaptation of approximately 70 software products and 30 applications to accelerator platforms, there is very little prior work that focuses specifically on testing and verification of LLM-based scientific code translators. In practice, evaluation remains largely manual and ad hoc: teams depend on informal comparisons, project-specific scripts, and sparse unit tests [ 20 ]. Recurring gaps include the lack of systematic methods for establishing behavioral equivalence across programming models, inconsistent treatment of numerical stability under changing floating-point behavior, and weak or absent integration of correctness verification into routine workflows. These gaps are exacerbated by LLM-translated codes, as programs using different programming models can look and behave in substantially different ways while achieving the same computational goals. Consequently, even when automated translation accelerates code generation, developers must still expend substantial manual effort to re-establish confidence in correctness and scientific validity. Current evaluation practices for LLM-based code translation rely on compilation success, token-level similarity, and developer-written tests from static benchmarks on which LLMs are likely to have been trained. None of these can reliably ensure that translated code preserves the original program’s computational behavior. A program can compile and execute successfully on standard test inputs while harboring semantic errors that manifest only under specific input conditions. This reliance on shallow proxies creates false confidence in translation quality, particularly for HPC scientific applications where numerical correctness is paramount. We present Kaizen, a framework that combines metamorphic testing, grammar-based fuzzing, and differential testing to evaluate the effectiveness of LLM-based HPC code translators on arbitrarily generated HPC scientific programs by measuring the behavioral correctness of the LLM-translated programs. Kaizen uses semantics-preserving source code mutations to generate diverse program variants as translation inputs, applies runtime grammar-based input fuzzing to systematically explore the behavioral space, and employs differential testing to expose semantic divergences between original and translated programs that compile and pass fixed test inputs yet produce incorrect scientific results. Although Kaizen is designed to be generic across HPC programming models, in this work we prototype and evaluate it for CUDA-to-OpenMP translation across 16 scientific applications from 7 domains using three top-performing LLMs of ChatPORT [ 28 ], a suite of fine-tuned LLMs for HPC code porting, at both kernel-level ( kernels are computationally intensive, self-contained functions of an HPC application that execute on parallel hardware) and full-program translation granularity. We investigate four research questions: 
+
+RQ1: To what extent do compilation success and developer-written tests from static benchmarks predict semantic correctness in LLM-translated HPC applications? Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 3
+
+Answer: The predictive power of compilation success and developer-written tests is application-dependent: neither proxy can reliably ensure semantic correctness. Programs that compile and pass developer-written tests can produce wrong outputs under inputs that those tests never exercise, revealing a substantial gap between shallow evaluation proxies and true behavioral correctness. For example, winograd and lif achieve compilation rates as high as 0.94 and 1.00 yet correctness of 0.00, while background-subtract and cross achieve up to 1.00 compilability and correctness, confirming that only differential testing with diverse inputs can reliably distinguish correct from incorrect translations. 
+
+RQ2: What compile-time errors do LLM-based HPC code translators introduce when translating CUDA-to-OpenMP kernels? 
+
+Answer: Kernel-level translations exhibit nine compile-time error categories. Several overlap with general LLM translation failures reported in prior work, while Incorrect Loop Construct , Unsupported Construct Usage , and Invalid Construct Usage are specific to the semantic gap between CUDA’s hierarchical execution model and OpenMP’s directive-based programming model. 
+
+RQ3: What semantic errors survive compilation in LLM-translated HPC applications, and how effective is Kaizen in exposing them? 
+
+Answer: Semantic errors in LLM-translated HPC applications are input-dependent and elude fixed developer-written tests. Kaizen’s metamorphic fuzzing and differential testing systematically exposes six categories of semantic errors: 
+
+Intermediate Variable Elimination , Execution Model Assumption Transfer , Loop Bound Error , Missing Statement Fault ,
+
+Shared Memory Scope Mistranslation , and Multi-dimensional Index Flattening . These errors produce incorrect scientific results only under specific input conditions, confirming that behavioral testing with diverse inputs is necessary to detect them. 
+
+RQ4: How does translation granularity (kernel vs full-program) affect LLM translation success and error profiles? 
+
+Answer: Full-program translation is substantially harder than kernel-level translation. While kernel-level translation achieves up to 72% correctness, full-program translation fails to compile entirely for 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B , with errors spanning 27 categories across offloading , memory management , parallelism , code validity , and compatibility . Kernel-level fine-tuning degrades full-program compilation and correctness for two of the three ChatPORT variants, suggesting over-specialization toward kernel-only output. This paper makes the following contributions: 
+
+• Kaizen, a metamorphic fuzzing and differential testing framework for correctness evaluation of LLM-based HPC code translators. 
+
+• A comprehensive empirical study of CUDA-to-OpenMP translation across 16 scientific applications from 7 domains using three top-performing fine-tuned LLMs at both kernel-level and full-program granularity. 
+
+• A two-level taxonomy of compile-time errors in LLM-based CUDA-to-OpenMP translation, comprising 9 cate-gories for kernel-level translation and 27 categories for full-program translation across six error groups. 
+
+• Empirical evidence that neither compilation success nor developer-written tests from static benchmarks can reliably ensure semantic correctness, and that metamorphic testing with grammar-based fuzzing and differential testing is necessary to expose input-dependent semantic errors in LLM-translated HPC programs. 
+
+• A replication package containing all code and data to replicate the results presented in this paper available at https://github.com/ANSWER-OSU/Kaizen-Replication-Package. 4 Ludwig et al. The remainder of this paper is organized as follows. Section 2 provides background on HPC code porting and LLM-based translation, and Section 3 describes the primary goals and challenges we address in this work and motivates the need for correctness-oriented evaluation of LLM-translators through a real-world example. Section 4 describes the Kaizen framework. Section 5 presents our experimental evaluation. Section 6 places our work in the context of related work. Section 7 discusses our findings while Section 8 addresses threats to their validity, and Section 9 summarizes our contributions. 
+
+2 Background 
+
+This section describes the background on translating high-performance computing (HPC) applications and automated testing techniques that Kaizen builds upon. 
+
+2.1 HPC Code Porting and LLM-Based Translation 
+
+High-performance computing applications increasingly rely on GPU accelerators to sustain performance gains as CPU clock speeds plateau. CUDA [ 22 ] remains the dominant programming model for NVIDIA GPUs, but its hardware-specific nature limits portability across diverse GPU architectures. Performance-portable alternatives such as OpenMP target offloading [ 26 ], SYCL [ 17 ], OpenACC [ 25 ], and Kokkos [ 5] allow developers to write code that runs across different hardware without modification. Porting existing CUDA codebases to these models is a high-priority activity in the HPC community, particularly as organizations seek to run scientific applications on heterogeneous systems from multiple vendors. Manual porting is labor-intensive and error-prone. A CUDA kernel (computationally intensive, self-contained function that executes on parallel hardware) must have its thread hierarchy, memory management, and synchronization primitives translated to semantically equivalent constructs in the target programming model. For large scientific codebases, this can involve months of developer effort. LLM-based translation has emerged as a promising approach to accelerating this process. Tools such as CodeRosetta [ 38 ], Fortran2CPP [ 6 ], LASSI [ 10 ], and UniPar [ 4 ] use pre-trained or fine-tuned LLMs to automate translation across programming models. ChatPORT [ 28 ], developed by the authors, is a suite of fine-tuned LLMs specialized for HPC code porting that raised CUDA-to-OpenMP correctness rates by 43.2% over baseline LLMs, with the best model reaching 79% correctness. A SYCL extension [ 18 ] achieves up to 81.7% correctness on kernel-level translations. Despite these advances, evaluation of LLM-based translation remains limited. Most approaches rely on three metrics: compilation success, token-level similarity [ 30 ], and developer-written tests from static benchmarks on which LLMs are likely to have been trained. Compilation success verifies syntactic validity but says nothing about whether the translated program computes the same results as the original. Token-level similarity measures surface-level textual resemblance, which does not correlate reliably with semantic equivalence. None of these can reliably ensure that a program does not harbor subtle semantic errors that manifest only under specific input conditions. 
+
+2.2 Testing LLM-Translated Code 
+
+Detecting semantic errors in LLM-translated code requires testing techniques that go beyond compilation checks. Three techniques are central to Kaizen: metamorphic testing, fuzzing, and differential testing. 
+
+Metamorphic testing [ 33 ] detects bugs by exploiting metamorphic relations: properties that specify how program outputs should change when inputs are transformed in a known way. If a transformation preserves program semantics, the output behavior should be preserved before and after the transformation. In Kaizen, we apply semantics-preserving source code mutations to generate diverse program variants as translation inputs. If an LLM correctly translates a Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 5program, it should correctly translate all semantically equivalent variants. A translation that fails on a variant but succeeds on the original reveals a robustness gap in the LLM’s translation capability and a translation correctness failure. 
+
+Fuzzing [21 ] is an automated testing technique that generates diverse inputs to exercise program behavior beyond what fixed test cases cover. Grammar-based fuzzers generate inputs that conform to a specified syntax or structure, ensuring validity while maximizing diversity. Kaizen uses grammar-based fuzzing at two levels: source code fuzzing to generate diverse program variants as translation inputs, and runtime input fuzzing to explore the behavioral space of translated programs under diverse execution parameters. 
+
+Differential testing [13 ] runs two implementations of the same program on identical inputs and flags discrepancies between their outputs. It is particularly effective for detecting semantic errors in translated code, where the original and translated versions should produce identical results. Kaizen applies differential testing by executing the original CUDA program and its LLM-translated OpenMP counterpart on the same fuzzed inputs, comparing outputs using configurable error norms to account for floating-point precision differences. Together, these three techniques form a correctness-oriented evaluation methodology that goes beyond shallow proxies. Rather than asking whether a translation compiles successfully, passes developer-written tests, or resembles the ground-truth code at the token level, Kaizen asks whether it behaves correctly across a diverse range of inputs and program variants. 
+
+3 Motivation 
+
+This section motivates our work by describing the primary goals and challenges we address along with an illustrative real-world example showing the need for Kaizen. 
+
+3.1 Goals and Challenges 
+
+The primary goal of this work is to provide a systematic methodology to verify that LLM-translated HPC software preserves semantic correctness. Shallow evaluation proxies such as compilation success, token-level similarity, and developer-written tests from static benchmarks on which LLMs are likely to have been trained cannot reliably ensure that translated code exhibits the same computational behavior as the original implementation. This is particularly critical in HPC and scientific computing domains where numerical correctness and reproducibility are paramount. Evaluating semantic correctness of LLM-generated translations presents several unique challenges: 
+
+Challenge 1: Data Leakage and Memorization. LLMs are trained on massive code corpora that may include benchmark suites and open-source HPC applications. When evaluated on these same benchmarks, high translation accuracy may reflect memorization rather than genuine translation capability. This data leakage makes it difficult to assess whether an LLM can generalize to unseen code patterns. 
+
+Challenge 2: Limited Test Coverage. Conventional testing approaches rely on fixed, developer-written test suites that provide limited coverage of the input space, and these tests often come from the same static benchmarks on which LLMs are likely to have been trained. For complex HPC programs with multiple parameters, array dimensions, and computational paths, static test cases cannot adequately exercise all possible execution behaviors. Subtle semantic bugs may remain undetected under typical test inputs. 
+
+Challenge 3: Hallucination and Subtle Semantic Errors. LLMs can generate syntactically valid code that compiles successfully but contains semantic errors invisible to syntax-based validation. These errors may include incorrect mem-ory access patterns, wrong computational logic, improper synchronization primitives, or platform-specific behaviors that only manifest under specific conditions. 6 Ludwig et al. 
+
+Challenge 4: Cross-Platform Behavioral Differences. HPC programming models such as CUDA, OpenMP, and SYCL have different execution models, memory hierarchies, and synchronization semantics. A translation may produce correct results on one platform but exhibit undefined behavior or produce incorrect outputs on another due to subtle differences in parallel execution semantics. To address these challenges, Kaizen employs a two-level fuzzing strategy combined with metamorphic testing and differential testing to provide rigorous, behavior-focused evaluation of LLM-based HPC code translators. 
+
+3.2 A Motivating Example 
+
+While LLMs have shown promise in translating HPC code between different programming models, these translations can introduce subtle correctness bugs that manifest only under specific input conditions. We demonstrate this challenge through a real-world example of the Leaky Integrate-and-Fire Neuron Model from the HeCBench benchmark suite [ 19 ]. The Leaky Integrate-and-Fire (LIF) model is a fundamental computational neuroscience model that simulates the electrical behavior of biological neurons [ 15 ]. The model is widely used in brain simulation, neuromorphic computing, and spiking neural networks. The LIF benchmark from HeCBench implements this model in CUDA, simulating the membrane voltage dynamics and spike generation of multiple neurons over discrete timesteps. 
+
+Program Inputs and Outputs: The LIF program takes three command-line arguments that define the simulation configuration: (1) neurons_per_item : Number of neurons in each computational item (2) num_items : Number of items to process (3) num_steps : Number of simulation timesteps The total number of neurons simulated is neurons_per_item × num_items , and each neuron is simulated for 
+
+num_steps timesteps with a timestep size of 𝑑𝑡 = 0.1. The program outputs include the spike values for each neuron at the final timestep, along with the average kernel execution time. Correctness is verified by comparing the GPU implementation against a reference CPU implementation using a tolerance of 10 −3.
+
+The Translation Bug: We used 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 LLM to translate Kaizen-generated CUDA variant of the original implementation to OpenMP for CPU execution. The LLM successfully converted the CUDA kernel to OpenMP target directives and maintained the overall program structure. However, the translation introduced a critical semantic error: a single line of code was omitted from the neuron state update logic. Figure 1 shows the diff between the Kaizen-modified CUDA kernel (left) and the corresponding OpenMP-translated kernel (right). As shown, Kaizen randomly added two unused variables (lines 25–30) in the CUDA kernel before the original implementation’s statement that decrements refractory time at each timestep ( ref_time -= dt; ) (line 31). This statement implements the biological refractory period during which a neuron cannot fire again immediately after spiking. While translating the kernel into OpenMP (right), the LLM intelligently removed the unused variable declaration statements and comments inserted by Kaizen, but it also omitted the original code statement causing the refractory period mechanism to fail. Without proper refractory time updates, neurons can exhibit incorrect spiking behavior, producing scientifically invalid simulation results. 
+
+Evading Developer-Provided Test Inputs: For each HeCBench application, we use developer-provided test inputs to start the fuzzing process. Interestingly, for the LIF program, the buggy translation compiled and executed successfully on multiple developer-provided test inputs: (100, 100, 10), (1000 100 10), (500 1000 50) , each simulating distinct number of neurons for different timesteps. When we manually tested both the original CUDA Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 7  
+
+> Fig. 1. Partial diff of the CUDA-to-OpenMP translation of Kaizen-modified variant of the Leaky Integrate-and-Fire (LIF) application from the HeCBench [ 19 ] using 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 . The CUDA kernel (left) contains Kaizen-added unused variables that preserve program semantics. The translated OpenMP kernel (right) removed the unused variables along with the required refractory time decrement statement (line 31 on the left), breaking the neuron model’s biological correctness.
+
+and LLM-translated OpenMP versions with these test inputs, both programs produced identical outputs and passed verification. A developer relying solely on these test inputs would incorrectly conclude that the translation is correct. This false negative occurs because the bug’s manifestation is input-dependent . The missing refractory time decrement only causes observable output differences when all of the following three conditions are met. (1) The random initialization produces specific neuron states for the given array configuration. (2) Neurons enter refractory periods during the simulation. (3) The simulation duration is sufficient for state divergence to accumulate. With the developer-provided test inputs, all these conditions are not met, allowing the buggy translation to produce outputs that coincidentally match the reference implementation. 
+
+3.3 Kaizen’s Systematic Bug Detection 
+
+Kaizen employs grammar-based fuzzing and differential testing to systematically explore the input space beyond what developer-written tests cover. Kaizen generated diverse input configurations and successfully exposed the latent bug in the translated OpenMP version of the LIF program. Table 1 shows two representative Kaizen-generated inputs that revealed the incorrectness. 8 Ludwig et al. 
+
+Table 1. Kaizen-generated inputs expose the translation bug in LIF example, which are missed by the seed inputs.                         
+
+> Input type Input value CUDA OpenMP Outcome
+> Seed (100, 100, 10) PASS PASS False negative Seed (1000, 100, 10) PASS PASS False negative Seed (500, 1000, 50) PASS PASS False negative Fuzzed (10, 128, 1) PASS FAIL Bug detected @0: 0.000 vs 0.001 Fuzzed (2048, 200, 200) PASS FAIL Bug detected @2192: 0.000 vs 0.001
+
+Fuzzed input 1: (10, 128, 1) simulates 1,280 neurons for a single timestep. Despite the minimal configuration, the specific array size causes the random number generator to produce an initialization that exposes the bug immediately. The OpenMP version produces an incorrect spike value at neuron index 0. 
+
+Fuzzed input 2: (2048, 200, 200) simulates 409,600 neurons for 200 timesteps—a production-scale workload. The extended simulation duration amplifies the bug’s effects as neurons spike and enter refractory periods throughout the execution. The mismatch occurs at neuron index 2192. Additionally, this input revealed a secondary issue: the OpenMP runtime emitted a warning about excessive thread requests, indicating the translation also failed to properly handle resource constraints. These results demonstrate three critical insights that motivate Kaizen’s design. (1) Latent bugs evade manual testing : The bug remains dormant under typical test inputs, creating false confidence in translation correctness. (2) Input-space exploration is essential : Different configurations trigger different execution paths, exposing bugs that fixed inputs miss. (3) Semantic correctness requires differential testing : Compilation success, developer-written tests, and runtime stability are insufficient; systematic output comparison across diverse inputs is necessary to ensure behavioral equivalence. 
+
+4 The Kaizen Approach 
+
+This section presents Kaizen, a metamorphic fuzzing and differential testing framework for evaluating the behavioral correctness of LLM-translated HPC programs. Kaizen’s primary goal is to provide a systematic methodology for evaluating semantic equivalence between source and translated code, going beyond compilation success, token-level similarity, and developer-written tests to verify that translations preserve computational behavior across diverse inputs and program variants. We describe the overall architecture using CUDA →OpenMP translation for illustration (Section 4.1), followed by its two core components: source code metamorphic fuzzing (Section 4.2) and runtime input fuzzing with differential testing (Section 4.3). 
+
+4.1 Kaizen Architecture 
+
+Figure 2 illustrates the overall architecture of Kaizen, which evaluates LLM-based code translation of HPC CUDA applications into OpenMP through two parallel pathways that both begin with source code fuzzing but differ in their translation scope. 
+
+Stage 1: Source Code Metamorphic Fuzzing and Validation. Given original HPC CUDA applications, Kaizen ap-plies a program-level fuzzer that uses the 15 grammar-based mutation operators (detailed in Table 2) to generate diverse variants of CUDA programs. Each mutated program is validated by compiling and executing it with developer-provided inputs to ensure semantic preservation. Only variants that compile successfully and produce correct outputs proceed to Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 9CUDA   
+
+> kernel
+> OpemMP
+> kernel
+> program fuzzer
+> seed CUDA programs &
+> inputs
+> mutated CUDA programs
+> kernel extractor
+> mutated CUDA kernels
+> no
+> program
+> compiles
+> and
+> runs? yes yes
+> kernel replacer translated OpenMP programs
+> differential fuzzer
+> compilation and test execution log
+> HecBench
+> Kaizen
+> kernel-level translation
+> ChatPORT
+> LLM
+> CUDA program
+> program-level translation add mutated program back into the pool program-level path kernel-level path seed/fuzzed inputs to execute programs
+> discard
+> 12a 3a 4a 2b
+> 5
+
+Fig. 2. Kaizen framework architecture showing two parallel translation evaluation paths. The kernel-level path extracts and translates individual kernels (following ChatPORT’s approach), while the program-level path translates complete CUDA applications. Both paths use source code fuzzing to generate diverse inputs and converge at differential testing for correctness validation. 
+
+LLM Prompt template : You are an HPC developer with knowledge of CUDA and OpenMP programming models. Translate the following CUDA program into OpenMP while preserving the CUDA runtime semantics and replacing CUDA APIs with OpenMP counterparts. Only generate the program and do not provide any explanations or comments. 
+
+<CUDA source code >
+
+Fig. 3. Prompt template engineered after manually translating a sample of 5 HeCBench programs from CUDA to OpenMP using the top-3 performing LLMs (HPC_Coder, StarCoder, and CodeLlama) for kernel-level translations in ChatPORT [28]. 
+
+the next stage, ensuring that downstream translation failures are attributable to the LLM rather than pre-existing bugs in the mutated source. From this point, the framework branches into two parallel evaluation paths: 
+
+4.1.1 Kernel-Level Translation Path. This consists of Stages 2a–4a. 
+
+Stage 2a: Kernel Extraction. For each validated CUDA program variant, Kaizen extracts individual computational kernels following ChatPORT’s kernel-focused approach [ 18 , 28 ], isolating device-side computation from host-side orchestration code. This extraction is necessary because ChatPORT accepts a single kernel file as input. 
+
+Stage 3a: Kernel Translation. Each extracted CUDA kernel is translated using the three top-performing ChatPORT LLM variants: 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B , 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_7B , and 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B [ 28 ]. These models were fine-tuned on CUDA-to-OpenMP kernel pairs from HeCBench and the OpenMP Validation and Verification suite [ 12 ]. The framework collects all generated OpenMP kernel translations along with any compilation warnings or errors. 
+
+Stage 4a: Kernel Replacement. Translated OpenMP kernels are inserted back into the original developer-written OpenMP programs provided in HeCBench, replacing existing human-written OpenMP kernels while keeping host-side code (memory management, data transfers, kernel launch configurations) unchanged. This design ensures that any correctness failures observed during differential testing can be attributed to kernel translation rather than host-side code issues. This step produces complete OpenMP programs ready for compilation and execution. 
+
+4.1.2 Full-Program Translation Path. This consists of Stage 2b. 
+
+Stage 2b: Full Program Translation. Each validated CUDA program variant is fed in its entirety to LLM to assess its capabilities in translating complete programs. The LLMs must translate not only the computational kernels but also all host-side code including memory allocation ( cudaMalloc → OpenMP target data mapping), data transfers 10 Ludwig et al. 
+
+Table 2. Source code mutation operators in Kaizen for generating diverse translation inputs. All operators preserve semantic equivalence while introducing syntactic variations.                                      
+
+> ID Mutation Operator Description
+> M1 Add dead if-statement block Insert if-statement block with false conditional (e.g., if (false) )M2 Add dead switch-statement block Insert switch-statement block with false or unreachable case labels M3 Add dead loop Insert for/while loop with false conditional (e.g., while (false) )M4 Add unused variable Declare and optionally initialize variables that are never used in the program M5 Add comments Insert natural language comments that may contradict actual code behavior M6 Edit comments Modify existing comments with alternatives M7 Delete comments Remove previously inserted comments M8 Swap variables Reorder consecutive variable declarations that have no data dependencies M9 Reorder predicates Change the order of predicates within if-statements or loop conditionals M10 Add predicates Insert conditional predicates that preserve behavior (e.g., add || false or && true )M11 Rename variable Change variable name and update all subsequent uses throughout the scope M12 Delete added if-statement Remove previously inserted dead if-statement block M13 Delete added switch block Remove previously inserted dead switch-statement block M14 Delete added loop Remove previously inserted dead for/while loop and all code inside M15 Delete added unused variables Remove previously inserted unused variable declarations
+
+(cudaMemcpy → OpenMP target update), kernel launches (CUDA syntax → OpenMP target teams distribute), and error handling. This represents a significantly more complex translation task than isolated kernel translation. We use the same three ChatPORT variants used for kernel-level translation, since no models fine-tuned specifically for full-program translation are currently available. To engineer an effective prompt for full-program translation, multiple authors independently and iteratively developed prompts on a held-out set of 5 HeCBench applications ( Adam ,
+
+Concat , Goulash , Mrc , and Overlay ), comparing LLM-translated versions against developer-written implementations. Authors reconciled their prompts after each iteration, arriving at the prompt template shown in Figure 3. 
+
+4.1.3 Convergence: Differential Testing. This consists of Stages 5a–5c: 
+
+Stage 5a: Compilation Validation. Each translated complete program is compiled using the OpenMP-enabled compiler (e.g., AMD Clang/LLVM). Programs that fail compilation are recorded with their error messages for analysis under RQ2. Successfully compiled programs proceed to next stage. 
+
+Stage 5b: Runtime Input Fuzzing. For each successfully compiled translation, Kaizen generates a comprehensive set of runtime test inputs by fuzzing kernel parameters, array dimensions, and input data values. This runtime fuzzing uses grammar-based input generation to systematically explore the behavioral space to maximize behavioral coverage. 
+
+Stage 5c: Differential Execution and Comparison. The original CUDA program and the translated OpenMP program execute on the same fuzzed inputs. The original runs on NVIDIA GPUs while the translated version runs on CPUs with OpenMP offloading support. Kaizen compares program outputs using configurable error norms and flags discrepancies where outputs exceed the error norms or result in runtime crashes or timeouts as correctness failures. 
+
+4.2 Source Code Metamorphic Fuzzing 
+
+The first component of Kaizen systematically generates diverse variants of input source code to evaluate LLM translation robustness. Unlike random mutation approaches, Kaizen employs grammar-aware transformations that preserve program semantics while maximizing syntactic diversity. This approach applies to both kernel-level and full program translation scenarios. 
+
+4.2.1 Mutation Operators. Table 2 shows 15 carefully designed mutation operators that Kaizen employs to generate semantically equivalent code variants while introducing syntactic and structural diversity. These operators are organized into the following five categories based on their transformation strategy: Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 11 (1) Dead Code Injection Operators (M1–M4) insert unreachable code that does not affect program execution, testing whether the LLM can distinguish executable logic from unreachable code and whether spurious code confuses the translation process. (2) Comment Manipulation Operators (M5–M7) modify documentation to assess whether the LLM relies on comments versus actual code logic for translation decisions. By inserting misleading comments, editing existing ones, or removing them entirely, Kaizen tests whether translation quality depends on documentation cues. (3) Structural Reordering Operators (M8–M10) permute semantically independent code elements, testing whether translation depends on specific code orderings or whether the LLM correctly understands data flow independence. (4) Renaming Operator (M11) systematically change variable names and their references within scope, testing whether translation quality depends on specific naming conventions or whether the LLM correctly analyzes program structure independent of identifier choices. (5) Deletion Operators (M12–M15) remove previously inserted constructs, enabling the framework to explore both addition and removal of code constructs as reverse mutations. Each mutation is validated through compilation and testing using developer-provided tests to ensure semantic preservation before being used as a translation input. 
+
+4.2.2 Grammar-Based Source Code Mutation Strategy. Kaizen uses a grammar-based approach that respects the syntactic structure and semantic constraints of the source programming language. For example, to evaluate C++-based implementations, we use C++ parsers and abstract syntax tree (AST) representations to ensure all generated variants remain well-formed and semantically equivalent. The fuzzing strategy proceeds iteratively by starting from a seed program (e.g., original HeCBench CUDA application), Kaizen applies mutation operators at randomly selected AST nodes, validates semantic preservation through compilation and baseline testing against developer-provided test inputs and reference outputs, and adds valid variants to the corpus. This process continues until reaching user-specified timeout, generating syntactically diverse yet semantically equivalent code variants. 
+
+4.2.3 Mitigating Data Leakage. By generating diverse source code variants that differ substantially from publicly available implementations, Kaizen mitigates the risk of data leakage from LLM training corpora. For example, even if an original HeCBench benchmark appeared in an ChatPort’s LLM training data, the fuzzed variants introduce novel syntactic patterns, identifier names, and structural arrangements unlikely to have been encountered during training. This ensures that successful translation reflects genuine understanding rather than memorization, which is particularly important when comparing kernel-level and full-program translation since general-purpose LLMs may have been trained on complete HeCBench programs. 
+
+4.3 Runtime Input Fuzzing for Differential Testing 
+
+The second component of Kaizen focuses on exposing semantic divergences between original and translated implemen-tations through comprehensive runtime testing. While source code fuzzing evaluates translation robustness across diverse input programs, runtime input fuzzing detects behavioral differences that manifest only under specific execution conditions. This component applies uniformly to both translation paths once the translated code compiles successfully. 
+
+4.3.1 Input Space Exploration. HPC kernels typically accept three categories of inputs that affect their execution: 12 Ludwig et al. (1) Problem Dimensions. Parameters defining array sizes, grid dimensions, block sizes, and iteration counts. These directly impact parallelization strategies, memory access patterns, and workload distribution. For example, the number of threads per block or grid dimensions in CUDA affects how work is distributed across GPU cores. (2) Computational Parameters. Numerical values affecting computation such as coefficients, thresholds, timesteps, and configuration constants. These influence algorithmic behavior, numerical stability, and con-vergence properties. For instance, timestep in molecular dynamics simulations affects both accuracy and stability. (3) Input Data Arrays. The actual data arrays processed by the kernel, which may exhibit various statistical properties, value ranges, and patterns. Different data characteristics (e.g., zeros, random values, edge cases, sorted vs. unsorted data) can expose different execution paths and potential bugs in translated code. Kaizen systematically explores this input space using the following grammar-based fuzzing strategies. Here each of these strategies is customized with input from domain experts to generate valid inputs for the application-under-test. 
+
+• Boundary value testing : Generate edge cases such as minimum and maximum dimension values (e.g., arrays of size 1, very large arrays), zero inputs, extreme numerical values, and boundary conditions that may trigger corner cases in the implementation. 
+
+• Random sampling : Generate diverse input combinations using pseudo-random sampling with controlled distributions to explore the general input space. This includes varying problem sizes, computational parameters, and data characteristics to exercise different code paths. 
+
+• Mutation-based generation : Derive new test inputs by perturbing existing inputs, particularly those that revealed interesting behaviors. 
+
+• Coverage-guided prioritization : Track code coverage to identify under-explored execution paths and priori-tize inputs that increase coverage in translated implementation. 
+
+4.3.2 Differential Testing Protocol. For each generated runtime input, Kaizen executes both the original and translated implementations and compares their outputs. The protocol addresses several HPC-specific considerations: 
+
+Cross-Platform Execution. The original and translated programs execute on their respective target platforms. For CUDA-to-OpenMP translation, this means executing the original CUDA code on NVIDIA GPUs and the translated OpenMP code on CPUs with OpenMP offloading support. To enable coverage-guided fuzzing, Kaizen uses HeteroBugDe-tect’s [ 24 ] approach that compiles the translated OpenMP program as a static library and creates a differential driver 
+
+program that invokes OpenMP program functions using the static library and CUDA program functions via syatem calls to run the same simulation on two versions using a different set of arguments. This allows Kaizen to measure the code coverage on the translated OpenMP version of the program while executing the simulation on both platforms. 
+
+Output Comparison with Error Norms. Simply comparing outputs with exact equality or basic diff operations generates excessive false positives due to inherent differences in floating-point precision, parallelization strategies, and numerical algorithms across platforms. To address this, Kaizen uses error norms commonly used in scientific computing to quantify differences between output arrays: 
+
+• L1 (Manhattan) norm : ∥𝑥 − 𝑦 ∥1 = Í𝑖 |𝑥 𝑖 − 𝑦 𝑖 | measures the total absolute difference 
+
+• L2 (Euclidean) norm : ∥𝑥 − 𝑦 ∥2 =√︁ Í𝑖 (𝑥 𝑖 − 𝑦 𝑖 )2 measures root mean square difference 
+
+• Max (Infinity) norm : ∥𝑥 − 𝑦 ∥∞ = max 𝑖 |𝑥 𝑖 − 𝑦 𝑖 | measures maximum pointwise difference Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 13 A discrepancy is flagged as a correctness failure only when the computed norm exceeds a user-configurable threshold, filtering benign floating-point variations while detecting true semantic divergences. We set the threshold to 0.0 for computations where the application’s own correctness check requires exact equality, and use the application’s documented tolerance otherwise. In practice, Kaizen prioritizes the application’s built-in verification logic when available, as it reflects domain-appropriate correctness criteria defined by the original developers. For example, the lif application compares spike values against a CPU reference with threshold of 10 −3 tolerance. When no built-in verification is available, Kaizen falls back to one of the three configurable error norms above, with the threshold set by the user based on the application’s numerical precision requirements. In our evaluation, all 18 HeCBench applications include built-in verification, so the built-in checks serve as the primary correctness oracle. 
+
+Timeout and Resource Monitoring. Each execution is subject to timeouts and resource limits to detect infinite loops, deadlocks, or excessive memory consumption that may indicate translation errors. If a translated program takes significantly longer than the original (e.g., more than 10 x), it is recorded as a timeout failure and excluded from correctness analysis. Full-program translations may introduce performance regressions or resource management issues not present in kernel-only translations, such as inefficient memory transfers or incorrect synchronization that causes excessive waiting. 
+
+Crash and Exception Handling. Runtime errors including segmentation faults, assertion failures, and exceptions are captured and classified as correctness violations. A translation that crashes on any test input is considered incorrect, regardless of whether the original implementation completes successfully. 
+
+Failure Categorization. When a semantic divergence or failure is detected, Kaizen records the specific input that triggered it, the platform configurations used, the error type (crash vs. wrong output), and the magnitude of the divergence (if applicable). This information enables post-analysis to identify common failure patterns and understand which types of code constructs or input characteristics are most challenging for LLM translation. For full-program translations, we additionally categorize failures by their location: host-side errors (incorrect memory management, wrong kernel launch parameters) versus device-side errors (incorrect kernel computation). This granular analysis helps identify whether LLMs struggle more with translating computational logic or with translating the orchestration and memory management aspects of HPC programs. 
+
+5 Evaluation 
+
+This section describes the dataset, metrics, and implementation and experiment procedure we use to evaluate Kaizen, along with the findings of our research questions. 
+
+5.1 Dataset 
+
+Kaizen is designed to be applicable to any HPC programming model translation task. In this work, we evaluate it on CUDA-to-OpenMP translation using applications from HeCBench [ 19 ], a large collection of HPC applications written in CUDA, HIP, SYCL, and OpenMP offloading. We selected a subset of the 47 HeCBench applications used in ChatPORT’s evaluation [ 28 ] that satisfy three criteria: (1) the program executes within one minute on our evaluation platform, enabling practical grammar-based input fuzzing within a 30-minute per-seed budget, (2) the program includes a reference CPU implementation against which to conduct differential testing, and (3) correctness results can be computed across all tested LLM variants within the available computational budget. Of the 47 applications, 21 satisfied these criteria. Three of these ( chemv , nbody , and axhelm )could not be evaluated because their CUDA kernels are defined across multiple files and ChatPORT accepts a single file 14 Ludwig et al. 
+
+Table 3. HPC Scientific Applications in the HeCBench benchmark used for Kaizen evaluation 
+
+Domain Application Description Kernel Size(s) (LoC) Program Size (LoC) 
+
+Computational Physics ace Initialization of boundary conditions and swap of grids in the phase-field simulation of den-dritic solidification 23, 8 652 burger A fundamental partial differential equation used in applied mathematics and physics 7 231 ising Monte-Carlo simulations of 2D Ising model 22 238 Geospatial Computing aidw Optimized inverse distance weighting interpo-lation used in Geographic Information System 22 257 Programming Language Feature assert Evaluate the performance impact of assertion checks in a GPU program 7 80 Computer Vision background-subtract An important pre-processing step in image pro-cessing applications such as object tracking 8, 4, 7, 8 180 p4 Post-processing for a 3D object detection net-work (typical of LiDAR / BEV detectors like PointPillars) 62 223 winograd Optimized convolution operation that shows success in accelerating convolution neural net-works, such as VGG and ResNet 52 356 Deep Learning attention Scaled dot-product attention for a single query without scaling 4, 8, 9 278 channelSum Per-channel sum of values in a multi-dimensional tensor in deep learning 17, 16 251 dense-embedding Addition of low-dimensional vectors of floating-point numbers that represents ahigh-dimensional entity in a continuous vector space 12 159 flip A primitive that reverses the order of a tensor along given axis 20 194 glu Activation function in artificial neural networks that uses a gating mechanism to control the flow of information 11 148 Machine Learning Primitives cross A primitive that performs cross-product opera-tion of two tensors 19 167 nlll The negative log likelihood loss reduction used in machine learning models for classification tasks 29 216 Neuromorphic Computing lif A leaky integrate-and-fire neuron model widely used to describe the electrical activity of a bio-logical neuron 29 202 
+
+as input. This is a limitation of the translator under evaluation, not of Kaizen. For two of the remaining applications (permute and chi2 ), the source code metamorphic fuzzing generated hundreds of code variants, making it infeasible to compute correctness results across all three LLMs using all code variants within the available computational budget. The final Kaizen evaluation set therefore comprises 16 applications spanning 7 domains including scientific computing, geospatial computing, programming language features, computer vision, deep learning, machine learning primitives, and neuromorphic computing, as shown in Table 3. For full-program translation, we evaluate all 47 HeCBench applications from the ChatPORT evaluation set, including the three examples excluded from kernel-level evaluation due to the multi-file limitation. Since full-program translation does not require kernel extraction, these examples can be included. We used 5 applications ( Adam , Concat , Goulash ,
+
+Mrc , and Overlay ) for prompt engineering. To maintain consistency with ChatPORT’s evaluation set and enable direct comparison, we evaluated full-program translation on all 47 applications, including the 5 prompt-engineering Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 15 applications. Since prompt engineering only influenced the instruction template and not model weights, the risk of contamination is minimal. 
+
+5.2 LLM Selection 
+
+We evaluate Kaizen using three ChatPORT variants [ 28 ]: 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B (fine-tuned version of CodeLlama 13B), 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_7B (fine-tuned version of StarCoderBase 7B), and 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B (fine-tuned version of HPC_Coder 6.7B). These were selected from ten ChatPORT variants as the top performers when considering both base model and fine-tuned variant correctness. 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B achieved the highest fine-tuned correctness at 72%, while 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_7B 
+
+and 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B each achieved 67%. Although 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_15B also reached 72% after fine-tuning, its base model produced no correct translations (0%), making 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_7B the stronger overall candidate within the StarCoder family. All three selected models demonstrated non-trivial baseline capability (9–46%) in addition to strong fine-tuned performance. 
+
+5.3 Metrics 
+
+We evaluate translation quality using two complementary metrics: (1) Compilability. The fraction of translated code variants that successfully compile using the target platform’s compiler. Formally, given 𝑁 code variants and their corresponding translations, compilability is defined as: Compilability = # of translations that compile 
+
+𝑁 
+
+This metric measures the LLM’s ability to generate syntactically valid code, but it is insufficient alone for evaluating semantic correctness. (2) Correctness. The fraction of translated code variants that compile successfully and produce identical outputs to the original implementation across all fuzzed runtime inputs. Formally, for each compiled translation 𝑇 𝑖 ,let 𝐶 𝑖 denote the set of fuzzed inputs on which 𝑇 𝑖 produces outputs matching the original implementation. Correctness is defined as: Correctness =
+
+Í𝑀 𝑖 =1 ⊮[| 𝐶 𝑖 | = |𝐹 |] 
+
+𝑁 
+
+where 𝑁 is the number of variants translated, 𝐹 is the set of all fuzzed runtime inputs, and ⊮[·] is the indicator function. A translation is considered correct only if it matches the original implementation on all fuzzed inputs within the specified error tolerance. These two metrics provide complementary perspectives: compilability assesses syntactic validity and basic platform compatibility, while correctness evaluates true semantic preservation. The gap between compilability and correctness reveals the extent to which syntactically valid translations harbor semantic errors—a key insight that motivates our shift from accuracy-focused to correctness-focused evaluation of HPC code translators. In addition to these quantitative metrics, we perform qualitative error analysis where we analyze compiler error logs and runtime output discrepancies to categorize failure types, characterize their root causes, and identify patterns across LLMs and translation granularities, reporting results as structured taxonomies with representative instances. 
+
+5.4 Implementation and Experiment Procedure 
+
+All experiments were executed on the Oregon State University High-Performance Computing (HPC) cluster using compute nodes from the DGX-2 partition, each equipped with two Intel Xeon Platinum 8168 processors (48 CPU cores total at 2.70 GHz), 16 NVIDIA Tesla V100 GPUs with 32 GB HBM2 memory per GPU (512 GB total GPU memory 16 Ludwig et al. per node), and 1.5 TB of system memory. Each node also provided 28 TB of local NVMe storage and high-speed interconnects through 100 Gb Ethernet and Mellanox EDR InfiniBand, with GPUs connected via NVSwitch to enable high-bandwidth GPU-to-GPU communication. This hardware configuration provided a large-scale heterogeneous computing environment suitable for computationally intensive experiments involving parallel CPU and GPU execution. For source code metamorphic fuzzing, Kaizen runs 5 independent fuzzing campaigns per application, each with a 5-minute budget, using the 15 mutation operators described in Section 4.2, taking approximately 25 minutes per application and 7.5 hours total across all 16 applications. For differential testing using grammar-based input fuzzing, Kaizen runs 5 fuzzing campaigns per variant with a 30-minute budget each, taking approximately 2.5 hours per variant. In total, we tested 1,583 unique code variants across all three LLMs, amounting to approximately 3,958 CPU-hours of correctness testing. Experiments were run in parallel across LLMs on the DGX-2 cluster described above. Output comparison uses the error thresholds documented in each HeCBench application. 
+
+5.5 Results 
+
+This section presents our findings in terms of the research questions we ask. 
+
+5.5.1 RQ1: Syntactic vs. Semantic Correctness Gap. Table 4 shows the compilability and correctness for kernel-level CUDA-to-OpenMP translations of the 16 HeCBench applications using three ChatPORT variants. Compilability results are averaged across five metamorphic fuzzing campaigns, while correctness results are computed using source code variants generated from a single representative seed and evaluated using five differential-testing campaigns with runtime inputs; using a single seed for correctness analysis is consistent with ChatPORT’s evaluation methodology [ 28 ]and enables direct comparison. As shown in Table 4, the compilation-correctness gap is stark and application-dependent. Several applications achieve near-perfect correctness: dense-embedding (𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B : 186 /186 = 1.00 , 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B : 183 /186 = 0.98 ), 
+
+cross (𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B : 61 /61 = 1.00 , 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B : 56 /61 = 0.92 ), and glu (𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B : 178 /190 = 0.94 )demonstrate that high semantic correctness is achievable for some application types. However, other applications with equally high compilability achieve zero correctness: lif (𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B : 393 /393 = 1.00 compilability, 0/393 = 0.00 
+
+correctness), winograd (𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B : 219 /234 = 0.94 compilability, 0/252 = 0.00 correctness), flip (𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B :
+
+226 /228 = 0.99 compilability, 0/221 = 0.00 correctness), and nlll (𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B : 136 /216 = 0.63 compilability, 
+
+0/216 = 0.00 correctness). This bimodal distribution confirms that compilation success provides no signal about semantic correctness. A program that compiles and passes developer tests may be perfectly correct or completely wrong, and only differential testing with diverse inputs can distinguish between them. Testing burger , nlll , and lif applications revealed additional edge cases where the developer-written CUDA program itself failed on Kaizen-generated inputs while the LLM-translated OpenMP versions passed, suggesting that the CUDA variants had latent bugs that Kaizen exposed independently of the translation. 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_7B achieves zero compilability on 14 of 16 applications, with meaningful results only for assert (4% com-pilability, 4% correctness) and glu (22% compilability, 18% correctness), making correctness largely unmeasurable for this LLM variant. Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 17 
+
+Table 4. Relationship between syntactic and semantic success in LLM-based kernel translation of HPC scientific applications. 
+
+application : application name; Compilability : avg fraction of OpenMP programs that compile successfully; Correctness : fraction of OpenMP programs that match the outputs on all the tests when compared against the CUDA variants for a single seed(10292). 
+
+application LLM Compilability Correctness 
+
+ace 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 0/307 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/307 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 305 /307 = 0.99 0/308 = 0.00 
+
+burger 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 0/228 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/228 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 223 /228 = 0.98 0/208 = 0.00 ∗
+
+ising 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 191 /199 = 0.96 0/192 = 0.00 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/199 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 0/199 = 0.00 N/A aidw 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 102 /103 = 0.99 43 /92 = 0.47 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/103 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 102 /103 = 0.99 92 /92 = 1.00 
+
+assert 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 0/174 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 7/174 = 0.04 6/167 = 0.04 ∗
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 72 /174 = 0.41 125 /167 = 0.75 
+
+background-subtract 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 158 /163 = 0.97 141 /155 = 0.91 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/163 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 155 /163 = 0.95 135 /155 = 0.87 
+
+p4 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 0/36 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/36 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 0/36 = 0.00 N/A winograd 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 219 /234 = 0.94 0/252 = 0.00 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/234 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 163 /234 = 0.70 0/252 = 0.00 
+
+attention 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 8/69 = 0.12 31 /65 = 0.48 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/69 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 45 /69 = 0.65 12 /63 = 0.19 
+
+channelSum 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 0/95 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/95 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 0/95 = 0.00 N/A dense-embedding 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 184 /188 = 0.98 186 /186 = 1.00 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/188 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 186 /188 = 0.99 183 /186 = 0.98 
+
+flip 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 226 /228 = 0.99 0/221 = 0.00 ∗
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/228 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 24 /228 = 0.11 0/221 = 0.00 ∗
+
+glu 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 179 /200 = 0.90 175 /190 = 0.92 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 44 /200 = 0.22 35 /190 = 0.18 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 186 /200 = 0.93 178 /190 = 0.94 
+
+cross 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 67 /67 = 1.00 61 /61 = 1.00 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/67 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 64 /67 = 0.96 56 /61 = 0.92 
+
+nlll 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 136 /216 = 0.63 0/216 = 0.00 ∗
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/216 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 82 /216 = 0.38 0/216 = 0.00 ∗
+
+lif 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 393 /393 = 1.00 0/393 = 0.00 ∗
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 0/393 = 0.00 N/A 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 317 /393 = 0.81 0/393 = 0.00 ∗
+
+*: Kaizen-generated tests inputs found bugs in developer-written CUDA program. 
+
+Key Finding: Neither compilation success nor developer-written tests from static benchmarks can reliably ensure semantic correctness. The results reveal a bimodal pattern: some applications achieve near-perfect correctness (up to 1.00) while others with equally high compilability achieve zero correctness, confirming that shallow evaluation proxies create false confidence in translation quality for scientific HPC applications. (RQ1) 
+
+5.5.2 RQ2: Taxonomy of Syntactic Errors. To identify the types of compilation failures introduced by LLMs during CUDA-to-OpenMP translation, we analyzed compiler errors produced when compiling the OpenMP translations of Kaizen-fuzzed CUDA kernels. Table 5 summarizes the resulting taxonomy obtained by analyzing the compilation errors produced by the three ChatPORT variants during kernel translations of Kaizen-fuzzed kernels of the 16 HeCBench applications. We identified 18 Ludwig et al. 
+
+Table 5. Compilation errors produced by three top-performing ChatPORT [ 28 ] LLMs (CodeLlama_13B (CL), StarCoderBase_7B (SC), HPC_Coder_6.7B (HC)) for CUDA-to-OpenMP kernel translations when evaluated on Kaizen-fuzzed kernels. 
+
+Error Type Description Error Instance Reasoning 
+
+Incorrect loop construct Loop structure violates OpenMP loop requirements. 
+
+ace(CL) , ising(CL) : insufficient nested loops for collapse(N) ; glu(CL) , channelSum(HC) :non-for loop after OpenMP directive; 
+
+assert(CL) , attention(CL) : invalid loop condition. LLM generated fewer nested loops than required, used unsupported loop forms, or copied CUDA loop logic incompatible with OpenMP. Unsupported construct usage OpenMP constructs or clauses used in invalid contexts. 
+
+ace(CL) , channelSum(CL) , flip(SC) : ille-gal region nesting; channelSum(CL) : invalid 
+
+num_teams clause; dense-embedding(CL) : in-valid grainsize clause. LLM applied directives or clauses in con-texts where they are not permitted by OpenMP. Function signature mismatch Function calls do not match avail-able definitions. 
+
+channelSum(CL) , ace(HC) , flip(SC) : no matching function for translated kernel calls; 
+
+aidw(SC) : unresolved overloaded function. LLM translated function invocations without generating compatible defini-tions or correct argument signatures. Undeclared identifier Variable, macro, constant, or func-tion referenced without declaration. 
+
+attention(CL) , glu(HC) , dense(SC) : fab-ricated identifiers; ace(CL) , burger(HC) ,
+
+lif(SC) : missing variable declarations; 
+
+ising(CL) , winograd(HC) : misspelled identi-fiers. LLM omitted declarations, altered iden-tifiers during translation, or generated placeholder names absent from the orig-inal code. Incorrect API/runtime name CUDA-specific APIs, types, or run-time variables retained in OpenMP code. 
+
+assert(CL) , channelSum(HC) , ace(SC) : use of 
+
+gridDim /blockIdx ; ising(CL) , glu(SC) : un-supported CUDA types ( int3 , float4 ). CUDA constructs were copied directly instead of being translated into valid OpenMP/C++ equivalents. Syntax error Generated code is not syntactically valid C++. 
+
+nlll(CL) , cross(HC) , lif(SC) : mismatched braces and missing expressions; aidw(SC) ,
+
+assert(SC) : invalid declarations; flip(HC) :malformed type declarations. Incomplete or malformed code genera-tion produced unparsable source code. Invalid control flow Control-flow statements violate OpenMP execution rules. 
+
+background-subtract(CL) , glu(HC) ,
+
+ising(SC) : return inside OpenMP re-gion; nlll(HC) , dense(SC) : break inside OpenMP loop. LLM generated control flow that exits parallel regions in ways prohibited by OpenMP. Invalid construct usage Incorrect use of OpenMP clauses or synchronization constructs. 
+
+glu(CL) : invalid atomic updates; nlll(CL) ,
+
+glu(SC) : invalid reduction variables; 
+
+channelSum(HC) : invalid num_threads 
+
+argument. LLM violated OpenMP semantic require-ments for reductions, atomics, data movement, or clause placement. Type mismatch Operations performed on incompat-ible types. 
+
+glu(CL) , flip(SC) : incompatible operands; 
+
+winograd(CL) : indexing function pointer; 
+
+lif(CL) : pointer-scalar assignment; ace(SC) :string used as integral value. Translation introduced incompatible types, incorrect casts, or naming con-flicts that changed expression semantics. 
+
+nine compilation error categories, including Incorrect Loop Construct , Unsupported Construct Usage , Function Signature Mismatch , Undeclared Identifier , Incorrect API/Runtime Name , Syntax Error , Invalid Control Flow , Invalid Construct Usage , and Type Mismatch . These errors primarily arise from the incorrect translation of CUDA kernels into OpenMP work-sharing constructs and are directly reflected in compiler diagnostics. Several categories identified in our study overlap with error types reported in prior work on LLM-based code translation[ 27 ]. In particular, Function Signature Mismatch , Undeclared Identifier , Incorrect API/Runtime Name , Syntax Error , Type Mismatch , and Invalid Control Flow correspond to common translation failures previously observed across conventional programming languages. These errors reflect general weaknesses of LLMs, including omitted declarations, inconsistent identifier generation, incorrect API substitution, malformed syntax, and type-related reasoning failures. However, our analysis also reveals error categories that are largely specific to CUDA-to-OpenMP translation. In particular, Incorrect Loop Construct , Unsupported Construct Usage , and Invalid Construct Usage stem from the semantic gap between CUDA’s hierarchical execution model and OpenMP’s directive-based programming model. These errors include invalid loop-collapse structures, illegal nesting of OpenMP regions, misuse of reduction and atomic clauses, and unsupported combinations of OpenMP directives and clauses. Such errors have not been reported in prior code-translation studies [ 41 ] as our identified error types arise from translating between heterogeneous parallel programming models rather than between conventional sequential programming languages (e.g, Go-to-Rust). Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 19 
+
+Table 6. Runtime Errors produced by three LLMs (CodeLlama_13B (CL), StarCoderBase_7B (SC), HPC_Coder_6.7B (HC)) using the kernel-level fine-tuned variants from ChatPORT [28] for CUDA-to-OpenMP kernel translations using Kaizen-fuzzed kernels. 
+
+Category Description Affected Benchmarks 
+
+Intermediate Variable Elimination A computed intermediate variable is dropped and a raw input substi-tuted in its place, silently altering formula semantics. The program compiles and runs but produces wrong numerical output. (aidw): R_S0 (normalized observation ratio) is dropped; raw 
+
+r_obs is substituted directly. All threshold comparisons and the cosine argument operate at the wrong scale, corrupting 
+
+u_R , alpha , and every output point. Execution Model Assumption Transfer An implicit CUDA execution guarantee — exact thread count per block, block-to-batch isolation, or nested parallelism hierarchy — is carried into OpenMP without the guards or restructuring needed to make it hold at runtime. (aidw): tid computed as team * BLOCK_SIZE + lid , but the OMP runtime silently reduces team thread count be-low BLOCK_SIZE . Output indices are skipped and shared-memory tiles are partially uninitialized. (dense embedding): target teams distribute +parallel for does not guarantee batch_idx isolation per team. The runtime may expose a wrong batch_idx to inner threads, producing incorrect dense_elem lookups. Loop Bound Error threadIdx.x is replaced by an explicit sequential loop, but the loop bound is set to the hardware block-size parameter rather than the data dimension, leaving output elements beyond the block size permanently unwritten. (dense embed, dense_esuhm): threadIdx.x serialized as for (tid=0; tid<numThreads; tid++) . With 
+
+numThreads=128 and embedding_dim=768 , columns 128– 767 (640 of 768) are never written. Missing Statement Fault A mandatory in-place state mutation is silently dropped during transla-tion. The affected variable is used immediately in downstream compu-tation and written back to global memory, so the stale value corrupts both the current output and all subsequent time steps that read the same location. (lif): ref_time -= dt is omitted in the OpenMP translation. The refractory multiplier tmp_val529 and the spike-triggered ref_time reset both use the un-decremented value. With the error accumulating across steps, spikes diverges from the CUDA output by step 1 for neurons_per_item=1000 , num_items=32 ,
+
+num_steps=1000 .Shared Memory Scope Mistransla-tion CUDA __shared__ arrays are translated into variables declared at the 
+
+teams scope rather than inside the parallel region with explicit shared visibility. Inter-thread access to these variables is implementation-defined in OpenMP, causing the thread-0 reduction to read uninitialized or privatized values and producing wrong output. (nlll): sm_inputs and acc_weight declared in the target teams region outside parallel . The per-thread accumula-tion writes are not guaranteed visible to thread 0 at reduc-tion time, corrupting both output and total_weight for input (8192, 1000, 10) .Multi-dimensional Index Flattening A multi-dimensional thread index space is incorrectly translated to a single linear index expression applied uniformly across all dimensions. Independent spatial axes that should resolve to different values become identical, causing threads to compute wrong coordinates and write to wrong or duplicate output locations. (winograd): tile_i and tile_j are both computed as 
+
+omp_get_team_num() * omp_get_num_threads() +omp_get_thread_num() , collapsing the 2D CUDA grid (blockIdx.x/y , threadIdx.x/y ) onto a single 1D index. Every thread processes a diagonal point where tile_i == tile_j , leaving all off-diagonal output elements unwritten for input (32, 8, 8) .
+
+Key Finding: Kernel-level LLM translations produce nine compile-time error categories: Incorrect Loop Con-struct, Unsupported Construct Usage, Function Signature Mismatch, Undeclared Identifier, Incorrect API/Runtime Name, Syntax Error, Invalid Control Flow, Invalid Construct Usage, and Type Mismatch. While several of these align with general LLM translation failures documented in prior work, Incorrect Loop Construct, Unsupported Construct Usage, and Invalid Construct Usage are unique to the semantic gap between CUDA’s hierarchical execution model and OpenMP’s directive-based programming model. (RQ2) 
+
+5.5.3 RQ3: Taxonomy of Semantic Errors. Table 6 presents the taxonomy of semantic errors identified through Kaizen’s differential testing of kernel-level translations across the 16 HeCBench applications. We identified six categories of semantic errors that survive compilation and produce incorrect scientific results only under specific input conditions. The first category, Intermediate Variable Elimination , occurs when a computed intermediate variable is silently dropped during translation and a raw input substituted in its place, altering formula semantics without triggering any compilation error. The second category, Execution Model Assumption Transfer , arises when implicit CUDA execution guarantees, such as exact thread count per block or block-to-batch isolation, are carried into OpenMP without the guards or restructuring needed to hold at runtime. The third category, Loop Bound Error , occurs when threadIdx.x is serialized into an explicit loop but the loop bound is set to the hardware block-size parameter rather than the data dimension, leaving output elements beyond the block size permanently unwritten. The fourth category, Missing Statement Fault ,covers cases where a mandatory in-place state mutation is silently omitted during translation; the affected variable is 20 Ludwig et al. used immediately in downstream computation and written back to global memory, so the stale value corrupts both the current output and all subsequent timesteps that read the same location. For example, as described in Section 3.2, the LIF bug is an instance of this category where 𝑟𝑒 𝑓 _𝑡𝑖𝑚𝑒 − = 𝑑𝑡 was omitted from the OpenMP translation, and Kaizen generated multiple diverse inputs to expose this fault. The fifth category, Shared Memory Scope Mistranslation ,occurs when CUDA __shared__ arrays are translated into variables declared at the teams scope rather than inside the parallel region with explicit shared visibility, causing inter-thread access to be implementation-defined in OpenMP and producing wrong output. The sixth category, Multi-dimensional Index Flattening , occurs when a multi-dimensional thread index space is incorrectly translated to a single linear index expression applied uniformly across all dimensions, collapsing independent spatial axes onto a single diagonal and leaving all off-diagonal output elements unwritten. All six categories share a common characteristic: they are input-dependent. Each error manifests only under specific combinations of array sizes, computational parameters, or simulation durations, and none were exposed by the developer-written seed inputs provided with the HeCBench applications. Notably, the semantic errors in dense-embedding are LLM-specific: 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B achieves 1.00 correctness while other ChatPORT variants exhibited 
+
+Loop Bound Error and Execution Model Assumption Transfer , confirming that different LLMs handle the same semantic translation challenges differently. These findings confirm that behavioral testing with diverse, Kaizen-generated inputs is necessary to detect semantic errors in LLM-translated HPC applications. Comparing the semantic error taxonomy with the compile-time error taxonomy (Table 5) reveals a qualitative shift in error character: the nine compile-time categories are syntactic and structural, immediately surfaced by the compiler, whereas the six semantic categories are behaviorally silent at compile time and manifest only under specific runtime conditions, making them substantially more dangerous in practice. ChatPORT [ 28 ] reports four compile-time error categories, all of which correspond to categories in our RQ2 taxonomy, but does not report any semantic errors since its evaluation relies on compilation success and fixed developer-written seed tests. Comparing our semantic error taxonomy against the seven heterogeneous bug categories identified by Heter-oBugDetect [ 24 ] for platform-specific divergences in developer-written CUDA/OpenMP code: incorrect host-device synchronization, missing host-device synchronization, accessing device memory from host, missed data copying, incorrect data copying, use of stale data, and concurrent modification of shared variables . Our Execution Model Assumption Transfer 
+
+category shares conceptual overlap with HeteroBugDetect’s missing-synchronization and stale-data categories, as both arise when an implicit guarantee about execution order or shared state fails to hold once code crosses a platform boundary. However, our remaining two categories, Intermediate Variable Elimination and Loop Bound Error , have no clear analog in HeteroBugDetect’s taxonomy. These errors arise from the LLM’s translation process itself, specifically dropped computational logic and mis-set loop bounds during thread-indexing serialization, rather than from manual host-device memory management mistakes. This suggests that LLM-translated code exhibits a partially distinct error profile from developer-written heterogeneous code: while both share synchronization and state-consistency risks, LLM translation additionally introduces code-generation-level errors that have no counterpart in bugs arising from manual heterogeneous programming. To our knowledge, the six-category taxonomy presented here is the first characterization of semantic errors in LLM-based CUDA-to-OpenMP translation. Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 21 
+
+Table 7. The effect of translation granularity on LLM-based CUDA-to-OpenMP translation across 47 HPC applications from HeCBench. The “Full-Program” shows the performance when translating the entire CUDA program, while the “Kernel-Only” shows the perfor-mance of translating only the CUDA kernels of the applications; the results of “Kernel-Only” are borrowed from the ChatPORT [ 28 ].                                                           
+
+> LLM Granularity Compilability Correctness
+> 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐶𝐿 _13 𝐵 Full-Program 0/47 =0.00 0/47 =0.00
+> Kernel-Only N/A 0.72
+> 𝐶𝑜𝑑𝑒𝐿𝑙𝑎𝑚𝑎 _13 𝐵 Full-Program 2/47 =0.04 1/47 =0.02
+> Kernel-Only N/A 0.22
+> 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝑆𝐶𝐵 _7𝐵 Full-Program 1/47 =0.02 1/47 =0.02
+> Kernel-Only N/A 0.67
+> 𝑆𝑡𝑎𝑟𝐶𝑜𝑑𝑒𝑟 𝐵𝑎𝑠𝑒 _7𝐵 Full-Program 7/47 =0.15 3/47 =0.06
+> Kernel-Only N/A 0.09
+> 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 𝐻 𝑃𝐶 _𝐶 _6.7𝐵 Full-Program 13 /47 =0.28 7/47 =0.15
+> Kernel-Only N/A 0.67
+> 𝐻𝑃𝐶 _𝐶𝑜𝑑𝑒𝑟 _6.7𝐵 Full-Program 11 /47 =0.23 3/47 =0.06
+> Kernel-Only N/A 0.46
+
+Key Finding: Semantic errors in LLM-translated HPC programs are input-dependent and elude fixed developer-written tests. Kaizen’s differential testing exposes six categories of semantic errors: Intermediate Variable Elimination, Execution Model Assumption Transfer, Loop Bound Error, Missing Statement Fault, Shared Memory Scope Mistranslation, and Multi-dimensional Index Flattening. These errors share a common pattern: they preserve the program’s structural appearance while silently altering its computational behavior, and they manifest only under specific runtime conditions that fixed developer tests do not exercise. (RQ3) 
+
+5.5.4 RQ4: Translation Granularity vs. LLM Success. Table 7 compares kernel-level and full-program translation outcomes across the three ChatPORT variants on all 47 HeCBench applications from the ChatPORT evaluation set [ 28 ], including the 5 examples used for prompt engineering. Kernel-level translation achieves non-trivial correctness rates across all three LLMs, with 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B achieving the highest correctness at 72%. Full-program translation is substantially harder. 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B fails to compile entirely (0%), while 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_7B 
+
+and 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B achieve only 2% and 28% compilability respectively, and at most 15% correctness. Notably, kernel-level fine-tuning degrades both compilability and correctness for 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B (0% vs base model’s 4% compilability, 0% vs 2% correctness) and 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_7B (2% vs 15% compilability, 2% vs 6% correctness), suggesting over-specialization toward kernel-only output. 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B is the only variant where fine-tuning improves both compilability (28% vs 23%) and correctness (15% vs 6%), though absolute correctness remains low. These results confirm that full-program translation remains an unsolved challenge even for fine-tuned models. Table 8 presents the 27-category taxonomy of compile-time errors identified across full-program translation of all 47 evaluated applications. As shown, we observed a broader set of compilation and translation errors spanning offloading, memory management, parallelism, code validity, performance instrumentation, and compatibility concerns. While many of these categories manifest through the same compiler diagnostics observed in kernel translations, full-program translation introduces additional challenges related to host-device memory management, OpenMP offloading directives, multi-file dependencies, and incomplete program implementations. For example, categories such as Missing Offloading ,
+
+Incorrect Memory Management , and Missing Function Implementations do not typically arise in isolated kernel translation because they involve interactions between kernels, host code, and application-level infrastructure. 22 Ludwig et al. 
+
+Table 8. Compilation errors produced in CUDA-to-OpenMP full program translations of original HeCBench applications using three top-performing LLMs (CodeLlama_13B (CL), StarCoderBase_7B (SC), HPC_Coder_6.7B (HC)) from ChatPORT [28]. 
+
+Category Error Type Description Error Instances Offloading Missing offloading Missing OMP pragma offloading, or failure to translate CUDA kernel launches to target directives. 
+
+gd (CL); ising (CL,SC); mrc (CL); nbody 
+
+(CL,SC,HC) Incorrect offloading Wrong OpenMP constructs (e.g., wrong collapse , incorrect thread limits), or nonsensical thread counts. 
+
+vol2col (CL,SC,HC); iso2dfd (CL,SC); lif 
+
+(CL,SC,HC); cmp (HC) 
+
+Memory Management Missing memory management No OMP mapping, missing allocation/deallocation, or missing shared memory. 
+
+haccmk (CL,SC); hotspot3d (all); ising (CL,SC); 
+
+iso2dfd (CL,SC); lif (all); mcpr (all); mrc (all); 
+
+nbody (SC,HC) Incorrect memory management Incorrect host-device mapping or data movement; incorrect shared memory simulation. 
+
+winograd (all); haccmk (SC,HC) Redundant data allocation Redundant memory allocation via OpenMP or extra variables. burger (CL,SC); haccmk (HC) 
+
+Parallelism Incorrect parallel runtime semantics Incorrect loop nesting or host-device execution flow. atomicCost (SC); chi2 (SC) Missing unrolling Missing manual loop unrolling or reduction directives. axhelm (all) Incorrect parallel indexing Incorrect indexing for OMP threads or teams. ace (CL,SC); vol2col (CL,SC) Missing data synchronization Missing OMP atomics; incorrect concurrent variable updates. gd ; AIDW (HC) 
+
+Code Validity Hallucinated APIs Non-existent functions or APIs; device-only calls invoked on host. 
+
+aidw (SC); attention (SC,HC) CUDA code/header retention Residual CUDA API calls or headers in translated code. lif ; ACE (CL,SC); particle-diffusion (SC); axhelm 
+
+(CL,SC) Missing macro definitions Undefined constants or missing preprocessor macros. burger (CL) Algorithmic errors Logic errors changing computational results (e.g., wrong filter or hardcoded dimensions). 
+
+flip (SC) Missing dependencies/headers Missing #include statements for required headers. overlay (CL); nll (CL,SC) Type inconsistency Wrong data types (e.g., int vs. float /DATA_TYPE ). iso2dfd (HC); mcpr (all); nbody (all) Incorrect function signatures Parameter type/count mismatch or incorrect function definition. vol2col (SC); assert (CL) Missing variable declarations Variables used without declaration; undeclared identifiers. channelShuffle (SC); aidw (SC) Syntax errors Invalid C/C++ syntax preventing compilation. swish (SC) Incorrect array access Wrong indexing schemes or dimensionality mismatches. backprop (SC,HC) Hardcoded values Literals used instead of symbolic constants or parameters. backprop (SC,HC) Incomplete implementations Stub functions or partially translated kernels. fdtd3d (HC) Missing function implementations Functions entirely absent from translated output. chi2 (CL); page-rank (CL); 
+
+Performance Incorrect timing/measurement Timing present but incorrectly implemented. nbody (CL,SC); channelShuffle (HC) Missing timing/measurement Timing/measurement mechanism entirely absent. background-subtract (CL) 
+
+Compatibility Multi-file compatibility errors Type or signature mismatches across translation units. nbody (CL,SC) Missing/incorrect verification Inadequate result validation or missing error checks. assert (CL,SC) Naming convention inconsistencies Function/variable names differ from expected conventions. page-rank (SC,HC) 
+
+all = CL, SC, HC 
+
+The qualitative difference between the two granularities is reflected in the error profiles. Comparing the two translation granularities reveals that kernel-level translation failures are dominated by low-level syntactic compilation errors, whereas full-program translation introduces additional system-level concerns related to offloading, memory management, dependency resolution, and application integration. These findings suggest that successful kernel translation alone is insufficient for achieving correct end-to-end migration of scientific applications, as full-program translation requires reasoning about both parallel execution semantics and application-level infrastructure. 
+
+Key Finding: Full-program translation is substantially harder than kernel-level translation. While kernel-level translation achieves up to 72% correctness, full-program translation fails to compile entirely for 
+
+𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B , with errors spanning 27 categories across offloading, memory management, parallelism, code validity, performance, and compatibility . Kernel-level fine-tuning degrades both compilability and correctness for full-programs using 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B (0% vs 4% compilability, 0% vs 2% correctness) and 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 SCB_7B 
+
+(2% vs 15% compilability, 2% vs 6% correctness), while only 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 HPC_C_6.7B benefits from fine-tuning (28% vs 23% compilability, 15% vs 6% correctness). (RQ4) 
+
+6 Related Work 
+
+This section places our contributions in the context of existing research. 
+
+LLM-Based HPC Code Translation. Recent advances in large language models (LLMs) have enabled automated code translation across programming languages and software ecosystems. Prior work has shown that LLMs can successfully translate code between conventional programming languages, but often introduce errors such as syntax violations, missing declarations, type inconsistencies, incorrect API mappings, and function signature mismatches [ 27 ]. Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 23 To improve translation quality at the project level, recent frameworks such as Oxidizer [ 41 ] employ feature mapping and type-compatibility validation to translate entire software projects while mitigating common translation failures. However, existing studies primarily focus on sequential programming languages and conventional software systems. c In the HPC domain, LLMs have recently been explored for translating accelerator programming models, including CUDA-to-OpenMP migration. Several recent tools use LLMs to automate translation between HPC programming models. CodeRosetta [ 38 ] uses an encoder-decoder transformer trained on CUDA and SYCL code pairs to translate between the two models. Fortran2CPP [ 6] fine-tunes LLMs specifically for Fortran-to-C++ translation, targeting legacy scientific codebases. LASSI [ 10 ] and UniPar [ 4] take broader approaches to parallelism-aware code transformation using LLM-based techniques. ChatPORT [ 18 , 28 ], developed as part of this research program, fine-tunes a range of open-source code LLMs for CUDA-to-OpenMP and CUDA-to-SYCL kernel translation, achieving correctness rates of up to 79% and 81.7% respectively. A common thread across all of these approaches is reliance on compilation success, token-level similarity metrics such as CodeBLEU [ 30 ], and developer-written tests from static benchmarks for evaluation. Kaizen complements these translation tools by providing a correctness-oriented evaluation framework that goes beyond syntactic proxies to assess behavioral equivalence. Our error taxonomies complement and extend prior work in two ways. First, several categories in our kernel-level compile-time taxonomy, including Function Signature Mismatch , Undeclared Identifier , Incorrect API/Runtime Name ,
+
+Syntax Error , Type Mismatch , and Invalid Control Flow , correspond to general LLM translation failures reported by Pan et al. [ 27 ] and addressed by project-scale frameworks such as Oxidizer [ 41 ]. Second, three categories, Incorrect Loop Construct , Unsupported Construct Usage , and Invalid Construct Usage , are specific to the semantic gap between CUDA’s hierarchical execution model and OpenMP’s directive-based model and have not been reported in prior studies of sequential language translation. ChatPORT [ 28 ] reports four compile-time error categories, all of which correspond to categories in our kernel-level taxonomy, but does not characterize semantic errors since its evaluation relies on compilation success and fixed developer-written seed tests. Our semantic error taxonomy, comprising six categories including Execution Model Assumption Transfer , Shared Memory Scope Mistranslation , and Multi-dimensional Index Flattening , is to our knowledge the first characterization of runtime errors in LLM-based CUDA-to-OpenMP translation. 
+
+Testing and Verification of HPC Programs. The evolution of testing in HPC has progressed from early efforts focused on numerical consistency and basic system correctness toward modern, multi-layered methodologies that address the complexity of heterogeneous, massively parallel architectures. Foundational work on floating-point determinism, such as FLiT’s cross-platform result-consistency testing [ 32 ] and ReproBLAS’s efficient, mathematically bounded summation routines [ 11 ], demonstrated the need for rigorous numerical validation in environments where non-associativity and parallel reduction order introduce nondeterminism. These foundational concerns directly motivate Kaizen’s use of configurable error norms rather than exact equality for output comparison. As systems scaled out, correctness efforts extended to communication-centric verification frameworks like MUST [ 29 ]and ISP [ 16 ], which enabled scalable detection of MPI errors such as deadlocks, datatype mismatches, and ordering bugs, while performance regression testing emerged as a vital component of software quality, with methodologies that systematically compare performance profiles across runs to detect regressions induced by hardware, kernel, or compiler changes [ 34 ]. In parallel, research on system noise and jitter showed how operating-system and hardware variability can significantly impact scalability [ 14 ], motivating HPC centers to refine acceptance and health-check suites for processors, interconnects, and runtime environments. Kaizen’s timeout and resource monitoring mechanism addresses similar concerns in the context of LLM-translated code. 24 Ludwig et al. As workflows and software stacks became more complex, the community increasingly emphasized reproducibility as a testing dimension in its own right: tools like ReproZip use provenance to capture and replay complete computational environments [ 8], while best-practice guidelines for computational science advocate infrastructure and processes that make results reproducible and extensible across platforms and time [ 35 ]. Storage- and I/O-layer correctness also gained prominence, with empirical analyses of latent sector errors and data corruption in disks [ 3] informing the design of more robust parallel filesystems and stress-testing tools. Collectively, these developments reflect a field that has evolved from isolated correctness checks into a holistic, system-wide testing ecosystem spanning numerical accuracy, communication correctness, performance stability, resilience, storage integrity, and workflow reproducibility. Kaizen builds on this tradition of rigorous HPC correctness verification by applying differential testing to evaluate LLM-translated code rather than developer-written implementations. Most closely related to Kaizen are techniques such as HeteroBugDetect [ 24 ] and HeteroFuzz [ 42 ], which detect semantic divergences between implementations of the same program running on different hardware. Kaizen builds on HeteroBugDetect’s differential testing methodology by evaluating LLM-translated codes rather than developer-written implementations, and by combining it with metamorphic source code fuzzing to generate diverse translation inputs that mitigate data leakage and expose translation robustness gaps. 
+
+Metamorphic Testing. Metamorphic testing [ 7 ] detects bugs by verifying that semantics-preserving input trans-formations produce consistent outputs. It has been widely applied to complex systems including search engines, compilers, and web APIs [ 33 , 37 , 39 ]. In the context of LLM-based systems, metamorphic testing has been used to evaluate robustness of neural machine translation [ 9 ]. Kaizen applies metamorphic testing at the source code level, generating semantically equivalent program variants as translation inputs. This is distinct from prior applications that apply metamorphic relations at the input-output level of a fixed program. By testing LLM translation robustness across a large corpus of semantically equivalent program variants, Kaizen exposes translation failures that evaluation on single fixed programs cannot detect. 
+
+Differential Testing and Fuzzing for Code. Differential testing was introduced by McKeeman [ 23 ] and has been highly effective for compiler testing. CSmith [ 40 ] generates random C programs and uses differential testing across compilers to find miscompilation bugs, finding hundreds of bugs in GCC and LLVM. Equivalence Modulo Inputs (EMI) testing [ 36 ] generates semantically equivalent program variants by inserting dead code into live regions, exploiting the same principle as our source code fuzzing approach. Grammar-based fuzzing has been applied broadly to programs, protocols, and file formats [ 2 ]. Kaizen combines these ideas in a novel way: grammar-based source code fuzzing generates diverse translation inputs to test LLM robustness, while runtime input fuzzing combined with differential testing detects semantic divergences in translated programs. Unlike compiler testing tools that compare multiple compilers on the same program, Kaizen compares the behavioral equivalence of an original and its LLM translation, which requires handling cross-platform execution and floating-point tolerance differences inherent to heterogeneous HPC environments. While each of these techniques has been applied individually in prior work, Kaizen is the first to combine source-level metamorphic fuzzing, which generates diverse translation inputs to test LLM robustness, with runtime grammar-based fuzzing and differential testing, which detects semantic divergences in translated programs across diverse execution conditions. 
+
+7 Discussion 
+
+Kaizen’s evaluation reveals a fundamental gap in how LLM-based HPC code translation is currently assessed. Compila-tion success, token-level similarity, and developer-written tests from static benchmarks, the dominant evaluation proxies Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 25 in prior work, substantially overestimate translation quality. Programs that compile and pass developer-provided seed inputs can still contain latent semantic defects that manifest only under specific input conditions. Developers relying on these proxies may deploy LLM-translated scientific code that produces incorrect results under production workloads. The semantic errors identified in RQ3 share a common pattern: they involve subtle departures from the original execution semantics that preserve the program’s structural appearance while altering its computational behavior. Intermediate variable elimination, execution model assumption transfer, loop bound errors, missing statement faults, shared memory scope mistranslation, and multi-dimensional index flattening all fall into this category. These errors are qualitatively different from compile-time errors in that they require behavioral testing to detect, and they are input-dependent in that they manifest only under specific runtime conditions. This reinforces the necessity of fuzzing-based evaluation for LLM-translated HPC code. The 0% compilation rate for full-program translation for 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B highlights the limitations of kernel-level fine-tuning for end-to-end translation. While many kernel-level compilation errors persist at the application level, full-program translation introduces additional challenges in host-device memory management, offloading constructs, multi-file dependencies, and kernel orchestration that are largely absent in isolated kernel translation. Future research on LLM-based HPC code migration should therefore move beyond compilation-based evaluation and isolated kernel benchmarks, with fine-tuning efforts specifically targeting the HPC-specific error categories identified in our taxonomies, as these represent the primary barriers to reliable end-to-end CUDA-to-OpenMP translation. Kaizen is designed to be applicable beyond CUDA-to-OpenMP translation. The metamorphic fuzzing component requires only a source language parser and a set of semantics-preserving mutation operators, both of which can be developed for any HPC programming model pair. The differential testing component requires the ability to execute both the original and translated program on the same inputs and compare outputs, which is possible for any two programming models that can run on available hardware. Extending Kaizen to CUDA-to-SYCL, CUDA-to-Kokkos, and Fortran-to-C++ translation are natural directions for future work. 
+
+8 Threats to Validity 
+
+Construct Validity. Our correctness metric flags a translation as incorrect if its output differs from the original by more than a configurable threshold on any fuzzed input. In our evaluation, correctness is determined by each application’s built-in verification logic, which varies per application. When no built-in verification is available, Kaizen uses a user-configured error norm threshold. This means correctness checking strictness is not uniform across applications, but reflects the domain-appropriate tolerance intended by the original developers. A stricter threshold might flag benign floating-point variations as errors, while a looser threshold might miss genuine semantic divergences. We mitigate this by using three error norms (L1, L2, Max) and requiring exact equality for computations where floating-point variation is not expected. The compile-time error taxonomy is qualitative and involves judgment in assigning errors to categories. To mitigate subjectivity, multiple authors independently categorized errors and reconciled disagreements, following established practices for qualitative analysis in software engineering research [31]. 
+
+Internal Validity. Fuzzing-based results depend on random seeds. We ran 5 independent fuzzing campaigns per application for source code mutation and 5 fuzzing campaigns per variant for differential testing to reduce sensitivity to individual seed choices. Three benchmark applications ( chemv , nbody , axhelm ) were excluded from kernel-level evaluation due to ChatPORT’s single-file limitation; this reflects a real constraint developers would face rather than a limitation of Kaizen. The full-program translation prompt was engineered on 5 held-out examples using a consistent template across all LLMs, minimizing contamination risk. 26 Ludwig et al. 
+
+External Validity. Our evaluation uses 16 HeCBench applications spanning 7 scientific domains for runtime correctness evaluation and 47 applications for compile-time analysis. Very large applications with complex inter-kernel dependencies or non-standard memory management patterns are not represented. Our findings are specific to CUDA-to-OpenMP translation using three ChatPORT variants; results may differ for other translation task or LLMs. 
+
+9 Conclusion 
+
+LLM-based translation of HPC programs is an increasingly important approach for porting scientific applications across heterogeneous programming models. However, current evaluation practices, which rely on compilation success, token-level similarity, and developer-written tests from static benchmarks, cannot reliably ensure behavioral correctness. We presented Kaizen, a framework that combines metamorphic testing, grammar-based fuzzing, and differential testing to evaluate the behavioral correctness of LLM-translated HPC applications. Evaluated on CUDA-to-OpenMP translation of 16 scientific applications from 7 domains using three top-performing ChatPORT variants at both kernel-level and full-program granularity, our evaluation produced four findings: neither compilation success nor developer-written tests can reliably ensure semantic correctness, as results range from perfect correctness to zero correctness across applications with similar compilability rates; LLM-translated programs exhibit systematic compile-time error patterns across 9 kernel-level and 27 full-program categories; semantic errors that survive compilation are application and input-dependent and require differential testing with diverse inputs to expose, with six categories identified; and full-program translation is substantially harder than kernel-level translation, failing to compile entirely for 𝐶ℎ𝑎𝑡𝑃𝑂𝑅𝑇 CL_13B ,and achieving at most 28% compilability across the remaining two top-performing ChatPORT variants. These findings establish that correctness-oriented evaluation is necessary for building trust in LLM-assisted HPC code porting. The error taxonomies provide actionable guidance for improving future LLM fine-tuning strategies, and extending Kaizen to other programming model pairs such as CUDA-to-SYCL and CUDA-to-Kokkos is a natural direction for future work. 
+
+References                        
+
+> [1] Hartwig Anzt, Axel Huebl, and Xiaoye S. Li. 2024. Then and Now: Improving Software Portability, Productivity, and 100 ×Performance. Computing in Science & Engineering 26, 1 (2024), 61–70. doi:10.1109/MCSE.2024.3387302 [2] Cornelius Aschermann, Tommaso Frassetto, Thorsten Holz, Patrick Jauernig, Ahmad-Reza Sadeghi, and Daniel Teuchert. 2019. NAUTILUS: Fishing for Deep Bugs with Grammars. Proceedings 2019 Network and Distributed System Security Symposium (2019). https://api.semanticscholar.org/ CorpusID:69790362 [3] Lakshmi N. Bairavasundaram, Garth R. Goodson, Shankar Pasupathy, and Jacob Schindler. 2008. An Analysis of Latent Sector Errors in Disk Drives. In SIGMETRICS . 289–300. [4] Tomer Bitan, Tal Kadosh, Erel Kaplan, Shira Meiri, Le Chen, Peter Morales, Niranjan Hasabnis, and Gal Oren. 2025. UniPar: A Unified LLM-Based Framework for Parallel and Accelerated Code Translation in HPC. In 2025 IEEE High Performance Extreme Computing Conference (HPEC) . IEEE. doi:10.1109/HPEC67600.2025.11196677 [5] H. Carter Edwards, Christian R. Trott, and Daniel Sunderland. 2014. Kokkos: Enabling manycore performance portability through polymorphic memory access patterns. J. Parallel and Distrib. Comput. 74, 12 (2014), 3202–3216. Domain-Specific Languages and High-Level Frameworks for High-Performance Computing. doi:10.1016/j.jpdc.2014.07.003 [6] Le Chen, Bin Lei, Dunzhi Zhou, Pei-Hung Lin, Chunhua Liao, Caiwen Ding, and Ali Jannesari. 2025. Fortran2CPP: Automating Fortran-to-C++ Translation using LLMs via Multi-Turn Dialogue and Dual-Agent Integration. In arXiv preprint arXiv:2412.19770 .[7] Tsong Yueh Chen, Shing-Chi Cheung, and Siu-Ming Yiu. 1998. Metamorphic Testing: A New Approach for Generating Next Test Cases . Technical Report HKUST-CS98-01. Department of Computer Science, The Hong Kong University of Science and Technology, Hong Kong. [8] Fernando Chirigati, Dennis Shasha, and Juliana Freire. 2013. ReproZip: Using Provenance to Support Computational Reproducibility. In USENIX Workshop on the Theory and Practice of Provenance (TaPP) .[9] Steven Cho, Stefano Ruberto, and Valerio Terragni. 2025. Metamorphic Testing of Large Language Models for Natural Language Processing. In 2025 IEEE International Conference on Software Maintenance and Evolution (ICSME) . 174–186. doi:10.1109/ICSME64153.2025.00025
+
+Kaizen : Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications 27 
+
+[10] Matthew T. Dearing, Yiheng Tao, Xingfu Wu, Zhiling Lan, and Valerie Taylor. 2024. LASSI: An LLM-based Automated Self-Correcting Pipeline for Translating Parallel Scientific Codes. In Proceedings of the IEEE International Conference on Cluster Computing Workshops (CLUSTER Workshops) .IEEE, 136–143. [11] James Demmel and Huan D. Nguyen. 2016. Efficient Reproducible Floating Point Summation and BLAS . Technical Report UCB/EECS-2016-121. EECS Department, UC Berkeley. [12] Jose Monsalve Diaz, Swaroop Pophale, Oscar Hernandez, David E. Bernholdt, and Sunita Chandrasekaran. 2018. OpenMP 4.5 Validation and Verification Suite for Device Offload. In Evolving OpenMP for Evolving Architectures , Bronis R. de Supinski, Pedro Valero-Lara, Xavier Martorell, Sergi Mateo Bellido, and Jesus Labarta (Eds.). Springer International Publishing, Cham, 82–95. [13] Robert B. Evans and Alberto Savoia. 2007. Differential testing: a new approach to change detection. In The 6th Joint Meeting on European Software Engineering Conference and the ACM SIGSOFT Symposium on the Foundations of Software Engineering: Companion Papers (Dubrovnik, Croatia) 
+
+(ESEC-FSE companion ’07) . Association for Computing Machinery, New York, NY, USA, 549–552. doi:10.1145/1295014.1295038 [14] Kurt B. Ferreira et al . 2008. Characterizing the Impact of System Noise on Scaling of Parallel Applications. In SC ’08: Proceedings of the International Conference for High Performance Computing, Networking, Storage and Analysis .[15] Wulfram Gerstner, Werner M. Kistler, Richard Naud, and Liam Paninski. 2014. Neuronal Dynamics: From Single Neurons to Networks and Models of Cognition . Cambridge University Press. https://neuronaldynamics.epfl.ch/online/Ch1.S3.html [16] Ganesh Gopalakrishnan et al . 2008. ISP: A Tool for Model Checking MPI Programs. In Proceedings of the 13th ACM SIGPLAN Symposium on Principles and Practice of Parallel Programming (PPoPP) . 285–286. [17] The Khronos Group Inc. 2020. SYCL ™ 2020 Specification (revision 11) . Accessed: 2025-10-25. https://registry.khronos.org/SYCL/specs/sycl-2020/html/sycl-2020.html [18] Zheming Jin, Swaroop Pophale, and Keita Teranishi. 2025. Enhancing ChatPORT with CUDA-to-SYCL Kernel Translation Capability. In Proceedings of the SC ’25 Workshops of the International Conference for High Performance Computing, Networking, Storage and Analysis (SC Workshops ’25) .Association for Computing Machinery, New York, NY, USA, 524–533. doi:10.1145/3731599.3767398 [19] Zheming Jin and Jeffrey S. Vetter. 2023. A Benchmark Suite for Improving Performance Portability of the SYCL Programming Model. In 2023 IEEE International Symposium on Performance Analysis of Systems and Software (ISPASS) . 325–327. doi:10.1109/ISPASS57527.2023.00041 [20] Upulee Kanewala and James M. Bieman. 2014. Testing scientific software: A systematic literature review. Information and Software Technology 56, 10 (2014), 1219–1232. doi:10.1016/j.infsof.2014.05.006 [21] Hongliang Liang, Xiaoxiao Pei, Xiaodong Jia, Wuwei Shen, and Jian Zhang. 2018. Fuzzing: State of the Art. IEEE Transactions on Reliability 67, 3 (2018), 1199–1218. doi:10.1109/TR.2018.2834476 [22] David Luebke. 2008. CUDA: Scalable parallel programming for high-performance scientific computing. In 2008 5th IEEE International Symposium on Biomedical Imaging: From Nano to Macro . IEEE (Institute of Electrical and Electronics Engineers), Piscataway, NJ, USA, 836–838. doi:10.1109/ISBI. 2008.4541126 [23] William M. McKeeman. 1998. Differential Testing for Software. Digital Technical Journal 10, 1 (1998), 100–107. [24] Manish Motwani, Aakash Kulkarni, Yunhan Qiao, Matthew Davis, and Ziyan Chen. 2025. LLM-Guided Differential Fuzzing for Detecting Platform-Specific Bugs in Scientific Applications. In 2025 Conference on AI x Software Engineering (AIxSE) . IEEE, 59–66. [25] OpenACC Committee. 2020. OpenACC Application Programming Interface Version 3.0 . Accessed: 2025-05-19. https://www.openacc.org/ [26] OpenMP Architecture Review Board. 2024. OpenMP Application Program Interface Version 6.0. https://www.openmp.org/wp-content/uploads/ OpenMP-API-Specification-6-0.pdf [27] Rangeet Pan, Ali Reza Ibrahimzada, Rahul Krishna, Divya Sankar, Lambert Pouguem Wassi, Michele Merler, Boris Sobolev, Raju Pavuluri, Saurabh Sinha, and Reyhaneh Jabbarvand. 2024. Lost in Translation: A Study of Bugs Introduced by Large Language Models while Translating Code. In Proceedings of the IEEE/ACM 46th International Conference on Software Engineering (Lisbon, Portugal) (ICSE ’24) . Association for Computing Machinery, New York, NY, USA, Article 82, 13 pages. doi:10.1145/3597503.3639226 [28] Swaroop Pophale, Zheming Jin, and Keita Teranishi. 2025. ChatPORT: Fine-Tuned LLM for Easy Code PORTing. In OpenMP: Balancing Productivity and Performance Portability: 21st International Workshop on OpenMP, IWOMP 2025, Charlotte, NC, USA, October 1-3, 2025 Proceedings (Charlotte, NC, USA). Springer-Verlag, Berlin, Heidelberg, 197–211. doi:10.1007/978-3-032-06343-4_13 [29] Joachim Protze, Tobias Hilbrich, Martin Schulz, Bronis R. de Supinski, Wolfgang E. Nagel, and Matthias S. Mueller. 2014. MPI Runtime Error Detection with MUST: A Scalable and Crash-Safe Approach. In 2014 43rd International Conference on Parallel Processing Workshops . 206–215. doi:10.1109/ICPPW.2014.37 [30] Shuo Ren, Daya Guo, Shuai Lu, Long Zhou, Shujie Liu, Duyu Tang, Neel Sundaresan, Ming Zhou, Ambrosio Blanco, and Shuai Ma. 2020. Codebleu: a method for automatic evaluation of code synthesis. arXiv preprint arXiv:2009.10297 (2020). [31] Johnny Saldaña. 2021. The Coding Manual for Qualitative Researchers (4th ed.). SAGE Publications. [32] Geof Sawaya, Michael Bentley, Ian Briggs, Ganesh Gopalakrishnan, and Dong H. Ahn. 2017. FLiT: Cross-platform floating-point result-consistency tester and workload. In 2017 IEEE International Symposium on Workload Characterization (IISWC) . 229–238. doi:10.1109/IISWC.2017.8167780 [33] Sergio Segura, Gordon Fraser, Ana B Sanchez, and Antonio Ruiz-Cortés. 2016. A survey on metamorphic testing. IEEE Transactions on software engineering 42, 9 (2016), 805–824. [34] Sameer Shende and Allen D. Malony. 2006. Performance Regression Testing for HPC Codes. In International Conference on Computational Science (ICCS) . 185–193. 28 Ludwig et al. 
+
+[35] Victoria Stodden et al . 2014. Best Practices for Computational Science: Software Infrastructure and Environments for Reproducible and Extensible Research. Computing in Science & Engineering 17, 6 (2014), 21–31. [36] Chengnian Sun, Vu Le, and Zhendong Su. 2016. Finding compiler bugs via live code mutation. SIGPLAN Not. 51, 10 (Oct. 2016), 849–863. doi:10.1145/3022671.2984038 [37] Qiuming Tao, Wei Wu, Chen Zhao, and Wuwei Shen. 2010. An automatic testing approach for compiler based on metamorphic testing technique. In 
+
+2010 Asia Pacific Software Engineering Conference . IEEE, 270–279. [38] Ali TehraniJamsaz, Arijit Bhattacharjee, Le Chen, Nesreen K. Ahmed, Azalia Mirhoseini, and Ali Jannesari. 2024. CodeRosetta: Pushing the Boundaries of Unsupervised Code Translation for Parallel Programming. In Advances in Neural Information Processing Systems (NeurIPS) , Vol. 37. 100965–100999. [39] Dongwei Xiao, Zhibo Liu, Yuanyuan Yuan, Qi Pang, and Shuai Wang. 2022. Metamorphic testing of deep learning compilers. Proceedings of the ACM on Measurement and Analysis of Computing Systems 6, 1 (2022), 1–28. [40] Xuejun Yang, Yang Chen, Eric Eide, and John Regehr. 2011. Finding and understanding bugs in C compilers. In Proceedings of the 32nd ACM SIGPLAN Conference on Programming Language Design and Implementation (San Jose, California, USA) (PLDI ’11) . Association for Computing Machinery, New York, NY, USA, 283–294. doi:10.1145/1993498.1993532 [41] Hanliang Zhang, Cristina David, Meng Wang, Brandon Paulsen, and Daniel Kroening. 2025. Scalable, Validated Code Translation of Entire Projects using Large Language Models. Proc. ACM Program. Lang. 9, PLDI, Article 212 (June 2025), 26 pages. doi:10.1145/3729315 [42] Qian Zhang, Jiyuan Wang, and Miryung Kim. 2021. HeteroFuzz: fuzz testing to detect platform dependent divergence for heterogeneous applications. In Proceedings of the 29th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering 
+
+(Athens, Greece) (ESEC/FSE 2021) . Association for Computing Machinery, New York, NY, USA, 242–254. doi:10.1145/3468264.3468610

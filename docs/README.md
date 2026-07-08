@@ -6,91 +6,73 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-07
-- 运行时间：2026-07-07 21:27:56 UTC
+- 最新运行日期：2026-07-08
+- 运行时间：2026-07-08 20:53:56 UTC
 - 运行状态：成功
-- 本次总论文数：23
-- 精读区：12
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今日聚焦 23 篇 AI 编程与软件工程论文，重点覆盖自动修复、LLM 测试验证、安全校准与 C→Rust 自动迁移。  
-最值得关注的是“多候选补丁确定性融合”与“LLM 测试 Oracle 权威来源分类”两条主线，前者直指自动修复稳定性，后者系统梳理了大模型测试可信度问题。  
-建议优先跟进代码安全校准、Verified Code Generation 与 Rust 自动迁移方向，这些主题已开始从研究走向工程落地。
-- 详情：[/202607/07/README](/202607/07/README)
+今日共追踪 17 篇 LLM 编程与测试方向论文，重点精读了“提示优化提升代码生成”和“先写代码还是先测试”的工程实践问题。  
+最值得关注的是：自然语言 Prompt 优化已能显著改善代码生成效果，而多篇工作开始把测试、代码审查与形式化规范纳入 LLM 开发闭环。  
+建议优先关注“代码生成 + 自动测试/Review”协同流程，这类方法最可能在真实开发环境里率先落地。
+- 详情：[/202607/08/README](/202607/08/README)
 
 ### 精读区论文标签
-1. [A Single Patch Is Not Enough: Deterministic Fusion of Repair Candidates](/202607/07/2607.01597v1-a-single-patch-is-not-enough-deterministic-fusion-of-repair-candidates)  
-   标签：评分：10.0/10、query:apr-oracle
-   evidence：修复候选补丁的确定性融合，用于选择和构建最终补丁
-2. [LLM-Based Test Oracles: Source-of-Authority Taxonomy -- A Systematic Literature Review](/202607/07/2607.05031v1-llm-based-test-oracles-source-of-authority-taxonomy----a-systematic-literature-review)  
-   标签：评分：10.0/10、query:apr-oracle
-   evidence：关于基于大语言模型的测试预言及其权威来源的系统文献综述
-3. [Loc2Repair: A Framework for Evaluating the Impact of File-Level Issue Localization in Repo-Level LLM Repair](/202607/07/2606.30963v1-loc2repair-a-framework-for-evaluating-the-impact-of-file-level-issue-localization-in-repo-level-llm-repair)  
+1. [From Failing to Passing: Evolving Natural Language Prompt Optimization Rules for LLM Code Generation](/202607/08/2607.05121v1-from-failing-to-passing-evolving-natural-language-prompt-optimization-rules-for-llm-code-generation)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：评估仓库级LLM修复与补丁合成的框架
-4. [Checked Program Recovery from Execution Video: A Sound Oracle for Untrusted Generators](/202607/07/2607.00635v1-checked-program-recovery-from-execution-video-a-sound-oracle-for-untrusted-generators)  
+   evidence：结合提示优化与执行反馈修复的分阶段修复流水线
+2. [On the risk of coding before testing: An empirical study on LLM-based test generation workflow](/202607/08/2607.05139v1-on-the-risk-of-coding-before-testing-an-empirical-study-on-llm-based-test-generation-workflow)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：针对不可信生成器的两层验证预言机以确保正确性
-5. [Knowledge-Enhanced Agentic Vulnerability Repair](/202607/07/2607.00820v1-knowledge-enhanced-agentic-vulnerability-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：使用验证的程序事实和知识的代理式自动漏洞修复
-6. [Delta Debugging in the Absence of Test Oracles Through Metamorphic Testing](/202607/07/2607.00929v1-delta-debugging-in-the-absence-of-test-oracles-through-metamorphic-testing)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：在缺乏测试预言的情况下通过蜕变测试进行Delta调试
-7. [SWE-Doctor: Guiding Software Engineering Agents with Runtime Diagnosis from Multi-Faceted Bug Reproduction Tests](/202607/07/2607.00990v1-swe-doctor-guiding-software-engineering-agents-with-runtime-diagnosis-from-multi-faceted-bug-reproduction-tests)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：用于补丁验证和指导补丁生成的缺陷复现测试
-8. [ContextSniper: AntTrail's Token-Efficient Code Memory for Repository-Level Program Repair](/202607/07/2607.01916v1-contextsniper-anttrails-token-efficient-code-memory-for-repository-level-program-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：用于大语言模型代理仓库级程序修复的令牌高效代码内存
-9. [ContextSniper: AntTrail's Token-Efficient Code Memory for Repository-Level Program Repair](/202607/07/2607.01916v2-contextsniper-anttrails-token-efficient-code-memory-for-repository-level-program-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：针对仓库级学习型程序修复的精准证据选择
-10. [Beyond Textual Repository Exploration: Dual-Modal Structural Reasoning for Agentic Issue Resolution](/202607/07/2607.01929v1-beyond-textual-repository-exploration-dual-modal-structural-reasoning-for-agentic-issue-resolution)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：用于智能体神经程序修复的双模态结构化推理
-11. [Anchored Self-Play for Code Repair](/202607/07/2607.03523v1-anchored-self-play-for-code-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：使用生成器-修复器自博弈强化学习的神经代码修复
-12. [Latent Programming Horizons in Coding Agents](/202607/07/2607.05188v1-latent-programming-horizons-in-coding-agents)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：用于解码代码是否通过测试集及引入回归的神经表示
+   evidence：研究LLM生成的测试作为独立可靠测试预言的有效性
+3. [Loc2Repair: A Framework for Evaluating the Impact of File-Level Issue Localization in Repo-Level LLM Repair](/202607/08/2606.30963v1-loc2repair-a-framework-for-evaluating-the-impact-of-file-level-issue-localization-in-repo-level-llm-repair)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：评估仓库级LLM修复和补丁合成失败模式的框架
+4. [Benchmarking Code Improvement with Progressive, Adaptive, and Interactive Feedback](/202607/08/2607.01360v1-benchmarking-code-improvement-with-progressive-adaptive-and-interactive-feedback)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：超越二元正确性，利用反馈引导的细化来评估程序修复和代码改进。
+5. [ContextSniper: AntTrail's Token-Efficient Code Memory for Repository-Level Program Repair](/202607/08/2607.01916v2-contextsniper-anttrails-token-efficient-code-memory-for-repository-level-program-repair)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：使用大语言模型智能体和上下文选择进行仓库级程序修复
+6. [Diagnosis-Driven Automatic Repair for Agentic Workflow via Symbolic Inference](/202607/08/2607.02882v1-diagnosis-driven-automatic-repair-for-agentic-workflow-via-symbolic-inference)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：通过符号推理对智能体工作流进行诊断驱动的自动修复
 
 ### 速读区论文标签
-1. [An Empirical Study of Security Calibration in Large Language Models for Code](/202607/07/2606.31159v1-an-empirical-study-of-security-calibration-in-large-language-models-for-code)  
+1. [Kaizen: Metamorphic Fuzzing and Differential Testing for LLM-Translated HPC Applications](/202607/08/2607.04058v1-kaizen-metamorphic-fuzzing-and-differential-testing-for-llm-translated-hpc-applications)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：衡量模型的置信度是否与其输出的真实正确性一致
-2. [AdaTrans: Automated C to Rust Transformation via Error-Adaptive Repair](/202607/07/2606.31706v1-adatrans-automated-c-to-rust-transformation-via-error-adaptive-repair)  
+   evidence：通过蜕变模糊测试和差异测试确保行为正确性
+2. [Teaching Code LLMs to Reason with Intermediate Formal Specifications](/202607/08/2607.04232v1-teaching-code-llms-to-reason-with-intermediate-formal-specifications)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：具有多阶段验证功能等效性的自动修复框架
-3. [AxDafny: Agentic Verified Code Generation in Dafny](/202607/07/2606.32007v1-axdafny-agentic-verified-code-generation-in-dafny)  
+   evidence：可执行形式化规范作为修复代码的机器可检查约束
+3. [SWE-Review: Closing the Loop on Issue Resolution with Agentic Code Review](/202607/08/2607.06065v1-swe-review-closing-the-loop-on-issue-resolution-with-agentic-code-review)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：验证器引导的修复框架，迭代生成实现和不变式
-4. [LLVM-Bench: Benchmarking and Advancing Large Language Models for LLVM Compiler Issue Resolution](/202607/07/2607.00700v1-llvm-bench-benchmarking-and-advancing-large-language-models-for-llvm-compiler-issue-resolution)  
+   evidence：智能体代码审查以决定PR接受并提供修订反馈
+4. [LogicHunter: Testing LLM Agent Frameworks with an Agentic Oracle](/202607/08/2607.06195v1-logichunter-testing-llm-agent-frameworks-with-an-agentic-oracle)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：LLM问题解决与自动补丁应用的基准测试
-5. [Test-Time Verification for Text-to-SQL via Outcome Reward Models](/202607/07/2606.30851v1-test-time-verification-for-text-to-sql-via-outcome-reward-models)  
+   evidence：用于测试LLM框架以解决预言机歧义的代理预言机
+5. [Safe and Adaptive Cloud Healing: Verifying LLM-Generated Recovery Plans with a Neural-Symbolic World Model](/202607/08/2607.01595v1-safe-and-adaptive-cloud-healing-verifying-llm-generated-recovery-plans-with-a-neural-symbolic-world-model)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：结果奖励模型作为推理时验证的学习语义评分
-6. [JETO-Bench: A Reproducible Benchmark for Execution Time Improvement Patches in Java](/202607/07/2606.31767v1-jeto-bench-a-reproducible-benchmark-for-execution-time-improvement-patches-in-java)  
+   evidence：用于故障自愈和恢复的神经符号程序合成
+6. [Refploit: Facilitating Exploit Construction via Code-Agent Trajectory Repair](/202607/08/2607.01760v1-refploit-facilitating-exploit-construction-via-code-agent-trajectory-repair)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：执行时间改进补丁的基准测试与补丁验证
-7. [Large Language Models for Multi-Lingual Equivalent Mutant Detection: An Extended Empirical Study](/202607/07/2607.00511v1-large-language-models-for-multi-lingual-equivalent-mutant-detection-an-extended-empirical-study)  
+   evidence：检测看似成功但未触发漏洞逻辑的补丁
+7. [Mastermind: Strategy-grounded Learning for Repository-Scale Vulnerability Reproduction](/202607/08/2607.01764v1-mastermind-strategy-grounded-learning-for-repository-scale-vulnerability-reproduction)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：利用大语言模型进行等价变体检测，以确保软件质量并减少偏差
-8. [RepoRescue: An Empirical Study of LLM Agents on Whole-Repository Compatibility Rescue](/202607/07/2607.01213v1-reporescue-an-empirical-study-of-llm-agents-on-whole-repository-compatibility-rescue)  
+   evidence：验证补丁构建后崩溃是否消失
+8. [Prompt Coverage Adequacy](/202607/08/2607.02057v1-prompt-coverage-adequacy)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于整库兼容性修复和缺陷修复的LLM智能体
-9. [How do Execution Features Improve Statistical Fault Localization? An Empirical Study](/202607/07/2606.30324v1-how-do-execution-features-improve-statistical-fault-localization-an-empirical-study)  
+   evidence：针对提示词生成代码的测试充分性准则
+9. [Are Performance-Optimization Benchmarks Reliably Measuring Coding Agents?](/202607/08/2607.01211v1-are-performance-optimization-benchmarks-reliably-measuring-coding-agents)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：利用执行特征和随机森林进行统计故障定位
-10. [MOA: A Profiling-Guided LLM Framework for Memory-Optimization Automation at Codebase Scale](/202607/07/2606.31368v1-moa-a-profiling-guided-llm-framework-for-memory-optimization-automation-at-codebase-scale)  
+   evidence：通过应用补丁并比较运行时间来评估编码智能体
+10. [Repair the Amplifier, Not the Symptom: Stable World-Model Correction for Agent Rollouts](/202607/08/2607.01767v2-repair-the-amplifier-not-the-symptom-stable-world-model-correction-for-agent-rollouts)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：自动检测并修复内存效率问题的LLM驱动框架
-11. [ATM: CID-Brokered Pre-Write Admission for Multi-Agent Code Co-Synthesis](/202607/07/2607.00041v1-atm-cid-brokered-pre-write-admission-for-multi-agent-code-co-synthesis)  
+   evidence：用于修复代理部署中失败规划图的世界模型校正
+11. [Regression Accumulation in Multi-Turn LLM Programming Conversations](/202607/08/2607.01855v1-regression-accumulation-in-multi-turn-llm-programming-conversations)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：包含验证与修复的多智能体代码合成治理基座
+   evidence：多轮大模型编程中的回归累积与测试充分性
 
 
 <div class="dpr-home-promo-card">
