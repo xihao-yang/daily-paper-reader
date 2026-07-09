@@ -1,0 +1,636 @@
+Title: Can Coding Agents Implement Missed Compiler Optimizations? Evaluating LLM Agents on LLVM Peephole Optimizations
+
+URL Source: https://arxiv.org/pdf/2607.02684v1
+
+Published Time: Tue, 07 Jul 2026 00:06:57 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Can Coding Agents Implement Missed Compiler Optimizations? Evaluating LLM Agents on LLVM Peephole Optimizations 
+
+Hongxu Xu 
+
+Cheriton School of Computer Science University of Waterloo 
+
+Waterloo, Canada hongxu.xu@uwaterloo.ca 
+
+Chunhao Liao 
+
+Cheriton School of Computer Science University of Waterloo 
+
+Waterloo, Canada chunhao.liao@uwaterloo.ca 
+
+Xintong Zhou 
+
+Cheriton School of Computer Science University of Waterloo 
+
+Waterloo, Canada x27zhou@uwaterloo.ca 
+
+Chengnian Sun 
+
+Cheriton School of Computer Science University of Waterloo 
+
+Waterloo, Canada chengnian.sun@uwaterloo.ca 
+
+Abstract —Coding agents built on large language models are now capable of patching sizable real-world codebases, yet whether they can develop compiler optimizations re-mains an open question. To study this question, we introduce PeepholeBench, an evaluation framework whose tasks are con-structed from real-world missed peephole optimizations reported against LLVM’s InstCombine pass. Since missed peephole opti-mizations are typically fixed with small, localized patches, they offer a well-scoped but demanding testbed for coding agents: a correct fix demands rigorous reasoning about program seman-tics along with familiarity with optimizer-specific conventions. PeepholeBench derives its tasks from 21 resolved LLVM issues and 19 merged pull requests (PRs), supplies agents with only the issue context that existed before each fix, and assesses the resulting patches for both correctness and profitability. With PeepholeBench, we benchmark state-of-the-art coding agents on fixing missed peephole optimizations in LLVM’s InstCombine pass, measuring their patches against the corre-sponding human-written fixes. We observe a tension between correctness and profitability, and no agent matches human developers on both dimensions at once. The dominant failure modes are overly narrow transformations and misuse of LLVM-specific mechanisms, errors that existing test suites rarely expose. Together, these results establish PeepholeBench as a realistic and challenging benchmark for coding agents, and suggest future directions for building agents that can more dependably assist compiler optimization development. 
+
+Index Terms —coding agents, compiler optimization, LLVM 
+
+I. I NTRODUCTION 
+
+Agents powered by large language models (LLMs) have shown promise on software development tasks [1]–[4]. Coding agents, such as Gemini CLI [5] and Claude Code [6], can inspect repositories, edit source files, run tests, and produce non-trivial patches for large software systems [7], [8]. Their ability to implement compiler optimizations, however, remains unclear. Compiler optimization is an important and challeng-ing software development task [9], [10], in which program semantics must be preserved while improving the performance or size of generated code, and the implementation must follow optimizer-specific conventions [11]–[13]. In agentic coding benchmarks, a patch is usually considered successful if it passes the test suites [2], [7]. However, for compiler optimizations, passing existing test suites is often insufficient. A patch may pass the tests by overfitting to the reported missed optimization cases (under-generalization), or by generalizing beyond the test cases in ways that are semantically invalid or unprofitable. Conversely, a patch may implement a correct and profitable optimization yet fail tests due to producing a structurally different but semantically equivalent result, such as reordering the operands of a commutative arithmetic operation. We study coding agents’ ability to implement compiler optimizations through LLVM’s InstCombine pass, the middle-end peephole optimization pass that rewrites LLVM interme-diate representation (IR) within small windows to simplify programs, reduce generated code, and expose later optimiza-tions [11], [14]. Implementing missed peephole optimizations in InstCombine offers a focused yet realistic testbed for coding agents for three reasons. First, missed peephole optimizations are frequently reported, providing a recurring source of real-world optimization tasks. Second, their fixes are often lo-calized, making the resulting behavior amenable to focused IR tests, mutation-based testing, and semantic validation [10], [11], [13], [14]. Third, InstCombine serves as a common entry point for new LLVM contributors [15] and provides stable coding guidelines [12], making it a well-specified and acces-sible starting point for evaluating coding agents on compiler optimization tasks. Together, these properties make missed InstCombine optimizations a natural setting for automation and benchmarking. Yet the task remains challenging: plausible 1
+
+> arXiv:2607.02684v1 [cs.SE] 2 Jul 2026
+
+patches still require precise reasoning about IR semantics, profitability, and interactions with other optimizations [10], [11]. 
+
+PeepholeBench. We present PeepholeBench, an evaluation framework that tasks coding agents with implementing missed LLVM peephole optimizations. PeepholeBench is constructed from 21 closed LLVM issues reporting missed InstCombine optimizations, alongside the 19 merged pull requests (PRs) that resolve them. For each task, PeepholeBench reconstructs the repository at the PR’s base commit (the commit immediately preceding the human patch) and provides the agent with the linked issue descriptions, available Alive2 examples (before-and-after IR pairs illustrating the optimization) [10], and the parts of the InstCombine development guide [12] that are relevant to implementing peephole optimizations. This setup evaluates agents on the exact same compiler development task originally faced by human contributors, without exposing the merged patch. In this paper, we study how far current coding agents are from implementing compiler optimizations by evaluat-ing three state-of-the-art coding agents with PeepholeBench: Gemini CLI [5] (Gemini 3 Flash), Codex CLI [16] (GPT 5.4 and GPT 5.4 mini), and Claude Code [6] (Sonnet 4.6). We first measure how often each agent can produce a buildable patch that passes the conventional LLVM test suites for missed InstCombine optimizations. We then go beyond merely pass-ing the test suites: using mutation-based testing, Alive2 vali-dation [10], and llvm-mca-based profitability estimation [17], we evaluate whether generated patches achieve behavioral validity , requiring the resulting rewrite to be both correct and 
+
+non-regressive , as formally defined in Definition III.2. We further compare agent-generated patches with accepted human patches and analyze common failure modes to identify where current agents still fall short in compiler development. Our evaluation reveals that no agent matches human experts in terms of both validity and profitability simultaneously. Sonnet 4.6 matches human-expert validity rates but produces profitable optimizations for substantially fewer programs. Gemini 3 Flash inverts this trade-off, achieving profitability on a range of programs comparable to human-written patches, but at a modest cost in validity. We attribute these shortcomings to two recurring limitations. First, agents tend to overfit to the concrete optimization instance described in the issue report and fail to generalize beyond it (§ IV-D1a). Second, they mishandle LLVM-specific correctness constraints—such as guarding single-use values (§ IV-D1d), preserving undefined-behavior semantics (§ IV-D1e), and avoiding conflicts with existing optimization rules (§ IV-D1c)—that issue reports leave underspecified and existing test suites often fail to cover. Together, these findings suggest that agentic development of compiler optimizations requires better evaluation methodolo-gies, tighter integration of semantic validation tools into the agent loop, targeted strategies to close generalization and domain-knowledge gaps, and a rethinking of how agents and human contributors can complement each other; we discuss these directions in § V. 
+
+Contributions. We make the following contributions:  
+
+> •
+
+We present and publicly release PeepholeBench, a bench-mark of 19 missed InstCombine optimizations derived from real-world LLVM issues and PRs.  
+
+> •
+
+We design an evaluation framework on top of PeepholeBench that augments the existing test suites with mutation-based generation to cover more edge cases and assesses behavioral validity to capture both the correctness and profitability requirements of compiler optimizations.  
+
+> •
+
+We empirically evaluate representative coding agents on PeepholeBench, comparing their generated patches with human-authored ones. We also perform a thematic analysis of failure modes and discuss key implications for future coding agents in compiler development. II. B ACKGROUND 
+
+This section introduces LLVM’s InstCombine pass, detailing how missed peephole optimizations are typically reported, implemented, and validated. 
+
+A. Peephole Optimization in LLVM 
+
+LLVM [18] translates programs into a typed intermediate representation (IR) and optimizes them through a series of transformation passes. A common technique within these passes is peephole optimization , which replaces localized instruction patterns with simpler or more efficient, yet se-mantically equivalent, code [19], [20]. Specifically, LLVM’s InstCombine pass serves as a middle-end peephole optimizer, aggressively applying target-independent simplifications and canonicalizations directly to the IR [11], [14], [21]. A missed peephole optimization occurs when the compiler fails to perform an expected, beneficial rewrite. 1 Within the LLVM community, developers typically report these missed optimizations by providing a minimal IR example alongside the expected optimized form [14], [21]. For instance, Figure 1a illustrates a real issue report (#156898) where the expression 
+
+trunc i1 (4 ≫ x)—which truncates the shift result to a 1-bit boolean—can be simplified to x == 2 . Since 4 is 0b100 in binary, right-shifting it by x yields a 1 in the least significant bit if and only if x == 2 . Consequently, the entire truncation expression can be replaced by the direct comparison x == 2 .
+
+B. Implementing InstCombine Optimizations 
+
+Implementing a missed peephole optimization in LLVM’s InstCombine pass typically involves three steps [12], [21]. First, a contributor identifies a missed optimization and reports it with a minimal example (a pair of IR instruction sequences showing the code before and after the optimization), as seen in Figure 1a. Second, developers generalize this example into a broader rewrite pattern. For instance, the human patch in Figure 1c generalizes the initial report by using m_Shr to 
+
+> 1In the remainder of this paper, we use “rewrite” to refer to a specific IR transformation (especially in negative cases), and “optimization” to refer to the general rule that applies across instances.
+
+2define i1 @src (i8 %x) {                         
+
+> %lshr =lshr i8 4, %x %trunc =trunc i8 %lshr to i1
+> ret i1 %trunc
+> }
+> define i1 @tgt (i8 %x) {
+> %cmp =icmp eq i8 %x, 2
+> ret i1 %cmp
+> }
+
+(a) An IR and its optimized form, where lshr is a logical right shift, trunc truncates a value to a smaller type, and icmp eq compares integers for equality.                              
+
+> define i1 @src (i8 %x) {
+> %lshr =lshr i8 15, %x %trunc =trunc i8 %lshr to i1
+> ret i1 %trunc
+> }
+> define i1 @tgt (i8 %x) {
+> %trunc =icmp ult i8 %x, 4
+> ret i1 %trunc
+> }
+
+(b) Another pair of IR from the test suites, where 
+
+icmp ult compares integers for unsigned less-than.              
+
+> // In `InstCombinerImpl::visitTrunc `
+> const APInt *C1; Value *V1;
+> if (DestWidth == 1 && match (Src, m_Shr (m_Power2 (C1), m_Value (V1)))) {
+> Value *Right = ConstantInt:: get (V1-> getType (), C1-> countr_zero ());
+> return replaceInstUsesWith (Trunc, Builder. CreateICmpEQ (V1, Right));
+> }
+> if (DestWidth == 1 && match (Src, m_Shr (m_LowBitMask (C1), m_Value (V1)))) {
+> Value *Right = ConstantInt:: get (V1-> getType (), C1-> countr_one ());
+> return replaceInstUsesWith (Trunc, Builder. CreateICmpULT (V1, Right));
+> }
+
+(c) Human patch covers both cases. The matcher m_Shr matches a logical or arithmetic right shift, m_Power2 matches a power-of-two constant, m_LowBitMask 
+
+matches a constant of the form 2n −1, m_Value matches any value, countr_zero 
+
+count trailing zeros, and replaceInstUsesWith replaces uses of an instruction (trunc ) with another ( icmp eq/ult ).       
+
+> const APInt *C;
+> if (match (Src, m_LShr (m_Power2 (C), m_Value (X)))) {
+> return new ICmpInst(ICmpInst::ICMP_EQ, X, ConstantInt:: get (SrcTy, C-> exactLogBase2 ()));
+> }
+
+(d) Agent patch only matches logical shifts using m_LShr and misses the mask pattern shown in Figure 1b. 
+
+Fig. 1: Missed InstCombine optimization addressed by LLVM PR #157030. The human patch handles both power-of-two and low-bit-mask patterns; the patch generated by Codex CLI handles limited patterns and instructions. capture both logical ( lshr ) and arithmetic ( ashr ) shifts, while also handling both power-of-two constants and low-bit masks (values of the form 2n − 1). Third, developers implement the rewrite in InstCombine and validate it with regression tests via LLVM’s integrated tester (llvm-lit) [22]. This involves writing test files with FileCheck directives [23] that specify the execution command ( RUN ) and the expected optimized IR (CHECK ), as shown later in Figure 3a. Figure 1b illustrates such a test case, verifying that the generalized pattern successfully rewrites trunc i1 (15 ≫ x) to x < 4.
+
+Coding Conventions. To maintain codebase consistency, LLVM strictly enforces its coding conventions. Proposed patches that fail to adhere to these standards are rejected during code review. Consequently, contributors are required to express these rewrites using LLVM’s specialized pattern-matching utilities and helper functions [12]. As Figure 1c demonstrates, this process relies heavily on abstractions like 
+
+m_Shr (right shift), m_Power2 (power-of-two constant), and 
+
+m_LowBitMask (constants of the form 2n − 1). 
+
+C. Validating Correctness and Profitability of IR Rewrites 
+
+An optimization must be both correct and profitable before it can be accepted into LLVM [12]. To guarantee correctness , an optimization must preserve the program’s observable behavior whenever the original program is free of undefined behavior. Manual testing cannot reliably catch the subtle semantic errors that can occur, such as mishandling undef or poison values [24]–[26] or relying on incorrect preconditions. Consequently, developers rely on Alive2, an SMT-based verifier that formally proves that the target IR refines 2 the source IR under LLVM’s semantics [10], [11]. 
+
+> 2
+
+Refinement is a formal relation that ensures the target’s behavior is consistent with or more defined than that of the source. LLVM 
+
+> Issues
+> PRs
+> Coding
+> Agents
+> Mutation -Based
+> Generation
+> Seed
+> Tests
+> Run
+> OPT
+> Patched
+> LLVM
+> Seeds &
+> Mutants
+> Behavioral
+> Validation
+> Alive2
+> llvm -mca
+> Regression
+> Tests
+> llvm -lit
+> Failure Analysis
+> Task Formulation
+
+Fig. 2: Overview of the PeepholeBench workflow. To establish profitability , an optimization must yield ameasurable performance gain. Even a semantically correct op-timization may be rejected if it increases compiler complexity without making the generated code meaningfully faster [12]. This profitability can be estimated statically using tools like the LLVM Machine Code Analyzer (llvm-mca), which pre-dicts the CPU cycles and micro-operations that a code se-quence requires on a given target architecture (e.g., x86 64 or AArch64). These predictions provide concrete evidence to help developers decide whether an optimization justifies its inclusion [17]. III. M ETHODOLOGY 
+
+We propose PeepholeBench, a rigorous evaluation frame-work designed to assess the capability of coding agents in implementing missed peephole optimizations within LLVM’s InstCombine pass. This section details PeepholeBench. Fig-ure 2 provides an overview of the end-to-end workflow. 
+
+A. Task Formulation 
+
+A task in PeepholeBench presents the agent with an LLVM development environment for one missed InstCombine opti-mization. To instantiate the task, we check out the LLVM repository at the PR’s base commit, i.e. , the parent of the merge commit before the human patch is applied. We then generate a task-specific prompt file that serves as the primary 3TABLE I: Mutation strategies used in test generation.                                                                
+
+> Strategy Description Example
+> boundary-val Replace constant with bound-ary value
+> add %x,8 →add %x,-1
+> fake-use Insert llvm.fake.use adds fake.use(%v)
+> gep-shape Vary constant GEP index to boundary value
+> gep %p,4 →gep %p,0
+> instr-flags Toggle instruction flags add nsw →add
+> intrinsic-bool Flip boolean poison flag of
+> ctlz ,cttz , and abs
+> ctlz(x,1) →ctlz(x,0)
+> operand-subst Replace operand with domi-nating same-typed value
+> add a,b →add a,a
+> operator-subst Swap opcode/predicate add →sub
+> power-of-two Replace 2kwith nearby value and %x,8 →and %x,7
+> select-shape Swap or merge true arms and false arms
+> sel c,a,b →sel c,b,a
+> shift-shape Move shift amount to 0,1, or
+> bw −1
+> shl %x,3 →shl %x,31
+> type-subst Replace a type with another of same family
+> i32 →i64
+> vector-shape Vary shuffle mask to identity, reverse, or splat
+> sflvec a, b, <0,1,2> →
+> sflvec a, b, <2,1,0>
+> Note: nsw /nuw = no signed/unsigned wrap; bw = bit width; sel =select ;gep =
+> getelementptr ;sflvec =shufflevector .
+
+specification for the agent. Upon completion, we collect the agent’s implementation as a patch file using git diff for downstream evaluation. The prompt is structured into four functional components:  
+
+> •
+
+Issue Specification : The titles and descriptions of linked GitHub issues, defining the reported missed optimization.  
+
+> •
+
+Reference IRs : When available, a source–target IR pair extracted from Alive2 links provided in the issue, serving as a concrete optimization target.  
+
+> •
+
+Optimization Guidelines : Excerpts from the InstCombine contributor guide [12], covering core conventions such as profitability, canonicalization, pattern matching, etc.  
+
+> •
+
+Instructions : Step-by-step task instructions: generalize the optimization, add regression tests and confirm the baseline does not optimize them, implement the optimization in the relevant files, and verify that the test cases are optimized. 
+
+B. Data Collection 
+
+We construct PeepholeBench from GitHub issues and PRs in the LLVM repository, mined via the GitHub API. Our pipeline first identifies closed issues labeled with both 
+
+instcombine and missed-optimization . For each is-sue, we retrieve the corresponding merged PRs created after Sept. 1, 2025. This cutoff focuses the benchmark on recent de-velopment instances, minimizing potential data leakage during agent training. For each candidate pull request, we extract metadata includ-ing timestamps, merge and base commits, and linked issues. 
+
+C. Mutation-Based Test Generation 
+
+We use mutation-based methodology to generate a test suite that exceeds the coverage of the manually written tests in the original PRs. Starting from the test cases ( seeds ) modified or added in the PR, we apply a suite of targeted mutators (see Table I) to produce pattern-adjacent IR variants. The objective is not to maximize random diversity, but to expose latent gaps in correctness, profitability, and generalization. Several mu-tators deliberately target pervasive InstCombine precondition classes, such as use counts ( fake-use ) and instruction flags (instr-flags ). For instance, the seed test in Figure 1b only covers logical right shifts ( lshr ), whereas the human-written patch also handles arithmetic right shifts ( ashr ). Applying the 
+
+operator-subst mutator, which replaces an operator with another from the same family, can automatically cover these critical edge cases. To generate a diverse set of mutants while bounding run-time, we maintain a seed pool S initialized with the original IRs and execute K iterations. In each iteration, we sample an existing seed and a mutator to produce a new mutant, which is retained if it is valid and unique. Retained mutants are added back to the pool S at the end of each iteration, allowing mutations to compose over time. To bound runtime, an iteration terminates once it reaches a target of N retained mutants or exceeds an attempt threshold T . The total number of generated mutants per task is at most K ·N . We discuss the specific values chosen for these hyperparameters in § IV-A1. 
+
+D. Behavioral Validation 
+
+We evaluate agent-generated patches by semantic correct-ness and architectural profitability, rather than by syntactic test passing alone. Standard LLVM regression tests typically compare the IR optimized by a patch against a reference IR (the output of the human-written patch). Such textual com-parisons are prone to false negatives: an agent may produce a rewrite that differs syntactically from the reference but is semantically equivalent and equally profitable. For example, 
+
+add i8 %a, %b and add i8 %b, %a are semantically iden-tical, but would fail a strict string comparison. To address this limitation, we lift validation from syntax to semantics, using Alive2 for correctness and llvm-mca for profitability analysis. Because optimizations often depend on target-specific data layouts (such as memory alignments), LLVM regression tests typically execute the optimizer OPT 
+
+under multiple configurations. To rigorously evaluate a patch across all intended architectures, we extract these configuration arguments from the RUN directives embedded in the original test files. For each configuration, we run the patched OPT to generate the optimized IR and then evaluate its behavioral validity. To provide a rigorous basis for evaluation, we define cost, profitability, and behavioral validity as follows. 
+
+Definition III.1 (Cost and Profitability) . Let cost (I) =(cycles (I), uops (I)) denote the estimated cost of an IR pro-gram I, where cycles and uops are the CPU cycles and micro-operations reported by llvm-mca, respectively. For two IR programs S and T , we write T ⪯ S if cycles (T ) ≤ cycles (S) ∧ uops (T ) ≤ uops (S),
+
+and T ≺ S if 
+
+T ⪯ S ∧  cycles (T ) < cycles (S) ∨ uops (T ) < uops (S).
+
+4The profitability of T relative to S is classified as: 
+
+P(S, T ) = 
+
+
+
+PROFITABLE , if T ≺ S, 
+
+NEUTRAL , if T ⪯ S ∧ T̸ ≺ S, 
+
+MIXED , if T̸ ⪯ S ∧ S̸ ⪯ T, 
+
+REGRESSIVE , if S ≺ T. 
+
+We say T is non-regressive relative to S if P(S, T )̸ =
+
+REGRESSIVE , i.e. , we do not classify T as regressive if it improves one cost metric even if it worsens another. 
+
+Definition III.2 (Behavioral Validity) . A rewrite is behav-iorally valid if and only if it satisfies both:  
+
+> •
+
+Correctness : The output IR is semantically equivalent to, or a refinement of, the input IR, as verified by Alive2 [10].  
+
+> •
+
+Profitability : The output IR is non-regressive relative to the unoptimized input IR, as estimated by llvm-mca using x86 64 backends in our evaluation. If Alive2 fails to return a conclusive result ( e.g. , due to a timeout or unsupported features) and llvm-mca does not indicate a regression, the validation result is inconclusive .Inconclusive cases are excluded from all analyses. 
+
+E. Thematic Analysis of Representative Failure Modes 
+
+To characterize the limitations of current coding agents, we conduct an LLM-assisted thematic analysis of representative failure modes [27]–[29]. We collect all test cases in which at least one agent patch is behaviorally invalid or regressive 
+
+relative to the human patch. Failure modes are grouped into three high-level categories— profitability issue , optimization failure , and incorrect transformation —each subdivided by  
+
+> OPT
+
+error messages, Alive2 counterexamples, and llvm-mca cost deltas (Table VII). We then perform stratified sampling, ensuring at least one case per stratum. For each sampled case, we assemble a diagnostic bundle containing the input IR, agent and human patches, OPT out-puts, Alive2 results, llvm-mca cost deltas, and the rewrite stack trace. Bundles are grouped by PR and provided to two independent LLM labelers, Claude Code (Sonnet 4.6) and Codex CLI (GPT 5.4), each assigning open-coding labels with a written rationale. Two authors collaboratively map codes from both labelers to candidate themes, refining them by splitting or merging, with each labeler’s codes mapped inde-pendently, preventing intentional alignment that would inflate agreement at the cost of theme validity. A third LLM agent, Antigravity CLI (Gemini 3.5 Flash), assigns final themes in closed-coding style. Fleiss’s κ [30] is computed across three labelers to ensure reliability (see § IV-D for details), and the two authors together make the final determination for divergent cases. IV. E VALUATION 
+
+We evaluate the performance of three state-of-the-art coding agents in implementing missed peephole optimizations for LLVM’s InstCombine pass using PeepholeBench. Our eval-uation is guided by three research questions (RQs): TABLE II: Dataset overview. ± Lines shows lines added and deleted in implementation files of the PR. Seeds/Mut shows the number of seed test cases extracted from the PR’s InstCombine test files and the mutations generated from them.                                                                                                 
+
+> PR Date ±Lines Seeds/Mut Issues
+> #157030 2025-09 +21 / 10 / 940 #156898 #158097 2025-09 +29 / 16 / 1,000 #157371 #158498 2025-09 +40 / -59 5 / 1,000 #59555, #158326 #161020 2025-09 +12 / 15 / 1,000 #160066 #161303 2025-10 +65 / -1 21 / 1,000 #157315 #163628 2025-10 +2 / -2 2 / 861 #162451 #164733 2025-10 +12 / 9 / 1,000 #164436 #166816 2025-11 +3 / 6 / 1,000 #86176, #163108 #169960 2025-12 +17 / -10 6 / 1,000 #166973 #170439 2026-01 +41 / 13 / 1,000 #167014 #171195 2026-01 +11 / -2 5 / 1,000 #170020 #172723 2026-01 +1 / -1 10 / 1,000 #172176 #173511 2026-01 +58 / 53 / 1,000 #154246 #173768 2026-01 +16 / -8 11 / 872 #173691 #175876 2026-01 +13 / 5 / 1,000 #167178 #176168 2026-01 +18 / -2 9 / 1,000 #175282 #177410 2026-01 +36 / -12 16 / 1,000 #82350 #178002 2026-02 +49 / 12 / 1,000 #140917 #178977 2026-02 +2 / -5 46 / 1,000 #172888
+> Total 19 PRs +446 /-102 270 /18,673 21
+> •
+
+RQ1 (Success Rate): To what extent can coding agents produce buildable patches that pass existing tests, satisfy behavioral validity, and achieve the same level of profitabil-ity as human-written patches?  
+
+> •
+
+RQ2 (Behavioral Comparison): Are patches written by humans always behaviorally valid? Can coding agents find more profitable optimizations than human experts?  
+
+> •
+
+RQ3 (Failure Modes): What are the representative failure modes of agent-generated patches, and what do they reveal about the limitations of agents in compiler optimization? 
+
+A. Experimental Setup 1) Dataset: To mitigate data leakage, we collect only PRs merged after Sept. 1, 2025. We initially identified 27 LLVM issues for InstCombine missed optimizations and 25 resolving PRs. Because Alive2 can return inconclusive results, we exclude PRs with >10% inconclusive test cases. We also manually exclude PRs not implementing an InstCombine peephole optimization ( e.g. , implementing in the other pass). This leaves 21 issues and 19 PRs. For mutation-based test generation, we use K = 5 iterations, targeting N = 200 
+
+mutants per iteration with an attempt threshold T = 100 · N ,yielding up to 1, 000 mutants per PR. Table II summarizes the dataset, detailing modified lines of code (excluding tests), seed test cases extracted, and unique mutations generated. 
+
+2) Agents and Configurations: Table III summarizes the evaluated agents, models, and knowledge cutoffs [31]–[33]. We use default CLI configurations with a 2-hour task timeout. Tasks failing to produce a non-empty patch are retried. To account for stochasticity, we run each task three times per agent-model pair. 5TABLE III: Agents, models, and knowledge cutoff dates.          
+
+> Agent Version Model (ID) Cutoff
+> Claude Code 2.1.136 Sonnet 4.6 (claude-sonnet-4-6) 2025-08 Gemini CLI 0.41.2 Gemini 3 Flash (gemini-3-flash-preview) 2025-01 Codex CLI 0.129.0 GPT 5.4 (gpt-5.4) 2025-08 GPT 5.4 mini (gpt-5.4-mini) 2025-08
+
+B. RQ1: Success Rate of Agent Patches 
+
+We first build each agent patch and run seed tests via llvm-lit. For behavioral validation on mutation-based bench-marks, we use a two-stage pipeline: we establish a baseline by optimizing each test case with the human patch, retaining only cases where the resulting rewrite is behaviorally valid 
+
+(Definition III.2), and then evaluate agent patches against these retained cases. 
+
+1) Metrics: For each agent and model, we report the number of independent runs (out of three) that successfully produce patches across four metrics:  
+
+> •
+
+Buildability ( B): The patch can be applied and the LLVM project builds without errors.  
+
+> •
+
+Seed-test passing ( S): The patch passes all seed regression tests using llvm-lit.  
+
+> •
+
+Behavioral validity ( V): All mutation-based test cases result in behaviorally valid rewrites, ensuring no semantic or profitability regressions (relative to the unoptimized input) are introduced.  
+
+> •
+
+Non-regressive profitability ( P): All mutations are behav-iorally valid and additionally non-regressive relative to the 
+
+human-patch output , a stricter baseline than the unoptimized input used in Definition III.2. This metric reflects the primary objective of matching the optimization performance of human-written patches. We also report Pass@1, the fraction of all runs (three per PR) that achieve the metric, and Pass@3, the fraction of PRs for which at least one of the three runs achieves it. 
+
+2) Results: Table IV summarizes the results. Models show near-perfect buildability (100% Pass@3), indicating their pro-ficiency in navigating the LLVM codebase and iteratively resolving diagnostics. The only build failures stem from an agent skipping validation and submitting an uncompiled patch with undeclared identifiers. 
+
+Finding 1 : Coding agents achieve near-perfect buildability, though they occasionally submit patches without validation. 
+
+Behavioral validity ( V) is the minimum safety bar against regressions. Codex CLI models lead here, with GPT 5.4 achieving 79% Pass@3, followed by GPT 5.4 mini (68%). Gemini 3 Flash ranks lowest (63%). 
+
+Finding 2: Codex CLI models reliably maintain behavioral validity (up to 79%), while Gemini 3 Flash achieves the lowest (63%). 
+
+However, achieving behavioral validity does not guarantee meeting the stricter non-regressive profitability objective rela-TABLE IV: Success counts per PR across three independent runs for each agent and model configuration. Each cell reports four metrics ( B/S/V/P) as explained in § IV-B1; darker green indicates more successful runs (0–3).                                                                                                                                                                                                                                                                                                                                                                      
+
+> Claude Code Gemini CLI Codex CLI
+> 19 PRs Sonnet 4.6 Gemini 3 Flash GPT 5.4 GPT 5.4 mini
+> BSVPBSVPBSVPBSVP
+> #157030 3000301030103000#158097 3330311132223130#158498 3030333332222000#161020 3132302230113022#161303 3030312031303010#163628 3333323332333333#164733 3131303030303030#166816 3000320030003100#169960 3233320030303122#170439 3000300030003000#171195 3000300030003000#172723 3030311130303030#173511 3000300030003010#173768 3131313230303020#175876 3333332232323131#176168 3030300030203020#177410 3031303230113000#178002 3030303030303030#178977 3000300032323333
+> Pass@3 (%) 100 37 68 37 100 47 63 42 100 32 79 37 100 32 68 26
+> Pass@1 (%) 100 25 68 25 100 28 47 28 100 19 63 23 98 18 54 19
+
+tive to the human patch. Gemini 3 Flash leads in profitability with 42% Pass@3 and 28% Pass@1. 
+
+Finding 3 : Gemini 3 Flash leads the stricter profitability objective (42% Pass@3), yet matching human experts across both metrics remains challenging. 
+
+Comparing seed-test passing and profitability reveals two limitations of traditional test suites. First, cases where patches achieve profitability but fail seed tests ( P > S, e.g. , #161020) indicate that LLVM’s exact FileCheck patterns are too brittle, rejecting valid, profitable optimizations. Conversely, cases where patches pass seed tests but regress in profitability ( S>P,
+
+e.g. , #158097 for Sonnet 4.6) demonstrate that seed tests lack the coverage to expose subtle performance regressions. 
+
+Finding 4 : Discrepancies between seed-test passing and profitabil-ity highlight dual test suite limitations: brittle FileCheck patterns reject valid optimizations ( P > S), while limited coverage of edge cases in seed tests masks profitability regressions ( S > P). 
+
+3) Case Studies: We illustrate the dual limitations of seed test suites identified in Finding 4 with two representative PRs. 
+
+a) FileCheck rejects profitable optimizations ( P > S): 
+
+#161020 implements a fold that rewrites the sum-reduction of a splat vector (a vector of identical elements) to a scalar multiplication: reduce.add(splat(x, N)) → mul x, N.As shown in Figure 3a, the seed test uses an i1 element type with N = 8 . In the human patch, an existing fold that handles 
+
+i1 vectors by rewriting reduce.add to a ctpop (count the number of 1-bits) sequence takes priority over the newly added fold, so the CHECK directives in the seed test expect ctpop .The agent, however, gives the new fold higher priority so that it fires first. For an i1 vector of size 8, mul i1 %x, 8 constant-folds to 0 (since 8 mod 2 = 0 ), yielding the output shown in 6; RUN : opt < %s -passes=instcombine -S | FileCheck %s                                                
+
+> define i1 @reduce_add_splat_v8i1 (i1 %x) {
+> ...
+> ;CHECK-NEXT :bitcast ... ;CHECK-NEXT :call ... @llvm.ctpop ... ;CHECK-NEXT :trunc ...
+> %ins =insertelement <8 xi1> poison, i1 %x, i64 0%spl =shufflevector <8 xi1> %ins, <8 xi1> poison, <8 xi32> zeroinitializer %r =call i1 @llvm.vector.reduce.add.v8i1 (<8 xi1> %spl)
+> ret i1 %r
+> }
+
+(a) A seed test case with an i1 splat vector of size 8. The input IR constructs the splat via insertelement and shufflevector ,then reduces by addition. The FileCheck directives expect the human patch to rewrite reduce.add into a ctpop -based sequence.       
+
+> define i1 @reduce_add_splat_v8i1 (i1 %x) {
+> ret i1 0
+> }
+
+(b) The optimized IR produced by agent patches. By applying the splat-to-multiplication fold with higher priority, the agent yields  
+
+> mul i1 %x, 8
+
+, which folds to 0 and is more profitable. 
+
+Fig. 3: Rigid FileCheck patterns in #161020 reject a correct and more profitable optimization produced by the agent. Figure 3b. This optimization is semantically correct and more profitable, yet the rigid FileCheck patterns cause the seed tests to reject it. We have submitted a PR (#182213) to address this issue by adjusting the fold priority, and it has been merged. 
+
+b) Seed tests mask profitability regressions ( S > P): 
+
+#158097 folds a disjunction of two fcmp (floating-point com-parison) instructions sharing the same variable and predicate into a single fcmp . As shown in Figure 4a, the mutation applies @llvm.fake.use —a test intrinsic that simulates a downstream use, keeping a value live—to the second fcmp 
+
+(%v2 ). Since %v2 is exactly the single fcmp the fold would produce, the human patch simply reuses it as the return value without introducing new instructions. Sonnet 4.6 instead introduces a redundant fresh fcmp (Figure 4b), a regres-sion the seed tests never expose because they contain no 
+
+@llvm.fake.use cases on fcmp operands. 
+
+C. RQ2: Behavioral Comparison Against Human Patches 
+
+In RQ2, we directly compare agent and human patches on the mutation-based benchmarks. We retain test cases on which the unpatched compiler’s output is behaviorally valid (unlike RQ1, we do not filter on human-patch validity), and exclude test cases for which Alive2 is inconclusive for the human or any agent rewrite. We report behavioral validity 
+
+(Definition III.2), profitability (percentage of valid rewrites that improve over the base commit per Definition III.1), and 
+
+generalization (percentage of test cases where the agent pro-duces a profitable rewrite but the human patch does not). Note that profitability here is measured relative to the unpatched base commit , a weaker criterion than RQ1’s metric ( P), which requires agents to match the human patch output. 
+
+1) Results: The aggregate results for RQ2 are presented in Table V. Across all agents, we observe high behavioral validity (97.0%–98.5%), which is comparable to or even exceeds the             
+
+> define i1 @or_fcmp_redundant_or1 (double %v0) {
+> %v1 = fcmp olt double %v0, 1.000000e-02 %v2 = fcmp olt double %v0, 1.990000e+00
+> call void (...) @llvm.fake.use (i1 %v2) %v3 = or i1 %v1, %v2
+> ret i1 %v3
+> }
+
+(a) A mutation computing v0 < 0.01 ∨ v0 < 1.99 , where %v2 is consumed by @llvm.fake.use to simulate a downstream use.            
+
+> define i1 @or_fcmp_redundant_or1 (double %v0) {
+> %v2 = fcmp olt double %v0, 1.990000e+00
+> call void (...) @llvm.fake.use (i1 %v2) %v3 = fcmp olt double %v0, 1.990000e+00 ; same as %v2
+> ret i1 %v3
+> }
+
+(b) The optimized IR produced by the agent. Instead of reusing 
+
+> %v2
+
+, the agent introduces a fresh %v3 with identical operands and predicate, leaving two fcmp instructions rather than one. 
+
+Fig. 4: Seed tests in #158097 lack coverage of @use , masking a profitability regression where the agent introduces a redun-dant fcmp instead of reusing the existing one. TABLE V: Percentage of test cases that are valid, profitable, and generalized-profitable relative to the human patch, aver-aged over three runs per PR and then across PRs with equal weight. The values support relative comparison under the same generated test distribution rather than estimates of absolute optimization performance.                         
+
+> Agent Model Valid Profitable Generalized
+> Human Pull Request 98.4% 16.4% -Claude Claude Sonnet 4.6 98.5% 9.0% 0.7%
+> Gemini Gemini 3 Flash 97.7% 16.5% 3.7%
+> Codex GPT-5.4 97.0% 9.0% 0.7%
+> Codex GPT-5.4 Mini 97.5% 8.8% 1.1%
+
+human-written patches (98.4%). The fact that human patches do not achieve 100% validity is notable; we categorize human patch failures into three buckets, summarized in Table VI. The dominant category is profitability regression (287 of 288 cases, 99.7%): the human patch produces a rewrite that is regressive relative to the base commit. Among these, about 15% of the PRs have cases with a cycle regression ≥ 100, indicating that the regressions are not minor. A single failure is due to optimization failure (unreachable fixpoint), where the InstCombine pass failed to converge. Notably, no cases of incorrect transformation were identified, confirming that human patches generally maintain semantic correctness. 
+
+Finding 5 : Human-written patches are not always behaviorally valid, but failures are almost exclusively profitability regressions rather than semantic incorrectness. 
+
+In terms of validity, Sonnet 4.6 achieves the highest rate (98.5%), matching the human-written baseline (98.4%), while Gemini 3 Flash lags slightly behind at 97.7%. In terms of profitability, however, Gemini 3 Flash achieves 16.5%, on par with the human-written baseline (16.4%), whereas all other agents fall well short at 8.8%–9.0%. Gemini 3 Flash also leads in generalization (3.7%), discovering profitable optimizations in cases that the human patch failed to cover. 7TABLE VI: Breakdown of human-patch testcases classified as behaviorally invalid across 19 PRs, by failure reason. The PRs/ PR % columns report how many of the 19 PRs contribute at least one such testcase in any agent’s run.                           
+
+> Failure Reason Count %PRs PR %
+> Profitability regression 287 99.7% 947.4%
+> ∆cycles ≥100 21 7.3% 315.8% Optimization failure 10.3% 15.3% Incorrect transformation 00.0% 00.0%
+> Total 288 100% 947.4%
+
+Finding 6 : Agents reveal a trade-off between validity and prof-itability: Sonnet 4.6 achieves the highest validity matching human experts but well below human profitability, while Gemini 3 Flash matches human profitability and leads in generalization at a small validity cost. 
+
+2) Case Studies: a) Human patch regression in the multi-use case: 
+
+#157030 folds trunc i1 (C ≫ x) to x == log 2 C for power-of-two constants C, exploiting the fact that C ≫ x yields 1 only when x equals the bit position of C. The fold is profitable only when the result of lshr becomes dead and can be eliminated. As shown in Figure 5, the test case includes an 
+
+@llvm.fake.use call that creates a second use of %lshr ,preventing its elimination. When the fold fires, it introduces 
+
+icmp eq i16 %x, 4 (since 16 = 24) but leaves %lshr 
+
+in place, yielding an output that carries the original lshr 
+
+alongside the new comparison. As icmp is more expensive than trunc , this rewrite is regressive.                               
+
+> define i1 @fold_lshr_power_of_2_multi_use (i16 %x) {
+> %lshr =lshr i16 16, %x
+> call void (...) @llvm.fake.use (i16 %lshr)
+> ;this `trunc `will be replaced with `icmp eq i16 %x, 4 `
+> %trunc =trunc i16 %lshr to i1
+> ret i1 %trunc
+> }
+
+Fig. 5: A test case for #157030 where @llvm.fake.use 
+
+creates a second use of %lshr . The fold fires but cannot eliminate %lshr , leaving it live alongside the new icmp eq 
+
+and causing a profitability regression. 
+
+b) Agent generalization beyond the human patch: We revisit #158097 from the generalization angle (see § IV-B3b for the test coverage perspective). The human patch imple-ments the redundant-fcmp fold only for ordered predicates (e.g. , olt ), leaving the symmetric unordered forms ( e.g. , ult )without a corresponding rule. Several agent patches further extend the fold to unordered predicates. 
+
+D. RQ3: Failure Modes of Agent Patches 
+
+Following the methodology in § III-E, we organize failure modes into ten subcategories under three high-level categories (Table VII): profitability issues, optimization failures, and incorrect transformations. We construct a representative set of 160 failure cases via stratified sampling; Fleiss’s κ =
+
+0.834 across the three labelers indicates almost perfect agree-ment [30], [34]. TABLE VII: Failure-mode breakdown of unsuccessful agent patches across 19 PRs. Values count the number of distinct PRs contributing at least one case in any agent’s run.                                                                
+
+> Failure Mode Sonnet 4.6 Gemini 3 Flash GPT 5.4 GPT 5.4 mini
+> Profitability issue 16 16 15 16
+> No change 14 915 15 Regressive vs. input
+> (slower than no change)
+> 5748Profitable vs. baseline
+> (but below human patch)
+> 3524Mixed vs. baseline 0100
+> Optimization failure 1332
+> Unreachable fixpoint 0210Timeout 1221Mismatched return type 0011
+> Incorrect transformation 0457
+> With undef input 0110Target is more poisonous 0232Other (value mismatch) 0135
+> Total PRs 16 17 17 17
+
+TABLE VIII: Failure themes of unsuccessful agent patches derived from a qualitative coding of 160 cases (131 with unanimous agreement, 29 resolved by human adjudication), broken down by the same failure-mode categories as Table VII. Values count the number of distinct PRs (of 19) contributing at least one case of that theme in any agent’s run.                                                                 
+
+> Theme / Failure Mode Sonnet 4.6 Gemini 3 Flash GPT 5.4 GPT 5.4 mini
+> Under-generalization 13 913 13 Canonicalization issues 3323Fold interaction 2212
+> The three themes above occur under profitability issues only.
+> Incorrect one-use guard 4546
+> Profitability issues 4546Optimization failure 0010
+> Poison/FMF flag misuse 0431
+> Profitability issues 0211Incorrect transformation 0320
+> Unsound transform 0157
+> Optimization failure 0011Incorrect transformation 0147
+> Non-convergent rewrite 1321
+> The theme above occurs under optimization failure only.
+> Total 16 17 17 17
+
+1) Results and Case Studies: Table VIII summarizes the 8 failure themes under three observed high-level failure modes. We discuss each in turn. 
+
+a) Under-Generalization: This is the most common fail-ure theme, observed in 9–13 PRs. It captures cases where the agent-generated patch implements a correct optimization but with tighter preconditions or missing matching rules compared to the human patch. The only failure mode observed under this theme is no change , i.e. , the input IR is left unchanged by the agent patch. The example in Figure 1d illustrates this failure theme, where the agent patch misses the fold for constants that are low-bit masks. 8define i8 @a (i1 %x, i8 %y) {               
+
+> %1 =select i1 %x, i8 3, i8 -3 %2 =mul i8 %y, %1
+> ret i8 %2
+> }
+
+(a) Agent patch: mul i8 %y, %1 (parameter %y first). The backend loads %y into the register via an extra mov instruction.                      
+
+> define i8 @b (i1 %x, i8 %y) {
+> %1 =select i1 %x, i8 3, i8 -3 %2 =mul i8 %1, %y
+> ret i8 %2
+> }
+
+(b) Human patch: mul i8 %1, %y (select result %1 first). 
+
+Fig. 6: Canonicalization issue: mul with swapped operands; the non-canonical form (top) generates one extra mov .
+
+b) Canonicalization Issue: Sometimes, the IR produced by the agent patch has the same instruction sequence as the human patch’s output but in a different canonical form, such as using a different operand order or comparison predicate. These differences may trigger different lowering paths in LLVM’s backend, leading to different profitability outcomes. For exam-ple, Figure 6 shows two semantically equivalent IR functions that differ only in the operand order of a commutative mul .The non-canonical form in Figure 6a generates an extra mov 
+
+instruction in the output assembly compared to the canonical form in Figure 6b, causing the agent patch’s output to be regressive. This could be a missed optimization in LLVM’s backend. Canonicalization issues are not as critical as other failure modes, since most cases are still profitable vs. baseline .However, they obscure the true performance of the patch and make it difficult to reliably evaluate profitability. 
+
+c) Fold Interaction: In these cases, the patch places the new fold at a different position in the match chain, producing a different fold firing order that preemptively blocks more prof-itable folds from triggering. Figure 7a shows a representative case from #157030. The human patch places the new fold (trunc to icmp ) at line 970 (Figure 7b), so an existing fold at line 963 fires first and produces true . The agent inserts the new fold at line 848 (Figure 7c), so it fires first and blocks the existing fold at line 963, causing a regression on profitability. 
+
+d) Incorrect One-Use Guard: Patches in this theme fail to correctly implement the one-use guard for a fold— missing it entirely, adding an unnecessary guard, or confusing 
+
+hasOneUse with hasOneUser (one user may have multiple uses, e.g. , a binary operation on identical operands). This is the second most common failure theme across all agents, observed in four to six PRs per model. One-use guards are a pervasive and critical precondition in InstCombine: without the guard, a fold may introduce an additional instruction, making the rewrite regressive. Figure 5 illustrates a missing one-use guard, where the fold fires even when the lshr instruction has multi-ple uses, leaving a regressive rewrite. What is worse, they can cause non-convergence. The IR in Figure 8 contains a chain of two getelementptr [35] instructions, performing pointer arithmetic equivalent to ((i8*)y+a)+8148 . The agent’s rewrite attempts to fold this into (i8*)y+(add a,8148)             
+
+> define i1 @fold_lshr_power_of_2_multi_use (i8 %x) {
+> %lshr = lshr exact i8 -128, %x
+> call void @use (i8 %lshr) %trunc = trunc nsw i8 %lshr to i1
+> ret i1 %trunc
+> }
+
+(a) Input IR: trunc nsw (lshr exact i8 -128, %x) , where 
+
+−128 is a power of two and %lshr has an additional use via @use .       
+
+> // [L963] Existing fold | fires first // fold `trunc nsw `of a non-zero source to `true `
+> ...
+> // [L970] Human inserts here (after L963):
+> if (DestWidth == 1 && match (m_Shr (m_Power2 (C), m_Value (X))))
+> return replaceInstUsesWith (Trunc, Builder. CreateICmpEQ (X, ...));
+
+(b) Human patch: the new fold is inserted at line 970, after the existing fold at line 963. For the input in (a), line 963 fires first and folds trunc to true .        
+
+> // [L848] Agent inserts here (before L963):
+> if (DestWidth == 1 && match (m_LShr (m_Power2 (C), m_Value (X))))
+> return new ICmpInst(ICmpInst::ICMP_EQ, X, ...); ...
+> // [L963] Existing fold | never fires // fold `trunc nsw `of a non-zero source to `true `
+
+(c) Agent patch: the new fold is inserted at line 848, before the existing fold at line 963. For the input in (a), the new fold fires first, blocking the more profitable fold at line 963. 
+
+Fig. 7: Fold interaction failure on #157030.              
+
+> define ptr @fail_source_gep_multiple_swap (i1 %x, ptr %y) {
+> %a =select i1 %x, i64 21304, i64 55104 %g1 = getelementptr inbounds nuw i8, ptr %y, i64 %a
+> call void @use (ptr %g1) %g2 = getelementptr i8, ptr %g1, i64 8148
+> ret ptr %g2
+> }
+
+Fig. 8: Non-convergence caused by missing one-use guard on #170439. when %a is a select result, but omits a one-use guard on the select . Because the intermediate pointer %g1 has an additional use ( @use ), neither it nor its operand %a can be eliminated, forcing the newly introduced add to remain in the IR. An existing fold then fires on the add -indexed 
+
+getelementptr , reverting (i8*)y+(add a,8148) back to the original ((i8*)y+a)+8148 . These conflicting rewrites cycle endlessly, creating an infinite optimization loop. 
+
+e) Poison/FMF Flag Misuse: Flag misuse arises when the patch incorrectly adds or drops poison-related or fast-math flags (FMF), or omits a flag check in the match condition. Dropping a flag blocks downstream folds that depend on it, causing a missed optimization. Adding a flag without justifica-tion is unsound: for IRs that violate the flag’s precondition, the target produces poison due to the new flag where the source does not. Omitting a flag guard is equally unsound: the fold fires without verifying the flag’s presence, yet the rewrite’s correctness relies on the guarantee it provides. For example, the samesign flag on icmp assumes that both operands share the same sign. An optimization might leverage this flag to rewrite icmp samesign ult x, y into icmp slt x, y.Omitting the flag check allows the fold to unsoundly apply to an ordinary icmp ult , which evaluates differently for sign-9mixed inputs ( e.g. , -1 ult 1 is 0, while -1 slt 1 is 1). 
+
+f) Unsound Transform: The patch may implement asemantically incorrect transformation, making this the most severe failure mode as it can lead to miscompilation. Unlike the poison/FMF flag theme, the root causes here are logical errors in the rewrite itself, e.g. , missing a guard on constant ranges or incorrectly swapping the two arms of a select .
+
+g) Non-convergent Rewrite: A non-convergent rewrite prevents InstCombine from reaching a fixpoint, triggering an assertion failure or an infinite loop (note that non-convergence caused by missing one-use guards, such as in Figure 8, is categorized under incorrect one-use guard ). These failures are severe because they can hang the compiler indefinitely. In the current LLVM (version 22 as of writing), InstCombine bounds its outer iterations but leaves the inner worklist loop unbounded. Consequently, conflicting rewrites that continually spawn new instructions cycle endlessly within the worklist and hang the compiler ( timeout ), whereas cycles spanning consecu-tive InstCombine iterations are safely caught by the outer limit (unreachable fixpoint ). This architectural distinction accounts for the two subcategories in Table VII.         
+
+> Finding 7 :While under-generalization and incorrect one-use guard are the most prevalent themes, unsound transform and
+> non-convergent rewrite are the most severe. These expose two core limitations: failing to correctly generalize beyond concrete examples, and mishandling LLVM-specific features ( e.g. , one-use guards, flags, fold interactions) not surfaced by seed tests.
+
+E. Threats to Validity 
+
+Profitability Across Backend Architectures. We estimate profitability with llvm-mca on the x86 64 backend; profitabil-ity on other architectures may differ. This is a construct-validity threat, as our criterion proxies backend performance rather than measuring all targets. Since our focus is on target-independent optimizations on LLVM IR, the impact of backend differences is limited. 
+
+Limitations of Alive2. Alive2 does not support all LLVM IR features and may return inconclusive results or time out on complex cases, so our validity criterion depends on the rewrites with conclusive validation; we mitigate this by excluding PRs where more than 10% of test cases are inconclusive. 
+
+Randomness in Agent Outputs. Agent outputs are non-deterministic, so our evaluation may be sensitive to the outputs of individual runs. We therefore run each task three times and report Pass@1 and Pass@3 [36]. 
+
+Data Leakage. All PRs in PeepholeBench are merged after Sept. 1, 2025, postdating every evaluated model’s knowledge cutoff. Auditing all agent transcripts, we find that no run accessed the solution PR or its linked issues. V. I MPLICATIONS AND FUTURE DIRECTIONS 
+
+Integrate Robust Validation into Agent Loops. Mutation-based test generation increases coverage beyond the original FileCheck-based regression tests and reveals more failures (§ IV-B3b), and behavioral validation provides a more accurate evaluation (§ IV-B3a). Future work could integrate both into the agent’s patch generation loop to enable self-correction. 
+
+Close Generalization and Compiler-Knowledge Gaps. In RQ3 (§ IV-D), under-generalization is the most common failure; moreover, profitability rates in RQ1 (§ IV-B) remain well below the human baseline, and many failures stem from mishandling LLVM-specific features that existing seed tests do not expose. Future work could tailor mutation-based test gen-eration to target these features more aggressively, and explore prompting or training strategies that ask agents to enumerate edge cases explicitly or incorporate LLVM’s pattern-matching grammar and feature conventions. 
+
+Use Agents as a Complement to Human Experts. RQ2 (§ IV-C) shows that human patches are not always behaviorally valid, and agents can discover profitable generalizations that human patches miss, suggesting agents could help review human patches, flagging regressions or missed cases. 
+
+Improve IR Profitability Measurement. Canonicalization issues (§ IV-D1b) show nearly identical IR snippets can lower to machine code with different profitability, highlighting the need for robust IR metrics. 
+
+Encourage Refactoring over Rule Accumulation. Agents produce larger patches than humans ( +27.1–43.9 net added lines vs. +18.1), suggesting a preference for appending rules over refactoring existing folds. To encourage refactoring, fu-ture work could provide tool support to help agents locate relevant folds and insertion points. 
+
+Prioritize Issues by Measuring Real-World Impact. As observed in RQ2 (§ IV-C), human-written patches can in-troduce profitability regressions. However, these regressions often persist without being reported by users, suggesting that their real-world impact may be limited. Since compilers face numerous missed optimizations, regressions, and bugs—many of which rarely occur in practice—prioritization is critical. Future work should measure IR pattern prevalence to guide efforts toward the most impactful issues. VI. R ELATED WORK 
+
+Agentic Coding Benchmarks. Coding agents have been evaluated on code generation in function level (e.g. Hu-manEval [37]), resolving real-world GitHub issues ( e.g. SWE-bench [1], SWE-Lancer [38]), and complex open-ended de-velopment tasks ( e.g. TerminalBench [7], FeatureBench [8]). Zheng et al. [39] evaluate agents on automated repair of real-world LLVM issues but do not assess the correctness or profitability of the optimizations; PeepholeBench instead tar-gets missed InstCombine peephole optimizations and evaluates patches behaviorally. 
+
+LLM-Based Approaches for Code Optimization. Sev-eral studies explore LLMs for code and compiler optimiza-tion [40]–[45], some at the source level only [40], [41]. Cummins et al. [42] and Grubisic et al. [43] train LLMs to predict compiler flags for LLVM code-size reduction. Fang 
+
+et al. [44] test whether LLMs can learn a single AArch64 peephole rule. Italiano and Cummins [45] use LLMs to 10 discover missed code-size optimizations but without imple-menting or verifying the rewrites. Yang et al. [46] construct an optimization-sensitive IR dataset for LLM-based IR opti-mizers. Qiu et al. [47] propose intent-driven IR optimization where LLMs apply transformations guided by high-level in-tent. Most closely related, LPO [14] uses LLMs to discover 
+
+missed InstCombine optimizations through an Alive2-guided feedback loop. PeepholeBench instead evaluates coding agents on implementing missed optimizations from real issue reports, and assesses patches along correctness, profitability, and gen-eralization dimensions. VII. C ONCLUSION 
+
+We presented PeepholeBench, a benchmark of 19 missed InstCombine peephole optimizations from real LLVM PRs. Our evaluation reveals a trade-off between correctness and profitability: no agent simultaneously achieves human-level performance on both. Failure modes center on under-generalization and mishandling of LLVM-specific conventions that existing test suites largely miss. REFERENCES [1] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. R. Narasimhan, “Swe-bench: Can language models resolve real-world github issues?” in The Twelfth International Conference on Learning Representations , 2023. [2] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. Narasimhan, and O. Press, “Swe-agent: Agent-computer interfaces enable automated soft-ware engineering,” Advances in Neural Information Processing Systems ,vol. 37, pp. 50 528–50 652, 2024. [3] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury, “Autocoderover: Autonomous program improvement,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis ,2024, pp. 1592–1604. [4] X. Wang, B. Li, Y. Song, F. F. Xu, X. Tang, M. Zhuge, J. Pan, Y. Song, B. Li, J. Singh et al. , “Openhands: An open platform for ai software developers as generalist agents,” in The Thirteenth International Conference on Learning Representations , 2024. [5] “Gemini CLI documentation — geminicli.com,” https://geminicli.com/ docs/, [n. d.], [Accessed 01-05-2026]. [6] “Claude Code overview - Claude Code Docs — code.claude.com,” https: //code.claude.com/docs/en/overview, [n. d.], [Accessed 01-05-2026]. [7] M. A. Merrill, A. G. Shaw, N. Carlini, B. Li, H. Raj, L. Shi, J. Y. Shin, T. Walshe, E. K. Buchanan, G. Ye, H. Lin, J. Poulos, M. Wang, D. Lu, O. M. Mastromichalakis, Z. Xu, Z. Chen, Y. Liu, R. Zhang, L. L. Chen, A. Kashyap, J.-L. Uslu, J. Li, J. Wu, M. Yan, S. Bian, V. Sharma, K. Sun, A. Anand, A. Lanpouthakoun, B. Koopah, C. Hu, E. Guha, G. H. S. Dreiman, J. Zhu, K. Krauth, L. Zhong, R. Amanfu, S. Tan, S. Pimpalgaonkar, X. Lin, X. Lan, X. Zhao, Y. Liang, Y. Wang, Z. Wang, C. Zhou, D. Heineman, H. Liu, H. Trivedi, J. Lin, M. Shetty, M. Yang, N. Omi, N. Raoof, T. Y. Zhuo, W. Lin, Y. Dai, Y. Wang, W. Chai, D. Wahdany, Z. She, J. Hu, Z. Dong, Y. Zhu, S. Cui, A. Saiyed, A. Kolbeinsson, J. Hu, C. Michael, R. Marten, Y. Wang, J. Jitsev, A. Dimakis, and L. Schmidt, “Terminal-bench: Benchmarking agents on hard, realistic tasks in command line interfaces,” in The Fourteenth International Conference on Learning Representations , 2026. [8] Q. Zhou, J. Zhang, H. Wang, R. Hao, J. Wang, M. Han, Y. Yang, S. Wu, F. Pan, L. Fan et al. , “Featurebench: Benchmarking agentic coding for complex feature development,” in The Fourteenth International Conference on Learning Representations , 2026. [9] R. Sasnauskas, Y. Chen, P. Collingbourne, J. Ketema, G. Lup, J. Taneja, and J. Regehr, “Souper: A synthesizing superoptimizer,” arXiv preprint arXiv:1711.04422 , 2017. [10] N. P. Lopes, J. Lee, C.-K. Hur, Z. Liu, and J. Regehr, “Alive2: bounded translation validation for llvm,” in Proceedings of the 42nd ACM SIGPLAN International Conference on Programming Language Design and Implementation , 2021, pp. 65–79. [11] N. P. Lopes, D. Menendez, S. Nagarakatte, and J. Regehr, “Provably correct peephole optimizations with alive,” in Proceedings of the 36th ACM SIGPLAN Conference on Programming Language Design and Implementation , 2015, pp. 22–32. [12] “InstCombine contributor guide &#x2014; LLVM 23.0.0git documen-tation — llvm.org,” https://llvm.org/docs/InstCombineContributorGuide. html, [n. d.], [Accessed 01-05-2026]. [13] J. Kwon, B. Jang, J. Lee, and K. Heo, “Optimization-directed compiler fuzzing for continuous translation validation,” Proceedings of the ACM on Programming Languages , vol. 9, no. PLDI, pp. 627–650, 2025. [14] Z. Xu, H. Xu, Y. Tian, X. Zhou, and C. Sun, “Lpo: Discovering missed peephole optimizations with large language models,” in Proceedings of the 31st ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 , 2026, pp. 1136–1150. [15] N. Popov, “How to contribute to LLVM — Red Hat Developer — web.archive.org,” https://web.archive.org/web/20260313105502/https:// developers.redhat.com/articles/2022/12/20/how-contribute-llvm, [n. d.], [Accessed 01-05-2026]. [16] “CLI – Codex — OpenAI Developers — developers.openai.com,” https: //developers.openai.com/codex/cli, [n. d.], [Accessed 01-05-2026]. [17] “llvm-mca - LLVM Machine Code Analyzer &#x2014; LLVM 23.0.0git documentation — llvm.org,” https://llvm.org/docs/CommandGuide/ llvm-mca.html, [n. d.], [Accessed 02-05-2026]. [18] C. Lattner and V. Adve, “Llvm: A compilation framework for lifelong program analysis & transformation,” in International symposium on code generation and optimization, 2004. CGO 2004. IEEE, 2004, pp. 75–86. [19] W. M. McKeeman, “Peephole optimization,” Communications of the ACM , vol. 8, no. 7, p. 443–444, 1965. [20] C. N. Fischer and R. J. LeBlanc Jr, Crafting a Compiler with C .Benjamin-Cummings Publishing Co., Inc., 1991. [21] M. Mukherjee and J. Regehr, “Hydra: Generalizing peephole optimiza-tions with program synthesis,” Proceedings of the ACM on Programming Languages , vol. 8, no. OOPSLA1, p. 725–753, Apr. 2024. [22] “lit - LLVM Integrated Tester &#x2014; LLVM 23.0.0git documen-tation — llvm.org,” https://llvm.org/docs/CommandGuide/lit.html, [Ac-cessed 09-05-2026]. [23] “FileCheck - Flexible pattern matching file verifier &#x2014; LLVM 23.0.0git documentation — llvm.org,” https://llvm.org/docs/ {C}
+
+ommand {G}uide/ {F}ile {C}heck.html, [Accessed 14-05-2026]. [24] “LLVM Language Reference Manual &#x2014; LLVM 23.0.0git doc-umentation — llvm.org,” https://llvm.org/docs/ {L}ang {R}ef.html, [Ac-cessed 21-06-2026]. [25] “LLVM IR Undefined Behavior (UB) Manual &#x2014; LLVM 23.0.0git documentation — llvm.org,” https://llvm.org/docs/ {U}
+
+ndefined {B}ehavior.html, [Accessed 21-06-2026]. [26] J. Lee, Y. Kim, Y. Song, C.-K. Hur, S. Das, D. Majnemer, J. Regehr, and N. P. Lopes, “Taming undefined behavior in LLVM,” ACM SIGPLAN Notices , vol. 52, no. 6, pp. 633–647, 2017. [27] V. Braun and V. Clarke, “Using thematic analysis in psychology,” 
+
+Qualitative research in psychology , vol. 3, no. 2, pp. 77–101, 2006. [28] S.-C. Dai, A. Xiong, and L.-W. Ku, “Llm-in-the-loop: Leveraging large language model for thematic analysis,” in Findings of the association for computational linguistics: EMNLP 2023 , 2023, pp. 9993–10 001. [29] T. Qiao, C. Walker, C. Cunningham, and Y. S. Koh, “Thematic-lm: a llm-based multi-agent system for large-scale thematic analysis,” in 
+
+Proceedings of the ACM on Web Conference 2025 , 2025, pp. 649–658. [30] J. L. Fleiss, “Measuring nominal scale agreement among many raters.” 
+
+Psychological bulletin , vol. 76, no. 5, p. 378, 1971. [31] “Models overview — platform.claude.com,” https://platform.claude. com/docs/en/about-claude/models/overview, [Accessed 11-05-2026]. [32] “Models — Gemini API — Google AI for Developers —ai.google.dev,” https://ai.google.dev/gemini-api/docs/models, [Accessed 11-05-2026]. [33] “Models — OpenAI API — developers.openai.com,” https://developers. openai.com/api/docs/models, [Accessed 11-05-2026]. [34] G. Landis JRKoch, “The measurement of observer agreement for cate-gorical data,” Biometrics , vol. 33, no. 1, p. 159174, 1977. [35] “The Often Misunderstood GEP Instruction &#x2014; LLVM 23.0.0git documentation — llvm.org,” https://llvm.org/docs/ {G}et {E}lement {P}
+
+tr.html, [Accessed 28-06-2026]. [36] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman et al. , “Evaluating large 
+
+11 language models trained on code,” arXiv preprint arXiv:2107.03374 ,2021. [37] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. de Oliveira Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman, A. Ray, R. Puri, G. Krueger, M. Petrov, H. Khlaaf, G. Sastry, P. Mishkin, B. Chan, S. Gray, N. Ryder, M. Pavlov, A. Power, L. Kaiser, M. Bavarian, C. Winter, P. Tillet, F. P. Such, D. Cummings, M. Plappert, F. Chantzis, E. Barnes, A. Herbert-Voss, W. H. Guss, A. Nichol, A. Paino, N. Tezak, J. Tang, I. Babuschkin, S. Balaji, S. Jain, W. Saunders, C. Hesse, A. N. Carr, J. Leike, J. Achiam, V. Misra, E. Morikawa, A. Radford, M. Knight, M. Brundage, M. Murati, K. Mayer, P. Welinder, B. McGrew, D. Amodei, S. McCandlish, I. Sutskever, and W. Zaremba, “Evaluating large language models trained on code,” 2021. [38] S. Miserendino, M. Wang, T. Patwardhan, and J. Heidecke, “Swe-lancer: Can frontier llms earn $1 million from real-world freelance software engineering?” arXiv preprint arXiv:2502.12115 , 2025. [39] Y. Zheng, C. Li, S. Li, Y. Zhang, and Z. Su, “Agentic harness for real-world compilers,” arXiv preprint arXiv:2603.20075 , 2026. [40] S. Garg, R. Z. Moghaddam, and N. Sundaresan, “Rapgen: An ap-proach for fixing code inefficiencies in zero-shot,” arXiv preprint arXiv:2306.17077 , 2023. [41] S. Gao, C. Gao, W. Gu, and M. Lyu, “Search-based llms for code optimization,” arXiv preprint arXiv:2408.12159 , 2024. [42] C. Cummins, V. Seeker, D. Grubisic, M. Elhoushi, Y. Liang, B. Roziere, J. Gehring, F. Gloeckle, K. Hazelwood, G. Synnaeve, and H. Leather, “Large language models for compiler optimization,” no. arXiv:2309.07062, Sep. 2023, arXiv:2309.07062 [cs]. [Online]. Available: http://arxiv.org/abs/2309.07062 [43] D. Grubisic, C. Cummins, V. Seeker, and H. Leather, “Com-piler generated feedback for large language models,” arXiv preprint arXiv:2403.14714 , 2024. [44] X. Fang and L. Mukhanov, “Towards llm-based optimization compilers. can llms learn how to apply a single peephole optimization? reasoning is all llms need!” no. arXiv:2412.12163, Dec. 2024, arXiv:2412.12163 [cs]. [Online]. Available: http://arxiv.org/abs/2412.12163 [45] D. Italiano and C. Cummins, “Finding missed code size optimizations in compilers using llms,” arXiv preprint arXiv:2501.00655 , 2024. [46] Z. Yang, L. Qiu, F. Lyu, M. Zhong, Z. Chai, H. Zhou, H. Cui, and X. Feng, “Ir-optset: An optimization-sensitive dataset for advancing llm-based ir optimizer,” Advances in Neural Information Processing Systems ,vol. 38, 2026. [47] L. Qiu, Z. Yang, F. Lyu, M. Zhong, H. Cui, and X. Feng, “Beyond pass-by-pass optimization: Intent-driven ir optimization with large language models,” arXiv preprint arXiv:2602.18511 , 2026. 
+
+12

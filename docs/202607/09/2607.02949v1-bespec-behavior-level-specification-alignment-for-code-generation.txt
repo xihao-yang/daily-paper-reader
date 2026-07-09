@@ -1,0 +1,698 @@
+Title: BeSpec: Behavior-Level Specification Alignment for Code Generation
+
+URL Source: https://arxiv.org/pdf/2607.02949v1
+
+Published Time: Tue, 07 Jul 2026 00:28:34 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# BeSpec: Behavior-Level Specification Alignment for Code Generation 
+
+1st Qinghua Xu 
+
+Lero the Research Ireland Centre for Software University of Limerick 
+
+Limerick, Ireland qinghua.xu@ul.ie 
+
+2nd Guancheng Wang 
+
+Lero the Research Ireland Centre for Software University of Limerick 
+
+Limerick, Ireland guancheng.wang@ul.ie 
+
+3rd Boxi Yu 
+
+Lero the Research Ireland Centre for Software University of Limerick 
+
+Limerick, Ireland boxi.yu@ul.ie 
+
+4th Lionel Briand 
+
+Lero the Research Ireland Centre for Software University of Limerick 
+
+Limerick, Ireland 
+
+University of Ottawa , Ottawa, Canada briand.lionel@ul.ie 
+
+Abstract —Large language models (LLMs) have made sub-stantial progress on automated code generation from natural-language descriptions of desired behavior ( intent ). Most existing methods improve generated programs through execution-guided code refinement: they generate a candidate solution, execute it, and patch the implementation using feedback, while leaving the underlying specification unchanged. This workflow implicitly assumes that the LLM’s understanding of the intent is already correct and complete. In practice, however, programming task descriptions are often ambiguous or underspecified. As a result, even a capable model may produce a correct implementation of the wrong intent , making specification mismatch a central bottleneck. This paper presents B ESPEC , a behavioral model-based ap-proach to specification alignment. B ESPEC treats the intent as partial evidence about the intended behavior of the correct program. It first builds an explicit behavioral model by extracting from the current intent and predicting executable behaviors ,which are checkable properties of the correct program. These behaviors capture what the program should do without requiring exact test oracles, which can be as hard to predict as the solution itself. B ESPEC then generates candidate programs, executes them on probe inputs, and compares their observed behaviors with the predicted behaviors . When observed behavior does not match the predicted behaviors, B ESPEC either refines the specification accordingly or rejects the candidate program. We evaluate BESPEC with three LLMs on four code-generation benchmarks: CodeContests, xCodeEval, APPS, and the contamination-free LiveCodeBench. Against nine baselines, BESPEC achieves the highest Pass@1 and average pass rate across all settings, improving average Pass@1 over the strongest baseline by 8.1% –25 .3% relative across the three LLMs. A failure analysis shows that after alignment, most remaining errors stem from algorithmic difficulty rather than weak specifications, while ablation studies confirm that each major component of B ESPEC 
+
+contributes positively. 
+
+This work has emanated from research jointly funded by Taighde Eireann – Research Ireland under Grant number 13/RC/2094 2 and by Huawei Technologies Co., Ltd. Lionel Briand is also supported by the Natural Sciences and Engineering Research Council of Canada. 
+
+Index Terms —Specification Alignment, Large Language Model, Code Generation 
+
+I. I NTRODUCTION 
+
+Code generation aims to automatically produce source code from a programming specification, such as a natural-language problem statement ( intent ). Large language models (LLMs) have made substantial progress in supporting this task. Pre-trained on large and diverse corpora, they can translate intents 
+
+into executable programs and have improved the state of the art across a wide range of software engineering tasks [1]– [5]. Despite their success, LLM-generated programs still often fail when requirements are complex, implicit, or only partially specified [6]–[11]. Many existing techniques improve LLM code generation by decomposing the process into stages. At a high level, the model first interprets the intent , then plans a solution, implements the plan as code, and finally repairs the code using test feedback. Recent prompt-based and agent-based methods primarily strengthen the latter stages: they elicit better plans, coordinate specialized agents, sample diverse implementations, or use execution feedback to refine incorrect programs [8], [12]–[19]. This generate-then-refine paradigm on the code improves pass rates and has become a dominant design pattern for LLM-based code generation. However, improving planning, implementation, and repair is not sufficient when the first stage (i.e., intent interpretation) is wrong. Before any code is generated, the LLM must infer the true intent behind the written intent . Most refinement pipelines largely ignore this gap and treat the written intent 
+
+as correct, while, in practice, written programming intents are often ambiguous or underspecified. For example, an intent 
+
+asking for a “copy” of a nested object may intend a deep copy that preserves dependencies among nested fields, while an LLM may implement a shallow copy that only duplicates 
+
+> arXiv:2607.02949v1 [cs.SE] 3 Jul 2026
+
+the top-level container. Such ambiguities invite LLMs to fill in missing intent with their own inferred assumptions. The generated code may therefore be logically coherent and well implemented, yet still deviate from the task’s true intent because it solves a slightly different problem. In this case, improving planning, implementation, or repair only helps the model implement its mistaken interpretation more effectively. What is needed instead is to reason about and clarify the specification before code generation. Prior work refers to this task as specification alignment [6], [7], which aims to align the specification interpretation with the true intent so that the subsequent code generation is guided by the true intent .A growing line of work addresses specification alignment by refining requirements before or during code generation [6]– [9]. Among these methods, Specine [7] and SpecFix [6] are the most directly related state-of-the-art baselines for our work. Specine recovers the specification implicitly inferred from the generated code and aligns it with the original input. SpecFix samples multiple candidate programs for the same ambiguous requirement, analyzes how their outputs diverge on tests, and rewrites the requirement to reduce the ambiguity that led to those divergent implementations. These methods are an important step beyond code-only repair because they make the specification itself a target of refinement. However, existing specification alignment methods still op-erate mainly at the test level . Candidate programs are executed on public or generated tests, and alignment is inferred from their final outputs, either by comparing them with expected outputs or by measuring disagreement among programs. It can reveal that candidate programs disagree, or that a program fails a test, but it does not directly expose which part of the specification caused the disagreement. For example, a failed test does not tell us whether the problematic point concerns an output format rule, a feasibility condition, an indexing convention, a boundary case, or the treatment of duplicate values. As a result, test-level evidence is often too coarse to support targeted specification repair. A further limitation is that test-level alignment depends on the availability and quality of complete tests. A test must contain not only a valid and informative input, but also a correct expected output (oracle). However, in non-trivial programming scenarios, generating the correct oracle can itself be close to solving the task [19]– [21]. Generated tests may also be invalid, unrepresentative, or focused on cases that do not isolate the underlying ambiguity. Consequently, an incorrect oracle may make a valid program appear wrong, while an uninformative test may fail to distin-guish two different interpretations of the same specification. Thus, test-level evidence provides a noisy and indirect signal for specification alignment. We therefore move from the test level to the behavior level .Rather than depending on the tests, B ESPEC decomposes the intended solution into smaller checkable behavioral expecta-tions. These behaviors capture checkable properties, such as whether the output must be exactly YES or NO , whether a solution should exist under a certain input condition, whether indices are recomputed after deletion, or how duplicate values should be handled. Unlike test-level evidence, such behaviors do not require solving the whole task for every generated input. Therefore, they are easier to predict from the written 
+
+intent , easier to observe from candidate programs, and easier to trace back to specific vague, missing, or misread parts of the specification. In this way, behavior-level reasoning provides a finer signal for improving the specification. To that end, we propose B ESPEC , a behavior-level approach to specification alignment. B ESPEC first asks how the correct program should behave. It predicts checkable behavioral prop-erties from the intent , such as output constraints, feasibility conditions, and format rules. B ESPEC then compares these predicted behaviors with the observed behaviors of candidate programs. Note that such observed behaviors result from exe-cuting selected test inputs that have no corresponding expected outputs. The resulting prediction–observation gaps identify which specific behavioral expectation is ambiguous, under-specified, or misread. Such predicted gaps make specification refinement more targeted than relying solely on coarse, test-level feedback from comparing actual and expected outputs. We evaluate B ESPEC across three LLMs and six eval-uation settings spanning four benchmarks, including the contamination-free LiveCodeBench. BESPEC achieves the highest Pass@1 and average passing rate (APR) across all settings, outperforming nine baselines. Averaged over the six settings, B ESPEC improves Pass@1 over the strongest baseline by 8.1% –25 .3% relative and improves APR by 8.7% –
+
+28 .7% across the three LLMs. The gains also hold on Live-CodeBench, where B ESPEC improves Pass@1 by 15 .8% –
+
+17 .7% relative. A failure analysis further shows that, after alignment, most remaining errors come from algorithmic dif-ficulty rather than specification misunderstanding, confirming the effectiveness of B ESPEC in clarifying specifications. This paper makes the following contributions:  
+
+> •
+
+Behavior-level specification alignment. We advance specification alignment from coarse test-level evidence to behavior-level reasoning, where checkable behavioral expectations are predicted, observed, and traced back to vague, missing, or misread parts of the specification.  
+
+> •
+
+The B ESPEC method. We instantiate this formulation with a concrete pipeline that predicts behavioral ex-pectations, compares them with candidate executions, automatically repairs the specification, and selects the best-aligned program.  
+
+> •
+
+A comprehensive evaluation. Across three LLMs and six evaluation settings spanning four benchmarks, in-cluding the contamination-free LiveCodeBench, B ESPEC 
+
+outperforms nine baselines on both Pass@1 and APR.  
+
+> •
+
+A failure analysis. We conduct a failure analysis using an LLM-as-judge and find that weak specifications account for only a small share of B ESPEC ’s remaining failures, while most failures are algorithmic or implementation-related errors. II. A M OTIVATING EXAMPLE 
+
+We adapt a programming problem from the CodeContests dataset [3] as a running example. The original written intent 
+
+is brief: 
+
+Problem 1 (Erase Game): You are given an integer sequence 
+
+a1, . . . , a n. Repeatedly choose an index i such that ai is not divisible by i+1 , and erase ai. Determine whether it is possible to erase the entire sequence. The answer is printed as YES or NO . In this benchmark instance, the intent is accompanied by sample cases, such as [1 , 2, 3] (YES ) and [7 , 7] (YES ). These sample cases help confirm the answer format and rule out interpretations that contradict the demonstrated behavior. We include them in the motivating example because they are available in this benchmark instance and are required by several baselines. In practical settings, such sample cases may be provided by programmers together with the task or may already exist as an initial test suite, for example, in a test-driven development setting. However, they are not compulsory for B ESPEC . They are useful when available, but B ESPEC focuses on behavior-level reasoning rather than test-level reasoning. One ambiguity in this intent is whether indices are recom-puted after each deletion or whether an element keeps its original index. The intended interpretation is dynamic: after an erase, the remaining sequence closes up and is indexed again from the front. This can be inferred from the examples or language conventions, but it is not stated directly. The sequence [1 , 3] shows why the distinction matters:  
+
+> •
+
+Dynamic indices. Erase 1 first, since 1 is not divisible by 1 + 1 = 2 . The remaining sequence is [3] , whose only element is now at index 1; since 3 is not divisible by 2,it can also be erased. The answer is YES . 
+
+> •
+
+Original indices. Erase 1 first, but keep the remaining element 3 at its original index 2. It is then checked against 
+
+2 + 1 = 3 , and since 3 is divisible by 3, it cannot be erased. The answer is NO .Thus, the same statement can induce two plausible executions unless the reindexing rule is made explicit. A refinement loop on the code may keep improving a candidate program while never noticing that it follows the wrong indexing convention. BESPEC exposes this gap by comparing predicted behavior with observed candidate behavior. From the written intent ,it predicts that after each deletion, the remaining sequence should be reindexed. It then runs candidate programs on input scenarios and checks whether their observed behavior matches this prediction. If all candidates behave consistently with the predicted behavior, no repair is needed. Otherwise, the mismatch indicates that the original intent is being inter-preted inconsistently, so B ESPEC repairs the specification by explicitly stating the reindexing rule. This example illustrates why behavior-level signals are more informative than test-level feedback alone. A candidate that keeps original indices may still pass available samples or fail only on a coarse input–output test, without revealing that the specific missing behavior is reindexing after deletion. By predicting the intended reindexing behavior and checking candidate executions against it, B ESPEC turns this hidden interpretation gap into targeted evidence for refinement. This behavior-level design is also important in practice because public examples or labeled tests may be sparse or unavailable. In such cases, B ESPEC can still reason over checkable behav-ioral expectations rather than depending solely on complete test cases with expected outputs. We revisit this example throughout our description of B ESPEC (Section III). III. T HE BESPEC METHOD 
+
+A. Overview 
+
+BESPEC treats each programming problem as an individual specification alignment task. Given the natural-language intent ,it first extracts a structured specification (Section III-B). It then builds two pipelines for the same task (Figure 1). The Pre-dicted Behavior Pipeline describes what the intended correct program should satisfy. The Observed Behavior Pipeline cap-tures how generated candidate programs behave on generated 
+
+input scenarios (Section III-D). Subsequently, misalignment identification compares these two views (Section III-E). If a specific behavior is consistent with the predicted behaviors across all candidate programs, the specification is left un-changed. If candidate programs disagree on scenarios covered by that behavior, B ESPEC treats the gap as evidence that the current specification might induce multiple interpretations of this behavior. Specification fixing then revises the impli-cated behavior description in the specification, regenerates candidates, and repeats the check (Section III-F). When no misalignment remains, or when the repair budget is exhausted, BESPEC performs behavior-grounded selection , choosing the candidate best supported by public examples and behaviors (Section III-G). We use the erase-game example from Sec-tion II, where [1 , 3] ⇒ YES depends on reindexing after deletion, as in the running example. 
+
+B. Specification Extraction 
+
+BESPEC first prompts the LLM to re-express the intent as an explicit, structured specification with five fields: the input/output format, the input constraints, the correctness rules 
+
+the output must satisfy (stated as properties to check, not as an algorithm to run), the edge cases the statement dictates, and a dedicated interpretation field that records any committed reading of an ambiguous point, leaving it empty when no ambiguity is identified. The model is instructed to remain faithful to the statement and consistent with every public example. This structured specification is the central object that BESPEC maintains and repairs , and it is used by later prompts to predict behaviors and generate candidate programs. In the erase-game running example, the rules field states: “delete ai
+
+when ai is not divisible by i + 1 , repeating until the sequence is empty.” The initial interpretation field is empty because the LLM has not yet found an ambiguity in the statement. Later stages will expose the indexing ambiguity mentioned in Section II and refine the specification accordingly. Natural Language intent                                                                                                              
+
+> Observed  Behaviors
+> Aligned? s!...s"s#s$s%
+> ×...××b$%=𝑏 %?
+> √...b$$=𝑏 $?
+> ×...×b$#=𝑏 #?
+> ×...×b$"=𝑏 "?
+> √...b$&=𝑏 &?
+> ×...×××…
+> √...b$'=𝑏 '?
+> 𝒃 *𝟏
+> 𝒃 *𝟐
+> YouKn0wWho has an
+> integer sequence
+> 𝑎 !,…,𝑎 ".He repeatedly
+> performs the following
+> operation s:
+> •choose an index isuch
+> that 𝑎 #is not divisible by
+> 𝑖 +1, and erase 𝑎 #.
+> •Determine whether it is
+> possible to erase the
+> entire sequence.
+> Print YES if it is possible,
+> and NO otherwise.
+> Samples :
+> [1, 2, 3] ->YES
+> [7, 7] ->YES
+> Specification Extraction
+> You are given a competitive -
+> programming problem
+> statement and its public
+> exa mples .Re -express the
+> problem as an EXPLICIT,
+> UNAMBIGUOUS structured
+> specification . Do not solve
+> it; just make the contract
+> precise.
+> {
+> “io_format ”: Each test case:
+> line with 𝑛 , then a line with 𝑛
+> integers …
+> “constraints ”: 1≤𝑎 #≤
+> 10 $…
+> “rules”: Choose an index i
+> with 𝑎 #NOT divisible by (i+1)
+> and remove it …
+> “edge_cases ”: 𝑛 =1: if the
+> only element is divisible by 2
+> it cannot be removed, so the
+> result is NO.
+> “interpretation”: None
+> }
+> Structured Specification
+> Behavior Generation
+> Generate a set of
+> EXECUTABLE BEHAVIORAL
+> OBLIGATIONS that the
+> program output must satisfy
+> given the input.
+> Each obligation is a Python
+> function with the EXACT
+> signature:
+> def check(input, output):
+> ...
+> on public input #1,
+> output must equal the gold output
+> on public input #2,
+> output must equal the gold output
+> Output must be exactly 'YES' or 'NO'
+> First line of input should contain the
+> number of test cases 𝑡
+> We can remove an element iff it's NOT
+> divisible by (1 -based index + 1)
+> For a 1-element array, it‘s ok to erase it
+> iff the element is NOT divisible by 2
+> Gold Output Input Semantic
+> …
+> Input Scenario Generation
+> Generate a diverse set of
+> VALID INPUT SCENARIOS
+> for this problem, used to
+> probe candidate programs
+> for divergent behavior .
+> Provide INPUT ONLY …
+> Cand. Code Generation
+> Write a single, self -
+> contained Python program
+> that solves the problem …
+> Input Scenarios
+> Candidate
+> Programs
+> 𝐬 𝟏 𝐬 𝟐 𝐬 𝟑 𝐬 𝟒 𝐬 𝐧 …
+> execute
+> …
+> Predicted  Behaviors
+> 𝒃 𝟏
+> 𝒃 𝟐
+> 𝒃 𝟑
+> 𝒃 "
+> 𝒃 𝟓
+> 𝒃 𝒎
+> 𝒃 *#
+> 𝒃 *"
+> 𝒃 *&
+> 𝒃 *'
+> Specification Fixing
+> The current explicit specification
+> is UNDER -SPECIFIED :
+> candidate programs
+> disagree on the behavioral
+> obligations listed below, which
+> means the statement leaves
+> these points ambiguous. Your
+> job is to REPAIR THE
+> SPECIFICATION so the intended
+> behavior is unambiguous --do
+> NOT write code.
+
+Predicted Behavior Pipeline 
+
+Observed Behavior Pipeline Misalignment Identification     
+
+> i≤N
+> &
+> misaligned
+> End
+> No
+> Yes
+> i+=1
+> Entity LLM -based Process Process
+
+BeSpec Fig. 1. Overview of B ESPEC , illustrated with the running example. 
+
+C. The Predicted Behavior Pipeline 
+
+This pipeline starts with the structured specification and then asks the LLM to predict a set of m intended behaviors, 
+
+B = {b1, b 2, . . . , b m}. These behaviors model how the gold solution (correct program) should behave, without asking the LLM to generate it directly. This is easier than solving the full problem because a single behavior describes only an output property, an input property, or a semantic consequence of the rules. Beyond being easier to predict, these behaviors provide more detailed signals than test-level validation for specification fixing (Section III-F), because each one points to a specific unclear behavior in the structured specification .Specifically, B ESPEC predicts four types of behaviors for the gold solution: 
+
+• Gold behaviors are optional. They come from samples in the intent or existing tests. If such samples are provided, their exact input-output pairs must be satisfied. For in-stance, the erase-game example includes [1 , 2, 3] ⇒ YES .
+
+• Output behaviors state properties of the claimed output, including syntax, format, and invariants. For example, each erase-game output line must be exactly YES or NO .
+
+• Input behaviors state input-side conditions under which a behavior applies, such as boundary cases, special struc-tures, or ambiguity-triggering scenarios. For example, in the erase-game task, the first line of the input should contain the number of test cases t.
+
+• Semantic behaviors state what the task rules imply for the output on a class of inputs. Some semantic behaviors cover edge cases. For example, in the erase-game task, a one-element array [x] should output YES exactly when 
+
+x is not divisible by 2. Other semantic behaviors cover general rules. For example, a sequence with no deletable element should output NO , while a sequence that becomes erasable after earlier deletions should output YES .Each predicted behavior is then implemented as a small Python function of the form check(input, output) that raises an assertion error on a true semantic violation and returns silently otherwise. 
+
+D. The Observed Behavior Pipeline 
+
+In parallel, BESPEC executes the Observed Behavior Pipeline , which captures how candidate programs actually 
+
+behave when executed. This pipeline has three components: 
+
+Probe Scenario Generation , Candidate Code Generation , and 
+
+Behavior Observation .
+
+Probe Scenario Generation. BESPEC generates a set of valid probe input scenarios X = {x1, x 2, . . . , x k} for observing the behaviors defined by the Predicted Behavior Pipeline. These probes provide shared scenarios on which candidate programs can be compared at the behavior level. They are designed to exercise the four behavior types defined above: gold behaviors, output behaviors, input behaviors, and semantic behaviors. By running every candidate on the same set of probes, B ESPEC 
+
+can observe where candidates agree, disagree, crash, or violate predicted behavior. 
+
+Candidate Code Generation. BESPEC generates a diverse pool of candidate programs S = {s1, s 2, . . . , s n} from the struc-tured specification. The candidates are intended to exercise the specification under the probe scenarios. Duplicate programs are removed. 
+
+Behavior Observation. For each candidate sj ∈ S and each probe xℓ ∈ X, B ESPEC executes sj (xℓ) and records the re-sulting output yj,ℓ . The execution records Yj = {(xℓ, y j,ℓ )}kℓ=1 
+
+provide the evidence used to form the observed behavior vector 
+
+ˆBj in the next step. For example, on the erase-game probe 
+
+xℓ = [1 , 3] , we observe that one candidate may produce 
+
+yj,ℓ = YES while another produces NO .E. Misalignment Identification 
+
+A key step is to compare the predicted behavior vector 
+
+B = {b1, . . . , b m} with the observed behavior vector ˆBj for each candidate sj in the pool. As shown in Figure 1, B ESPEC 
+
+forms a behavior-comparison matrix whose rows are candidate solutions and whose columns are predicted behaviors. Each cell records whether a candidate’s observed behavior matches the corresponding prediction. For each predicted behavior bi,BESPEC derives the corresponding observed behavior ˆbi from each candidate’s outputs on the applicable scenarios. If bi = ˆbi
+
+for all candidates, the behavior is aligned : the candidates agree with the prediction, so B ESPEC treats the behavior as unambiguous and leaves the specification unchanged. If 
+
+bi̸ = ˆbi for any candidate, or if candidates produce different 
+
+ˆbi values for the same behavior, the behavior is misaligned :the candidate pool exposes ambiguity in the specification. This does not by itself identify which candidate is correct. Rather, the predicted behavior serves as the reference, while the disagreement indicates that the current specification in-duces different implementations. B ESPEC therefore repairs the implicated part of the specification. Gold behavior checks are the exception: a candidate that contradicts a public example is simply wrong and is excluded during selection rather than used to implicate the specification. In the example, if the reindexing behavior is misaligned, some candidates in the pool answer YES on [1 , 3] and others answer NO . The disagreement points to ambiguity about whether indices are recomputed after deletion, and the subsequent specification fixing step (Section III-F) resolves it by making the reindexing rule explicit. 
+
+F. Specification Fixing 
+
+Each misaligned behavior points to a part of the specifica-tion that should be clarified. Given the misaligned behavior and the scenarios that triggered it, B ESPEC asks the LLM to repair the specification rather than the code. The revised specification updates the relevant structured specification field: it adds missing requirements to the correctness rules field, records committed ambiguity resolutions in the interpretation 
+
+field, and, when useful, adds the triggering case to the edge cases field. Fresh candidates are regenerated from the revised specification, and the next iteration checks whether observed behavior now matches it. For the erase game, B ESPEC in-corporates the missing specification: “after each deletion, the remaining sequence is reindexed from the front” and regen-erates candidates that now agree on [1 , 3] . B ESPEC repeats the iteration N times and stops early when no misalignment remains. It also stops when the fixing budget is exhausted or when a repair fails to add useful new candidates. 
+
+G. Behavior-Grounded Selection 
+
+On termination, BESPEC returns the refined specifica-tion and one selected program. Following the intuition of CodeT [22] and MPSC [23], B ESPEC selects the candidate best supported by these signals, with behavior checks pro-viding evidence beyond samples. Specifically, it first removes candidates that fail any public sample when they are available. Among the remaining candidates, it ranks higher those that satisfy more predicted behaviors, and uses fewer crashes or missing outputs as the final tie-breaker. If multiple candidates tie, B ESPEC breaks the tie randomly. IV. E XPERIMENTAL DESIGN 
+
+A. Research Questions 
+
+We structure the evaluation around three research questions:  
+
+> •
+
+RQ1: Effectiveness and efficiency. How effective is BESPEC at improving specification alignment, and what computational cost does it require? This question eval-uates the overall performance of B ESPEC . We compare BESPEC with nine baselines across three LLMs and six evaluation settings, and report token and time overheads.  
+
+> •
+
+RQ2: Failure mode analysis. Which problems remain hard after alignment, and why does B ESPEC still fail on them? We first exclude problems that every method solves. We then classify the remaining failures of B E-SPEC and the strongest baselines to determine whether they stem from weak specifications or other causes, such as the adoption of wrong algorithms.  
+
+> •
+
+RQ3: Ablation study. What is the contribution of major components of B ESPEC ? We first examine the role of behavior prediction by comparing B ESPEC with a variant that generates a structured specification from the intent, then generates a solution from that specification, without using behaviors. We then study the effect of candidate pool size by comparing variants with different pool sizes. Due to budget constraints, we conduct the ablation study across all datasets but only with Qwen3-Coder. 
+
+B. Datasets 
+
+We evaluate on four programming benchmarks that are standard in the specification alignment literature: CodeCon-tests [3], xCodeEval [24], and APPS [25], which together span a wide range of difficulty and problem styles, and LiveCodeBench [26], a continuously updated benchmark of recent contest problems. We deliberately exclude basic func-tion completion benchmarks such as HumanEval and MBPP, on which strong models already exceed 90% Pass@1 with plain prompting and leave little room to study specification ambiguity. Following prior specification alignment work [7], [8], we instead use harder, competition-level problems whose lengthy natural-language statements are where ambiguity ac-tually arises. 
+
+CodeContests [3] is a programming benchmark curated by Google DeepMind from Codeforces and similar contest sites, comprising 13 ,328 training, 117 validation, and 165 test problems. Following prior work [7], we use all 165 test problems. Each problem contains two held-out private test fields: the original raw field (which we report as CC-Raw ) and an extended field that adds roughly 190 additional generated tests per problem for stricter evaluation (which we report as 
+
+CodeContests ). APPS [25] collects problems from open competitive program-ming platforms (e.g., Codeforces, Kattis, LeetCode) across three difficulty tiers (introductory, interview, competition), with 5,000 training and 5,000 test problems. To balance evaluation cost and generalizability, we sample 300 test prob-lems stratified according to the official difficulty distribution, following prior work [7], [8]. We additionally rescore the same problems under APPS-Eval [7], an extended test suite that augments each problem with over 100 additional private tests. 
+
+xCodeEval [24] is a large, execution-based, multilingual, mul-titask benchmark comprising roughly 7,500 competition-level problems drawn from Codeforces. In line with our APPS protocol, we sample 300 code-generation problems stratified by the difficulty frequency distribution. 
+
+LiveCodeBench [26] continuously collects new contest prob-lems from platforms such as LeetCode, AtCoder, and Code-forces, with each problem tagged by release date. We use the LiveCodeBench split containing 112 problems released after the models’ training cutoffs ( ≥ 2025-01-01). In total, we report six evaluation settings: the four bench-marks plus the two extended test suites (CodeContents, APPS-Eval). All methods are evaluated on the held-out private test sets for each problem. We use the same problem instances and metrics for all methods, ensuring a fair comparison. 
+
+C. Metrics 
+
+Following prior work [7], [8], we report two effective-ness metrics. Pass@1 is the fraction of problems whose selected program passes all private tests, which is the strict, deployment-relevant metric. APR (average pass rate) is the average fraction of private tests passed, a finer-grained signal that credits partial progress and is less sensitive to a single failing edge case. We further report two efficiency metrics [7]: token overhead, defined as the total number of prompt and completion tokens consumed per problem, and time overhead, defined as the end-to-end wall-clock time per problem. Smaller values indicate better efficiency. Because CodeContests and APPS reuse the same generated programs under their alternative scoring fields (CC-Raw, APPS-Eval), average efficiency is aggregated over the four distinct benchmarks and reported per method along-side effectiveness in Table I. 
+
+D. Baselines 
+
+In this work, we compare B ESPEC against nine state-of-the-art baselines covering the main families of LLM code generation. We select published baselines with available repli-cation packages. Therefore, works such as ReaCoder [10] and SpecAlign [11] are not included because they are not published and do not provide replication packages. Specifically, our baselines are as follows. Zero-shot prompting measures the base model’s performance. SCoT [17] asks the model to produce a structured chain-of-thought plan before coding. Self-Repair [13] iteratively revises code using execution feed-back. Self-Collaboration [15] and AgentCoder [14] use multi-agent workflows with roles such as analyst, coder, and tester. 
+
+PairCoder [16] models pair programming with a navigator and a driver agent. μFiX [8] uses test case analysis and feedback prompting to improve the model’s understanding of the specification. Our most direct comparisons are Specine [7] and Spec-Fix [6], two specification alignment methods that share our motivation. Specine lifts the specification perceived by the LLM from the generated code and aligns it with the input using requirements engineering rules. SpecFix repairs the pro-gram distribution induced by an ambiguous requirement and maps the change back to the requirement through contrastive specification inference. These methods represent the current state-of-the-art in specification alignment. Unlike B ESPEC ,however, they rely on test-level feedback: they run candidate code against tests and revise the intent based on the resulting failures. B ESPEC instead works at the behavior level, decom-posing the intent into behaviors that are easier to predict, check, localize, and refine into a better specification. 
+
+E. Implementation and Setup 
+
+We implement BESPEC and all baselines on three ad-vanced LLMs to evaluate whether the method general-izes across model families: qwen3-coder-30b , an open-weight coding-specialized LLM; glm-4.7-flash , an open-weight general-purpose LLM; and gpt-5-mini , a propri-etary general-purpose LLM. Following prior practice [7], we set the temperature to 0.8 for all LLMs. We set the maximum number of iterations N to 10 for both BESPEC and the baselines. We set the pool size for candidate solutions to be 20 for Specfix and B ESPEC , as suggested by the former [6]. All experiments are run on a Dell Precision 7960 Tower workstation with an Intel Xeon w9-3495X processor and two NVIDIA RTX 6000 Ada GPUs. All LLM calls are served through the OpenRouter API [27]. To facilitate reproducibility, we will release the code upon acceptance. V. R ESULTS 
+
+A. RQ1: Overall Performance 1) Effectiveness: Table I reports Pass@1 and APR for all methods across the three LLMs and six evaluation settings. We analyze the results from two complementary perspectives: whether the gains hold across LLMs , and whether they hold 
+
+across benchmarks .
+
+Across LLMs. The Avg. columns summarize perfor-mance over all six evaluation settings and show that B E-SPEC achieves the highest mean Pass@1 and APR for ev-ery LLM. As expected, all methods improve when moving from the smaller open-weight models ( qwen3-coder-30b 
+
+and glm-4.7-flash ) to the stronger proprietary model (gpt-5-mini ), reflecting the effect of base model capa-bility. However, B ESPEC consistently outperforms the base-lines across LLMs. Relative to the strongest baseline, B E-SPEC improves mean Pass@1 and APR by 25 .3% and 
+
+28 .7% on qwen3-coder-30b , by 17 .9% and 20 .8% on 
+
+glm-4.7-flash , and by 8.1% and 8.7% on gpt-5-mini .TABLE I EFFECTIVENESS AND EFFICIENCY OF BESPEC AND NINE BASELINES ACROSS THREE LLM S AND SIX EVALUATION SETTINGS . CODE CONTESTS  
+
+> DENOTES THE RAW
+
+CODE CONTESTS PRIVATE -TEST FIELD , APPS-E VAL DENOTES THE EXTENDED APPS EVALUATION FIELD , AND LCB DENOTES 
+
+LIVE CODE BENCH . P ASS @1 ( ↑) IS THE FRACTION OF PROBLEMS PASSING ALL PRIVATE TESTS ; APR ( ↑) IS THE AVERAGE PRIVATE -TEST PASS RATE .
+
+TOK (↓) IS MEASURED IN 10 3 TOKENS AND TIME (↓) IN SECONDS . AVG . REPORTS THE MEAN PASS @1 AND APR ACROSS THE SIX EVALUATION SETTINGS . ∆rel REPORTS THE RELATIVE CHANGE OF BESPEC OVER THE BEST BASELINE IN EACH COLUMN .
+
+Effectiveness Efficiency CC-Raw CodeContests xCodeEval APPS APPS-Eval LCB Avg. LLM Method Pass@1 APR Pass@1 APR Pass@1 APR Pass@1 APR Pass@1 APR Pass@1 APR Pass@1 APR Tok Time 
+
+qwen3-coder-30b 
+
+Zero-shot 5.5 8.0 5.5 8.1 28.0 33.4 35.0 39.7 13.7 34.4 27.7 31.0 19.2 25.8 1.4 16 SCoT 21.8 30.3 17.0 28.0 29.7 39.6 43.7 55.4 18.0 47.9 35.7 46.6 27.7 41.3 3.2 28 Self-Repair 20.6 28.4 17.0 27.9 35.3 45.5 52.3 61.9 21.0 53.6 37.5 44.6 30.6 43.6 10.7 98 Self-Collaboration 24.2 33.5 20.6 32.0 39.3 51.0 52.3 62.7 21.0 54.9 39.3 48.2 32.8 47.1 8.4 56 AgentCoder 13.3 18.8 13.3 18.0 37.3 43.4 48.3 52.5 18.7 46.8 38.4 44.5 28.2 37.3 10.3 106 
+
+μFiX 22.4 31.6 17.6 31.5 37.7 49.7 51.3 64.2 19.7 55.4 36.6 48.7 30.9 46.9 8.4 60 PairCoder 24.8 36.3 21.8 36.1 42.3 53.5 58.7 69.2 24.3 58.4 35.7 48.5 34.6 50.3 23.4 162 SpecFix 24.2 27.7 20.0 27.6 36.3 41.6 52.0 56.5 20.7 49.8 37.5 42.0 31.8 40.9 129.1 316 Specine 27.9 35.1 23.6 33.8 41.0 53.3 58.0 68.0 23.7 59.0 39.3 48.8 35.6 49.7 25.4 169 BESPEC 42.4 56.0 33.9 54.5 46.3 60.0 68.0 80.2 28.0 68.2 45.5 60.2 44.0 63.2 60.3 364 
+
+∆rel +52.0% +54.3% +43.6% +51.0% +9.5% +12.1% +15.8% +15.9% +15.2% +15.6% +15.8% +23.4% +25.3% +28.7% -53.3% +15.2% 
+
+glm-4.7-flash 
+
+Zero-shot 8.5 14.1 6.7 14.3 25.3 33.9 38.3 48.3 14.3 42.5 28.6 36.2 20.3 31.6 3.5 41 SCoT 12.7 19.8 9.7 19.7 26.3 37.1 34.7 50.9 13.7 43.3 29.5 39.0 21.1 35.0 8.1 92 Self-Repair 16.4 26.0 13.3 24.1 37.7 49.8 47.7 61.7 18.7 53.1 32.1 50.2 27.7 44.1 25.0 290 Self-Collaboration 21.2 29.6 17.0 30.2 35.0 49.5 49.7 63.1 20.3 54.4 32.1 50.2 29.2 46.2 31.9 355 AgentCoder 21.8 30.8 17.0 28.7 43.0 55.1 50.3 61.1 18.7 51.2 38.4 49.9 31.5 46.1 29.6 440 
+
+μFiX 20.6 29.3 18.2 27.7 32.0 47.2 49.3 59.5 19.3 51.7 33.0 44.6 28.7 43.3 21.8 249 PairCoder 23.6 34.7 17.6 32.7 38.7 50.1 53.0 68.3 21.3 56.4 39.3 55.2 32.2 49.6 67.6 993 SpecFix 21.8 26.7 18.2 27.9 36.3 45.8 51.3 58.8 19.3 50.4 34.8 40.7 30.3 41.7 292.7 1614 Specine 29.1 40.4 25.5 38.1 40.3 53.5 53.0 65.4 20.7 53.9 40.2 56.1 34.8 51.2 61.9 833 BESPEC 35.8 54.0 27.9 50.9 45.7 64.3 63.3 80.4 28.0 67.0 47.3 58.5 41.3 62.5 122.1 1132 
+
+∆rel +23.0% +33.7% +9.4% +33.6% +6.3% +16.7% +19.4% +17.7% +31.5% +18.8% +17.7% +4.3% +17.9% +20.8% -58.3% -29.9% 
+
+gpt-5-mini 
+
+Zero-shot 47.9 51.4 46.1 49.6 65.7 71.3 72.3 78.0 29.3 64.0 42.9 50.6 50.7 60.8 3.4 52 SCoT 43.0 49.7 39.4 47.9 64.0 71.0 74.7 80.8 31.0 64.6 42.0 49.1 49.0 60.5 6.9 73 Self-Repair 57.0 62.8 50.9 58.6 70.7 76.2 78.7 84.5 33.3 68.2 44.6 51.8 55.9 67.0 14.9 220 Self-Collaboration 49.7 56.1 43.6 51.1 70.3 75.2 80.3 85.6 34.0 69.8 47.3 58.3 54.2 66.0 18.3 227 AgentCoder 69.1 76.2 61.8 71.7 70.0 74.4 85.7 90.4 35.7 73.0 55.4 64.5 62.9 75.0 20.3 336 
+
+μFiX 55.2 61.6 50.3 59.2 68.7 74.9 82.3 87.2 34.7 70.4 46.4 54.4 56.3 68.0 12.8 156 PairCoder 72.7 79.5 63.6 72.5 71.7 78.0 84.3 90.3 33.7 71.5 61.6 71.0 64.6 77.1 31.0 382 SpecFix 66.1 70.0 60.6 67.2 72.0 77.9 81.3 86.3 34.3 69.4 56.2 63.2 61.8 72.3 225.5 1104 Specine 70.9 78.3 63.0 72.2 69.7 77.4 86.0 91.4 36.3 73.0 54.5 66.2 63.4 76.4 33.5 456 BESPEC 78.8 87.5 72.1 80.3 76.3 82.3 88.0 93.1 37.3 75.5 71.4 85.4 70.6 84.0 104.7 853 
+
+∆rel +8.4% +10.1% +13.4% +10.8% +6.0% +5.5% +2.3% +1.9% +2.8% +3.4% +15.9% +20.3% +8.1% +8.7% -53.6% -22.7% 
+
+This indicates that BESPEC generalizes across a coding-specialized LLM, a reasoning LLM, and a strong proprietary LLM. The relative gains are largest on the open-weight Qwen and GLM backbones, suggesting that B ESPEC can partially compensate for weaker base model capability through explicit specification alignment. This makes B ESPEC especially useful when only smaller LLMs are accessible due to resource-related or financial constraints. 
+
+Across benchmarks. BESPEC achieves the state of the art Pass@1 and APR on all benchmarks. On 
+
+qwen3-coder-30b , B ESPEC improves Pass@1 by 52 .0% 
+
+relative on CC Raw (27 .9% → 42 .4% ) and by 15 .8% 
+
+on APPS (58 .7% → 68 .0% ). On glm-4.7-flash , it improves APPS Pass@1 by 19 .4% (53 .0% → 63 .3% ). On gpt-5-mini , it improves CC Raw Pass@1 by 8.4% 
+
+(72 .7% → 78 .8% ). On xCodeEval, BESPEC improves Pass@1 over the best baseline by 9.5% , 6.0% , and 6.3% 
+
+relative on qwen3-coder-30b , gpt-5-mini , and 
+
+glm-4.7-flash , respectively. The corresponding APR gains are 12 .1% , 5.5% , and 16 .7% , showing that B ESPEC ’s advantage generalizes across benchmarks. The extended private test suites are stricter than their raw counterparts. CodeContests extends CC Raw, and APPS Eval extends APPS. Both score the same generated programs with more complete private test fields. As a result, scores drop for all methods when moving from CC Raw to CodeContests and from APPS to APPS Eval, showing that the extended suites expose failures missed by the raw test fields. Despite this stricter evaluation, B ESPEC remains the best method in every cell on both metrics. On CodeContests, it improves Pass@1 over the strongest baseline by 43 .6% , 9.4% , and 
+
+13 .4% relative on qwen3-coder-30b , glm-4.7-flash ,and gpt-5-mini , respectively. On APPS Eval, the corre-sponding gains are 15 .2% , 31 .5% , and 2.8% . This stability across raw and extended test suites suggests that B ESPEC im-proves the underlying program behavior rather than overfitting to specific evaluation test suites. Finally, we observe the same pattern on LiveCodeBench, the contamination-free benchmark. B ESPEC improves Pass@1 over the best baseline by 15 .8% , 15 .9% , and 17 .7% relative on the three models, respectively. Because these problems are newer than the models’ training data, the gains are unlikely to come from memorization and instead reflect better specifica-tion alignment. 2) Efficiency: The two rightmost columns of Table I report the mean token and time cost per problem. Most baselines are relatively inexpensive. Excluding SpecFix and Specine, they use at most 67 .6k tokens and 993 seconds per problem on average. SpecFix is substantially more token-intensive than the other methods, using 129 .1k to 292 .7k tokens per problem, and Specine also incurs a higher cost than lightweight baselines. Compared with SpecFix, B ESPEC is both more effective and less token-intensive. For example, on gpt-5-mini , B ESPEC 
+
+uses 104 .7k tokens per problem compared with 225 .5k for SpecFix. Compared with Specine, B ESPEC is more costly because it executes a pool of candidate programs against probe scenarios. However, the absolute cost remains practical. Across the three LLMs, B ESPEC uses 60 .3k to 122 .1k tokens and takes 364 to 1132 seconds per problem on average, which is acceptable for program generation workloads where accuracy is the primary goal. 
+
+Answer to RQ1. BESPEC consistently improves mean Pass@1 and APR across all LLMs and benchmarks, with relative gains of 8.1 to 25 .3% and 8.7 to 28 .7% over the strongest baselines, while incurring an acceptable cost of 60 .3k to 122 .1k tokens and 364 to 1132 seconds per problem. 
+
+B. RQ2: What Remains After Alignment? 
+
+RQ1 shows that B ESPEC improves performance, but it does not explain why the remaining problems are unsolved. We therefore analyze residual failures in two steps. First, we identify the problems that are not solved by every method (Section V-B1). Second, we analyse the failure mode of BESPEC and two top baselines (i.e., Specine and SpecFix) (Section V-B2). 
+
+1) Which problems remain hard?: For each problem, we count how many of the ten methods (B ESPEC plus the nine baselines in Table I) solve it. Figure 2 shows the distribution. Across all four benchmarks, 515 problems ( 19 .6% ) are solved by all ten methods, indicating easy instances that any reason-able pipeline can solve. Another 979 problems ( 37 .2% ) are solved by none of the methods, indicating instances beyond the reach of current methods regardless of specification quality. Method differences are therefore determined by the 1,137 
+
+contested problems ( k = 1 .. 9), where some methods succeed and others fail. We exclude the easy set and analyze failures on the remaining hard problems. 
+
+2) A failure mode analysis: We analyse the hard problems for the three specification alignment methods only, namely BESPEC , Specine, and SpecFix. This choice follows from Table I, where these three methods substantially outperform the code refinement baselines (Self-Repair, Self-Collaboration, AgentCoder, μFiX, PairCoder, and SCoT) across every model and setting. The more informative question is therefore whether the remaining failures of the three specification alignment methods are still caused by specification errors. Specifically, we analyse the failure types shown in Figure 3:  
+
+> •
+
+Weak spec. The refined specification still omits or mis-states something required by the problem statement, such 0                                     
+
+> 100
+> 200
+> 300
+> 400
+> 500
+> # problems
+> 151
+> 30 16 20 25 29 27 38 48
+> 158
+> 335
+> gpt-5-mini
+> none solved contested all solved
+> 0
+> 100
+> 200
+> 300
+> 400
+> 500
+> # problems
+> 346
+> 61 39 46 36 36 37 59 71 78 68
+> glm-4.7-flash
+> 012345678910
+> # of methods that solve the problem
+> 0
+> 100
+> 200
+> 300
+> 400
+> 500
+> # problems
+> 482
+> 54 36 26 15 14 24 28 29 57
+> 112
+> qwen3-coder-30b
+> Fig. 2. Problem distribution by the number of methods that solve each problem.
+
+as the input format, output format, a stated constraint, or the objective.  
+
+> •
+
+Adherence. The refined specification already states the behavior needed to pass the failing test, but the selected program does not follow it. We divide adherence fail-ures into nine subtypes: input-handling parses the input incorrectly; output-format computes the right value but returns it in the wrong form; language convention mis-uses programming-language conventions, such as integer division, modulo behavior, or array bounds; constraints violation ignores a stated bound or validity condition; 
+
+objective divergence optimizes or computes the wrong target; algorithmic/logic uses an incorrect algorithm or control logic; runtime crash terminates with an exception or invalid operation; timeout exceeds the time limit; and 
+
+edge case failure passes visible tests but fails a hidden case.  
+
+> •
+
+Other. The failure does not fit weak spec or any adherence subtype, such as an LLM response parsing failure. We classify every residual failure with an LLM judge (gpt-5-mini , temperature 0). The judge reads the state-ment, the predicted specification, the selected program, and the failing tests, then emits exactly one class. To validate the judge, we drew a fixed seed sample of 100 failures, strati-fied across all classes and the three specification alignment systems. One author labeled these failures while blind to the model output. Human and judge labels agree on 87% of the sample, with Cohen’s κ = 0 .86 . Under the Landis and Koch # failures       
+
+> BeSpec
+> (n=184)
+> Specine
+> (n=253)
+> Specfix
+> (n=258)
+> 25
+> 26
+> 7
+> 24
+> 26
+> 40
+> 41
+> 35
+> 10
+> 9
+> 21
+> 50
+> 50
+> 55
+> 27
+> 28
+> 26
+> 17
+> 15
+> 39
+> 48
+> 43
+> gpt-5-mini
+> # failures
+> BeSpec
+> (n=458)
+> Specine
+> (n=516)
+> Specfix
+> (n=550)
+> 20
+> 65
+> 45
+> 9
+> 6
+> 9
+> 7
+> 19
+> 192
+> 171
+> 54
+> 42
+> 18
+> 285
+> 158
+> 88
+> 23
+> 21
+> 190
+> 20
+> 7
+> 8
+> 17
+> 20
+> 18
+> glm-4.7-flash
+> 0100 200 300 400 500 600
+> # failures
+> BeSpec
+> (n=533)
+> Specine
+> (n=593)
+> Specfix
+> (n=624)
+> 28
+> 88
+> 56
+> 32
+> 14
+> 13
+> 19
+> 7
+> 15
+> 42
+> 193
+> 217
+> 38
+> 34
+> 15
+> 235
+> 137
+> 117
+> 78
+> 66
+> 157
+> 46
+> 40
+> 18
+> 14
+> 13
+> 12
+> qwen3-coder-30b
+> weak spec
+> adherence: input-handling
+> adherence: output-format
+> adherence: language convention
+> adherence: constraints violation
+> adherence: objective divergence
+> adherence: algorithmic/logic
+> adherence: runtime crash
+> adherence: timeout
+> adherence: edge case failure
+> other
+
+Fig. 3. Failure mode analysis of B ESPEC , Specine, and SpecFix on hard problems. 
+
+interpretation [28] of Cohen’s κ statistic [29], this indicates strong agreement. This validation supports using the LLM judge for the full failure set, consistent with prior LLM judge protocols [30]. Figure 3 shows the resulting distribution. The taxonomy shows that, among problems that remain hard, the specification is no longer the main bottleneck. Across all three specification alignment methods, weak spec is a small minority of failures. For B ESPEC , weak specification 
+
+failures account for 4 out of 184 failures on gpt-5-mini ,
+
+20 out of 458 on glm-4.7-flash , and 28 out of 533 on 
+
+qwen3-coder-30b , for a total of 52 out of 1,175 . The corresponding totals are higher for the baselines: Specine has 26 + 65 + 88 = 179 weak specification failures out of 
+
+1,362 , and SpecFix has 7 + 45 + 75 = 127 out of 1,432 .This indicates that all three specification alignment methods improve the generated specifications, and that B ESPEC pro-duces the fewest weak specification failures among them. The remaining B ESPEC failures are concentrated in adherence: algorithmic/logic , adherence: runtime crash , and adherence: timeout , where the program reflects the intended specification but uses an incorrect or inefficient algorithm. Thus, after intent is aligned, further performance gains require better implementations. This may come from more powerful LLMs or from code refinement that better enforces adherence to the refined specification. 
+
+Answer to RQ2. After alignment, failures are rarely due to weak specifications. Only 52 out of 1,175 of B ESPEC ’s remaining failures are classified as weak spec , compared with 
+
+179 out of 1,362 for Specine and 127 out of 1,432 for SpecFix, while most remaining errors are adherence failures. 
+
+TABLE II RQ3 ABLATION STUDY ACROSS ALL BENCHMARKS ON 
+
+Q W E N 3-C O D E R -30 B . VW/O BH REMOVES BEHAVIORAL MODEL , WHILE 
+
+Vn=k REPRESENTS VARIANTS WITH DIFFERENT POOL SIZES . Iters IS THE AVERAGE NUMBER OF REFINEMENT ITERATIONS USED . Full REPRESENTS THE FULL METHOD OF BESPEC .CC AND xCE ARE SHORT FOR 
+
+CodeContents AND xCodeEval , RESPECTIVELY .
+
+CC CC-Raw xCE APPS APPS-Eval LCB Variant Iters P@1 APR P@1 APR P@1 APR P@1 APR P@1 APR P@1 APR 
+
+Vw/o bh – 15.2 26.0 17.0 27.0 36.3 45.6 46.3 57.1 20.0 50.8 33.9 42.6 
+
+Vn=2 1.97 24.2 41.5 34.5 45.9 42.7 55.6 61.7 74.5 25.0 63.4 44.6 57.2 
+
+Vn=4 1.84 29.7 49.8 38.2 51.1 45.7 59.0 64.3 75.7 28.0 63.1 46.4 59.1 
+
+Vn=6 1.79 27.9 45.9 33.9 48.5 45.0 58.0 64.3 77.6 26.7 66.3 45.5 59.1 
+
+Vn=8 1.78 23.0 44.3 32.1 46.4 46.7 60.2 61.3 74.9 25.7 63.5 45.5 60.2 
+
+Vn=10 1.66 33.3 50.9 42.4 54.1 46.0 60.0 65.0 77.0 26.3 66.1 45.5 59.5 
+
+Vn=12 1.66 31.5 50.0 38.8 52.1 49.3 60.9 64.7 78.7 28.3 67.8 43.8 58.7 
+
+Vn=14 1.68 28.5 50.3 40.0 54.7 46.3 61.1 64.3 79.5 28.7 67.7 45.5 59.8 
+
+Vn=16 1.61 29.1 49.2 38.2 50.5 49.3 62.8 65.7 79.1 28.0 67.6 46.4 60.1 
+
+Vn=18 1.60 32.7 52.1 41.8 55.4 46.3 60.2 66.7 80.3 27.7 69.3 42.9 60.5 Full 1.58 33.9 54.5 42.4 56.0 46.3 60.0 68.0 80.2 28.0 68.2 45.5 60.2 
+
+C. RQ3: Ablation Study 
+
+For the ablation study, we ask two questions. First, does the behavior model in B ESPEC improve performance (Sec-tion V-C1)? Second, how does the candidate pool size affect performance (Section V-C2)? To save budget, we run all abla-tions on all benchmarks but only with qwen3-coder-30b .
+
+1) Ablation study on the behavior model: To assess whether the behavior model is useful, we compare B ESPEC with a variant that does not use behaviors. This variant generates a structured specification from the intent, then generates a solution from that specification. It does not predict behaviors, check candidate programs against behaviors, or use behavior feedback to refine the specification. In Table II, this variant is the row labeled Vw/o bh , and we compare it with the full system on the same problem set. We observe that the behavior model contributes substantially and consistently across all six settings. On CC, removing the behavior model reduces Pass@1 by 55 .2% (33 .9 → 15 .2)and APR by 52 .3% (54 .5 → 26 .0). On CC Raw, the reduc-tions are 59 .9% (42 .4 → 17 .0) and 51 .8% (56 .0 → 27 .0). On xCodeEval, they are 21 .6% (46 .3 → 36 .3) and 24 .0% 
+
+(60 .0 → 45 .6). On APPS, they are 31 .9% (68 .0 → 46 .3)and 28 .8% (80 .2 → 57 .1). On APPS Eval, they are 28 .6% 
+
+(28 .0 → 20 .0) and 25 .5% (68 .2 → 50 .8). On LiveCodeBench, they are 25 .5% (45 .5 → 33 .9) and 29 .2% (60 .2 → 42 .6). Thus, removing behaviors hurts both exact correctness and partial correctness in every setting, showing that the behavior model is a central contributor to B ESPEC ’s gains. 
+
+2) Ablation study on the pool size: We next study the effect of candidate pool size. We vary the pool size n ∈{2, 4, . . . , 20 } while keeping the maximum iteration budget fixed at N =10 and using early stopping with a plateau patience of 2, so every setting has enough repair budget to reach its full performance while stopping when refinement no longer improves. Table II reports these pool-size variants across all benchmarks. We observe that larger pools improve accuracy, with most gains appearing before pool size 10 . On CC Raw, increasing the pool from 2 to 20 improves Pass@1 from 34 .5 to 42 .4
+
+and APR from 45 .9 to 56 .0. The same trend appears across the other settings, with much of the gain already achieved by a pool size of 10 . At the same time, the average number of refinement iterations decreases as the pool grows, from 1.97 
+
+at pool 2 to 1.58 at pool 20 . Thus, pool size and refinement iterations trade off: a larger pool is more likely to include a strong candidate early, while a smaller pool relies more on specification refinement to improve the specification and the subsequently generated code over additional repair iterations. In RQ1 (Section V-A), we set n = 20 and the maximum number of refinement iterations to 3 to match the budgets of SpecFix and Specine for a fair comparison. However, the ablation results show that B ESPEC can achieve similar or better results with smaller pools or fewer refinement iterations, reducing token and time cost. In practice, the pool size and iteration budget should therefore be chosen according to the available compute constraints. When concurrency is available, a larger pool with fewer refinement iterations can exploit parallel execution. Otherwise, a smaller pool with more refinement iterations can reduce peak resource usage.           
+
+> Answer to RQ3. Removing the behavior model substantially reduces both Pass@1 and APR. Pool size trades off with refinement iterations, so larger pools with fewer iterations are preferable when concurrency is available, while smaller pools with more iterations are preferable otherwise.
+
+VI. T HREATS TO VALIDITY 
+
+Construct validity concerns whether the metrics used in the evaluation faithfully capture the concepts of interest. Following prior work on specification alignment [6]–[8], we use Pass@1 and APR to measure program correctness, with Pass@1 capturing exact success and APR capturing partial correctness. To provide a broader measurement, we addition-ally report efficiency metrics, including token and time cost, and conduct a failure analysis to characterize the remaining errors. 
+
+Internal validity concerns whether the observed improve-ments are caused by the method itself rather than by imple-mentation choices, model selection, or experimental configu-ration. The choice of LLMs may affect the experimental re-sults, since different model families have different coding and reasoning capabilities. We mitigate this threat by using three representative LLM types within our financial constraints: a coding-oriented open-weight model, a reasoning-oriented open-weight model, and a general closed-source model. Ex-perimental configuration may also bias the comparison. We mitigate this by using the same evaluation setup for B ESPEC 
+
+and the baselines where applicable, including the same bench-mark splits, LLM temperature, iteration limits, candidate pool sizes, and scoring protocol. 
+
+External validity concerns whether the results generalize beyond the evaluated dataset. To assess the generalizability, we evaluate B ESPEC on four benchmark datasets and six evalua-tion configurations, covering different problem sources and test settings. Moreover, older benchmarks may also overlap with the training data of recent LLMs. To mitigate the influence of data leakage, we additionally include the LiveCodeBench dataset, a contamination-free benchmark with recent problems. The consistent gains of B ESPEC on LiveCodeBench support that the improvements do not rely on memorized benchmark solutions. 
+
+Conclusion validity concerns whether the evidence is strong enough to support the claims drawn from the experiments, rather than reflecting random variation or an isolated bench-mark effect. We mitigate this threat by evaluating on 877 
+
+unique problems across four benchmarks and six evaluation configurations, and by repeating the evaluation across three LLMs. Across these settings, B ESPEC shows consistent and substantial improvements over the strongest baselines, reduc-ing the likelihood that the conclusions are driven by a single model, benchmark, or random outcome. VII. R ELATED WORK 
+
+A. Automated Code Generation 
+
+Code generation has been studied for decades, and recent advances in large language models trained on code [1], [2] have accelerated progress in LLM-based program generation. As discussed in the introduction, recent LLM code generation can be viewed as four stages: interpreting the input specifica-tion, planning a solution, implementing the plan, and repairing the program with feedback. Most existing methods focus on the last three stages. Prompting methods such as struc-tured chain-of-thought [17] improve planning before coding. Generate-then-refine methods iterate on the implementation using execution feedback or self-feedback, including self-debugging [12], self-repair [13], and self-refine [31]. Multi-agent frameworks assign complementary roles to strengthen planning, implementation, and testing: Self-Collaboration [15] and AgentCoder [14] coordinate analyst/coder/tester agents, and PairCoder [16] mimics pair programming with a navi-gator and a driver. Selection-based methods rerank sampled implementations using generated tests or consensus, as in CodeT [22] and multi-perspective self-consistency [23]. In contrast, B ESPEC targets the first stage. It refines the LLM’s interpretation of the original intent rather than the generated code. 
+
+B. Specification Alignment 
+
+A growing line of work recognizes that ambiguous intent, not generation ability, often limits LLM code generation. 
+
+μFiX [8] improves the model’s specification understanding 
+
+through test-case analysis and feedback prompting. Clari-fyGPT [9] detects ambiguous requirements and asks clarifying questions. Specine [7] lifts the LLM-perceived specification out of generated code into a requirement DSL and aligns it to the input using software-engineering rules. SpecFix [6] repairs the distribution of programs an ambiguous requirement induces and maps the change back to the requirement via contrastive specification inference. B ESPEC shares the premise of these works that specification alignment is central, but dif-fers in mechanism. Rather than rewriting the requirement and then generating code directly, B ESPEC maintains an explicit 
+
+model of intended behavior across various input scenarios. It then uses disagreement among executed candidates to localize where the specification is ambiguous and to decide whether a failure comes from the specification or the generated code. Our experiments show that this behavior-level specification alignment outperforms both Specine and SpecFix. VIII. C ONCLUSION AND FUTURE WORK 
+
+In this work, we presented BESPEC , a framework for specification alignment in LLM code generation. Instead of only refining generated code after failures, B ESPEC builds an explicit behavior model of the correct program from the original intent, checks candidate programs by execution, and uses the gap between predicted and observed behavior to refine the specification and select the best aligned program. Across three LLMs and six evaluation settings spanning four bench-marks, including the contamination-free LiveCodeBench, B E-SPEC consistently improves both Pass@1 and APR over nine baselines. The failure analysis further shows that, after alignment, most remaining errors are algorithmic or resource-related rather than specification misunderstandings, indicating that B ESPEC reduces the specification gap it targets. In the future, we plan to extend specification alignment beyond generated code. One direction is to align specifi-cations with additional sources of evidence, such as tests and execution traces. This would allow the framework to reason jointly about the problem statement, the generated code, and the available tests, supporting more reliable LLM-based software development when intent is ambiguous and evidence is incomplete. ACKNOWLEDGEMENT 
+
+This work has emanated from research jointly funded by Taighde Eireann – Research Ireland under Grant number 13/RC/2094 2 and by Huawei Technologies Co., Ltd. Lionel Briand is also supported by the Natural Sciences and Engi-neering Research Council of Canada. For the purpose of Open Access, the authors have applied a CC BY public copyright licence to any Author Accepted Manuscript version arising from this submission. REFERENCES [1] M. Chen, J. Tworek, H. Jun, Q. Yuan et al. , “Evaluating large language models trained on code,” arXiv preprint arXiv:2107.03374 , 2021. [2] J. Austin, A. Odena, M. Nye, M. Bosma et al. , “Program synthesis with large language models,” arXiv preprint arXiv:2108.07732 , 2021. [3] Y. Li, D. Choi, J. Chung, N. Kushman et al. , “Competition-level code generation with AlphaCode,” Science , vol. 378, no. 6624, pp. 1092– 1097, 2022. [4] J. Jiang, F. Wang, J. Shen, S. Kim, and S. Kim, “A survey on large language models for code generation,” ACM Transactions on Software Engineering and Methodology (TOSEM) , 2026. [5] A. Fan, B. Gokkaya, M. Harman, M. Lyubarskiy, S. Sengupta, S. Yoo, and J. M. Zhang, “Large language models for software engineering: Sur-vey and open problems,” in 2023 IEEE/ACM International Conference on Software Engineering: Future of Software Engineering (ICSE-FoSE) .IEEE, 2023, pp. 31–53. [6] H. Jia, R. Morris, H. Ye, F. Sarro, and S. Mechtaev, “Automated repair of ambiguous problem descriptions for LLM-based code generation,” in Proceedings of the 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) , 2025. [7] Z. Tian and J. Chen, “Aligning requirement for large language model’s code generation,” in Proceedings of the 48th IEEE/ACM International Conference on Software Engineering (ICSE) , 2026. [8] Z. Tian, J. Chen, and X. Zhang, “Fixing large language models’ speci-fication misunderstanding for better code generation,” in Proceedings of the 47th IEEE/ACM International Conference on Software Engineering (ICSE) , 2025. [9] F. Mu, L. Shi, S. Wang, Z. Yu, B. Zhang, C. Wang, S. Liu, and Q. Wang, “ClarifyGPT: A framework for enhancing LLM-based code generation via requirements clarification,” Proceedings of the ACM on Software Engineering (FSE) , 2024. [10] J. Li, R. Bai, Y. Luo, Y. Zhang, W. Yang, Z. Sun, T. Zhao, D. Jin, L. Li, and Z. Jin, “Bridging the gap between user intent and llm: A requirement alignment approach for code generation,” arXiv preprint arXiv:2604.16198 , 2026. [11] W. Wang, Y. Huang, Z. Yuan, H. Bao, S. Du, Y. Ma, Y. Zhao, Y. Ye, and X. Zhang, “Specalign: Efficient specification-grounded alignment of large language models via synthetic data,” arXiv preprint arXiv:2606.16276 , 2026. [12] X. Chen, M. Lin, N. Sch¨ arli, and D. Zhou, “Teaching large language models to self-debug,” in International Conference on Learning Repre-sentations (ICLR) , 2024. [13] T. X. Olausson, J. P. Inala, C. Wang, J. Gao, and A. Solar-Lezama, “Is self-repair a silver bullet for code generation?” in International Conference on Learning Representations (ICLR) , 2024. [14] D. Huang, J. M. Zhang, M. Luck, Q. Bu, Y. Qing, and H. Cui, “AgentCoder: Multi-agent-based code generation with iterative testing and optimisation,” arXiv preprint arXiv:2312.13010 , 2023. [15] Y. Dong, X. Jiang, Z. Jin, and G. Li, “Self-collaboration code gener-ation via ChatGPT,” ACM Transactions on Software Engineering and Methodology (TOSEM) , vol. 33, no. 7, 2024. [16] H. Zhang, W. Cheng, Y. Wu, and W. Hu, “A pair programming framework for code generation via multi-plan exploration and feedback-driven refinement,” in Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering (ASE) , 2024. [17] J. Li, G. Li, Y. Li, and Z. Jin, “Structured chain-of-thought prompting for code generation,” ACM Transactions on Software Engineering and Methodology (TOSEM) , 2025. [18] G. Wang, Q. Xu, L. Briand, and K. Liu, “ Mutation-Guided Unit Test Generation With a Large Language Model ,” IEEE Transactions on Software Engineering , vol. 52, no. 05, pp. 1657–1671, May 2026. [Online]. Available: https://doi.ieeecomputersociety.org/10.1109/ TSE.2026.3682975 [19] Q. Xu, G. Wang, L. Briand, and K. Liu, “Hallucination to consensus: Multi-agent llms for end-to-end junit test generation,” 
+
+ACM Trans. Softw. Eng. Methodol. , Mar. 2026. [Online]. Available: https://doi.org/10.1145/3803418 [20] S. B. Hossain and M. Dwyer, “TOGLL: Correct and Strong Test Oracle Generation with LLMs,” 5 2024. [Online]. Available: http://arxiv.org/abs/2405.03786 [21] X. Wang, Q. Xu, P. Arcaini, S. Ali, and T. Peyrucain, “Quantum machine learning-based test oracle for autonomous mobile robots,” in 
+
+2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) , 2025, pp. 3695–3706. [22] B. Chen, F. Zhang, A. Nguyen, D. Zan, Z. Lin, J.-G. Lou, and W. Chen, “CodeT: Code generation with generated tests,” in International Con-ference on Learning Representations (ICLR) , 2023. [23] B. Huang, S. Lu, X. Wan, and N. Duan, “Enhancing large language mod-els in coding through multi-perspective self-consistency,” in Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (ACL) , 2024. [24] M. A. M. Khan, M. S. Bari, X. L. Do, W. Wang, M. R. Parvez, and S. Joty, “XCodeEval: An execution-based large scale multilingual multitask benchmark for code understanding, generation, translation and retrieval,” in Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (ACL) , 2024. [25] D. Hendrycks, S. Basart, S. Kadavath, M. Mazeika, A. Arora, E. Guo, C. Burns, S. Puranik, H. He, D. Song, and J. Steinhardt, “Measuring coding challenge competence with APPS,” in Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track , 2021. [26] N. Jain, K. Han, A. Gu, W.-D. Li, F. Yan, T. Zhang, S. Wang, A. Solar-Lezama, K. Sen, and I. Stoica, “LiveCodeBench: Holistic and contamination-free evaluation of large language models for code,” in 
+
+International Conference on Learning Representations (ICLR) , 2025. [27] OpenRouter, “OpenRouter: The unified interface for LLMs,” https: //openrouter.ai/, 2026, accessed: 2026-06-24. [28] J. R. Landis and G. G. Koch, “The measurement of observer agreement for categorical data,” Biometrics , vol. 33, no. 1, pp. 159–174, 1977. [29] J. Cohen, “A coefficient of agreement for nominal scales,” Educational and Psychological Measurement , vol. 20, no. 1, pp. 37–46, 1960. [30] L. Zheng, W.-L. Chiang, Y. Sheng, S. Zhuang, Z. Wu, Y. Zhuang, Z. Lin, Z. Li, D. Li, E. P. Xing, H. Zhang, J. E. Gonzalez, and I. Stoica, “Judging LLM-as-a-judge with MT-Bench and Chatbot Arena,” in Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track , 2023. [31] A. Madaan, N. Tandon, P. Gupta, S. Hallinan et al. , “Self-refine: Iterative refinement with self-feedback,” in Advances in Neural Information Processing Systems (NeurIPS) , 2023.
