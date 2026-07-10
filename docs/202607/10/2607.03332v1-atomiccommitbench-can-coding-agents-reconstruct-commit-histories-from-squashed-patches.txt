@@ -1,0 +1,367 @@
+Title: AtomicCommitBench: Can Coding Agents Reconstruct Commit Histories from Squashed Patches?
+
+URL Source: https://arxiv.org/pdf/2607.03332v1
+
+Published Time: Tue, 07 Jul 2026 01:20:57 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+AtomicCommitBench Preprint 
+
+# AtomicCommitBench: Can Coding Agents Reconstruct Commit Histories from Squashed Patches? 
+
+Zhihao Lin 1 Mingyi Zhou 1 Li Li 1,* 
+
+> 1
+
+Beihang University, Beijing, China {mathieulin, zhoumingyi}@buaa.edu.cn, lilicoding@ieee.org 
+
+> *
+
+Corresponding author. 
+
+Abstract. Coding agents often finish a session by returning one squashed patch that mixes feature implementation, bug fixes, refactorings, tests, and configuration edits. However, implementing the requested functionality is not enough: when unrelated edits are collapsed into one patch, the history no longer records the intentions, dependencies, and review units that support later maintenance. Human maintainers and coding agents that rely on repository history must infer this missing structure from the final diff alone. Since coding agents already reason over code and diffs during development, a natural question is whether they can also maintain history retrospectively. We study retrospective commit-history reconstruction : given a completed squashed change, an agent groups its hunks into commits and materializes them as a replayable sequence. We formalize the task as hunk-to-commit partitioning with a replay requirement and build AtomicCommitBench from 800 real consecutive-commit episodes across 10 Python projects. Because developers can decompose the same change in more than one reasonable way, we score outputs with PPAR for replay validity, ARI for reference-based grouping, and TCR for failure containment on scoreable modified-test episodes. Natural retrospective reconstruction exposes difficulty that replay checks and synthetic tangling miss. All non-random methods nearly saturate replay validity (PPAR ≥ 0.988 ), yet grouping quality ranges from 0.03 to 0.46 ARI. Matched synthetic composites are much easier for an untangling baseline than real same-author squashed diffs (+0.333 ARI). In this model-agent snapshot, the GPT-5.4 setup driven by Codex CLI (0.46) and the GLM-5 setup driven by Claude Code (0.43) form a higher ARI band than the MiniMax (0.31) and Kimi (0.29) setups. On the 151 episodes scoreable by the partial modified-test probe, TCR gives the same setup ordering without using developer labels. These signals indicate that current setups can produce replayable, structured draft histories with meaningful alignment to human-maintained organization, with the strongest setups recovering structure beyond file-local grouping. Qualitative trace diagnosis highlights same-file lumping and support-hunk drift as recurring error patterns. Dependency-Aware Commit Evidence (DACE) improves the two lower-scoring setups (+0.05 to +0.08 ARI), consistent with dependency cues and hunk roles helping when agents over-rely on locality. AtomicCommitBench lets agentic-coding evaluation measure the history an agent leaves behind alongside the final code. 
+
+# 1 Introduction 
+
+Coding agents are moving software work from edit-by-edit programming toward session-level change production. In one session, an agent may explore candidate fixes, touch many files, add tests, refactor nearby code, and update configuration before returning a final patch. Human-in-the-loop use can make the scope even less linear: developers steer agents with follow-up requests, parallel feature 1 
+
+> arXiv:2607.03332v1 [cs.SE] 3 Jul 2026 AtomicCommitBench Preprint
+
+requests, or partial corrections instead of waiting for one cleanly scoped change. The resulting patch may implement the requested functionality, yet still leave a history that is hard to inspect or reuse. Current coding-agent benchmarks [1–4] evaluate final-patch correctness and leave history organization unmeasured. After a coding session, teams rely not only on the final code but also on the history that explains it. A monolithic commit and a clean sequence of atomic commits may contain the same diff, yet they behave differently under review, git bisect , selective revert, and history-based retrieval. A bug fix tangled with a refactor costs more reviewer attention. A version bump bundled with a behavior change is harder to revert safely. The retrieval case is concrete as well. A single feature rarely consists of one edit in one place: it may require a new subclass, a config registration, a type stub, and a test. Distributed changes like this are easy to ship incomplete. The gap often surfaces later, after a user hits it and a follow-up commit supplies the missing piece. Clean, self-contained commits let the next developer or agent recover the complete pattern. If the fix sits inside an unrelated commit, the recoverable example may be the original incomplete change, so the same bug can reappear. Prior software engineering results already tie commit structure to later work. Decomposed changesets can reduce wrongly reported issues and context-seeking during review [5]; tangled changes can inflate defect prediction error by 5 to 200% [6]. Recent agent pipelines also read commit history: Code Researcher [7] searches repositories using commit history, HAFixAgent [8] conditions repair on commit-level context, and Lore [9] treats commit messages as a structured protocol. Histories produced by today’s agents can become inputs for later agents. We therefore treat commit organization as a measurable producer-side property of an agent’s output. Good history organization is more than partitioning a diff by file or label. Real development already interleaves change intents: behavior edits may sit beside same-file refactoring, tests, release metadata, or configuration updates. Some change intents cross files, while others split hunks within one file. In our 800-episode sample from GitHub projects, an episode contains a median of 12 hunks across 6 files, with a mean of 51 hunks across 9.8 files. In 35.4% of episodes, at least one file contains hunks from different observed commits; the Hard tier reaches 55.0%. Meanwhile, 59.5% of observed commits span at least two files. A method has to separate nearby hunks when they serve different change intents and keep distributed hunks together when they implement one logical change. Therefore, we study the problem as retrospective commit-history reconstruction . The input is a completed squashed change and the repository snapshot before that change. The agent organizes a known diff into commits without generating new code or solving a hidden issue. This setting isolates history organization from patch construction and matches common cleanup workflows, such as splitting a squashed branch or preparing a large pull request for review. To obtain observable references for this cleanup setting, we use human-maintained consecutive commit histories: the original commits give one defensible organization of a completed change, while the agent sees only the squashed diff and base snapshot. The central prediction is a hunk-to-commit grouping: the output assigns each hunk to one predicted commit and chooses the number of commits. The groups are then sequenced so that the result is a replayable commit history. 2AtomicCommitBench Preprint STAGE 1 — INPUT STAGE 2 — AGENT RECONSTRUCTION STAGE 3 — ORDERED HUNK PARTITION STAGE 4 — COMPLEMENTARY EVALUATION 
+
+</> 
+
+> Base snapshot c ₀
+
++  
+
+> Squashed patch
+> File A h0
+> h1
+> File B
+> h2
+> File C h3
+> h4
+> File D
+> h5
+> </>
+> Pr edict boundar ies
+> and or der
+> m is predicted
+
+C₁   
+
+> h0+h3
+> h0h3
+
+C₂      
+
+> h1+h2+h4
+> h1h2h4
+
+C₃     
+
+> h5
+> h5
+> C₀C₁
+> C₂
+> C₃
+> final tr ee
+> Groups distributed
+> cross-file hunks
+> (h0and h3)
+> Splits nearby
+> same-file hunks
+> (h0and h1)
+> Ever y hunk used exactly once
+> Validity
+> Histor y
+> quality
+> PPAR
+> Do all prefixes apply?
+> ARI
+> Do concern
+> groupings agree?
+> TCR
+> Are failures isolated
+> under revert?
+> Replayable does not necessarily mean well organized.
+
+Figure 1: Overview of retrospective commit-history reconstruction. Given a base repository snapshot and a squashed multi-commit diff, the task is to group hunks into commits and materialize a replayable history. Evaluation separates structural replay validity, reference-based grouping quality, and selective-revert failure containment. This task has no single correct decomposition. Reasonable developers may group small cleanups differently or attach support edits to different behavior changes. We avoid a hard semantic-validity rule and ask three narrower questions: whether the predicted history replays, how its hunk grouping compares with an observed developer decomposition, and whether selective-revert failures stay contained within predicted commits. One observed developer history serves as a reference rather than the unique ground truth. AtomicCommitBench contains 800 real multi-commit episodes from 10 Python projects. The public artifact is available at https://github.com/mathieu0905/AtomicCommit . We evaluate four model-agent setups against six diagnostic baselines. We also compare real squashed changes with matched synthetic composites to test whether the synthetic tangles used in prior work capture the same boundary structure. We organize the study around three questions: 1. RQ1: What makes natural retrospective reconstruction non-trivial? We test whether replay validity, simple heuristics, and synthetic composites capture the same difficulty as real squashed changes. 2. RQ2: How do current model-agent setups perform under complementary history-quality signals? We compare four model-agent setups using replay validity, reference-based hunk grouping, and a partial selective-revert containment probe. 3. RQ3: What failure modes explain the remaining gap, and when does explicit evidence help? We qualitatively analyze same-file lumping and support-hunk drift, then test whether Dependency-Aware Commit Evidence (DACE) exposes useful dependency and hunk-role cues. The paper makes three contributions: 1. A formalization of retrospective commit-history reconstruction. We turn the organi-zation of a completed change into a hunk-level commit decomposition task, separating history quality from final-patch correctness. 3AtomicCommitBench Preprint 
+
+2. AtomicCommitBench and a measurement design for non-unique histories. The benchmark contains 800 real episodes from 10 Python projects and scores outputs with structural replay validity (PPAR), reference-based grouping quality (ARI), and selective-revert failure containment (TCR). This design uses the observed developer history as a reference without treating it as the only valid answer. 3. Empirical evidence about difficulty, current agents, and failure mechanisms. Real same-session squashed changes are substantially harder than matched synthetic composites for an untangling baseline. Replay validity nearly saturates while grouping quality varies, and DACE helps mainly where agents over-rely on locality in this setup. 
+
+# 2 Formalization 
+
+2.1 Retrospective Commit-History Reconstruction 
+
+To evaluate history organization independently of code generation, we fix the final change and ask only how it should be organized. A clean history can be produced in two ways: an agent may commit incrementally while writing the code, or it may reorganize the completed change after the code is finished. We study the second setting because incremental commits can be entangled with interactive problem solving: the agent may misunderstand the developer’s intent, implement a wrong direction, receive corrections, and backtrack. A messy incremental history may therefore reflect miscommunication and repair during the session rather than the agent’s ability to organize the completed change. Starting from a completed squashed change removes this confound. In retrospective commit-history reconstruction, the agent receives the squashed diff and the repository snapshot immediately before it. The code change is fixed; the agent does not generate new code or solve a hidden issue. Its task is to group the diff into coherent commits that can be replayed for review, selective revert, and later reuse. Maintainable decompositions sometimes split hunks within one file and sometimes group hunks across files. The natural unit of prediction is therefore the hunk. We formalize the task as a hunk partition with a replay requirement. 
+
+2.2 Hunk Partition and Replay Task 
+
+Definition 1 (Change Episode). A change episode E = ( R, c 0, (c1, . . . , c k)) consists of a repository 
+
+R, a base commit c0, and k consecutive commits by the same author, where each ci applies cleanly on ci−1. The episode induces a squashed diff D from c0 to ck, and the original commits provide one observed decomposition of that diff. 
+
+Definition 2 (Hunk Partition with Replay). Given the squashed diff D, we parse it into hunks H = {h1, . . . , h n}. Each hunk is a maximal contiguous block of added and deleted lines, the granularity at which tools such as git add -p stage changes. At repository state c0, the method partitions H into a sequence π = ( C1, . . . , C m) of non-empty groups; each group Ci is a predicted commit. The predicted number of commits m is chosen by the method and need not equal the observed number k. A valid output must satisfy: (1) Coverage : S 
+
+> i
+
+Ci = H and Ci ∩ Cj = ∅ for 
+
+i̸ = j; (2) Replay Validity : applying the groups in order produces a chain of intermediate states 
+
+s0 → s1 → · · · → sm, where s0 is the repository state at c0 and each si results from applying the hunks in Ci to si−1 without conflicts. By coverage, the final state sm equals the post-change state 
+
+ck, so a valid output is exactly a commit history that replays the squashed change from c0 to ck.We keep semantic coherence out of the validity definition. In an ideal history, each commit should address one coherent change intent, but developers can draw those boundaries differently [6, 10]. 4AtomicCommitBench Preprint 
+
+One developer may keep a small cleanup with the bug fix that motivated it; another may separate it. We measure semantic coherence empirically instead of encoding one developer’s style as a rule. Under this definition, a one-commit output can be formally valid and still be a poor decomposition. 
+
+2.3 Relation to Commit Untangling 
+
+The closest prior task is commit untangling, which groups a tangled change by change intent [11 –13]. That line of work casts the problem as grouping against a reference partition. Commit-history reconstruction uses the same central intuition, but the output is a commit-history artifact rather than a partition alone: after hunks are grouped, the groups must be sequenced so their prefixes replay cleanly through valid intermediate states. Reviewers inspect one commit at a time, git bisect searches over commit prefixes, and git revert removes whole commits from a history. We therefore keep grouping quality primary and use replay validity as the structural condition that turns a partition into a history. 
+
+# 3 Methodology 
+
+3.1 Dataset Construction 
+
+We construct the evaluation set from 10 mature Python projects on GitHub. The projects cover testing (pytest), data validation (pydantic), HTTP clients (requests and httpx), formatting (black), terminal rendering (rich), web frameworks (fastapi and flask), and command-line interfaces (click and typer). We chose popular projects with mature public histories and active development. The observed histories from these mature projects provide generally high-quality human decompositions of real changes. They serve as reference decompositions for evaluating whether agents can reconstruct maintainable histories from squashed changes. Individual commits may still reflect developer style or non-atomic practice, so we do not treat any observed decomposition as uniquely correct. We collect candidate episodes with PyDriller [14] from repository snapshots taken between 2025-12-30 and 2026-03-09. For each project, we scan the commit history for maximal same-author runs in which adjacent commits are at most 48 hours apart. We keep runs with 2 to 8 commits and discard longer runs rather than splitting them into sub-windows. We exclude runs that contain merge commits, bot-authored commits, documentation-only changes, binary files, diffs smaller than 20 lines, or diffs larger than 2,000 lines. A run enters the candidate pool only if its commits replay cleanly from the base commit and the replayed final state matches the squashed diff. This process yields 2,558 candidate episodes before sampling, with commits dated from 2007 to 2026. The distribution is uneven: pytest (921) and pydantic (610) contribute the most, while click (55) and typer (24) contribute the fewest. Each accepted episode is squashed into one unified diff with Git’s default three lines of context and parsed into hunks. We assign each hunk to the commit contributing most of its lines, producing reference labels used only by the evaluator. Agents receive only the squashed diff and base repository snapshot; they do not receive commit messages, commit hashes, intermediate states, or original commit boundaries. The same-author and time-window constraints approximate coherent development sessions without requiring issue metadata. They reduce the risk of joining unrelated work by different contributors or long-lived branches spanning multiple tasks. This filtering favors retrospective cleanup episodes, matching the setting studied in this paper. 5AtomicCommitBench Preprint 
+
+Table 1: Sample composition and per-episode statistics by difficulty tier. Hunks and files are reported as mean (median); percentage rows report rates.                                 
+
+> Metric Easy Medium Hard All Episodes 320 320 160 800 Observed commits 2.33 3.47 5.07 3.33 Changed lines 68 260 701 272 Hunks 19 (6) 71 (19) 78 (31) 51 (12) Files 4.8 (4) 10.3 (7) 18.8 (13) 9.8 (6) Intra-file tangling 22.2% 38.8% 55.0% 35.4% Multi-file commits 57.0% 60.0% 63.6% 59.5%
+
+3.2 Difficulty Stratification 
+
+We stratify episodes by commit count and diff size. Easy episodes have at most 3 commits and 200 changed lines (1,461 episodes). Among the remaining episodes, Medium episodes have at most 5 commits and 600 changed lines (415 episodes), and the Hard tier contains the remaining 682 episodes. We then sample 800 episodes with seed 42: 320 Easy, 320 Medium, and 160 Hard. The sample oversamples Medium cases so that the comparison includes enough non-trivial episodes. Table 1 reports the sampled composition and per-episode statistics by tier. Harder tiers have larger diffs, more files, and more intra-file tangling. Multi-file commits are common even in Easy episodes, so file-level grouping misses cross-file structure across the whole sample. The difficulty tiers are used for analysis, not for scoring. Every method is evaluated on the same 800 episodes, and the headline ARI is the unweighted mean over this fixed evaluation set; re-weighting to the original pool proportions does not change the setup ranking. 
+
+3.3 Metrics 
+
+The formal task uses hunks as the prediction unit. A hunk could in principle contain lines from more than one original commit, which would make hunk-level prediction lossy. Auditing the squashed hunks against the per-commit reference labels shows this is rare: 97.7% draw all of their lines from a single observed commit, and the remaining 2.3% are cases where hunk-level prediction is lossy. Because the same change can admit multiple defensible decompositions, evaluation needs signals that do not reduce the task to exact recovery of one observed history. We combine three comple-mentary measurements. Structural replay checks whether the predicted sequence is executable, reference-based grouping compares the hunk partition with one human-maintained history, and selective-revert failure containment tests whether predicted commits localize behavioral breakage without using developer labels. 
+
+PPAR (prefix-patch apply rate) measures structural replay validity. For a predicted sequence 
+
+π = ( C1, . . . , C m), we apply each prefix (C1, . . . , C i) and compute the fraction of prefixes that apply without conflicts. PPAR directly uses the predicted order. It rejects non-replayable prefixes and stays silent about which replay-valid order is more reviewable. 
+
+ARI measures grouping quality with Adjusted Rand Index [15] between the predicted hunk partition and the observed developer partition. ARI ignores commit names, index labels, and order, so it measures whether hunks are grouped together while leaving replay validity to PPAR. Because it uses one observed decomposition as reference, we interpret it as a dataset-level relative signal rather than an absolute per-episode correctness score. 6AtomicCommitBench Preprint 
+
+TCR (test-failure containment rate) is a label-free probe of whether predicted commits behave like isolated maintenance units. For episodes that modify executable Python tests, we first run the modified tests at the episode tip and keep the tests that pass. We then evaluate each predicted commit by applying only that commit’s reverse patch to the tip state and rerunning the retained tests. TCR is the fraction of induced test failures that appear under exactly one predicted commit’s reverse patch. Intuitively, if a logical change is split across commits or unrelated changes are lumped together, failures tend to spread across multiple reverse patches rather than localize to one commit. An episode is scoreable only when the modified tests run at the tip and at least one retained test fails under a partial reverse patch; 151 common episodes meet these conditions in the comparison between agent outputs and the observed history. Episodes outside this slice remain in the PPAR and ARI evaluation. We pair TCR with TBR (test breakage rate), the fraction of retained tests broken by a partial reverse patch, because containment is meaningful only when it does not come from broad breakage. 
+
+3.4 Diagnostic Baselines and Evidence-Augmented Runs 
+
+We use six heuristic baselines to diagnose what simple organization rules can and cannot capture. 
+
+NoSplit (B0) places all hunks in a single commit and measures how much score a vacuous replayable answer earns. Random (B1) partitions hunks randomly into two to five commits. FileSplit (B2) creates one commit per changed file, testing a common cleanup shortcut. HunkSplit (B3) creates one commit per hunk. DepSplit (B4) groups hunks by syntactic dependency components. Untangle (B5) vectorizes path and hunk tokens with TF-IDF, clusters hunks with agglomerative clustering, and orders clusters with a dependency-based topological pass. It adds lexical similarity and a lightweight ordering repair while leaving program semantics and change intent unmodeled. For the failure-mechanism analysis in RQ3, we use DACE (Dependency-Aware Commit Evidence) as an external evidence source. DACE provides two kinds of hints. A dependency analyzer extracts lightweight def-use and file-creation edges from the unified diff. A hunk profiler uses path and identifier similarity to suggest related hunks and warn about likely locality traps, such as same-file hunks with different roles or mixed test and implementation edits. Agents receive these outputs only as soft evidence and still choose the number of commits, hunk grouping, and replayable sequence. DACE does not report observed commit counts, reference labels, commit messages, commit hashes, intermediate states, or other information derived from git history. We mark these evidence-augmented runs with a +T suffix (e.g., MiniMax+T ). 
+
+3.5 Experimental Setup 
+
+We evaluate six diagnostic baselines and four model-agent setups on the same 800 episodes. OpenAI’s Codex CLI drives GPT-5.4. Claude Code CLI drives, through provider routing, ZhipuAI GLM-5, Moonshot Kimi K2.5, and MiniMax-M2.5. To keep figures and tables compact, we use the setup labels GPT-5.4, GLM-5, Kimi, and MiniMax after this point. These labels always denote model-agent setups, not standalone models. GLM-5, Kimi, and MiniMax share one harness, while the GPT-5.4 comparison also changes the CLI. Because the agent harness shapes how a model inspects files, runs commands, and formats outputs, the evaluated unit is the model-agent setup rather than the model alone. All four setups use the same task description, one prompt, and one run per episode. They can read the working tree but cannot access git history. 7AtomicCommitBench Preprint 
+
+3.6 Evaluation Protocol 
+
+Each method is evaluated in a workspace containing the base repository snapshot at c0 and the squashed diff. The workspace withholds .git metadata, commit hashes, commit messages, original commit boundaries, and intermediate states; traces were checked for history-inspection commands before scoring. LLM agents have at most 50 turns and may inspect the working tree or run local analysis commands. The prompt asks agents to produce a reviewable sequence of atomic commits and notes that hunks from the same file may belong to different commits. It does not provide examples from the evaluation set or specify the number of commits to produce, because predicting m
+
+is part of the task. Each method outputs an ordered partition as JSON: a list of predicted commits, each with hunk indices and a short message. Messages are collected because commit cleanup normally produces them, although message quality is not scored. Some agent outputs contain coverage errors, such as missing hunk indices or duplicate assignments. For metric computation, we normalize these outputs: missing hunks are appended to a final commit, and duplicate assignments are removed after their first occurrence. Normalized scores are optimistic for malformed outputs. The strict-only check reports whether rankings survive when such outputs are discarded. 
+
+# 4 Results 
+
+We organize the results around three questions that separate task characterization, current capability, and error mechanisms. First, a retrospective-history benchmark is useful only if natural squashed changes expose structure that replay checks, simple grouping rules, or standard synthetic tangles do not already capture. RQ1 therefore asks what makes natural reconstruction non-trivial, using replay validity, diagnostic baselines, and matched synthetic composites. Second, RQ2 asks how current model-agent setups perform on this task. We score all 800 episodes with ARI and use TCR and TBR, difficulty slices, alternative references, and strict-output checks to interpret the scores under non-unique histories. Third, RQ3 asks what kind of decisions remain difficult and whether DACE evidence helps agents make those decisions. 8AtomicCommitBench Preprint 
+
+4.1 RQ1: What Makes Natural Reconstruction Non-Trivial? 0.0 0.1 0.2 0.3 0.4 0.5 
+
+> ARI
+> GPT-5.4+T
+> GPT-5.4
+> GLM-5
+> GLM-5+T
+> MiniMax+T
+> FileSplit
+> Kimi+T
+> MiniMax
+> Kimi
+> Untangle
+> NoSplit
+> DepSplit
+> HunkSplit
+> Random
+> 0.464
+> 0.459
+> 0.425
+> 0.418
+> 0.381
+> 0.340
+> 0.337
+> 0.306
+> 0.288
+> 0.260
+> 0.178
+> 0.063
+> 0.054
+> 0.030
+> Overall ARI ranking
+> Baseline
+> Model-agent
+> +DACE
+
+Figure 2: Main grouping results on 800 natural retrospective episodes. Points report ARI against the observed developer decomposition; colors distinguish diagnostic baselines, model-agent setups, and DACE-augmented runs. RQ1 characterizes whether natural retrospective reconstruction adds an empirical challenge beyond simpler alternatives. If replayable output were enough, if simple grouping rules recovered most developer organization, or if synthetic tangled changes exposed the same boundary structure, then existing checks would already capture much of the task. We therefore design RQ1 around three comparisons: PPAR versus ARI to separate replay from grouping, diagnostic baselines to test simple organization rules, and matched synthetic composites to test whether cross-episode tangles behave like real same-session squashed changes. The first comparison asks whether replay validity can stand in for grouping quality. We run every baseline and model-agent setup on the same 800 natural episodes, materialize each predicted ordered history, and score each output with both PPAR and ARI. Figure 2 shows that replay failures are rare: all non-random methods reach PPAR ≥ 0.988 , so most predicted histories can be replayed as patch sequences. The grouping results are much less uniform. ARI spans 0.03 to 0.46, showing that different setups split the same squashed patch in substantially different ways and reach different degrees of alignment with the observed human-maintained grouping. Thus, the main challenge is not making a patch sequence apply, but recovering a maintainable grouping of change intents within that sequence. The second comparison asks whether lightweight organization rules can stand in for reconstruction. 9AtomicCommitBench Preprint 
+
+We test five simple rules: NoSplit puts all hunks into one commit, HunkSplit puts each hunk into its own commit, FileSplit groups by changed file, DepSplit groups by dependency components, and Random provides a chance baseline. Figure 2 shows that these rules have clear ceilings. FileSplit is the strongest simple heuristic (ARI=0.340) because file boundaries often approximate intent boundaries, but it still misses intra-file tangling and multi-file intents. NoSplit and HunkSplit are replay-friendly extremes: one collapses every intent into a single commit, while the other separates hunks that often belong together. Random and DepSplit perform poorly, showing that ARI is not mechanically improved by producing more partitions or following dependency reachability alone. The useful structure is more specific: a decomposition must separate unrelated nearby hunks while keeping distributed edits together when they implement one change intent. The third comparison asks whether synthetic tangled changes can substitute for real same-session squashed changes. Prior untangling work often constructs a tangled change by combining otherwise unrelated commits. If that construction had the same boundary structure as natural episodes, then synthetic composites would be a sufficient evaluation target. To test this, we build a matched synthetic set: for each real episode with k observed commits, we concatenate k commits drawn from distinct AtomicCommitBench episodes and use each source commit as the reference label. This keeps the commit count matched while removing the same-session constraint. 2 3 4 5-8 All 
+
+> Observed commit count k
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> B5 ARI
+> synthetic
+> real
+> mean gap +0.333
+> Synthetic composites are easier
+
+Figure 3: B5 ARI on synthetic composites versus real squashed diffs, matched by observed commit count k. B5 receives the true k for both sides; the shaded band highlights the ARI gap. We then run the same untangling baseline, B5, on the synthetic and natural sets. B5 receives the true k on both sides, so the comparison tests boundary separability rather than commit-count prediction. Figure 3 shows that synthetic composites are much easier: B5 scores an average +0.333 ARI higher on synthetic composites than on real squashed diffs ( p < 10 −49 , Cliff’s δ = 0 .430 ). The reason is that cross-episode construction often combines commits from different files, identifiers, or topics, making their boundaries clearer. Real same-session changes are harder because the commits come from one development context: they may touch the same files, share helper edits, or modify related logic. Natural episodes therefore cannot be replaced by simple synthetic composites; they measure boundary ambiguity that arises inside real development sessions. 10 AtomicCommitBench Preprint 
+
+Observation RQ1 
+
+Natural retrospective episodes expose grouping difficulty that replay checks, simple heuristics, and synthetic composites miss. Non-random methods nearly all replay (PPAR ≥ 0.988 ), yet grouping quality still varies widely (0.03–0.46 ARI), and matched synthetic composites are much easier than real squashed diffs (+0.333 ARI). 
+
+4.2 RQ2: How Do Current Model-Agent Setups Perform? 
+
+RQ2 asks whether current model-agent setups can turn one large patch into a decomposition that resembles how a human maintainer organized the same change. Since several histories may be defensible, the target is human-aligned draft history rather than exact boundary recovery. We assess this capability with complementary signals. ARI measures alignment with an observed human-maintained grouping. TCR and TBR check whether predicted commits localize behavior changes on the scoreable test slice. Difficulty, alternative-reference, and strict-output checks test how stable the pattern is across harder episodes, different reference decompositions, and parser-normalization choices. The main ARI results show that model-agent setups recover substantial human-aligned structure from squashed patches. In Figure 2, all four model-agent setups score far above Random and the two replayable extremes, indicating meaningful grouping signal. The GPT-5.4 setup reaches ARI=0.459 and the GLM-5 setup reaches 0.425, both above FileSplit, the strongest simple baseline (0.340). FileSplit is a meaningful diagnostic target because file paths often approximate developer intent. The MiniMax setup (0.306) and Kimi setup (0.288) are close to this strong path-local heuristic, while the GPT-5.4 and GLM-5 setups move further toward the organization seen in human-maintained histories. Overall, current model-agent setups can produce plausible commit decompositions for a large patch, and stronger setups produce decompositions that are measurably closer to human-maintained organization than file-local grouping alone. The practical reading is that these outputs are structured draft histories: they provide replayable commit units that expose candidate review units for a maintainer or later agent to inspect and refine. The final code is fixed across methods; the scores compare history organization. GLM-5, MiniMax, and Kimi share one harness; the GPT-5.4 comparison also includes the Codex CLI harness, so we interpret the rows as model-agent setups rather than isolated model rankings. Strict output coverage is also an operational signal. Before normalization, strict valid counts are 798 of 800 for GPT-5.4, 712 of 800 for GLM-5, 652 of 800 for MiniMax, and 550 of 800 for Kimi. These rates show that producing a complete, non-duplicated hunk assignment is itself uneven across setups. Discarding coverage-error outputs before scoring preserves the same broad ranking, so the ARI pattern is not an artifact of optimistic normalization. Commit-count prediction explains only part of this level. Under-splitting and over-splitting both hurt ARI, but many errors occur at fixed or near-correct commit counts. The harder decision is assigning hunks to change intents; estimating m is one part of the reconstruction. TCR adds a behavior-containment signal to the reference-based ARI result. It is computed where modified tests run at the episode tip and partial reverse patches yield a scoreable attribution surface; episodes outside this slice remain in the 800-episode PPAR and ARI evaluation. On the 151-episode common scoreable slice, TCR ranks the setups in the same order as ARI: GPT-5.4 (0.917), GLM-5 (0.871), MiniMax (0.827), and Kimi (0.780), with the observed developer history at 0.922 (Figure 4). The slice is harder than the rest of the benchmark, and every setup’s ARI is lower on it, making the agreement a useful partial stress check rather than a full correctness result. 11 AtomicCommitBench Preprint 
+
+Table 2: Reference-sensitivity check. Rows and columns use the setup labels defined in Section 3.5; cells report mean ARI against each alternative reference. 
+
+Setup Observed GPT-5.4 GLM-5 Kimi MiniMax GPT-5.4 0.459 — 0.591 0.446 0.454 GLM-5 0.425 0.591 — 0.496 0.498 Kimi 0.288 0.446 0.496 — 0.444 MiniMax 0.306 0.454 0.498 0.444 —0.6 0.7 0.8 0.9 
+
+> TCR
+> Observed
+> GPT-5.4
+> GLM-5
+> MiniMax
+> Kimi
+> FileSplit
+> 0.922
+> 0.917
+> 0.871
+> 0.827
+> 0.780
+> 0.622
+> Selective-revert containment
+
+Figure 4: Selective-revert containment on the 151-episode common scoreable slice. Easy Medium Hard  
+
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> ARI
+> GPT-5.4
+> GLM-5
+> FileSplit
+> MiniMax
+> Untangle
+> Kimi
+> ARI by episode difficulty
+
+Figure 5: ARI by difficulty tier. Difficulty is based on commit count and diff size. This probe clarifies why grouping matters for maintenance. If unrelated changes are lumped together, one reverse patch can remove both behaviors and mix their test failures. If one logical change is split across commits, either fragment can break tests whose cause is distributed across the sequence. High TCR means the predicted commits behave more like isolated failure-containment units under this patch-based test. B0 shows why containment must be read with TBR: its one-commit containment is vacuous, and it has the highest TBR (0.094), compared with 0.043 for GPT-5.4 and 0.042 for FileSplit. Capability is strongest on easier structure and degrades on harder episodes. The gap widens as episodes become harder: the GPT-5.4 setup holds ARI=0.414 on Hard episodes, while the Kimi setup drops to 0.120 (Figure 5). To check that this pattern is not an artifact of binning by commit count and diff size, we re-partition difficulty by dependency-graph width, longest dependency chain, and intra-file split count. Under each feature, the gap between the GPT-5.4 and Kimi setups widens across tertiles, from under 0.07 on the easiest third to about 0.2 on the hardest. FileSplit remains relatively stable because its rule does not change with diff size; it fails when change intents cross files or split within a file. Setup degradation is more gradual, suggesting that the evaluated model-agent systems use more than file-level or count-level heuristics. Alternative references preserve the same pattern. We rescore each setup against alternative setup decompositions, and the GPT-5.4 and GLM-5 setups remain above MiniMax and Kimi under every external reference (Table 2). This check captures robustness across plausible stylistic variation. Episode-level bootstrap 95% confidence intervals over mean ARI on this fixed benchmark (10,000 resamples) separate the same two performance bands: GPT-5.4 [0.41, 0.49] and GLM-5 [0.40, 0.47] do not overlap with Kimi [0.28, 0.35] or MiniMax [0.31, 0.37]. Pairwise Wilcoxon signed-rank tests [16] with Benjamini-Hochberg correction [17] give the same cross-band separation, with every cross-band 12 AtomicCommitBench Preprint 
+
+pairing at pBH < 10 −10 . The most stable conclusion is the cross-band separation; within-band ordering is weaker. Additional checks preserve the same interpretation. Restricting to the 356 episodes whose hunks are all cleanly attributable to a single observed commit leaves the setup ranking unchanged. Since all 10 repositories are public, some historical commits may have appeared in model pretraining corpora. We therefore split results by each model’s public pretraining cutoff. Post-cutoff means are higher for all four setups: GPT-5.4 +0.163, MiniMax +0.080, GLM-5 +0.059, and Kimi +0.007. This split points away from training-period memorization as the main driver. Observation RQ2 Current model-agent setups can reconstruct useful draft histories from squashed patches. All four setups recover more structure than degenerate baselines; GPT-5.4 (0.46 ARI) and GLM-5 (0.43) outperform the strongest simple heuristic, while TCR, alternative-reference, and strict-output checks preserve the same broad performance bands. 
+
+4.3 RQ3: What Explains the Remaining Gap? 
+
+RQ3 moves from aggregate scores to the decisions that remain difficult. The RQ2 results suggest that locality is an important candidate mechanism: FileSplit is competitive, yet it has a clear ceiling, and harder episodes increase the gap between setups. We therefore use qualitative trace inspection to identify recurring error patterns, then compare base runs with DACE-augmented runs to test whether explicit evidence changes aggregate scores. DACE (Dependency-Aware Commit Evidence) supplies soft evidence from a dependency analyzer and a hunk profiler; agents still choose the number of commits, hunk grouping, and replayable sequence. The trace analysis points to a locality tension. Nearby hunks often belong together, but maintain-able histories also require splitting nearby hunks and attaching distributed support edits to the right change intent. In the inspected traces, the clearest recurring patterns are same-file lumping, where file locality overrides the semantic role of each hunk, and support-hunk drift, where tests or helper edits follow the nearest textual change. 1) Squashed diff 2) Clean atomic history 3) Locality failure                                    
+
+> session.py h0 h1 h2
+> adapters.py h3
+> types.py h4
+> test_timeouts.py h5 h6
+> release h7 h8
+> split
+> nearby
+> hunks
+> group
+> distant
+> hunks
+> C1 h0 h3 h4 h5
+> C2 h1 h2 h6
+> C3 h7 h8
+> coding agent
+> Ah0 h1 h2 same-file
+> lumping
+> Bh5 h6 h4 support-
+> hunk
+> drift
+> DACE cues
+> h0 ≠h1
+> h0 →h3 →h5
+> h7 +h8 = release
+
+Figure 6: An anonymized representative reconstruction case. The squashed diff interleaves a timeout bug fix, an option-parser refactor, and release metadata. A maintainable history must split same-file hunks, group cross-file hunks, and keep support hunks with the change intent they support. Figure 6 illustrates why this tension matters. The squashed diff contains a timeout bug fix, an option-parser refactor, and release metadata. The observed reference history groups the timeout-13 AtomicCommitBench Preprint 
+
+related hunks across source, type, and test files. It separates nearby same-file refactoring hunks and keeps the changelog with the version bump. File-level grouping fails in both directions: it lumps the timeout-fix hunk with same-file refactoring hunks in session.py , while separating cross-file hunks that jointly implement the timeout fix. A locality-driven agent can make the analogous error by attaching support hunks to the nearest textual edit rather than to the change intent they support. The DACE comparison then tests whether explicit evidence helps with this locality tension. If a setup over-relies on nearby paths or same-file grouping, dependency and hunk-role cues should help it separate nearby but unrelated edits and connect distributed support hunks. The results follow this pattern: adding the dependency analyzer and hunk profiler raises MiniMax from 0.306 to 0.381 ARI (+0.075) and Kimi from 0.288 to 0.337 (+0.049), with paired Wilcoxon tests [16] and Benjamini-Hochberg correction [17] giving p < 10 −8 and p < 10 −6, respectively. For the two higher-scoring setups, the same evidence source leaves scores statistically unchanged: GLM-5 moves by −0.006 (p = 0 .56 ) and GPT-5.4 by +0 .005 (p = 0 .90 ). The benefit is therefore targeted rather than universal. The inspected traces give a concrete reading of the aggregate gains. DACE does not choose commits for the agent; it exposes dependency cues from lightweight edges and grouping cues from hunk similarity and change-role warnings. A typical successful use is anti-lumping: when same-file hunks have different change roles, the hunk profiler makes that local evidence explicit, helping the agent separate a behavior change from a nearby refactor or cleanup. The aggregate gains fit this interpretation. Tool augmentation helps most when path-based grouping is plausible but wrong, such as same-file hunks with different roles or cross-file helper edits tied together through imports. It helps less when the decision requires broader design judgment. Observation RQ3 The remaining errors concentrate around locality: agents often lump unrelated same-file hunks or attach support hunks to the nearest edit. DACE evidence helps the lower-scoring setups, MiniMax (+0.075 ARI) and Kimi (+0.049), mainly by making anti-lumping and dependency cues explicit. 
+
+# 5 Related Work 
+
+5.1 Coding-Agent Benchmarks and Process-Oriented Evaluation 
+
+SWE-bench [1] and its variants, including Verified [2], Multi-SWE-bench [3], and SWE-bench-Live [4], evaluate whether a coding agent can produce a patch that passes a repository’s tests. Systems such as SWE-Agent [18] and AutoCodeRover [19] have driven progress on final-state repair. AtomicCommitBench asks a different artifact question: after a multi-commit change already exists, can an agent reconstruct a reviewable, replayable commit sequence? Recent work has begun to evaluate process-level aspects of coding agents. GitGoodBench [20] evaluates agentic Git operations across file-commit, issue-resolution, and issue-classification scenarios, using LLM-as-Judge for the file-commit-chain setting; EditFlow [21] reconstructs developer editing flows; SWE-EVO [22] evaluates long-horizon evolution; and AgentPack [23] collects agent-human co-authored edits with structured commit messages. Pham and Ghaleb [24] compare structural properties of AI-generated and human pull requests. None formalizes retrospective commit-history reconstruction as hunk-level commit decomposition with replay validity and deterministic grouping metrics. Another line studies how agents consume commit history. Code Researcher [7] uses commit history 14 AtomicCommitBench Preprint 
+
+for repository search, HAFixAgent [8] conditions repair on commit-level context, and Lore [9] treats commit messages as a structured knowledge protocol. These systems motivate the downstream value of organized histories: commits record work for humans and can serve as retrieval units for future agents. Our work measures the producer side of that loop. 
+
+5.2 Commit Quality and Tangled Changes 
+
+Prior SE research shows that commit structure has measurable consequences. Tangled changes can inflate defect prediction error by 5 to 200% [6]; tangling has been studied in fine-grained bug-fix datasets [10] and as a multi-label concern-detection task [25]. Program-dependence-based changeset decomposition supports review [26], and controlled evidence suggests decomposed changesets reduce wrongly reported issues and context seeking during review [5]. Code-review research similarly treats reviewability as an artifact property [27, 28]. These studies show that atomic histories matter, but they do not evaluate coding agents as producers of commit histories. AtomicCommitBench turns retrospective cleanup into an evaluation target: agents must organize hunks into a replayable history after the final tree already exists. Commit message generation is complementary. Datasets such as CommitBench [29] and Com-mitChronicle [30] evaluate whether systems can produce messages from existing diffs, and RAG or reasoning-based methods improve message quality [31, 32]. Our task asks how the diff should be grouped into commits before messages are written. We collect short messages because cleanup normally produces them, although message quality is not scored. 
+
+5.3 Commit Untangling 
+
+Commit untangling is the closest prior task. SmartCommit [11] constructs a change graph and partitions it into activity-oriented groups. Flexeme [12] overlays program-flow information on diffs and applies spectral clustering. UTango [13] learns context-aware graph embeddings for untangling. LLM-based systems such as Atomizer [33] and ColaUntangle [34] use intent reasoning or collaborative agents to identify change groups. These systems provide the closest partitioning tradition. AtomicCommitBench builds on it but evaluates a commit-history artifact: hunks must form coherent commits, and the resulting sequence must replay. We use lightweight heuristic baselines as diagnostic references; adapting full untangling systems with commit-count selection and replay repair is a separate comparison. Final-patch benchmarks score the final tree but produce no partition. Process-oriented benchmarks evaluate ordered behavior yet still emit no hunk partition. Untangling systems partition multi-file changes but stop at change-intent groups rather than replayable commit histories. Retrospective commit-history reconstruction combines hunk grouping, commit-count selection, replay validity, and evaluation on real multi-file changes. 
+
+# 6 Discussion 
+
+Coding-agent evaluation today asks whether the final patch is correct. AtomicCommitBench asks whether the delivered change is organized into a history the next reader can use. A monolithic commit and a clean commit sequence can carry identical code while placing different burdens on review, selective revert, and history-based retrieval. Our results show that this property needs separate measurement: replay validity nearly saturates, synthetic composites are easier than natural same-session diffs, and current agents can produce draft histories with meaningful alignment to human-maintained organization. 15 AtomicCommitBench Preprint 
+
+6.1 Agents as Producers and Consumers of History 
+
+Agents now sit on both ends of the commit-history loop. They produce history through session-level squashed changes, and they consume it when localizing bugs or retrieving prior edits [7 –9]. The history one agent leaves behind can become context another agent reads, so poor organization may become degraded input to later automation. AtomicCommitBench measures the producer side: can current agents organize a completed change well? We leave the consumer-side question open. Better-organized history may help downstream agents retrieve prior edits or repair bugs, but this paper does not test that causal link. 
+
+6.2 A Reusable Measurement Structure 
+
+The measurement structure also applies beyond commit history. Many agentic-coding artifacts have no single correct answer, yet still have a cheap deterministic validity check. For such tasks, the same pattern can work: require the validity gate, use a reference-based relative score, and add a behavioral check when available. AtomicCommitBench is most useful as a comparative diagnostic. It can test whether a new prompt, model, or tool reduces same-file lumping and support-hunk drift while preserving replay validity and selective-revert containment. The design implication is narrower than a leaderboard: support tools should expose structured evidence, such as hunk roles and dependency edges, while leaving final grouping to the agent. Commit-history reconstruction gives agentic-coding evaluation a concrete way to assess the artifacts an agent leaves behind alongside the code it produces. 
+
+# 7 Threats to Validity 
+
+Task and metric validity. AtomicCommitBench evaluates retrospective decomposition: reorganiz-ing an existing squashed change into a commit sequence. Prospective commit authoring asks what an agent should stage while editing, testing, and revising code. The retrospective setting isolates history organization from patch construction and matches cleanup workflows such as git rebase -i , squash-then-split review cleanup, and hunk-level staging. Besides, the hunk-level representation is imperfect: a content-based audit shows that 2.3% of squashed hunks contain content attributable to more than one observed commit. We keep this representation because hunk-level staging is the native cleanup granularity and setup rankings are unchanged on the fully clean subset. Sub-hunk decomposition remains outside this paper. Semantic coherence also has no unique ground truth, so ARI is a dataset-level relative score rather than an absolute per-episode correctness score; we check reference sensitivity with alternative setup decompositions. PPAR and TCR cover different parts of the construct. PPAR is a structural gate: a replayable sequence can still group intents poorly, and a non-replayable sequence can fail for formatting or patch-application reasons. TCR provides a label-free containment check only where modified-test execution yields an attribution signal. It applies selected hunks from a reverse diff with git apply ; it does not evaluate full git revert 
+
+behavior, commit metadata, merge semantics, unmodified regression tests, or non-test behavior. The common slice for setup outputs and the observed history contains 151 such episodes, so TCR is an independent partial probe rather than a full-benchmark correctness score. 
+
+Dataset and external validity. The evaluation set is drawn from 10 mature Python repositories. These projects provide maintainer-accepted public histories rather than adjudicated atomicity labels, and they do not represent all software. Results may differ for enterprise repositories, less curated projects, other languages, or ecosystems with different build systems. The same-author and 48-hour 16 AtomicCommitBench Preprint 
+
+window constraints bias the dataset toward coherent cleanup episodes, matching the intended retrospective setting but not the full range of collaborative development. All repositories are public, so pretraining exposure is possible. Splitting results by each model’s public pretraining cutoff shows higher post-cutoff mean ARI for all four setups, which is not the pattern expected under simple memorization. We cannot verify model-specific cutoff claims or fully rule out exposure; the check is bounded evidence, not proof of absence. Commit untangling systems are the closest algorithmic baselines [11 –13, 33]. We use B5 as a transparent diagnostic anchor; applying full untangling systems to AtomicCommitBench would require commit-count selection and replay-validation components. This keeps the distinction between partitioning alone and replayable commit-history reconstruction. 
+
+Model-agent setup and evidence-source validity. The evaluated setups use heterogeneous harnesses: Codex CLI with GPT-5.4 for the GPT-5.4-labeled setup and Claude Code CLI with provider routing for GLM-5, Kimi, and MiniMax. The same-harness comparison among GLM-5, Kimi, and MiniMax is compute-matched within 7% by mean token usage; the comparison between GPT-5.4 and GLM-5 is a setup-level comparison. Each episode is evaluated with one run under one prompt, producing a reproducible snapshot of these hosted setups. The confidence intervals and p-values are episode-level descriptive analyses conditional on fixed traces, not cluster-robust population inference. The +T setting uses DACE as an evidence source, not as an oracle. The tools report dependency edges, similarity clusters, and change-role warnings, but not observed commit counts, reference labels, commit messages, commit hashes, or intermediate states. We evaluate the combined tool package without dependency-only or profiler-only ablations. The observed gains support this evidence source under the chosen prompt, not a claim about which component is causal. The strongest claims concern the task formalization, benchmark construction, and separation of replay, grouping, and selective-revert measurements. The setup ranking and tool effects diagnose the evaluated setups rather than establishing a permanent leaderboard ordering. 
+
+# 8 Conclusion 
+
+We studied retrospective commit-history reconstruction: organizing a completed squashed change into a replayable sequence of commits. We formalized the task as hunk-to-commit partitioning with a replay requirement and built AtomicCommitBench from 800 real multi-commit episodes across 10 Python projects. The benchmark combines PPAR for replay, ARI for reference-based grouping, and TCR for failure containment on a selected modified-test slice. Natural episodes are necessary: replay validity nearly saturates, grouping quality varies widely, and matched synthetic composites are much easier than real same-author squashed diffs. In this model-agent snapshot, the GPT-5.4 and GLM-5 setups recover more structure than a strong file-based heuristic, while the MiniMax and Kimi setups remain closer to path-local organization. Qualitative trace diagnosis identifies same-file lumping and support-hunk drift as recurring error patterns, and DACE helps mainly lower-scoring setups under this evidence source and prompt by exposing dependency and hunk-role cues. Agentic-coding evaluation should measure the history an agent leaves behind alongside the code it produces. 
+
+# References 
+
+[1] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. Narasimhan, “SWE-bench: Can language models resolve real-world GitHub issues?” in Proc. ICLR , 2024. 17 AtomicCommitBench Preprint 
+
+[2] N. Chowdhury, J. Aung, J. S. Chan, O. Jaffe, D. Sherburn, G. Starace, E. Mays, R. Dias, M. Aljubeh, M. Glaese, C. E. Jimenez, J. Yang, L. Ho, T. Patwardhan, K. Liu, and A. Madry, “Introducing SWE-bench verified,” https://openai.com/index/introducing-swe-bench-verified/, 2024. [3] D. Zan, Z. Huang, W. Liu, H. Chen, L. Zhang, S. Xin, L. Chen, Q. Liu, X. Zhong, A. Li, S. Liu, Y. Xiao, L. Chen, Y. Zhang, J. Su, T. Liu, R. Long, K. Shen, and L. Xiang, “Multi-SWE-bench: A multilingual benchmark for issue resolving,” arXiv:2504.02605 , 2025. [4] L. Zhang, S. He, C. Zhang, Y. Kang, B. Li, C. Xie, J. Wang, M. Wang, Y. Huang, S. Fu, E. Nal-lipogu, Q. Lin, Y. Dang, S. Rajmohan, and D. Zhang, “SWE-bench goes live!” arXiv:2505.23419 ,2025. [5] M. di Biase, M. Bruntink, A. Bacchelli, and A. van Deursen, “The effects of change decomposition on code review—a controlled experiment,” PeerJ Computer Science , vol. 5, p. e193, 2019, arXiv:1805.10978. [6] K. Herzig, S. Just, and A. Zeller, “The impact of tangled code changes on defect prediction models,” Empirical Software Engineering , vol. 21, no. 2, pp. 303–336, 2016. [7] R. Singh, S. Joel, A. Mehrotra, N. Wadhwa, R. B. Bairi, A. Kanade, and N. Natarajan, “Code researcher: Deep research agent for large systems code and commit history,” arXiv preprint arXiv:2506.11060 , 2025. [8] Y. Shi, H. Li, B. Adams, and A. E. Hassan, “HAFixAgent: History-aware program repair agent,” 
+
+arXiv preprint arXiv:2511.01047 , 2025. [9] I. Stetsenko, “Lore: Repurposing git commit messages as a structured knowledge protocol for AI coding agents,” arXiv preprint arXiv:2603.15566 , 2026. [10] S. Herbold, A. Trautsch, F. Trautsch, B. Ledel, A. Aghamohammadi, T. Ahlbrecht, M. Aslan, B. Caglayan, S. Cattes, M. Dyba et al. , “A fine-grained data set and analysis of tangling in bug fixing commits,” Empirical Software Engineering , vol. 27, no. 1, pp. 1–43, 2022. [11] B. Shen, W. Zhang, C. Kästner, H. Zhao, Z. Wei, G. Liang, and Z. Jin, “SmartCommit: A graph-based interactive assistant for activity-oriented commits,” in Proc. ESEC/FSE , 2021, pp. 379–390. [12] P.-P. Pârţachi, S. K. Dash, M. Allamanis, and E. T. Barr, “Flexeme: Untangling commits using lexical flows,” in Proc. ESEC/FSE , 2020, pp. 63–74. [13] Y. Li, S. Wang, and T. N. Nguyen, “UTANGO: Untangling commits with context-aware, graph-based, code change clustering learning model,” in Proc. ESEC/FSE , 2022. [14] D. Spadini, M. Aniche, and A. Bacchelli, “PyDriller: Python framework for mining software repositories,” in Proc. ESEC/FSE , 2018, pp. 908–911. [15] L. Hubert and P. Arabie, “Comparing partitions,” Journal of Classification , vol. 2, no. 1, pp. 193–218, 1985. [16] F. Wilcoxon, “Individual comparisons by ranking methods,” Biometrics Bulletin , vol. 1, no. 6, pp. 80–83, 1945. 18 AtomicCommitBench Preprint 
+
+[17] Y. Benjamini and Y. Hochberg, “Controlling the false discovery rate: A practical and powerful approach to multiple testing,” Journal of the Royal Statistical Society: Series B (Methodological) ,vol. 57, no. 1, pp. 289–300, 1995. [18] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. Narasimhan, and O. Press, “SWE-agent: Agent-computer interfaces enable automated software engineering,” in Proc. NeurIPS , 2024. [19] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury, “AutoCodeRover: Autonomous program improvement,” in Proc. ISSTA , 2024, pp. 1592–1604. [20] T. Lindenbauer, E. Bogomolov, and Y. Zharov, “GitGoodBench: A novel benchmark for evaluating agentic performance on Git,” in REALM@ACL , 2025, pp. 272–288. [Online]. Available: https://aclanthology.org/2025.realm-1.19/ [21] C. Liu, Y. Lin, J. Chang, J. Liu, B. Qi, B. Jiang, Z. Huang, and J. S. Dong, “EditFlow: Benchmarking and optimizing code edit recommendation systems via reconstruction of developer flows,” in Proc. OOPSLA , 2026. [22] T. Le, M. V. T. Thai, D. Nguyen Manh, H. N. Phan, and N. D. Q. Bui, “SWE-EVO: Benchmark-ing coding agents in long-horizon software evolution scenarios,” arXiv preprint arXiv:2512.18470 ,2025. [23] Y. Zi, Z. Wu, A. Boruch-Gruszecki, J. Bell, and A. Guha, “AgentPack: A dataset of code changes, co-authored by agents and humans,” arXiv:2509.21891 , 2025. [24] D. Pham and T. A. Ghaleb, “Code change characteristics and description alignment: Acomparative study of agentic versus human pull requests,” arXiv preprint arXiv:2601.17627 ,2026. [25] B. Koh, N. Walkinshaw, and D. Shin, “Detecting multiple semantic concerns in tangled code commits,” arXiv preprint arXiv:2601.21298 , 2026. [26] M. Barnett, C. Bird, J. Brunet, and S. K. Lahiri, “Helping developers help themselves: Automatic decomposition of code review changesets,” in Proc. ICSE , 2015, pp. 134–144. [27] P. C. Rigby, D. M. German, L. Cowen, and M.-A. Storey, “Peer review on open-source software projects: Parameters, statistical models, and theory,” ACM TOSEM , vol. 23, no. 4, pp. 1–33, 2014. [28] L. MacLeod, M. Greiler, M.-A. Storey, C. Bird, and J. Czerwonka, “Code reviewing in the trenches: Challenges and best practices,” IEEE Software , vol. 35, no. 4, pp. 34–42, 2018. [29] M. Schall, T. Czinczoll, and G. de Melo, “CommitBench: A benchmark for commit message generation,” in Proc. SANER , 2024. [30] A. Eliseeva, Y. Sokolov, E. Bogomolov, Y. Golubev, D. Dig, and T. Bryksin, “From commit message generation to history-aware commit message completion,” in Proc. ASE , 2023. [31] L. Zhang, H. Zhang, C. Wang, and P. Liang, “RAG-enhanced commit message generation,” 
+
+arXiv:2406.05514 , 2024. 19 AtomicCommitBench Preprint 
+
+[32] J. Li, D. Faragó, C. Petrov, and I. Ahmed, “Only diff is not enough: Generating commit messages leveraging reasoning and action of large language model,” Proceedings of the ACM on Software Engineering , vol. 1, no. FSE, pp. 745–766, 2024. [33] K. Zhu, Z. Tian, S. Wang, M. Leng, and X. Mao, “Atomizer: An LLM-based collaborative multi-agent framework for intent-driven commit untangling,” arXiv:2601.01233 , 2026. [34] B. Hou, X. Tan, K. Zheng, F. Liu, Y. Zhu, and L. Zhang, “LLM-driven collaborative model for untangling commits via explicit and implicit dependency reasoning,” arXiv preprint arXiv:2507.16395 , 2025. 20

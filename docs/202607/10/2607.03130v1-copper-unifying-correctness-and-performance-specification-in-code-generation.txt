@@ -1,0 +1,344 @@
+Title: Copper: Unifying Correctness and Performance Specification in Code Generation
+
+URL Source: https://arxiv.org/pdf/2607.03130v1
+
+Published Time: Tue, 07 Jul 2026 00:57:56 GMT
+
+Number of Pages: 8
+
+Markdown Content:
+# Copper: Unifying Correctness and Performance Specification in Code Generation 
+
+Andr´ e Lizardo 
+
+Red Hat, Madrid, Spain University of Coimbra, CISUC, DEI, Portugal 
+
+alizardo@redhat.com Raul Barbosa 
+
+University of Coimbra, CISUC, DEI 
+
+Coimbra, Portugal rbarbosa@dei.uc.pt 
+
+Abstract —Generative AI has made remarkable progress in producing functionally correct code, yet ensuring both correct-ness and performance remains an open challenge. We present Copper, a framework that combines formal verification with performance-aware specification to generate code that is provably correct and efficiently executable. Our approach integrates AI-driven code synthesis with formal verification tools, and au-tomated performance profiling loops. Evaluated on a diverse set of algorithmic and real-world programming tasks, Copper produces solutions that satisfy strict correctness guarantees while delivering significant improvements in runtime and memory efficiency compared to baseline AI-generated code. This work demonstrates that it is feasible to bridge the gap between trustworthiness and performance in AI-assisted programming, offering a practical pathway toward reliable, high-performance code generation. 
+
+Index Terms —Software Engineering, Generated Code, Formal Verification, Correctness, Performance Analysis 
+
+I. I NTRODUCTION 
+
+Although code generation has advanced significantly, Large Language Models (LLMs) still lack the ability to generate reliable, verifiable code. Moreover, while correctness has received considerable attention, code performance has been largely overlooked, despite the fact that both are necessary. This paper aims to guide the generation process toward code that is not only correct but also satisfies specified complexity constraints. Generative AI can produce correct code for a variety of tasks, but guaranteeing both correctness and performance remains a challenge. Traditional optimizations rely on human insight or post-hoc tuning, leaving AI-generated solutions correct but inefficient. This paper introduces Copper (short for “Correctness Plus Performance”) which is a framework that bridges this gap by integrating formal verification with performance-aware code generation, ensuring correctness and efficiency simultaneously. It uses Dafny [1] as an intermediate language, allowing the generated code to be formally verified. Software development is undergoing a fundamental trans-formation. Just as the introduction of Fortran in the late 1950s allowed developers to move up from assembly to high-level programming languages, the field is now witnessing a further shift in abstraction, from high-level languages to specifications. The goal is for LLMs to generate trustworthy code, ideally paired with formal specifications which can be verified in an automated way. In practice, however, LLMs remain unable to generate formally verified code autonomously. This limitation defines the research problem this paper addresses. In the proposed approach, Dafny serves as the intermedi-ate language, enabling specification-driven code generation. Generative AI is prompted to produce a formal specification, including a proof of algorithmic complexity, from which the corresponding implementation is derived and verified. The Dafny backend can then transpile the result to languages such as Python for final deployment. Correctness is specified through contracts, which are formally verified to hold for the generated implementation. Computational complexity, mean-while, serves as a formally verifiable proxy for performance, with the complexity proof embedded directly in the specifica-tion. The first contribution is the design of a generation pipeline consisting of four stages: prompt construction and submission to the model, parsing and validation of the response into a Dafny file, formal verification via the Dafny verifier, and estimation of the time complexity of the final Python code. The pipeline is iterative, running up to a specified maximum number of attempts, with verification errors fed back into the loop to guide repair of the generated code. The second contribution is the design and comparative evaluation of three prompt variants. A short prompt, serving as the baseline, provides a brief natural-language statement of the specification. A detailed prompt supplements this with additional information to clarify the specification. A formal prompt goes further, presenting the specification as a Dafny contract, namely, the requires and ensures clauses that the generated implementation must satisfy. The third contribution is the design of an agent architecture and composition strategy for guiding code generation toward correct, formally verified solutions, together with an evaluation across a range of language models. The proposed approach improves the success rate from a low and variable pass@1 to a substantially higher repair@10. The remainder of the paper is organized as follows. Sec-tion II contextualizes the proposed approach and describes related work. Section III describes the proposed approach. Section IV presents the results of the experimental evaluation. The conclusions are described in Section VI. 
+
+> arXiv:2607.03130v1 [cs.SE] 3 Jul 2026
+
+II. R ELATED WORK 
+
+Prior research on LLM-generated code has converged into four main paradigms.  
+
+> •
+
+Empirical Validation — assess correctness by develop-ing benchmarks, containing problems and test suites such as HumanEval, SWE-bench or FeedbackEval.  
+
+> •
+
+Empirical Validation with feedback — assesses correct-ness by running feedback loops where code was proven to be incorrect (using unit tests) and re-submitting it back to the model for repair.  
+
+> •
+
+Formal Verification — assess correctness verifiable artifacts validated against explicit specifications (pre-conditions, post-conditions, and invariants).  
+
+> •
+
+Performance Benchmarks — assess the performance by measuring the execution time and CPU instruction counts. While benchmarks like HumanEval [2] and SWE-bench have become standard for assessing functional correctness through test suites. Functional validation may be insufficient due to lack of coverage and risk of data contamination - LLMs can game the benchmark [3], [4]. Addressing such limita-tions, Dai et al. [4] introduced FeedbackEval, a framework that evaluates and repairs generated code through feedback loops. Moreover, Li et al. [5] introduced a Dafny Pipeline. It generates Dafny code as intermediate representation that can be verified against agreed specifications. Unlike functional validation, formal verification provides an absolute guaranty of the correctness of a given specifica-tion. Regarding performance, efficiency is measured through execution time [6] or CPU instruction count [7]. However, such metrics are highly sensitive to the hardware and runtime environment. TABLE I: Comparison of the different approaches for evalu-ating correctness and performance of LLM-generated code                         
+
+> Solution Correctness Performance Repair
+> HumanEval [2] Unit tests No No SWE-bench [8] Project tests No No FeedbackEval [4] Unit tests No Yes Dafny-Pipeline [5] Dafny Verifier No No LLM-Leetcode [6] Unit tests Execution No Runtime COFFE [7] Unit tests CPU No Instruction Count
+> Copper Dafny Verifier Time Complexity Yes Bound Postcondition
+
+As demonstrated in Table I, current research focus mainly on empirical validation using unit-testing and on classic per-formance benchmarks by measuring execution time. To address such limitations, we introduce Copper (Com-plexity Plus Performance) an evaluation pipeline which applies formal verification of correctness and performance to evaluate generated code.        
+
+> Solve the following problem in Dafny: given a sorted array
+> array_A and a target target_B , return the index of
+> target_B , or -1 if target_B is absent. . . . Requirements:
+> •The solution must be verifiable and have O(log N)
+> time complexity
+> •The solution method must be named ”exec”, take two arguments ”array A” (the array) and ”target B” (the target), and return an integer
+
+Fig. 1: Short prompt for the search problem. III. M ETHOD 
+
+Copper evaluates whether generated code can be formally correct and asymptotically efficient. This pipeline is composed by five discrete stages:  
+
+> •
+
+PromptBuilder — Prepares, enhances and builds the prompt before requesting the model.  
+
+> •
+
+ModelRequester — Requests the model and parses the model response, validating whether the response contains a source code block and parsing it into a Dafny code file.  
+
+> •
+
+CorrectnessVerifier — Runs Dafny Verify assessing cor-rectness and performance, then runs Dafny Build generat-ing Python code from the LLM-generated code. In formal specifications, CorrectnessVerifier assesses performance verifying the time-complexity postcondition.  
+
+> •
+
+PerformanceAnalyzer — Estimates the time-complexity of the Python code.  
+
+> •
+
+SanityChecker — Runs the Python code using provided inputs and asserts the results with provided expected results. Each evaluation executes the entire pipeline in a fixed order, starting from a prompt preparation up to running a sanity check. 
+
+A. Prompt types. 
+
+Copper was developed to handle three different prompt scenarios. 
+
+Short prompts represent a short phrase, as shown by Figure 1, the typical day-to-day request that a developer makes, containing a small representation of the task and expectations but lacking detailed specifications. 
+
+Detailed prompt improve upon the short prompt, as shown by Figure 2. It contains more requirements, expectations, edge cases, scenarios written in natural language. This represents the prompts used for ”vibe-coding” applications. 
+
+Formal prompts represent formal specifications where the developer provides the formal contract written in Dafny con-taining method signature, preconditions and postconditions. 
+
+B. Single-attempt execution. 1. PromptBuilder ingests a classic textbook problem-specific prompt with the expected time complexity, for in-stance: Solve the following problem in Dafny: given array A of integers, return the same elements rearranged in non-decreasing order by meeting the time complexity O(n) . If repair Solve the following problem in Dafny: given a sorted array                                          
+
+> array_A and a target target_B , return the index of
+> target_B , or -1 if absent. Requirements:
+> •The solution must be verifiable and meet O(log N)
+> time complexity
+> •The solution method must be named exec , take two arguments array_A and target_B , and return an integer.
+> •Return only Dafny source code—no markdown, preamble, or explanation.
+> Dafny refinement:
+> •Development: State requires and ensures
+> first, then implement; add loop invariant and
+> decreases as needed
+> •Method: Use exactly the signature
+> exec(array_A: array<int>, target_B: int) returns (index: int) ...
+> •Verification: single complete, compilable .dfy pro-gram ...
+> •Requires: state all preconditions the solution relies on. ...
+> •Ensures: fully specify the contract of the return value. ...
+> •(more details were omitted)
+
+Fig. 2: Detailed prompt for the search problem (partially omitted).                                                              
+
+> Complete the following method body:
+> ghost function Log2(n: nat): nat requires n >0decreases n{if n<= 1then 0else 1+Log2(n / 2) }ghost var steps: int method exec(arr_A: array<int>, tg_b: int) returns (index: int) reads arr_A requires forall i, j:: ... ==> arr_A[i] <= arr_A[j] ensures index == -1 ==> forall i :: ... arr_A[i] != tg_b ensures index >= 0==> 0<= ... && arr_A[index] == tg_b ensures steps == if arr_A.Length <= 1then arr_A.Length else Log2(arr_A.Length) + 1{}
+
+Fig. 3: Formal prompt for the search problem (partially omit-ted). mode is enabled, it also enhances the prompt with previous generated code and errors. 2. ModelRequester requests the model using such prompt, extracts the Dafny code block from the payload and persists it as a .dfy file. 3. CorrectnessVerifier 
+
+runs dafny verify on that file to formally check correctness and performance, then runs dafny build to generate Python code. 4. PerformanceAnalyser executes the Python code and estimates its asymptotic time-complexity comparing it with the prompt expectation. Finally, 5. SanityChecker runs the python code with a fixed input and tests if the results match the expected output. 
+
+C. Feedback-Repair loop. 
+
+When repair mode is enabled, attempts are no longer inde-pendent, they share contexts. Each step failure is reported back to the attempt execution history. The PromptBuilder injects the full attempt history by appending the previous attempts context (generated code, exceptions, failures and successes) to the prompt. The prompt is sent to the model containing context of the previous runs, helping the model understanding why the generated code failed to pass a specific step of the pipeline. The repair loop finishes when all pipeline stages succeed or the maximum number of attempts is reached. 
+
+D. Correctness Approach. 
+
+This approach is a key design choice in the Copper architec-ture. Guides the model toward better results, improving both correctness and performance. 
+
+Dafny formally verifies the generated code. Such verifica-tion includes checks for preconditions, postconditions, loop invariants and terminations. For formal prompts, the time-complexity is also bound to contract as a postcondition (ghost step counter) which forces the model to generate code where efficiency can be formally assessed. For instance, to force a linear time complexity, the postcondition can be set as: ensures steps == array A.Length followed by a ghost variable ghost var steps: int . This is further detailed in Section III-G. By unifying correctness and performance at the level of formal proof, a new research dimension is introduced: models must satisfy correctness and performance without sacrificing any of them. Beyond that, introducing such design into the formal specification allows optimisation of performance and correctness – much like GCC optimisation flags – allowing researchers to relax or tighten verification requirements trading efficiency against correctness or vice versa. 
+
+E. Performance checks. 
+
+As mentioned above, formal prompts can enforce perfor-mance through formal verification. Apart from that, time-complexity is estimated and validated against benchmarked results. PerformanceAnalyzer runs and estimates the Python code (built by Dafny) validating their estimation results. In short, performance check contains two main evaluations: for-mal verification and empirical time estimation. 
+
+F. Metrics and Measurements 
+
+Copper outputs two kind of metrics pass@k for measuring if k independent shots can produce correct and performant solution, and repair@k for measuring if the model can fix bugs in k tries. Moreover, pass@1 measures raw capability, 
+
+pass@10 measures consistency, repair@1 and repair@10 
+
+measure debugging ability. Metrics are averaged over ten repeated iterations (not attempts) to have better statistical stability. 
+
+G. Complexity Specification 
+
+To unify functional correctness and algorithmic complexity in automated code generation, we use Dafny’s ghost state mechanism to instrument code with zero-cost runtime trackers. The provides the means to support the formal equivalent to instruction counting, used in related work [7] via unit testing as a proxy to performance. Because deductive verifiers lack a native concept of asymp-totic time complexity (such as Big-O notation), traditional specifications only guarantee what a program computes, leav-ing how long it takes unverified. Our approach addresses this gap by requiring the code generator to co-synthesize a computational “budget” alongside the core logic. This is achieved by introducing explicit ghost step-counter variables that increment at the dominant, high-cost operations of the algorithm, such as the condition checks of a loop or recursive branch invocations. The core challenge in automated code generation is not merely injecting these counters, but generating the inductive mathematical bridges required to satisfy the SMT solver. For iterative blocks, the generator must emit a “lock-step” loop invariant that strictly equates the ghost counter to the progress of the loop indices (e.g., invariant steps == current_index ). Without this explicit relational tie, the solver views the loop as a black box and fails to propagate the tracking data past the loop boundary. By forcing the generator to bind the ghost state to the loop’s natural structural boundaries, we transform a vague performance goal into a checkable inductive proof. As show in Figure 3, the description includes ghost helper functions, such as Log2, to specify the intended complexity, similar to Big-O notation, which allows one to write the following specification in our running example: 
+
+ensures steps == if arr_A.Length <= 1 then arr_A.Length else Log2(arr_A.Length) + 1
+
+Furthermore, given that ghost variables are purely archi-tectural artifacts used for verification, they are completely erased during compilation. This provides a clean separation of concerns: the generated software carries a proven guarantee of its resource boundaries during the synthesis phase, yet compiles down into optimized machine code with zero runtime performance penalties. 
+
+H. Methodology 
+
+To run Copper from the command line, a few parameters are required: prompt, expected algorithm, and model. To enable repair, repair and attempts must also be set. The prompt is usually passed as a plain text file. The expected algorithm names the textbook algorithm the model should implement and determines the expected time complex-ity—for example, binary search has logarithmic complexity. The model parameter sets the model name; when using Ollama, this should be an Ollama model identifier such as 
+
+gemma4:31b . If the experiment uses guided repair loops, repair and attempts must be configured as well. Copper outputs the repair history, raw and base prompts, full model responses, extracted Dafny code, Dafny compiled Python code and a structured event timeline. Experiments were conducted using the three prompt types (short, detailed and formal) designed to solve a specific algo-rithmic search problem, where binary search was the expected correct and performant solution. In addition, the experiments were made against three models of different sizes - Gemini 3 Flash Preview (large), Gemma 4 31B (medium), and LLaMA 3 8B (small). Moreover, while large models were hosted in Ollama Cloud services, medium and small models were serve locally by Ollama running on a Kubernetes cluster. Each iteration was represented by a Job resource which spun up a pod with two containers copper and ollama. Finally, the results were persisted to an attached NFS server. IV. R ESULTS 
+
+The following results represent an experiment designed to solve an algorithmic search problem using binary search. The experiment was run by Copper and went through all pipeline steps. A success output indicates that the solution passed all stages and met the correctness and performance requirements. Table II shows that gemini-3-flash-preview excels: with the short, less restrictive prompt, it solves the problem easily 
+
+(pass@1 = 1.0, pass@10 = 1.0, repair@1 = 1.0, repair@10 = 1.0) . The mid-sized model, gemma4:31b , can also pro-duce solutions that meets correctness and performance criteria 
+
+(pass@1 = 0.3, pass@10 = 0.9, repair@1 = 0.8, repair@10 = 0.9) . The smallest model fails drastically, it never generates a successful solution. TABLE II: Evaluation of correctness and performance for binary search solution using short prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 1.00 0.30 0.00
+> pass@10 1.00 0.90 0.00
+> repair@1 1.00 0.80 0.00
+> repair@10 1.00 0.90 0.00
+
+With a more detailed prompt, the models tend to underper-form. Table III shows that gemini-3-flash-preview could only produce a successful solution when repair mode was enabled 
+
+(repair@1 = 1.0, repair@10 = 1.0) . The mid-sized model, 
+
+gemma4:31b , had the same behaviour but presenting worse results than the larger model (repair@1 = 0.0, repair@10 = 0.5) . The smallest model keeps failing drastically, a more detailed prompt did not improve its performance. With formal prompt, the models struggle and require multi-ple repair rounds. Table III shows that gemini-3-flash-preview 
+
+produces a successful only after extended repair (repair@1 = 0.0, repair@10 = 0.9) . gemma4:31b presents stronger single repair iteration (repair@1 = 0.3) and full success during TABLE III: Evaluation of correctness and performance for binary search solution using detailed prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 0.00 0.00 0.00
+> pass@10 0.00 0.00 0.00
+> repair@1 1.00 0.00 0.00
+> repair@10 1.00 0.50 0.00
+
+TABLE IV: Evaluation of correctness and performance for binary search solution using formal prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 0.00 0.00 0.00
+> pass@10 0.00 0.00 0.00
+> repair@1 0.00 0.30 0.00
+> repair@10 0.90 1.00 0.00
+
+extended repair (repair@10 = 1.0) . Finally, the smallest model fails completely, achieving no successful solution. Copper uses formal verification techniques alongside with empirical time-complexity evaluations to ensure correctness and efficiency simultaneously, as shown in Table IV. While the main criteria are about guaranteeing both correct-ness and performance, reporting correctness and performance separately reveal whether the factors (model, prompt) struggle with verification, efficiency, or both. 
+
+A. Evaluating Only Correctness 
+
+Table V shows that gemini-3-flash-preview outperforms the rest of the models in both for independent and guided-repair experiments. Additionally, gemma4-31b has an high ability to generate correct code, improving its results for higher k. Also, 
+
+gemma4-31b achieves better results when the guided repair is enabled. Llama3-8b fails to generate any correct code. TABLE V: Evaluation of correctness for binary search solution using short prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 1.00 0.30 0.00
+> pass@10 1.00 0.90 0.00
+> repair@1 1.00 0.80 0.00
+> repair@10 1.00 0.90 0.00
+
+Detailed prompts include more problem details, require-ments, and expectations. Table VI shows that gemini-3-flash-preview and gemma4:31b rely on guided repair to generate correct code. Moreover, gemma4:31b needs at least ten repair rounds to produce correct solutions, and remains well behind 
+
+gemini-3-flash-preview . Llama3-8b fails to generate any cor-rect code. Table VII details that gemini-3-flash-preview struggles to produce correct code using formal specifications with-out guided repair, getting a positive result only for re-pair@10=0.90 . gemma4:31b results are different, it struggles without guided repair but it presents better results than any other model - repair@1=0.30 and repair@10=0.90 . Llama3-8b fails to generate any correct code. TABLE VI: Evaluation of correctness for binary search solu-tion using detailed prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 0.00 0.00 0.00
+> pass@10 0.00 0.00 0.00
+> repair@1 1.00 0.00 0.00
+> repair@10 1.00 0.50 0.00
+
+TABLE VII: Evaluation of correctness for binary search solu-tion using formal prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 0.00 0.00 0.00
+> pass@10 0.00 0.00 0.00
+> repair@1 0.00 0.30 0.00
+> repair@10 0.90 1.00 0.00
+
+B. Evaluating Only Performance 
+
+Performance is estimated by running the Python code (built by Dafny) validating the results with expected time-complexities. Table VIII shows that larger models tend to excel, while smaller models fail. gemini-3-flash-preview and 
+
+gemma4:31b are able to generate efficient code with short prompts. Llama3-8b still fails to generate efficient code. TABLE VIII: Evaluation of performance for binary search solution using short prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 1.00 0.80 0.00
+> pass@10 1.00 1.00 0.00
+> repair@1 1.00 1.00 0.00
+> repair@10 1.00 1.00 0.00
+
+Table IX shows that gemini-3-flash-preview requires guided repair to generate efficient code with detailed prompts. This also applies to gemma4:31b , although gemini-3-flash-preview 
+
+generates efficient code with a single guided repair iteration (repair@1 = 1.00 ). Llama3-8b still fails to generate efficient code. TABLE IX: Evaluation of performance for binary search solution using detailed prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 0.00 0.00 0.00
+> pass@10 0.00 0.00 0.00
+> repair@1 1.00 0.00 0.00
+> repair@10 1.00 0.60 0.00
+
+With formal prompts, larger models require guided repair iterations to produce efficient code - gemini-3-flash-preview re-quires k=10 iterations and gemma4:31b requires k=1 improv-ing its results when k=10 . For formal prompts, gemma4:31b 
+
+outperforms the rest of the models. TABLE X: Evaluation of performance for binary search solu-tion using formal prompt                
+
+> Metric gemini-3-flash-preview gemma4:31b llama3-8b
+> pass@1 0.00 0.00 0.00
+> pass@10 0.00 0.00 0.00
+> repair@1 0.00 0.70 0.00
+> repair@10 0.90 1.00 0.00
+
+C. Statistical Analysis: Which prompt–model pairs are statis-tically better fit for pass@10? 
+
+The results are binomial outcomes, presenting pass or fail per iteration and attempt. Therefore, the main statistical method used is Chi-Square Test - it evaluates if there is statistical evidence between categorical variables (pass/fail). To answer this question, it is required to understand if there are pairs that differ statistically in their success rate. For that, the following hypotheses were defined:  
+
+> •
+
+H0: all model–prompt pairs have equal pass@10 success rates;  
+
+> •
+
+H1: there are model–prompt pairs with lower or higher 
+
+pass@10 success rate. TABLE XI: Chi-square tests for pass@10 .                     
+
+> Effect df χ2pvalue
+> Model 212.1 2.31 ×10 −3** Prompt 248.2 3.47 ×10 −11 **** Model:Prompt 884.6 5.78 ×10 −15 ****
+
+As shown in Table XI, the omnibus Chi-Square Test rejects H0 (χ2 = 84 .6 and pvalue = 5 .78 × 10 −15 ) across all model-prompt pairs. It also reports that there is a strong prompt effect (χ2 = 48 .2 and pvalue = 3 .47 × 10 −11 ) and slight model effect too ( χ2 = 12 .1 and pvalue = 2 .31 × 10 −3). χ2 might be inaccurate due to only running ten iterations per experiment. In order to understand which pairs outperform the others, it is required to do a follow-up analysis. 2×2 chi-square tests 
+
+tests the association between two categorical variables. TABLE XII: Pairwise chi-square tests for pass@10 .              
+
+> Model–prompt pair pvalue vs rest gemini + short 1.26 ×10 −9
+> gemma4 + short 1.51 ×10 −7
+> gemini + detailed 0.185 gemini + formal 0.185 gemma4 + detailed 0.185 gemma4 + formal 0.185 llama3-8b + detailed 0.185 llama3-8b + formal 0.185 llama3-8b + short 0.185
+
+Table XII details that gemini + short (pvalue = 1 .26 ×
+
+10 −9) and gemma4 + short with (1.51 × 10 −7) present 
+
+pvalue < 0.05 meaning that they have statistically better results for pass @10 .
+
+D. Statistical Analysis: Which prompt–model pairs are statis-tically better fit for repair@10? 
+
+This question requires the same set of tests. The following hypotheses were defined as:  
+
+> •
+
+H0: all model–prompt pairs have equal repair@10 suc-cess rates;  
+
+> •
+
+H1: there are model–prompt pairs with lower or higher 
+
+repair@10 success rate. TABLE XIII: Chi-square tests for repair@10 .                   
+
+> Effect df χ2pvalue
+> Model 266.2 4.26 ×10 −15 **** Prompt 21.47 0.48 —Model:Prompt 872.2 1.76 ×10 −12 ****
+
+As shown in Table XIII, Chi-Square Test rejects H 0 (χ2 =72 .2 and pvalue = 1 .76 × 10 −12 ) across all model-prompt pairs. Additionally, it reports strong model effect ( χ2 = 66 .2
+
+and pvalue = 4 .26 × 10 −15 ). χ2 might be inaccurate due low amount of iterations per experiment. In short, there are statistical evidence that model:prompt have different success rates for repair@10 , as well as that different models have impact in such metric too. TABLE XIV: Pairwise chi-square tests for repair@10 .                          
+
+> Model–prompt pair Success pvs rest
+> gemini + detailed 10/10 0.0138 gemini + short 10/10 0.0138 gemma4 + formal 10/10 0.0138 gemini + formal 9/10 0.0751 gemma4 + short 9/10 0.0751 gemma4 + detailed 5/10 0.791 llama3-8b + detailed 0/10 2.39 ×10 −4
+> llama3-8b + formal 0/10 2.39 ×10 −4
+> llama3-8b + short 0/10 2.39 ×10 −4
+
+As mentioned in the first question, this test requires a follow-up using 2×2 chi-square tests , Table XIV details that 
+
+gemini + short prompt , gemini + detailed prompt and gemma4 + formal prompt are statistically better having success = 10/10 and pvalue = 0 .0138 vs the rest. Therefore, these pair combinations present statistically better results for repair@10 .V. D ISCUSSION 
+
+Do models perform better with short prompts? Table XI shows that Prompt has a statistically significant effect on 
+
+pass@10 results with short prompts performing best. This pattern does not hold for repair@10 : (Table XIII), Prompt does not have a statistically significant prompt effect. Table XII further indicates that larger models perform statis-tically better with short prompts only in Independent runs. In short, results suggest that larger models prefer prompts with less restrictive prompts—but only under independent runs. 
+
+Do models perform better when correctness is ignored but performance is not? Yes. Larger models tend to achieve higher repair@k when correctness is not required. Table X shows that formal prompts have higher repair@k scores when ignoring correctness (Table IV) mainly gemma4:31b at 
+
+repair@1 .
+
+What is the impact of increasing k? k denotes the number of attempts per iteration. Its effect is less noticeable in independent runs, like pass@k . In guided repair,a larger k
+
+allows more repair loops leading to increased model reasoning which results to higher success rates. 
+
+Why models underperform with formal prompts? As shown in Tables VII, IV, formal prompts require the model to follow a predefined formal specification. The model must understand the preconditions and postconditions before start-ing writting the code, which demands additional reasoning rather than a simple pattern-matching exercise. Moreover, time-complexity is also bound as a postconditions further increasing task difficulty. Ultimately, even when the model generates a syntactically valid Dafny code, it must still pass full verification. 
+
+Do guided repair attempts improve the correctness and performance of generated code when compared to independent attempts? 
+
+Initial results show that large models (gemini3-flash-preview, gemma4-31b ) tend to struggle with detailed and formal prompts. More specifically, they tend to struggle more generating correct code (Tables V, VI and VII) than efficient code (Tables VIII, IX and X). Moreover, smaller models fail entirely regardless the prompt or of whether independent or guided-repair runs are used. In addition, Tables II, III and III show larger models achieve better results using guided repair iterations than independent runs. This is an expected behavior because the guided repair feedbacks attempts logs, errors and generated code to the prompt giving more context for model reasoning, improving results. Table XIV shows that the top-tier model-prompt pairs include larger models only for repair@10 . Comparing it with 
+
+pass@10 using Table XII, it can be concluded that larger models, regardless the prompt type used, have better results when use guided repair instead of independent runs. VI. C ONCLUSION 
+
+This paper addressed the challenge of guiding LLMs to-ward generating code that is both functionally correct and performant. To this end, Copper was proposed, combining formal verification with complexity-aware code generation using Dafny as an intermediate language. Three prompt strate-gies were designed and evaluated, and an architecture was developed to guide the generation process iteratively toward correct, formally verified solutions. Experiments show that the proposed approach substantially improves success rates over a single-pass baseline. The experimental results confirm that a single prompt is in-sufficient to obtain a correct, formally verified solution, given that pass@1 is effectively zero across nearly all executions. In a substantial number of cases, the LLM asserts that the generated implementation is formally verified, while the Dafny verifier rejects it outright, supporting the need for a guided, iterative approach. Model size proves to be a determining factor: models up to 8 billion parameters consistently fail to produce valid solutions, while larger models achieve a reasonable success rate. Nevertheless, most models exhibit notable limitations in generating Dafny code, likely due to its niche status and limited representation in training data. Repair mode consistently improves results across all mod-els, substantially increasing the success rate for generating code that satisfies both functional and complexity specifica-tions, regardless of the prompt used. This confirms that feeding verification errors back into the generation loop is an effec-tive strategy for guiding models toward correct, performant solutions. Among the three prompt variants, the short prompt yields the best results, followed by the formal prompt, with the detailed prompt performing worst. This suggests that current LLMs perform substantial internal processing of the prompt prior to generating a response, such that an extensively de-tailed prompt counterintuitively reduces performance. Simi-larly, although the formal prompt constrains the solution space through a precise mathematical formulation, models fail to leverage this structure to their advantage. The proposed approach demonstrates that combining formal verification with iterative, feedback-driven generation is a vi-able path toward trustworthy code synthesis. Copper provides a practical framework that can be applied across a range of tasks and language models, offering a principled mecha-nism for enforcing both functional correctness and complexity guarantees without relying solely on model confidence. The results also point to clear directions for future work. The limited availability of Dafny in model training corpora remains a significant obstacle, and progress in this area will likely depend on the curation of dedicated training datasets and the fine-tuning of models on high-quality Dafny examples. As formal verification languages gain traction in AI-assisted development, such efforts may prove essential to realizing the full potential of specification-driven code generation. ACKNOWLEDGEMENT 
+
+This work is funded by national funds through FCT – Foundation for Science and Technology, I.P., through the Digital Person project (Ref. 14765, COMPETE2030-FEDER-00926800) and within the scope of the research unit UID/00326 – Centre for Informatics and Systems of the University of Coimbra. REFERENCES [1] K. R. M. Leino, Program proofs . MIT Press, 2023. [2] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman et al. , “Evaluating large language models trained on code,” arXiv preprint arXiv:2107.03374 ,2021. [3] C. Wang, M. Scazzariello, D. Kosti´ c, and M. Chiesa, “Toward auto-mated, contamination-free dafny benchmark generation.” [4] D. Dai, M. Liu, A. Li, J. Cao, Y. Wang, C. Wang, X. Peng, and Z. Zheng, “Feedbackeval: A benchmark for evaluating large language models in feedback-driven code repair tasks,” arXiv preprint arXiv:2504.06939 ,2025. [5] Y. C. Li, S. Zetzsche, and S. Somayyajula, “Dafny as verification-aware intermediate language for code generation,” arXiv preprint arXiv:2501.06283 , 2025. [6] T. Coignion, C. Quinton, and R. Rouvoy, “A performance study of llm-generated code on leetcode,” in Proceedings of the 28th international conference on evaluation and assessment in software engineering , 2024, pp. 79–89. [7] Y. Peng, J. Wan, Y. Li, and X. Ren, “Coffe: A code efficiency benchmark for code generation,” Proceedings of the ACM on Software Engineering ,vol. 2, no. FSE, pp. 242–265, 2025. [8] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. Narasimhan, “Swe-bench: Can language models resolve real-world github issues?” arXiv preprint arXiv:2310.06770 , 2023. [9] X. He, Q. Liu, M. Du, L. Yan, Z. Fan, Y. Huang, Z. Yuan, and Z. Ma, “Swe-perf: Can language models optimize code performance on real-world repositories?” arXiv preprint arXiv:2507.12415 , 2025. [10] I. T. Leong and R. Barbosa, “Translating meaning representations to behavioural interface specifications,” Journal of Systems and Software ,vol. 211, p. 112009, 2024.

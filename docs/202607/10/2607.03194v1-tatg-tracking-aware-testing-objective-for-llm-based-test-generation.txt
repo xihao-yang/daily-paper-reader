@@ -1,0 +1,397 @@
+Title: TATG: Tracking-Aware Testing Objective for LLM-based Test Generation
+
+URL Source: https://arxiv.org/pdf/2607.03194v1
+
+Published Time: Tue, 07 Jul 2026 00:50:24 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# TATG: Tracking-Aware Testing Objective for LLM-based Test Generation 
+
+Guancheng Wang ∗, Qinghua Xu ∗, Lionel C. Briand ∗† ∗ Research Ireland Lero Centre for Software, University of Limerick, Limerick, Ireland 
+
+† School of Electrical Engineering and Computer Science, University of Ottawa, Ottawa, Canada guancheng.wang@ul.ie, et.qinghua@gmail.com, lionel.briand@lero.ie 
+
+Abstract —Complex Java methods remain challenging for auto-mated unit test generation because achieving strong coverage and fault detection often requires satisfying branch-specific testing requirements that are not directly visible from a focal method signature. Examples include establishing prerequisite program state, exercising specific switch branches, triggering exception-translation paths, identifying valid entry routes, and strength-ening weak assertions. Recent LLM-based frameworks, such as KTester, PANTA, and MUTGEN, leverage project context, static analysis, coverage feedback, or mutation guidance to improve test generation. However, these approaches do not explicitly represent and track individual testing requirements across iterations. As a result, generation and repair efforts may repeatedly tar-get already-satisfied requirements while overlooking unresolved branches and weak oracles. Moreover, existing approaches typi-cally optimize either structural coverage or mutation effectiveness in isolation, without coordinating the two signals within a unified process. We present TATG, a tracking-aware LLM-based unit test generation. TATG introduces a unified objective representation that captures testing requirements derived from both static program analysis and dynamic feedback. Each objective records its evidence, setup, action, oracle, acceptance criterion, status, and de-duplication key, enabling fine-grained tracking of which requirements have been satisfied and which remain unresolved throughout generation. Building on this representation, TATG employs a two-stage workflow: structural rounds first improve coverage, while hardening rounds subsequently strengthen as-sertions using mutation feedback to improve fault-detection capability. We evaluate TATG on 141 complex Java methods, including the 110 KTester subjects and 31 additional challenging methods. Results show that TATG consistently outperforms state-of-the-art baselines, including KTester and PANTA, improving line coverage, branch coverage, and mutation score by an average of 22.15, 20.14, and 37.66 percentage points, respectively. On a randomly selected subset of 50 focal methods, TATG also achieves performance comparable to that of a proprietary industrial test generation tool, while achieving higher line coverage and a higher mutation score. 
+
+Index Terms —Unit Test Generation, Program Analysis, Large Language Models 
+
+I. I NTRODUCTION 
+
+Automated unit test generation has relied on random testing, search-based testing, symbolic execution, and, more recently, large language models (LLMs). Despite this progress, gen-erating high-quality tests for complex Java methods remains challenging. The difficulty often lies not in the size of the focal method itself, but in satisfying branch-specific testing requirements that are only partially visible from the method’s source code. Reaching a target behavior may require establish-ing a prerequisite program state, exercising a particular switch branch, triggering an exception-translation path, invoking the method through a valid entry route, or constructing assertions strong enough to detect semantic regressions. Some of these requirements can be inferred statically, while others only become visible after generated tests are compiled, executed, and evaluated. Recent LLM-based test generation approaches have moved beyond focal-method-only prompting by incorporating project context, static analysis, coverage feedback, and mutation guidance [1], [2], [3], [4], [5], [6], [7], [8], [9]. For ex-ample, KTester injects project structure and usage knowl-edge [2], PANTA uses coverage feedback to target under-tested paths [3], and MUTGEN leverages mutation feedback to strengthen generated tests [9]. However, these signals are typically delivered to the LLM as prompts, hints, path de-scriptions, or post-execution feedback. Existing approaches do not maintain an explicit representation of individual testing requirements and their status across iterations. Consequently, later rounds may revisit already-satisfied behaviors while un-resolved branches, or weak oracles, remain unaddressed. Fur-thermore, coverage-oriented and mutation-oriented feedback are usually handled separately, limiting their ability to jointly improve reachability and fault-detection strength. We present TATG, a framework that unifies static program analysis and dynamic evaluation feedback through a unified objective representation. TATG represents each testing re-quirement as a tracked objective containing fields such as supporting evidence, required setup, and target action. Static analysis generates structural objectives for reachability, branch coverage, exception handling, object construction, boundary behavior, and entry routes. During generation, compilation/ex-ecution, coverage, oracle-quality, and mutation feedback are converted into feedback objectives and integrated into the same tracking mechanism. This representation enables the framework to reason explicitly about which requirements have been satisfied, which remain unresolved, and which require further refinement. Building on this objective representation, TATG employs a two-stage generation strategy. The structural stage focuses on producing executable tests, improving reachability, and increasing line/branch coverage using static objectives, along 
+
+> arXiv:2607.03194v1 [cs.SE] 3 Jul 2026
+
+with compilation/execution, and coverage feedback. Once structural progress stabilizes, the hardening stage uses mu-tation feedback to improve fault-detection capability. We evaluate TATG on an extended benchmark of 141 focal methods, comprising complex methods with rich control-flow structures and project dependencies, collected from all projects used by recent LLM-based baselines, as well as additional modern multi-module projects. We compare TATG against six representative approaches across three categories: traditional, hybrid (traditional + LLM), and LLM-based. The evaluation is conducted using two recently released open-source LLMs, Qwen3.6-35B-A3B and DeepSeek-V4-Flash-284B, representing different model sizes. In addition, we compare TATG against a proprietary industrial test-generation tool on a randomly selected subset of 50 focal methods. The results show that TATG consistently outperforms all baselines in terms of structural coverage and mutation score under the same iteration budget. Furthermore, TATG achieves performance comparable to the industrial tool while achieving higher line coverage and a higher mutation score. 
+
+Contributions. This paper makes the following contributions:  
+
+> •
+
+Tracking-aware objective representation. We introduce a unified objective representation for LLM-based unit test generation that captures branch-level testing requirements together with supporting evidence, required setup, target actions, expected oracles, acceptance predicates, and exe-cution status. The representation enables explicit tracking of which testing objectives have been satisfied and which remain unresolved across generation iterations.  
+
+> •
+
+Two-stage objective-guided generation. We propose a two-stage objective-guided framework that coordinates structural coverage improvement and mutation-based oracle strength-ening within a unified generation process. Static-analysis re-sults, compilation/execution diagnostics, coverage feedback, and mutation feedback are all represented and managed through the same objective-tracking mechanism.  
+
+> •
+
+Comprehensive evaluation on challenging Java methods. 
+
+We evaluate TATG on 141 complex Java methods, including the 110 KTester subjects and 31 additional challenging methods. Results show that TATG consistently outperforms strong state-of-the-art baselines, while achieving a perfor-mance comparable to a proprietary industrial test generation tool. Ablation studies further confirm the effectiveness of the two-stage generation strategy. II. M OTIVATING EXAMPLE 
+
+We use a single running example to illustrate the testing problem that TATG addresses. Listing 1 presents a sim-plified, representative token-stream reader that abstracts re-curring testing challenges from real-world code, rather than reproducing a concrete class from an existing project. The field currToken records the reader’s current state. The collaborator stream provides three operations: advance() 
+
+moves to the next token and may throw StreamException ;
+
+getText() returns the current string value; and getInt() 
+
+returns the current integer value. The method under test, 
+
+nextTextValue() , returns a textual representation of the current token when possible and throws IOException when stream processing fails.                                                                              
+
+> 1class StreamTokenReader {
+> 2private Token currToken;
+> 3private TokenStream stream;
+> 45String nextTextValue() throws IOException {
+> 6if (currToken == Token.FIELD_NAME) {// G
+> 7currToken =stream.advance();
+> 8if (currToken == Token.STRING) // P1
+> 9return stream.getText();
+> 10 if (currToken == Token.NULL) // P2
+> 11 return null ;
+> 12 if (currToken == Token.INT) // P3
+> 13 return String.valueOf(stream.getInt());
+> 14 }
+> 15 if (currToken == Token.NULL) // P4
+> 16 return null ;
+> 17 try {
+> 18 stream.advance();
+> 19 }catch (StreamException e) {// P5
+> 20 throw new IOException("Stream error", e);
+> 21 }
+> 22 throw new IOException("Not atext value"); // P6
+> 23 }
+> 24 }
+> Listing 1. Running example: stateful entry, finite dispatch, and exception translation.
+
+A useful test suite for Listing 1 must satisfy require-ments that are not explicit. First, most paths are state-dependent . Paths P1–P3 are reachable only when currToken 
+
+is FIELD_NAME before the call and stream.advance() 
+
+then returns a particular next token. A test that simply con-structs a fresh reader and calls the target may reach only the fall-through exception. Second, the number of nested branches is finite : P1, P2, and P3 correspond to distinct token constants, and each needs a distinct input or mock behaviour. Third, P5 requires exceptional predecessor behaviour : the collaborator must throw StreamException at the right call site so that the method executes the catch-rethrow block. Finally, if the method is package-private or is normally accessed through a facade, the test must also select an executable entry route. These requirements also explain why coverage should pre-cede mutation refinement. If tests do not reach P2, P3, or P5, mutants inside those branches provide little actionable information: mutation analysis mainly reports that the mutated statements were not covered. In contrast, coverage feedback reveals unresolved coverage obligations and directs subsequent test generation toward the prerequisite state or collaborator behaviour needed to satisfy them. Once those branches are reached, mutation feedback becomes useful: covering the 
+
+Token.STRING branch is insufficient if the test does not verify the returned text. A mutant that changes return stream.getText() to return "" may not be killed. At that point, the useful objective is no longer reachability, but oracle strengthening, e.g., asserting the exact text returned by the stream. Existing generators struggle with this example because the information is not represented at the right granularity. Search-based tools optimize generated call sequences and coverage feedback, but the required setup for this method is highly specific: the test must place the reader in a particular token state or configure the stream to fail when advance() is exe-cuted. LLM-based tools can reason about the source and often generate readable tests, yet a generic branch- or exception-oriented prompt does not translate P1–P6 into distinct testing goals with required setup and measurable acceptance criteria. KTester, a recent state-of-the-art approach, combines project knowledge for test generation, however, the context remains coarse-grained (e.g., it does not capture predicate-specific information such as condition variables) and is not maintained as a per-path objective that records whether each branch or exception path has been attempted, satisfied, or left open. As a result, a passing test suite may still leave deep paths uncovered, while subsequent repair or regeneration lacks an explicit objective that identifies the unresolved branch or exception behavior requiring attention, such as a specific token-dispatch branch or an exception-translation path. TATG addresses this example through two-stage objective-guided generation. Before generation, static analysis translates branch-relevant facts into explicit objectives, such as “exer-cise the branch where currToken == Token.STRING ”, “exercise the branch where currToken == Token.NULL 
+
+after entering the FIELD_NAME state”, and “configure 
+
+stream.advance() to throw StreamException and assert the resulting IOException ”. The structural stage first uses compilation and execution diagnostics, together with coverage feedback, to improve target reachability and code coverage. After each round, TATG updates the objective state to record which objectives were satisfied, which failed compilation/execution, and which remain open. Only after sufficient structural progress does mutation feedback become actionable: mutants in unreached code mainly indicate missing reachability, whereas live mutants in reached code may indi-cate either insufficient test inputs or weak assertions. There-fore, the hardening stage converts mutation testing feedback into semantic objectives that strengthen oracles and kill live mutants. Both stages share the same objective schema, but the generation focus shifts from improving reachability to strengthening oracles. III. A PPROACH 
+
+A. Overview 
+
+TATG is a two-stage, objective-guided framework for LLM-based unit test generation. Its central abstraction is an objective state : a set of testing goals that records what should be tested, what evidence supports each goal, how a test should reach it, how success will be checked, and whether previous attempts have made progress. An objective may ask the model to reach a branch, construct a required state, repair an invalid setup, strengthen a weak assertion, or kill a live mutant. Across iterations, TATG updates the status of each tracked objective, unifying compilation/execution diagnostics, coverage gaps, and mutation results into a single objective rather than handling them independently. Figure 1 shows the workflow. Given a focal method and its corresponding source, TATG first constructs a compact target context that includes the method body, relevant condition values, construction information, and accessible entry routes. Static objective synthesizers then create the initial objective state from source and type facts, such as state-dependent setup, branch-relevant facts, exception paths, construction con-straints, boundary inputs, and entry routes. The first stage performs structural generation, using compilation/execution diagnostics to produce executable tests and coverage feedback to improve branch reachability and coverage. The second stage performs hardening: once the relevant code is reached, mutation testing feedback creates semantic objectives that guide the LLM to strengthen assertions and kill live/uncovered mutants. The two stages share the same objective schema and the same objective-guided prompt structure, but they differ in focus. The structural stage prioritizes executable tests and hard-to-reach paths. The hardening stage prioritizes strength-ening oracles for code that is already reachable. This order is important for complex methods: if the test suite does not reach deep branches, mutation feedback often only reports that mutants are not covered, which provides little useful oracle guidance. The remainder of this section follows the lifecycle of an objective in TATG. Section III-B defines the objective; Section III-C describes how initial objectives are derived from the source code and how they are updated from compila-tion/execution diagnostics, coverage, and mutation feedback; Section III-D explains the prompt structure and how the objective state is rendered into the prompt; and Section III-E describes the budget allocation and termination rules. 
+
+B. Objective definition 
+
+An objective state G is a set of objectives: 
+
+G = {G1, G 2, . . . , G n},
+
+where each objective G is represented as a tuple: 
+
+G = ⟨id, src, cat, E, S, A, Q, α, status, key ⟩.
+
+The tuple’s fields have the following definitions. 
+
+Identifier. The field id is an identifier for the objective, which allows TATG to track the same testing goal across iterations. It is derived from the objective source and its evidence. For example, an objective created from a missed branch may use the source line and branch index, while a mutation objective may use the mutant identifier reported by mutation testing. 
+
+Source. The field src records where the objective comes from: 
+
+src ∈ { static, coverage, validation, oracle, mutation }.
+
+Static objectives are created before generation. Coverage ob-jectives are created from missed lines or branches. Validation objectives are created from compilation or execution failures. Oracle objectives are created when generated tests execute code, but contain weak or missing assertions. Mutation ob-jectives are created from mutation testing feedback. Fig. 1. Overview of TATG. 
+
+Category. The field cat specifies the objective category, which determines how the objective is rendered in the prompt. 
+
+Structural categories. StateSetup establishes object or collaborator state; 
+
+DispatchArm targets enum, switch, or constant-family branches; 
+
+ExceptionPath targets paths involving exception handling (e.g., try-catch and throw statements); 
+
+Construction describes object or dependency construction; 
+
+BoundaryInput covers null, empty, malformed input, or boundary values; and EntryRoute specifies how to reach non-directly callable targets, e.g., private focal method. 
+
+Feedback categories. ValidationRepair repairs compilation, execution, or target-reach failures; 
+
+OracleStrengthening replaces weak observations with stronger assertions; 
+
+MutationReachability targets uncovered mutants; and MutationAssertion adds assertions that distinguish the original behavior from a live mutant. 
+
+Evidence. The field E contains the evidence that jus-tifies the objective. Evidence may include a source line, a branch condition, an enum constant, a caught exception path, a constructor signature, a validation error, a weak assertion, or a live mutant description. For example, for a catch-rethrow path, E may contain the source snippet 
+
+catch (StreamException e) and the wrapper excep-tion IOException . For a mutation objective, E may contain the mutator name, mutated line, and live mutant id. 
+
+Required setup. The field S describes what must be arranged before executing the target action. This may include constructing an object, selecting an input value, positioning an internal state through public APIs, configuring a mock collab-orator, or routing through a facade method. For example, cov-ering a Token.NULL branch under a FIELD_NAME guard may require the setup “advance the stream to FIELD_NAME ,then advance to NULL .” 
+
+Target action. The field A describes the action that the test must execute. Usually, this is a direct call to the focal method. For non-public targets, A may be an accessible entry route, such as a public facade method that eventually reaches the target. For mutation objectives, A identifies the call intended to exercise the mutated code. 
+
+Oracle shape. The field Q describes the expected form of the assertion, not necessarily the final assertion text. Oracle shapes include exact-value assertions, null asser-tions, exception assertions, state-change assertions, inter-action assertions, and differential assertions. For exam-ple, an objective may specify that the test should use 
+
+assertThrows(IOException.class, ...) for an exception path, or assertEquals("42", result) for a mutant that changes an integer-to-string return value. 
+
+Acceptance predicate. The field α is a measurable predi-cate that determines whether the objective has been satisfied after executing generated tests. It maps a feedback record to a Boolean value: 
+
+α(F ) → { true, f alse }.
+
+For a coverage objective, α checks whether the corresponding line or branch is covered in the JaCoCo report. For a validation objective, α checks whether the candidate compiles, executes, and reaches the target. For an oracle objective, α checks whether the weak assertion has been replaced by a stronger oracle shape. For a mutation objective, α checks whether a live mutant is killed. 
+
+Status. The field status records the objective lifecycle: 
+
+status ∈ { open, attempted, satisf ied, blocked }.
+
+An objective is open when it has not yet been addressed. It becomes attempted when a generated test claims to target it. It becomes satisfied when its acceptance predicate evaluates to true. It becomes blocked when generated tests repeatedly fail validation or cannot reach the target action. 
+
+De-duplication key. The field key records the behavioral signature of an objective attempt. It is not a test name or a hash of the generated code. Instead, it summarizes the behavior being attempted: 
+
+key = ⟨cat, S, A, Q ⟩.For example, two tests that both exercise the Token.NULL 
+
+arm after entering the FIELD_NAME state and both assert a null result share the same key, even if their code differs syntactically. When an objective repeatedly fails to make progress, either due to execution failures or inability to reach the target behavior, TATG retires the objective from G to avoid repeatedly exploring redundant generation strategies. 
+
+C. Objective Projection 
+
+Table I summarizes how the objective fields ( cat , S, A, and 
+
+Q) are instantiated from different types of evidence ( E). We consider five evidence sources: static analysis, compilation/ex-ecution diagnostics, coverage feedback, oracle feedback, and mutation feedback. The first six rows correspond to structural objectives derived from source code, whereas the remaining rows correspond to feedback-driven objectives derived during iterative generation. For each evidence type, the table specifies how the setup ( S), target action ( A), and oracle shape ( Q) are constructed. Structural objectives are initialized before the first gener-ation round. Most structural objectives are derived through static analysis, including StateSetup , DispatchArm , Exception-Path , Construction , BoundaryInput , and EntryRoute . However, some testing requirements cannot be reliably inferred through static analysis alone. Therefore, TATG performs additional LLM-based objective inference, using the objective definitions and the focal method source code to identify higher-level testing objectives. For example, from the code fragment in Lines 17–22 of Listing 1, the LLM infers an Exception-Path objective corresponding to the try–catch–rethrow path. It may further infer a StateSetup objective indicating that the collaborator state must be initialized to a specific value before invoking the focal method. This additional objective subsequently guides test generation toward triggering catch block P5. Feedback-driven objectives are generated incrementally throughout iterative generation. Compilation and execution diagnostics, along with coverage reports, generate Valida-tionRepair objectives, weak assertions identified in generated tests generate OracleStrengthening objectives, and mutation testing generates MutationReachability and MutationAssertion 
+
+objectives for uncovered and live mutants, respectively. Table I lists all structural objectives that can be obtained through static analysis. The additional LLM-based objective inference complements static analysis by identifying objec-tives that require semantic reasoning beyond what syntactic program analysis can provide. In contrast, feedback-driven objectives are introduced dynamically as new evidence be-comes available after each generation round. Together, these objectives provide a unified representation that accumulates structural knowledge and execution feedback throughout the iterative generation process. 
+
+D. Prompt Construction 
+
+Listing 2 shows the prompt structure. The central part of the prompt is the set of objective cards . Each objective card                                                                                                                                                                                                              
+
+> 1Task:
+> 2Generate or revise JUnit tests for the focal method.
+> 34Focal method context:
+> 5focal_method:
+> 6<method source>
+> 7object_context:
+> 8<relevant fields and helper methods>
+> 9construction_context:
+> 10 <constructors, factories, builders, mocks, or subclasses>
+> 11 entry_context:
+> 12 <direct call or accessible caller routes>
+> 13 test_stack:
+> 14 <JUnit version, Mockito availability, Java version>
+> 15 16 Active objective cards:
+> 17 Objective <G_i>:
+> 18 source:
+> 19 static |coverage |validation |oracle | mutation
+> 20 category:
+> 21 StateSetup |DispatchArm |ExceptionPath |
+> 22 Construction |BoundaryInput |EntryRoute |
+> 23 ValidationRepair |OracleStrengthening |
+> 24 MutationReachability |MutationAssertion
+> 25 status:
+> 26 open |attempted |blocked
+> 27 evidence:
+> 28 <source lines, branch condition, diagnostic,
+> 29 weak assertion, or mutant description>
+> 30 prior_observation:
+> 31 <what happened in the previous round, if any>
+> 32 required_setup:
+> 33 <object state, input values, mock behavior,
+> 34 construction strategy, or entry route>
+> 35 target_action:
+> 36 <direct target call or accessible caller route>
+> 37 oracle_shape:
+> 38 <exact value, null, exception, state change,
+> 39 interaction, or differential assertion>
+> 40 acceptance_condition:
+> 41 <how TATG will check whether G_i is satisfied>
+> 42 de_duplication_key:
+> 43 <cat, setup, action, oracle shape>
+> 44 45 Global constraints:
+> 46 -compile under the project build
+> 47 -do not modify production code
+> 48 -use only available project dependencies
+> 49 -preserve already passing tests when repairing
+> 50 -avoid duplicating existing objective keys
+> 51 -return tests in the required format
+> 52 53 Output contract:
+> 54 new_tests: [
+> 55 {
+> 56 objective_id: "<G_i>",
+> 57 test_name: "<name>",
+> 58 input_family: "<declared input partition>",
+> 59 setup: "<state/mocking/construction>",
+> 60 oracle_shape: "<declared oracle shape>",
+> 61 test_code_lines: ["<JUnit code lines>"]
+> 62 }
+> 63 ]
+
+Listing 2. Generation prompt structure used in each round. 
+
+is a textual rendering of one active objective. It contains the same fields as the objective state defined in Section III-B. If the objective was updated in a previous round, the card also includes a brief prior observation explaining what happened, such as “attempted but did not reach the branch”, “compiled but failed at runtime”, or “produced a live mutant”. This structure allows each testing goal to receive its own feedback. For example, if a previous test claimed to target the branch P2 in Listing 1 but failed, TATG does not sim-TABLE I PROJECTION FROM SOURCE -GROUNDED EVIDENCE TO OBJECTIVES .
+
+Category cat Evidence E from static analysis or dynamic feedback Required setup S Target action A Oracle shape Q
+
+StateSetup Assignment, update, or predicate over a receiver field, e.g., 
+
+this.index++ , _token = p.nextToken() , if (this.index >= end) , or a method call whose receiver resolves to a receiver field, e.g., this.context.inObject() 
+
+Establish the required receiver or collaborator state through visible constructors, setters, builders, factories, or public methods Invoke the focal method after the required state has been established Assert return value, state transition, emitted output, collaborator interaction, or exception 
+
+DispatchArm Branch or switch statement whose predicate/selector depends on a concrete code element: if (token == VALUE_STRING) ,
+
+switch (mode) , case STRICT: , "json".equals(format) ,
+
+type == 1 , or x instanceof Foo 
+
+Choose argument values, receiver state, or concrete object types that satisfy the selected predicate, match the selected label, or satisfy the selected type test. Invoke the focal method, or an accessible caller that reaches the selected statement Assert behavior specific to that statement: return value, state, output, interaction, or exception 
+
+ExceptionPath Exception-handling paths involving try , catch , and optional rethrowing, e.g., try {... } catch (X e) {throw new Y(e); }.Provide invalid input or configure a collaborator to raise the exception required by the handler Invoke the focal method on the exceptional scenario Assert exception type, message, cause, wrapped exception, or documented fallback behavior 
+
+Construction Object construction or initialization, including constructor calls, static factory methods, builder chains, concrete implementations of abstract/interface types, and field initialization visible in source (e.g., 
+
+this.client = client in a constructor or setter) Build the receiver and arguments using visible construction APIs and available concrete implementations Invoke the focal method on the constructed object graph Assert concrete return value, state, output, interaction, or exception 
+
+BoundaryInput Null, boundary, or shape predicate, including null checks, emptiness checks, numeric or size comparisons, array/collection/string shape checks, and loop-bound conditions (e.g., x == null ,
+
+s.isEmpty() , list.size() > 1 , and i < limit ). Instantiate values that satisfy or violate the target predicate under representative input conditions (e.g., null, boundary, validity, or shape) Invoke the focal method with the boundary-relevant input Assert exact value, nullness, exception, state change, or output 
+
+EntryRoute Focal method has non-public visibility, or is reachable through a public or protected wrapper method Construct the receiver and arguments required by the accessible caller Invoke the shortest source-visible entry method that reaches the focal method Assert behavior observable through that entry method 
+
+ValidationRepair Compilation/execution diagnostics, or coverage reports Repair construction, imports, mocks, arguments, or setup so execution reaches the target branches Revise the test based on compilation/execution diagnostics or coverage feedback Preserve or add a concrete assertion after the repaired call 
+
+OracleStrengthening Passing test with no assertion, only weak assertions (e.g., 
+
+assertNotNull ), or assertions that merely verify successful execution. Reuse the passing setup that already reaches the target behavior Execute the same target path Replace the weak check with exact-value, exception, state, interaction, output, or differential assertion 
+
+MutationReachability Uncovered mutant reported on a source line that was not executed Arrange arguments or receiver state that execute the mutated statement Invoke the focal method so the mutated statement is reached Assert observable behavior after the mutated statement is reached 
+
+MutationAssertion Live mutant on an already reached statement Arrange a mutant-reaching input whose behavior can differ from the original program Invoke the focal method killing the live mutant Assert exact or differential behavior that distinguishes the original program from the mutant 
+
+ply append “missed branch at line 10” to the next prompt. Instead, it updates the corresponding DispatchArm objective: the evidence records the missed branch condition, the prior observation records the failed attempt, the required setup states how to reach the NULL state, the oracle shape specifies the expected assertion, and the acceptance condition states that P2 must be covered in the next run. When a generated test fails to compile or execute, TATG creates or updates a ValidationRepair objective. The evidence field records the compiler diagnostic, execution, or target-reach failure; the required setup field describes the suspected fix; the target action maintains the intended call or entry route; and the acceptance condition requires that the revised test compile, execute, and reach the target. Thus, repair is not handled by a separate prompt. It is represented as another objective category in the same objective state. The LLM response fields are used to associate generated tests with objectives during validation. After execution, TATG updates each objective according to its acceptance condition and de-duplication key. This is the mechanism that turns multi-round prompting into explicit objective-state tracking. 
+
+E. Budgeting and Termination 
+
+TATG allocates the per-iteration generation budget accord-ing to the number of active objectives, rather than using a fixed number of tests for every round. The number of requested tests is computed as Br = clip( Bmin , B max , ⌈λ|A r |⌉ ), where 
+
+λ controls how many candidates are allocated per active objective, and Bmin and Bmax bound the budget. The concrete values of these parameters are reported in the evaluation setup. A stage terminates when its configured round limit is reached, when no active objective remains, or when recent rounds do not satisfy any new objectives. IV. E XPERIMENTAL DESIGN 
+
+We evaluate TATG by addressing the following research questions (RQs): 
+
+• RQ0: Overall performance. How does TATG compare with representative baselines across effectiveness and effi-ciency metrics? 
+
+• RQ1: Comparison with coverage- and mutation-oriented approaches. How effective are the structural stage and the hardening stage compared with representative coverage-oriented and mutation-oriented approaches, respectively? 
+
+• RQ2: Ablation study. How does each stage contribute to the overall effectiveness of TATG? RQ0 evaluates the overall effectiveness and efficiency of TATG as a complete test-generation framework. RQ1 com-pares each stage with recent approaches that target the same objective, namely, structural coverage and mutation score, respectively. RQ2 isolates the contributions of the two stages through ablation analysis. Specifically, the structural stage focuses on producing executable tests and improving structural coverage, whereas the hardening stage leverages mutation feedback to strengthen assertions and improve fault-detection capability. We evaluate TATG on 141 complex Java methods, including all 110 subjects from the KTester benchmark and 31 additional challenging methods drawn from larger multi-module projects. The remainder of this section presents the datasets, baselines, evaluation metrics, and implementation. 
+
+A. Datasets 
+
+We adopt all focal methods from the KTester benchmark [2], which contains 110 complex Java methods from 10 open-source projects. To further evaluate TATG on even more challenging real-world software systems, we collect 31 ad-ditional methods from 10 open-source projects. Compared with the projects used by KTester, the additional projects are selected from the MocklessTester benchmark [10]. They include both Defects4J projects and modern multi-module Java projects (cutoff date: March 2025), such as JQuick-Curl [11], ADK Java [12], AgentScope Java [13], and A2A Java [14]. Given the high computational cost of evaluation, these subjects are carefully selected through purposive sam-pling. We first prioritize projects not included in KTester to increase project diversity. Within these projects, we favor methods with relatively high cyclomatic complexity (CC) and non-comment lines of code (NLOC), as these characteristics generally indicate greater testing complexity. We further select methods that exhibit features known to challenge automated test generation, including package-private members (i.e., meth-ods without an explicit access modifier), private methods, and dependencies that require constructing objects from external classes. Consequently, the additional subjects cover a broader range of access-control constraints and dependency patterns commonly encountered in real-world Java projects. Table II summarizes the benchmark subjects, including the number of methods, cyclomatic complexity (CC), and non-comment lines of code (NLOC). CC and NLOC are computed using Lizard [15]. Across all 141 methods, the mean CC is 18.5, the median CC is 16, and the mean NLOC is 59.8, indicating substantial structural complexity [16], [9]. All methods are extracted from real-world open-source projects, ensuring that the evaluation is conducted on realistic testing tasks. 
+
+B. Baselines 
+
+We compare TATG against representative traditional, hy-brid, and LLM-based test generation approaches.  
+
+> •
+
+Randoop [17]: a feedback-directed random testing tool that generates unit tests through randomized sequences of method and constructor invocations.  
+
+> •
+
+EvoSuite [18]: a search-based test generation tool that optimizes generated test suites toward structural coverage objectives.  
+
+> •
+
+EvoObj [19]: an extension of EvoSuite that improves object-oriented test generation by addressing object con-struction challenges.  
+
+> •
+
+KTester [2]: a recent LLM-based test generation approach that injects project-structure and project-usage knowledge into the generation process.  
+
+> •
+
+PANTA [3]: a recent LLM-based approach that combines static analysis and coverage-guided feedback to target under-tested execution paths.  
+
+> •
+
+MUTGEN [9]: a recent LLM-based approach targeting mutation score through mutation testing feedback, used for comparison with the hardening stage. 
+
+C. Evaluation Metrics 
+
+Effectiveness metrics. TATG aims to improve both the structural coverage and the fault-detection capability of gen-erated tests. Following prior work [2], we report line cov-erage and branch coverage at the method level measured using JaCoCo [20]. Line coverage measures the percentage of executable lines in the focal method covered by the gener-ated tests, while branch coverage measures the percentage of conditional branches exercised. To evaluate fault-detection capability, we use mutation score as the primary effectiveness metric. Mutation score measures the percentage of generated mutants detected by the generated test suite and is computed as: Mutation Score = # killed mutants # total mutants × 100 (1) Following prior work [3], [2], [9], mutants are produced by PITest [21] with its default mutator set. A mutant is considered killed if at least one generated test distinguishes the behavior of the mutated program from that of the original program, typically through a failed assertion or an unexpected exception. A higher mutation score indicates stronger fault-detection capability. 
+
+Efficiency metrics. We report the average number of gen-erated test cases and the average end-to-end execution time per focal method. The former measures the number of test methods contained in the final generated test class, while the latter measures the average time required to complete the entire testing workflow of each approach for a focal method. 
+
+D. Implementation 
+
+All benchmark subjects are built using Maven. Following the official documentation of each tool, we integrate EvoSuite, Randoop, EvoObj, JaCoCo, and PITest into the Maven pipeline for automated test generation, coverage measurement, and mutation testing, respectively. We used a per-focal-method generation budget of 900 seconds and fixed the random seed to 3 for EvoSuite, Randoop, and EvoObj. For approaches requiring multiple random seeds, we report the average results across runs. Each of the 141 focal methods was evaluated in-dependently. Generated tests were installed in isolated, copied workspaces and then evaluated using JaCoCo and PITest for method-level coverage and mutation scores. Among the baselines, as neither Randoop nor PANTA natively supports method-level generation, both are executed independently for each focal method, with PANTA additionally prompted to generate tests only for the target focal method. TATG is implemented in Python. Static analysis is imple-mented using SootUp [22], including call-graph construction, type analysis, constructor discovery, branch analysis, exception analysis, and entry-route extraction. As described in Sec-tion III-E, we set the maximum number of generated tests per focal method Bmax to 50, the minimum number Bmin to 1, and the factor λ to 1. Static analysis is limited to 300 seconds per method, and the overall test-generation process to 1800 seconds. We use five iterations for each of the structural and hardening stages, for a total of 10 test-generation iterations. We deploy Qwen3.6-35B-A3B locally using vLLM [23] with its default configuration and a temperature of 0.2. The same configuration is used throughout all experiments. To assess the generality of the results obtained with TATG, we TABLE II PROJECTS AND FOCAL METHOD CHARACTERISTICS . CC AND NLOC ARE COMPUTED BY LIZARD OVER THE TARGET JAVA SOURCE FILES .                                                                                                                                                                        
+
+> Project Domain Version #MUT CC Mean CC Median CC Range NLOC Mean
+> KTester benchmark methods (110)
+> Commons-CLI Cmd-line Interface 1.7.0-SNAPSHOT 212.0 12.0 10–14 36.5 Commons-CSV Data Processing 1.10.0 616.5 15.5 12–24 55.0 Gson Serialization 2.10.1 20 18.2 16.0 10–41 52.0 Commons-codec Encoding 3a6873e 18 23.6 17.5 11–90 73.3 Commons-collections4 Utility 4.5.0-M1 14 17.4 16.0 10–29 54.5 JDom2 Text Processing (XML) 2.0.6 21 16.5 16.0 11–27 49.5 Datafaker Data Generation 1.9.0 615.2 14.0 9–25 39.0 Event-ruler Event Engine 1.4.0 15 21.5 15.0 11–45 68.5 windward Microservices 1.5.1-SNAPSHOT 216.5 16.5 16–17 46.0 batch-processing-gateway Cloud Computing 1.1 616.0 17.5 10–19 67.0 Overall (110) ––110 18.6 17.0 9–90 57.5
+> Additional methods collected (31)
+> Commons-Math3 Math / Optimization Math-2f 332.1 31.0 20–45 118.3 Jackson-Dataformat-XML XML Serialization JacksonXml-5f 214.0 14.0 8–20 61.5 Commons-Lang3 Core Java Utility Lang-4f 155.0 55.0 55–55 132.0 Jackson-Core JSON Streaming JacksonCore-26f 154.0 54.0 54–54 181.0 Joda-Time Date/Time Time-13f 143.0 43.0 43–43 148.0 Jsoup HTML Processing Jsoup-93f 13.0 3.0 3–3 11.0 jquick-curl Command Parsing ee84ed6 310.3 12.0 5–14 35.7 ADK Java AI Agent Framework 5ee51fd 10 7.6 4.5 1–23 32.9 AgentScope Java AI Agent Framework 28ef28a1 527.0 16.0 6–60 110.4 A2A Java Agent Protocol SDK 0b867d0d 411.5 6.5 1–32 42.8 Overall (31) ––31 18.3 12.0 1–60 68.0 Overall ––141 18.5 16.0 1–90 59.8
+
+also evaluate it on the DeepSeek-V4-Flash-284B model served via Fireworks AI [24], using the same configuration. Both models were released around April 2026. To ensure a fair comparison, all approaches are executed using the same project-specific Java version and JUnit 5framework. Coverage is measured with JaCoCo, and mutation testing is performed with PITest using its default mutator set. We run KTester and PANTA for 10 iterations. We run MUTGEN for five iterations, the same as in the hardening stage. All experiments are conducted on a Linux server running Ubuntu 24.04.1 LTS with a 56-core CPU, 125 GB of RAM, and two NVIDIA RTX 6000 Ada GPUs. The implementation of TATG and the benchmark subjects will be made publicly available. V. E XPERIMENTAL RESULTS 
+
+A. RQ0: Overall Performance 
+
+We compare the end-to-end performance of the two-stage TATG with the first five baselines listed in Section IV-B. All LLM-based and hybrid approaches are evaluated using two recently released open-source LLMs, Qwen3.6-35B-A3B (35B) and DeepSeek-V4-Flash (284B), which represent two different model scales and have demonstrated strong code-generation performance. Our approach is the first LLM-based test generation approach that jointly targets structural coverage and mutation score. Since no existing LLM-based approach optimizes both objectives simultaneously, the end-to-end com-parison is limited to recent coverage-oriented approaches: KTester and PANTA. The complete results are reported in Table III. Across both models, TATG consistently achieves the best overall performance in terms of line coverage, branch coverage, and mutation score while generating fewer test cases than the base-lines. Specifically, TATG improves both structural coverage and fault-detection capability over existing approaches on both models, demonstrating that the proposed two-stage objective-tracking framework is effective regardless of the underlying LLM. We further conducted paired-sample Wilcoxon signed-rank tests on line coverage, branch coverage, and mutation score. The results show that TATG achieves statistically sig-nificant improvements over both PANTA and KTester across all three metrics on both LLMs ( α = 0 .05 ). In terms of generation time, the primary overhead comes from invoking PITest during each hardening iteration to obtain mutation feedback. Although mutation testing accounts for most of the additional runtime, this overhead is acceptable in practice because it further improves mutation score and structural coverage, yielding higher-quality test suites at the cost of only about 8 additional minutes. For traditional approaches, EvoSuite and Randoop achieve nearly complete coverage on relatively easy subjects. However, their overall performance is substantially reduced because they fail to generate valid tests for many of the more challenging subjects, especially those with rich project dependencies. Al-though EvoObj enhances EvoSuite with an LLM, its overall performance is still limited by the capabilities of the underly-ing EvoSuite framework. In addition, we collaborated with an industrial partner to evaluate their proprietary test generation tool, which is based on the GLM-5.2-753B model. Due to the high computational cost, the comparison was conducted on 50 focal methods, including 39 randomly selected methods from the 110 KTester subjects and 11 methods from our additional benchmark, preserving the original ratio of 110:31. The industrial tool achieved 68.23% line coverage, 66.46% branch coverage, and a mutation score of 46.14%. In comparison, TATG with the same model achieved 75.01% line coverage, 65.12% branch coverage, and a mutation score of 53.72%. These results indicate that TATG achieves comparable branch coverage while substantially improving line coverage and mutation score. Moreover, TATG successfully generated valid tests for TABLE III OVERALL COVERAGE , MUTATION SCORE , AND COST METRICS ON 141 METHODS . G RAY ROWS DENOTE INTERMEDIATE STAGE RESULTS INCLUDED FOR SUBSEQUENT STAGE -LEVEL ANALYSIS .                                                                                                              
+
+> LLM Tool Stage Line (%) Branch (%) Mutation score (%) Avg. time (s) Avg. tests –EvoSuite –11.35 9.97 7.08 900 2.45 Randoop –21.52 17.17 14.31 900 8771.90 Qwen3.6-35B-A3B EvoObj –38.84 34.48 2.76 900 4.04 KTester –44.26 40.02 28.92 554.16 15.78 PANTA –51.17 46.70 20.11 441.89 36.02 TATG Structural 62.65 51.67 40.54 355.20 8.10
+> ∆Hardening (+MUTGEN) +11.00 +12.75 +21.55 +420.20 +3.44 Final (+MUTGEN) 73.65 64.42 62.09 775.40 11.54
+> ∆Hardening (+Default) +12.63 +16.06 +24.43 +482.95 +2.00
+> Final (+Default) 75.28 67.73 64.97 838.15 10.10 DeepSeek-V4-Flash-284B EvoObj –37.18 33.26 2.93 900 3.97 KTester –48.10 43.82 31.09 664.52 21.46 PANTA –59.72 51.97 34.46 523.66 42.87 TATG Structural 65.80 57.69 52.89 278.40 7.40
+> ∆Hardening (+MUTGEN) +9.19 +8.43 +9.10 +390.14 +14.14 Final (+MUTGEN) 74.99 66.12 61.99 668.54 21.54
+> ∆Hardening (+Default) +14.13 +13.52 +12.03 +355.80 +5.40
+> Final (+Default) 79.93 71.21 64.92 634.20 12.80
+
+six additional focal methods for which the industrial tool failed. Due to the high inference cost of GLM-5.2-753B, we do not use this model for the full benchmark evaluation or for comparisons with all baselines. Instead, the comparison with the industrial tool is conducted on the selected subset using the same underlying model to ensure a fair evaluation. 
+
+Answer to RQ0. Across both LLMs, the complete two-stage framework consistently achieves the best overall per-formance, improving line coverage, branch coverage, and mutation score by an average of 22.15, 20.14, and 37.66 percentage points, respectively, over the strongest baseline PANTA. Furthermore, the comparison with the industrial test generation tool based on GLM-5.2-753B demonstrates that TATG achieves comparable branch coverage while outperforming it in both line coverage and mutation score. 
+
+B. RQ1: Comparison with Coverage- and Mutation-Oriented Approaches 
+
+To demonstrate the effectiveness of the proposed two-stage framework, Table III reports not only the end-to-end perfor-mance of TATG, but also the performance of its structural and hardening stages separately. Since TATG is the first LLM-based approach that jointly targets structural coverage and mutation score, we compare the structural stage with recent coverage-oriented approaches and the hardening stage with the mutation-oriented baseline MUTGEN. Across both LLMs, the structural stage consistently outper-forms all coverage-oriented baselines. Specifically, compared with the best baseline PANTA, as shown in Table III, the structural stage of TATG improves line coverage by 11.48% and branch coverage by 4.97% on Qwen, and by 6.06% and 5.72% on DeepSeek. Notably, these improvements are achieved using only five iterations, whereas PANTA is con-figured with ten iterations. For the hardening stage, TATG consistently achieves higher mutation scores than MUTGEN, improving the mutation score by 2.88 % on Qwen and by 2.93 % on DeepSeek. Moreover, the hardening stage further improves the line and branch coverage by 13.38% and 14.79% on average, respectively, compared with 10.10% and 10.59% achieved by MUTGEN. The improvements achieved by both stages originate from the unified objective representation. Instead of repeatedly prompting the LLM with newly obtained feedback at each iteration, TATG maintains explicit objective states throughout the iterative generation process. Completed objectives are not revisited, allowing subsequent iterations to focus exclu-sively on unresolved testing goals. Furthermore, each objec-tive provides fine-grained guidance beyond less informative coverage or mutation feedback, including input constraints, dependency construction, and mutation-specific requirements. This objective-tracking mechanism enables the LLM to make more effective use of each generation iteration, resulting in improvements in both structural coverage and mutation score. 
+
+Answer to RQ1. Both stages outperform approaches targeting the same objective. The unified objective rep-resentation enables more effective iterative guidance by tracking unresolved testing objectives and providing fine-grained feedback. 
+
+C. RQ2: Ablation Study 
+
+Table III shows that the hardening stage makes a substan-tial contribution to the overall performance by consistently improving the mutation score over the structural stage alone. To evaluate the contribution of the structural stage, we conduct an ablation study by removing it and running only the hardening stage for 10 iterations. Since PITest requires at least one executable test to produce mutation feedback, the first iteration is performed without mutation feedback to bootstrap test generation. Without the structural stage, TATG achieves only 26.90% line coverage, 20.45% branch coverage, and a mutation score of 23.45% on Qwen. The corresponding results on DeepSeek are 24.38%, 18.37%, and 20.91%, respectively. Performance drops substantially in both structural coverage and mutation score. This result supports our design rationale that effective mutation-guided hardening relies on establishing sufficient reachability and structural coverage first. 
+
+Answer to RQ2. The ablation study demonstrates that each stage of TATG contributes to its overall performance. In particular, the structural stage plays a critical role by es-tablishing stronger structural coverage, thereby improving the reachability of subsequent mutation-based hardening. 
+
+D. Threats to Validity 
+
+Internal validity. LLM outputs are stochastic and may vary across model releases, inference settings, and execution environments. To reduce this threat, we evaluate all LLM-based approaches with the same model version, configuration, prompting budget, and execution environment, and apply the same validation, coverage, and mutation testing pipeline to all generated tests. 
+
+Construct validity. Construct validity may be affected by whether the selected metrics accurately reflect the objectives of the proposed approach. Since TATG explicitly targets structural coverage and mutation score, we evaluate it using method-level line coverage, branch coverage, and mutation score, following prior work. 
+
+External validity. External validity is limited by the bench-mark and implementation scope. We reuse benchmark tasks, project versions, and evaluation protocols from prior work [2] and add 31 challenging methods from larger multi-module projects to enable broader assessment. The current imple-mentation targets Java/JUnit. While TATG’s objective repre-sentation is language-independent, porting TATG to another ecosystem would simply require replacing the Java-specific providers used for static analysis, test execution, coverage measurement, mutation testing, and validation diagnostics, such as SootUp, JaCoCo, and PITest. VI. R ELATED WORK 
+
+We organize existing test generation approaches by the type of guidance used during the generation process. Recent ap-proaches increasingly integrate multiple sources of guidance, including static analysis, coverage and mutation feedback, to iteratively refine generated tests. The key distinction between existing work and TATG lies in how these guidance signals are represented, managed, and propagated across iterations. 
+
+a) Traditional automated test generation: Search-based, random, and symbolic techniques predate LLMs and demon-strate the power of explicit coverage objectives and execution feedback. Tools such as EvoSuite [18] and its many-objective extensions (e.g., MOSA [25], DynaMOSA [26]) optimise towards structural coverage targets, while Randoop [26] uses feedback-directed random exploration; symbolic executors like KLEE [27] and JPF [28] solve path constraints to synthesise inputs. These techniques have strong coverage and fault-detection potential, but they rely primarily on search heuristics, branch-distance functions, and path constraints rather than ex-plicit representations of testing objectives, making it difficult to capture the complex project dependencies required to generate executable tests. 
+
+b) LLM-based and knowledge-guided generation: The emergence of large language models has prompted recent techniques that treat test generation as a code understanding and synthesis task. Approaches such as AthenaTest, TestSpark, ASTER, HITS, RAGTest, ChatUniTest, TestSpark and KTester 
+
+guide LLMs by incorporating additional information into prompts through program analysis or retrieval techniques [29], [30], [31], [1], [32], [33], [30]. These approaches highlight the importance of contextual guidance. However, testing intent and supporting knowledge are typically embedded in prompts in an ad hoc manner, making it difficult to represent, organize, and systematically reuse testing objectives. 
+
+c) Feedback-guided improvement: Several approaches iteratively refine tests using execution or coverage feed-back [34], [5], [6], [35], [4]. Among them, PANTA alternates static control-flow analysis with dynamic coverage measure-ment to drive an iterative generate–execute loop and system-atically explore uncovered branches [3]. These approaches underscore the value of feedback loops but primarily treat feedback as prompt text, coverage summaries, or repair re-quests without maintaining a structured state across iterations. In contrast, TATG normalises static and dynamic signals into a unified objective representation. Feedback thus becomes ex-plicit and traceable, enabling unified management of structural and feedback-driven objectives across iterations. 
+
+d) Mutation-guided generation: Mutation testing pro-vides a stronger adequacy signal than structural coverage [9], [21]. Recent approaches, such as MuTAP [7], ACH [34], and 
+
+MUTGEN [9], integrate mutation feedback into LLM-based generation to strengthen assertions. These approaches demon-strate the effectiveness of mutation signals but treat mutants as separate targets. TATG includes mutation objectives in the same tracking model as structural and feedback-driven objectives; once reachability and basic assertions are achieved, mutation objectives trigger oracle strengthening within the two-stage generation process. VII. C ONCLUSION 
+
+This paper presents TATG, an LLM-based unit test genera-tion framework based on a unified objective representation. By representing static analysis results, execution feedback, coverage gaps, and mutation feedback as tracked objectives, TATG enables iterative guidance across generation rounds, allowing the LLM to focus on unresolved testing objectives. We evaluated TATG on 141 complex Java methods against representative traditional, hybrid, and LLM-based test gen-eration approaches. Experimental results show that TATG consistently achieves higher structural coverage and mutation score than existing baselines. On a randomly selected subset of 50 methods, TATG also achieves performance comparable to that of an industrial proprietary test generation tool while achieving higher line coverage and a higher mutation score. These results demonstrate that unified objective tracking en-ables more effective iterative guidance for LLM-based unit test generation. ACKNOWLEDGMENT 
+
+This work has emanated from research jointly funded by Taighde ´Eireann – Research Ireland under Grant num-ber 13/RC/2094 2 and by Huawei Technologies Co., Ltd. Lionel Briand is also supported by the Natural Sciences and Engineering Research Council of Canada. For the purpose of Open Access, the authors have applied a CC BY public copyright licence to any Author Accepted Manuscript version arising from this submission. REFERENCES [1] Z. Wang, K. Liu, G. Li, and Z. Jin, “Hits: High-coverage llm-based unit test generation via method slicing,” in Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineer-ing , 2024, pp. 1258–1268. [2] A. Li, M. Liu, Z. Chen, Z. Pei, Z. Li, D. Dai, Y. Wang, and Z. Zheng, “Ktester: Leveraging domain and testing knowledge for more effective llm-based test generation,” arXiv preprint arXiv:2511.14224 , 2025. [3] S. Gu, N. Nashid, and A. Mesbah, “Llm test generation via iterative hybrid program analysis,” arXiv preprint arXiv:2503.13580 , 2025. [4] S. Gu, Q. Zhang, K. Li, C. Fang, F. Tian, L. Zhu, J. Zhou, and Z. Chen, “Testart: Improving llm-based unit testing via co-evolution of automated generation and repair iteration,” arXiv preprint arXiv:2408.03095 , 2024. [5] J. Altmayer Pizzorno and E. D. Berger, “Coverup: Effective high cov-erage test generation for python,” Proceedings of the ACM on Software Engineering , vol. 2, no. FSE, pp. 2897–2919, 2025. [6] P. Liu, W. Yuan, J. Fu, Z. Jiang, H. Hayashi, and G. Neubig, “Pre-train, prompt, and predict: A systematic survey of prompting methods in natural language processing,” ACM computing surveys , vol. 55, no. 9, pp. 1–35, 2023. [7] A. M. Dakhel, A. Nikanjam, V. Majdinasab, F. Khomh, and M. C. Desmarais, “Effective test generation using pre-trained large language models and mutation testing,” Information and Software Technology , vol. 171, p. 107468, 2024. [8] M. Harman, J. Ritchey, I. Harper, S. Sengupta, K. Mao, A. Gulati, C. Foster, and H. Robert, “Mutation-guided llm-based test generation at meta,” in Proceedings of the 33rd ACM International Conference on the Foundations of Software Engineering , 2025, pp. 180–191. [9] G. Wang, Q. Xu, L. C. Briand, and K. Liu, “Mutation-guided unit test generation with a large language model,” arXiv preprint arXiv:2506.02954 , 2025. [10] Q. Xu, G. Wang, L. Briand, Z. Guo, and K. Liu, “Llm-based mockless unit test generation for java,” arXiv preprint arXiv:2605.26851 , 2026. [11] paohaijiao, “jquick-curl: A java wrapper for libcurl,” https://github.com/ paohaijiao/jquick-curl, accessed 2024-06-23. [12] Google, “Agent development kit (adk) for java,” https://github.com/ google/adk-java, accessed 2024-06-23. [13] agentscope-ai, “Build production-ready ai agents in java,” https://github. com/agentscope-ai/agentscope-java, accessed 2024-06-23. [14] A2A Project, “A2a: An open-source framework for building autonomous agents in java,” https://github.com/a2aproject/a2a-java, accessed 2024-06-23. [15] “Lizard: A code complexity analyzer,” https://github.com/terryyin/lizard, accessed 2026-06-23. [16] M. Stavtsev and Y. Bugayenko, “Evaluating the dependency be-tween cyclomatic complexity and response for class,” arXiv preprint arXiv:2410.06416 , 2024. [17] C. Pacheco and M. D. Ernst, “Randoop: feedback-directed random testing for java,” in Companion to the 22nd ACM SIGPLAN conference on Object-oriented programming systems and applications companion ,2007, pp. 815–816. [18] G. Fraser and A. Arcuri, “Evosuite: automatic test suite generation for object-oriented software,” in Proceedings of the 19th ACM SIGSOFT symposium and the 13th European conference on Foundations of soft-ware engineering , 2011, pp. 416–419. [19] Y. Lin, Y. S. Ong, J. Sun, G. Fraser, and J. S. Dong, “Graph-based seed object synthesis for search-based unit testing,” in Proceedings of the 29th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering , 2021, pp. 1068–1080. [20] “Jacoco,” Accessed: 2026. [Online]. Available: https://www.jacoco.org [21] “Pitest,” Accessed: 2026. [Online]. Available: https://pitest.org [22] soot-oss, “Sootup: A redesign of the soot static analysis framework,” https://github.com/soot-oss/SootUp, 2023, accessed: 2026-02-05. [23] “vllm: A high-performance llm inference and serving framework,” https: //vllm.ai, accessed 2024-06-23. [24] “Fireworks ai,” https://fireworks.ai/models/fireworks/deepseek-v4-flash, accessed 2024-06-23. [25] A. Suppapitnarm, K. A. Seffen, G. T. Parks, and P. Clarkson, “A simu-lated annealing algorithm for multiobjective optimization,” Engineering optimization , vol. 33, no. 1, pp. 59–85, 2000. [26] A. Panichella, F. M. Kifetew, and P. Tonella, “Automated test case generation as a many-objective optimisation problem with dynamic selection of the targets,” IEEE Transactions on Software Engineering ,vol. 44, no. 2, pp. 122–158, 2017. [27] C. Cadar, D. Dunbar, D. R. Engler et al. , “Klee: unassisted and automatic generation of high-coverage tests for complex systems programs.” in 
+
+OSDI , vol. 8, 2008, pp. 209–224. [28] W. Visser, C. S. Pˇ asˇ areanu, and S. Khurshid, “Test input generation with java pathfinder,” in Proceedings of the 2004 ACM SIGSOFT international symposium on Software testing and analysis , 2004, pp. 97–107. [29] M. Tufano, D. Drain, A. Svyatkovskiy, S. K. Deng, and N. Sundaresan, “Unit test case generation with transformers and focal context,” arXiv preprint arXiv:2009.05617 , 2020. [30] A. Sapozhnikov, M. Olsthoorn, A. Panichella, V. Kovalenko, and P. Derakhshanfar, “Testspark: Intellij idea’s ultimate test generation companion,” in Proceedings of the 2024 IEEE/ACM 46th international conference on software engineering: companion proceedings , 2024, pp. 30–34. [31] R. Pan, M. Kim, R. Krishna, R. Pavuluri, and S. Sinha, “Aster: Natural and multi-language unit test generation with llms,” in 2025 IEEE/ACM 47th International Conference on Software Engineering: Software Engineering in Practice (ICSE-SEIP) . IEEE, 2025, pp. 413– 424. [32] J. Shin, N. S. Harzevili, R. Aleithan, H. Hemmati, and S. Wang, “Retrieval-augmented test generation: How far are we?” arXiv preprint arXiv:2409.12682 , 2024. [33] Y. Chen, Z. Hu, C. Zhi, J. Han, S. Deng, and J. Yin, “Chatunitest: A framework for llm-based test generation,” in Companion Proceedings of the 32nd ACM International Conference on the Foundations of Software Engineering , 2024, pp. 572–576. [34] N. Alshahwan, J. Chheda, A. Finogenova, B. Gokkaya, M. Harman, I. Harper, A. Marginean, S. Sengupta, and E. Wang, “Automated unit test improvement using large language models at meta,” in Companion Proceedings of the 32nd ACM International Conference on the Founda-tions of Software Engineering , 2024, pp. 185–196. [35] C. Lemieux, J. P. Inala, S. K. Lahiri, and S. Sen, “Codamosa: Escaping coverage plateaus in test generation with pre-trained large language models,” in 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) . IEEE, 2023, pp. 919–931.

@@ -6,70 +6,74 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-09
-- 运行时间：2026-07-09 21:48:26 UTC
+- 最新运行日期：2026-07-10
+- 运行时间：2026-07-10 21:28:33 UTC
 - 运行状态：成功
-- 本次总论文数：16
-- 精读区：5
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-今天共追踪 16 篇 AI 代码智能与 Agent 方向论文，重点精读了 LLM 修复循环与编译器优化补丁两条高分研究线。  
-最值得关注的是《Is Three the Magic Number?》对 LLM 多轮修复效果的实证评估，以及 Agent 驱动编译器优化补丁的分析，另有 AgentTether 聚焦提升 LLM Agent 运行可靠性。  
-如果你关注 AI Coding 或自动化开发，下一步可以优先跟进“多轮修复 + Agent 调试/干预”这类正在快速落地的工程实践方向。
-- 详情：[/202607/09/README](/202607/09/README)
+- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
+- 精读：《Specification Grounding Drives Test Effectiveness for LLM Code》（9.0/10）, 《Bug Report Specification Refinement with Trajectory Guidance for Automated Program Repair》（9.0/10）
+- 速读：《DeepSWE: Measuring Frontier Coding Agents on Original, Long-Horizon Engineering Tasks》（8.0/10）, 《Copper: Unifying Correctness and Performance Specification in Code Generation》（7.0/10）, 《Round-Trip Mutation Testing: Translating Code to Natural Language Intent and back》（7.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202607/10/README](/202607/10/README)
 
 ### 精读区论文标签
-1. [Is Three the Magic Number? An Empirical Evaluation of LLM-Based Repair Loops](/202607/09/2607.05197v1-is-three-the-magic-number-an-empirical-evaluation-of-llm-based-repair-loops)  
-   标签：评分：8.5/10、query:apr-oracle
-   evidence：对使用反馈进行伪像验证的迭代修复循环进行实证评估
-2. [Understanding Agent-Based Patching of Compiler Missed Optimizations](/202607/09/2607.02370v1-understanding-agent-based-patching-of-compiler-missed-optimizations)  
+1. [Specification Grounding Drives Test Effectiveness for LLM Code](/202607/10/2607.06636v1-specification-grounding-drives-test-effectiveness-for-llm-code)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：基于规格说明的测试有效性增强与LLM代码修复
+2. [Bug Report Specification Refinement with Trajectory Guidance for Automated Program Repair](/202607/10/2607.07882v1-bug-report-specification-refinement-with-trajectory-guidance-for-automated-program-repair)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：自动程序修复智能体与补丁正确性
+3. [ContextSniper: AntTrail's Token-Efficient Code Memory for Repository-Level Program Repair](/202607/10/2607.01916v3-contextsniper-anttrails-token-efficient-code-memory-for-repository-level-program-repair)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：基于智能体的编译器优化缺失补丁修复及补丁泛化研究
-3. [Understanding Agent-Based Patching of Compiler Missed Optimizations](/202607/09/2607.02370v2-understanding-agent-based-patching-of-compiler-missed-optimizations)  
+   evidence：用于仓库级基于学习的程序修复的令牌高效代码存储
+4. [Obey, Diverge, Collapse: Blind Obedience to Incorrect Instructions Drives Code LLMs to Irrecoverable Code Semantic Collapse](/202607/10/2607.04537v1-obey-diverge-collapse-blind-obedience-to-incorrect-instructions-drives-code-llms-to-irrecoverable-code-semantic-collapse)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：基于智能体的编译器优化缺失补丁修复及补丁泛化研究
-4. [What Predicts Correctness in Text-to-SQL? A Selective-Prediction Study](/202607/09/2607.06799v1-what-predicts-correctness-in-text-to-sql-a-selective-prediction-study)  
+   evidence：在迭代修复设置中评估模型对错误指令的抵抗力
+5. [KAT-Coder-V2.5 Technical Report](/202607/10/2607.05471v1-kat-coder-v25-technical-report)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：预测正确性并使用LLM裁判进行验证
-5. [What Makes a Good Bug Report for an AI Agent?](/202607/09/2607.07593v1-what-makes-a-good-bug-report-for-an-ai-agent)  
+   evidence：代理代码修复的可验证奖励和失败到通过的验证
+6. [SCOPE: Leveraging Subgoal Critiques for Code Generation](/202607/10/2607.05810v1-scope-leveraging-subgoal-critiques-for-code-generation)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：自动程序修复代理与影响修复成功的错误报告特征
+   evidence：利用子目标评论和鲁棒性检查表确保代码生成的语义正确性
 
 ### 速读区论文标签
-1. [AgentTether: Graph-Guided Diagnosis and Runtime Intervention for Reliable LLM Agent Operation](/202607/09/2607.06273v1-agenttether-graph-guided-diagnosis-and-runtime-intervention-for-reliable-llm-agent-operation)  
-   标签：评分：7.5/10、query:apr-oracle
-   evidence：针对LLM智能体轨迹的运行时修复框架
-2. [Guiding Human Validation of LLM-Generated Code via Verifiable Literate Programming](/202607/09/2607.02333v1-guiding-human-validation-of-llm-generated-code-via-verifiable-literate-programming)  
+1. [DeepSWE: Measuring Frontier Coding Agents on Original, Long-Horizon Engineering Tasks](/202607/10/2607.07946v1-deepswe-measuring-frontier-coding-agents-on-original-long-horizon-engineering-tasks)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：DeepSWE解决了测试可能导致正确的替代补丁失败或通过不完整补丁的问题。
+2. [Copper: Unifying Correctness and Performance Specification in Code Generation](/202607/10/2607.03130v1-copper-unifying-correctness-and-performance-specification-in-code-generation)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：LLM生成代码的人工验证与可验证编程
-3. [TestEvo-Bench: An Executable and Live Benchmark for Test and Code Co-Evolution](/202607/09/2607.02469v1-testevo-bench-an-executable-and-live-benchmark-for-test-and-code-co-evolution)  
+   evidence：结合形式验证与合成以确保代码正确性
+3. [Round-Trip Mutation Testing: Translating Code to Natural Language Intent and back](/202607/10/2607.03223v1-round-trip-mutation-testing-translating-code-to-natural-language-intent-and-back)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：测试与代码协同演化的基准测试及针对新行为的测试生成
-4. [Can Coding Agents Implement Missed Compiler Optimizations? Evaluating LLM Agents on LLVM Peephole Optimizations](/202607/09/2607.02684v1-can-coding-agents-implement-missed-compiler-optimizations-evaluating-llm-agents-on-llvm-peephole-optimizations)  
+   evidence：利用基于LLM的代码到意图转换作为测试预言进行变异测试
+4. [What Resolve Rate Hides: Trajectory Structure Diagnostics for Coding Agents](/202607/10/2607.06184v1-what-resolve-rate-hides-trajectory-structure-diagnostics-for-coding-agents)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估LLM代理修复真实编译器优化问题的能力
-5. [A Systematic Methodology for Evaluating Failure Independence in LLM-Generated Code](/202607/09/2607.02808v1-a-systematic-methodology-for-evaluating-failure-independence-in-llm-generated-code)  
+   evidence：编码代理的轨迹结构诊断，用于评估补丁生成过程
+5. [SmartHomeSecure: Automated Detection and Repair of Smart Home Configuration Errors Using Large Language Models](/202607/10/2607.06748v1-smarthomesecure-automated-detection-and-repair-of-smart-home-configuration-errors-using-large-language-models)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估LLM生成代码的故障独立性与可靠性
-6. [EvoOtter: Evolutionary Reproduction Test Generator](/202607/09/2607.02854v1-evootter-evolutionary-reproduction-test-generator)  
+   evidence：使用约束引导的LLM自动检测和修复配置错误
+6. [PERFOPT-Bench: Evaluating Coding Agents on Software Performance Optimization](/202607/10/2607.07744v1-perfopt-bench-evaluating-coding-agents-on-software-performance-optimization)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：生成缺陷复现测试以提供补丁执行反馈
-7. [Cheap Code, Costly Judgment: A Case Study on Governable Agentic Software Engineering](/202607/09/2607.01087v1-cheap-code-costly-judgment-a-case-study-on-governable-agentic-software-engineering)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：用于可纠正AI辅助开发的证据和反馈循环
-8. [BeSpec: Behavior-Level Specification Alignment for Code Generation](/202607/09/2607.02949v1-bespec-behavior-level-specification-alignment-for-code-generation)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：行为级规范对齐，以确保生成的代码符合意图
-9. [Fixed-Set Robustness in Programming by Example: Example Corruption and Semantic Partition Recovery](/202607/09/2607.01280v1-fixed-set-robustness-in-programming-by-example-example-corruption-and-semantic-partition-recovery)  
+   evidence：评估功能正确的补丁与性能优化
+7. [Compete Then Collaborate: Frontier AI Teachers Build a Verifiable Curriculum to Improve a Coding Student Beyond Imitation](/202607/10/2607.08255v1-compete-then-collaborate-frontier-ai-teachers-build-a-verifiable-curriculum-to-improve-a-coding-student-beyond-imitation)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：使用单元测试验证和排名生成代码的基于执行的评判器
+8. [PairCoder++: Pair Programming as a Universal Paradigm for Verified Code-Driven Multimodal and Structured-Artifact Generation](/202607/10/2607.01883v1-paircoder-pair-programming-as-a-universal-paradigm-for-verified-code-driven-multimodal-and-structured-artifact-generation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：PBE中的测试预言鲁棒性和语义签名验证
-10. [UA-ChatDev: Uncertainty-Aware Multi-Agent Collaboration for Reliable Software Development](/202607/09/2607.02186v1-ua-chatdev-uncertainty-aware-multi-agent-collaboration-for-reliable-software-development)  
+   evidence：导航代理根据验证证据和执行结果审查程序
+9. [TATG: Tracking-Aware Testing Objective for LLM-based Test Generation](/202607/10/2607.03194v1-tatg-tracking-aware-testing-objective-for-llm-based-test-generation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于可靠软件开发和细化的不确定性感知多智能体框架
-11. [Characterizing and Bridging the Diagnostic Gap in eBPF Verifier Rejections](/202607/09/2607.02748v1-characterizing-and-bridging-the-diagnostic-gap-in-ebpf-verifier-rejections)  
+   evidence：基于LLM的测试生成与跟踪测试需求
+10. [AtomicCommitBench: Can Coding Agents Reconstruct Commit Histories from Squashed Patches?](/202607/10/2607.03332v1-atomiccommitbench-can-coding-agents-reconstruct-commit-histories-from-squashed-patches)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：重建证明以弥合eBPF程序修复中的诊断差距
+   evidence：评估代理从压缩补丁中重建提交历史的能力，以确保可维护性。
+11. [Semantic-aware and Self-improving Program Reduction via Agentic Large Language Models](/202607/10/2607.03766v1-semantic-aware-and-self-improving-program-reduction-via-agentic-large-language-models)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：用于语义感知程序缩减和调试的代理LLM
 
 
 <div class="dpr-home-promo-card">
