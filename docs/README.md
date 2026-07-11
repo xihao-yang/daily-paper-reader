@@ -6,74 +6,56 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-10
-- 运行时间：2026-07-10 21:28:33 UTC
+- 最新运行日期：2026-07-11
+- 运行时间：2026-07-11 21:02:29 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：11
+- 精读区：0
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
-- 精读：《Specification Grounding Drives Test Effectiveness for LLM Code》（9.0/10）, 《Bug Report Specification Refinement with Trajectory Guidance for Automated Program Repair》（9.0/10）
-- 速读：《DeepSWE: Measuring Frontier Coding Agents on Original, Long-Horizon Engineering Tasks》（8.0/10）, 《Copper: Unifying Correctness and Performance Specification in Code Generation》（7.0/10）, 《Round-Trip Mutation Testing: Translating Code to Natural Language Intent and back》（7.0/10）
+- 今日共生成 11 篇推荐（精读 0 篇，速读 11 篇）
+- 速读：《Formal Disco: Scalable Open-Ended Generation of Formally Verified Programs》（7.5/10）, 《Harnessing Code Agents for Automatic Software Verification》（7.5/10）, 《SEDCoT: Enhancing LLM-Based COBOL Code Translation via Symbolic Execution and Delta Debugging》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202607/10/README](/202607/10/README)
+- 详情：[/202607/11/README](/202607/11/README)
 
 ### 精读区论文标签
-1. [Specification Grounding Drives Test Effectiveness for LLM Code](/202607/10/2607.06636v1-specification-grounding-drives-test-effectiveness-for-llm-code)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：基于规格说明的测试有效性增强与LLM代码修复
-2. [Bug Report Specification Refinement with Trajectory Guidance for Automated Program Repair](/202607/10/2607.07882v1-bug-report-specification-refinement-with-trajectory-guidance-for-automated-program-repair)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：自动程序修复智能体与补丁正确性
-3. [ContextSniper: AntTrail's Token-Efficient Code Memory for Repository-Level Program Repair](/202607/10/2607.01916v3-contextsniper-anttrails-token-efficient-code-memory-for-repository-level-program-repair)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：用于仓库级基于学习的程序修复的令牌高效代码存储
-4. [Obey, Diverge, Collapse: Blind Obedience to Incorrect Instructions Drives Code LLMs to Irrecoverable Code Semantic Collapse](/202607/10/2607.04537v1-obey-diverge-collapse-blind-obedience-to-incorrect-instructions-drives-code-llms-to-irrecoverable-code-semantic-collapse)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：在迭代修复设置中评估模型对错误指令的抵抗力
-5. [KAT-Coder-V2.5 Technical Report](/202607/10/2607.05471v1-kat-coder-v25-technical-report)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：代理代码修复的可验证奖励和失败到通过的验证
-6. [SCOPE: Leveraging Subgoal Critiques for Code Generation](/202607/10/2607.05810v1-scope-leveraging-subgoal-critiques-for-code-generation)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：利用子目标评论和鲁棒性检查表确保代码生成的语义正确性
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [DeepSWE: Measuring Frontier Coding Agents on Original, Long-Horizon Engineering Tasks](/202607/10/2607.07946v1-deepswe-measuring-frontier-coding-agents-on-original-long-horizon-engineering-tasks)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：DeepSWE解决了测试可能导致正确的替代补丁失败或通过不完整补丁的问题。
-2. [Copper: Unifying Correctness and Performance Specification in Code Generation](/202607/10/2607.03130v1-copper-unifying-correctness-and-performance-specification-in-code-generation)  
+1. [Formal Disco: Scalable Open-Ended Generation of Formally Verified Programs](/202607/11/2607.04631v1-formal-disco-scalable-open-ended-generation-of-formally-verified-programs)  
+   标签：评分：7.5/10、query:apr-oracle
+   evidence：用于生成程序质量保证的形式化验证
+2. [Harnessing Code Agents for Automatic Software Verification](/202607/11/2607.06341v1-harnessing-code-agents-for-automatic-software-verification)  
+   标签：评分：7.5/10、query:apr-oracle
+   evidence：利用代码智能体进行自动软件验证和正确性保证
+3. [SEDCoT: Enhancing LLM-Based COBOL Code Translation via Symbolic Execution and Delta Debugging](/202607/11/2607.04092v1-sedcot-enhancing-llm-based-cobol-code-translation-via-symbolic-execution-and-delta-debugging)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：结合形式验证与合成以确保代码正确性
-3. [Round-Trip Mutation Testing: Translating Code to Natural Language Intent and back](/202607/10/2607.03223v1-round-trip-mutation-testing-translating-code-to-natural-language-intent-and-back)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：利用基于LLM的代码到意图转换作为测试预言进行变异测试
-4. [What Resolve Rate Hides: Trajectory Structure Diagnostics for Coding Agents](/202607/10/2607.06184v1-what-resolve-rate-hides-trajectory-structure-diagnostics-for-coding-agents)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：编码代理的轨迹结构诊断，用于评估补丁生成过程
-5. [SmartHomeSecure: Automated Detection and Repair of Smart Home Configuration Errors Using Large Language Models](/202607/10/2607.06748v1-smarthomesecure-automated-detection-and-repair-of-smart-home-configuration-errors-using-large-language-models)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：使用约束引导的LLM自动检测和修复配置错误
-6. [PERFOPT-Bench: Evaluating Coding Agents on Software Performance Optimization](/202607/10/2607.07744v1-perfopt-bench-evaluating-coding-agents-on-software-performance-optimization)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：评估功能正确的补丁与性能优化
-7. [Compete Then Collaborate: Frontier AI Teachers Build a Verifiable Curriculum to Improve a Coding Student Beyond Imitation](/202607/10/2607.08255v1-compete-then-collaborate-frontier-ai-teachers-build-a-verifiable-curriculum-to-improve-a-coding-student-beyond-imitation)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：使用单元测试验证和排名生成代码的基于执行的评判器
-8. [PairCoder++: Pair Programming as a Universal Paradigm for Verified Code-Driven Multimodal and Structured-Artifact Generation](/202607/10/2607.01883v1-paircoder-pair-programming-as-a-universal-paradigm-for-verified-code-driven-multimodal-and-structured-artifact-generation)  
+   evidence：使用符号执行生成测试套件以确保正确性的迭代修复框架
+4. [Intent-Based Mutation Testing: From Naturally Written Programming Intents to Mutants](/202607/11/2607.05149v1-intent-based-mutation-testing-from-naturally-written-programming-intents-to-mutants)  
+   标签：评分：6.5/10、query:apr-oracle
+   evidence：基于意图的变异测试，用于捕捉程序规范理解偏差
+5. [Can Large Language Models Generate Observability-Aware Code?](/202607/11/2607.05785v1-can-large-language-models-generate-observability-aware-code)  
+   标签：评分：6.5/10、query:apr-oracle
+   evidence：评估智能体生成代码的功能正确性和可观测性故障信号
+6. [Don't Blame the Large Language Model: How Scaffolding Evolution Shapes Coding Agent Quality](/202607/11/2607.03691v1-dont-blame-the-large-language-model-how-scaffolding-evolution-shapes-coding-agent-quality)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：导航代理根据验证证据和执行结果审查程序
-9. [TATG: Tracking-Aware Testing Objective for LLM-based Test Generation](/202607/10/2607.03194v1-tatg-tracking-aware-testing-objective-for-llm-based-test-generation)  
+   evidence：研究智能体脚手架演化对软件工程任务质量的影响
+7. [Semantic-aware and Self-improving Program Reduction via Agentic Large Language Models](/202607/11/2607.03766v1-semantic-aware-and-self-improving-program-reduction-via-agentic-large-language-models)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：基于LLM的测试生成与跟踪测试需求
-10. [AtomicCommitBench: Can Coding Agents Reconstruct Commit Histories from Squashed Patches?](/202607/10/2607.03332v1-atomiccommitbench-can-coding-agents-reconstruct-commit-histories-from-squashed-patches)  
+   evidence：用于调试和修复的语义感知程序缩减
+8. [Heaviside Continuity of Rolling Coefficients for Eliminating Epistemic Entropy in Large Language Models](/202607/11/2607.04562v1-heaviside-continuity-of-rolling-coefficients-for-eliminating-epistemic-entropy-in-large-language-models)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：评估代理从压缩补丁中重建提交历史的能力，以确保可维护性。
-11. [Semantic-aware and Self-improving Program Reduction via Agentic Large Language Models](/202607/10/2607.03766v1-semantic-aware-and-self-improving-program-reduction-via-agentic-large-language-models)  
+   evidence：正确性谓词的验证优先执行框架
+9. [Finetuning Lightweight LLMs for Control Flow Graph Generation](/202607/11/2607.04582v1-finetuning-lightweight-llms-for-control-flow-graph-generation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于语义感知程序缩减和调试的代理LLM
+   evidence：用于生成控制流图作为程序表示的神经模型
+10. [An Exploration of Agentic Information Fusion for Test Maintenance Prediction](/202607/11/2607.04786v1-an-exploration-of-agentic-information-fusion-for-test-maintenance-prediction)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：使用语义和词法分析预测测试维护需求
+11. [InvWeaver: Deductive Feedback for Invariant Synthesis in Interacting-Loop Programs](/202607/11/2607.05478v1-invweaver-deductive-feedback-for-invariant-synthesis-in-interacting-loop-programs)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：用于不变式合成和程序验证的神经符号框架
 
 
 <div class="dpr-home-promo-card">
