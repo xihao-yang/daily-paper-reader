@@ -1,0 +1,329 @@
+Title: Knowing When to Stop: Predicting Execution-Consistency Convergence in Text-to-SQL
+
+URL Source: https://arxiv.org/pdf/2607.03991v1
+
+Published Time: Tue, 07 Jul 2026 01:49:16 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Knowing When to Stop: Predicting Execution-Consistency Convergence in Text-to-SQL 
+
+Yaron Anavi, Mor Aisenberg, Nadav Nesher, Elena Khabibullina, Isabella Cattinelli 
+
+GIGASPACES 
+
+Abstract 
+
+Repeated LLM calls are the standard way to estimate how trustworthy a Text-to-SQL re-sult is: run the pipeline multiple times, judge each SQL execution, and use the consistency of the verdicts as a confidence signal. The open question is when to stop, when the con-sistency has converged . We formulate this as a convergence-prediction problem and train a family of lightweight 1-D models that observe the running consistency trajectory and decide, at each step, whether further runs are unlikely to shift it materially, and we benchmark them against a principled Beta-Bernoulli stopping rule and a learned run-count baseline. On the BIRD benchmark and two production customer datasets, our method adapts its stopping point to each user question, halting sooner when con-sistency converges early and continuing longer when it converges late. We further show that the weak serial correlation between runs lets us permute their order as a training augmenta-tion, controlled by a tunable shuffling weight. Performance stays consistent across the three datasets, and to mimic an imperfect production judge we inject noise into the correct/incorrect verdicts obtained by comparing the generated and ground-truth SQL results, showing that the method still predicts convergence reliably. 
+
+1 Introduction 
+
+Modern production Text-to-SQL pipelines translate a user question into SQL, execute it, and check whether its execution result matches the expected answer (Li et al., 2023; Lei et al., 2025). Because large language models can respond inconsistently to the same prompt, a single run is an unreliable witness, so pipelines run the same question several times and use the consistency of the outcomes as a trust signal: high agreement suggests the answer can be trusted, while low agreement suggests the model is uncertain or the question is ambiguous and may need a clarifying follow-up. The stakes 
+
+Figure 1: Stopping-criterion pipeline. A user question is repeatedly run by an LLM that produces SQL via Text-to-SQL; each generated SQL’s correctness is judged by examining the produced SQL and its execution re-sult. This produces a sequence of binary outcomes, transposed into a 1-D consistency signal. We propose a framework in which, once a correctness judge is plugged in, a lightweight model predicts when the sequence of judge verdicts has converged. 
+
+are higher for Text-to-SQL than for free-form text: a wrong column, a missing join condition, or an off-by-one filter produces an entirely wrong result table rather than a gracefully degraded answer. This reliability comes at a cost. The more runs we collect, the more we can trust the consistency estimate, but each run is a full generation plus exe-cution, which in production translates directly into latency and budget (Aggarwal et al., 2023; Li et al., 2024). Fixed-budget stopping, running every ques-tion a preset number of times, wastes calls on easy questions that settle immediately and starves hard ones that need more. The central question is there-fore: when has the consistency level converged enough that further runs are unlikely to change it? 
+
+Answering it turns consistency estimation from a fixed-budget procedure into an adaptive one. We study this question on both benchmark and 
+
+> arXiv:2607.03991v1 [cs.LG] 4 Jul 2026
+
+production customer datasets. For each question we hold an expected (ground-truth) SQL along-side the model-generated SQL; executing both and comparing their result tables turns every run into a binary True /False outcome. From the running sequence of these outcomes we learn the run at which the consistency converges, so the pipeline can stop there and read off the consistency reached just before convergence. In a real production sys-tem the expected SQL does not exist; instead one plugs in a judge meant to approximate this com-parison as closely as possible, that is, to decide whether the generated SQL produces the desired table. To test whether our method would survive such a judge, we inject label noise that simulates an imperfect one and ask whether convergence is still predictable. If plugging in a judge of Text-to-SQL correctness in place of the ground-truth comparison still lets us predict convergence, then such a judge could be dropped into production. 
+
+Contributions. 
+
+• We present a method that allocates the right run budget for judging Text-to-SQL correct-ness: it reads the running consistency as a 1-D signal and outputs both when to stop and the consistency at that point (Sections 3 and 4). • We train a family of lightweight convergence predictors that, at each LLM run and SQL ex-ecution, classify whether the consistency has converged and detect the first converged run, outperforming both a fixed-budget rule that runs every question a preset number of times and a principled Beta-Bernoulli stopping rule (Section 5). • We stress-test the method by injecting label noise to simulate an imperfect judge and show it degrades gracefully, supporting its use as a drop-in stopping layer above any binary exe-cution judge. • We find the serial correlation between nearby runs is weak, justifying run-order permutation as a training augmentation, controlled by a tunable shuffling weight (Sections 3 and 4). 
+
+2 Related Work 
+
+Our work draws on four threads: judging LLM responses, Text-to-SQL generation, consistency in repeated LLM outputs, and adaptive stopping for LLM inference. 
+
+Judging LLM responses. Using one LLM to judge or critique another’s output is now a large, ac-tive area, spanning general-purpose evaluators (Liu et al., 2023; Zheng et al., 2023) and critic models that propose corrections (Gou et al., 2024). The same idea is increasingly applied to Text-to-SQL, where learned judges decide execution correctness or semantic equivalence (Kim et al., 2025) and actor–critic or clause-wise critics detect and repair errors (Zheng et al., 2024; Chen et al., 2025; Askari et al., 2024). We use a lab-controlled, ground-truth judge as a clean stand-in; in production, exactly these learned judge models are what would plug in above our pipeline. 
+
+Text-to-SQL generation. Generating SQL from natural language is a large field of its own, from sequence-to-sequence models (Zhong et al., 2017) and cross-domain and enterprise benchmarks (Yu et al., 2018; Lei et al., 2025) to modern LLM pipelines built on schema linking, decomposition, and self-correction (Pourreza and Rafiei, 2023; Pourreza et al., 2025), and to large-scale bench-marking of such methods (Gao et al., 2024). Our experiments use the financial-domain subset of the BIRD benchmark (Li et al., 2023), and our pipeline takes the per-run correctness outcome these sys-tems produce as input rather than contributing to generation itself. 
+
+Consistency in repeated LLM outputs. Self-Consistency (Wang et al., 2023) samples multi-ple chain-of-thought paths and takes the majority answer; Universal Self-Consistency (Chen et al., 2023b) extends this to open-ended generation, and Brown et al. (2024) show that repeated sam-pling improves answer coverage on hard reasoning benchmarks. Consistency has also been linked to calibration: Xiong et al. (2024) find behavioral consistency more calibrated than verbalized con-fidence, and Kuhn et al. (2023) propose semantic uncertainty for generation. We adopt majority-vote consistency as our signal. 
+
+Adaptive stopping criteria for LLM inference. 
+
+Adaptive-Consistency (Aggarwal et al., 2023) places Dirichlet/beta-binomial posteriors over the running answer tallies and stops once the major-ity lead is statistically secure, cutting the sample budget sharply at negligible accuracy cost; we in-stantiate its binary case as a Beta-Bernoulli poste-rior stopping rule and use it as our principled sta-tistical baseline (Section 5). Early-Stopping Self-Consistency (Li et al., 2024) is a simpler, parameter-light rule that halts once a window of samples agrees. Closest to our setting, Qu et al. (2025) model an LLM-ensemble judge’s outputs with a mixture of Beta–Binomial distributions and ap-ply conformal-prediction-based adaptive stopping during sampling; we instead predict per-question execution-consistency convergence with a learned signal model. Relatedly, Chen et al. (2023a) cas-cade models by response confidence to cut infer-ence cost. 
+
+3 Problem Setup 
+
+We focus on a specific notion of consistency: agree-ment of the post-process evaluation of Text-to-SQL responses. Each LLM response is turned into SQL through chain-of-thought reasoning guided by prompt rules, executed against the database, and labeled True when the resulting table matches the expected table exactly or within a similarity thresh-old (Section 4) and False otherwise. We study this in a controlled lab setting: each label is created by comparing the generated table against the dataset’s ground-truth expected table, with no learned judge or critic model in the loop. Collecting these labels across n runs of the same question, we define the consistency as Consistency (n) = max  NTrue (n), N False (n)
+
+n ,
+
+(1) where NTrue (n) and NFalse (n) denote the counts of the two outcome classes. Figure 3 (Appendix A) shows how this value settles as runs accumulate. Because it takes the larger of the two counts, a ques-tion whose runs are all False , the generated and expected tables never match, is 100% consistent even though the Text-to-SQL output is uniformly wrong; we are measuring the consistency of the Text-to-SQL behavior, not necessarily its success. 
+
+Convergence criterion. For a prefix of n binary responses, we define the consistency as converged 
+
+at run n if it stays within K percentage points of C(n) over the next W runs: Converged (n, W, K ) = 1     
+
+> 
+> max
+> n<t ≤n+WC(t)−C(n)≤K
+> 
+
+(2) where 1[·] equals 1 when the bracketed condition holds and 0 otherwise. Throughout this work we set W = 30 and K = 0 .05 . We chose a window-based criterion because it is simple yet effective: in                      
+
+> Table 1: Lag-kautocorrelation of the per-question binary Text-to-SQL correctness sequence (the
+> True /False outcomes), averaged across questions and datasets. Observed values stay within ±0.05 of zero, indicating only weak serial dependence.
+> Dataset lag-1 lag-2 lag-3
+> BIRD −0.0023 −0.0143 −0.0380
+> Dataset A −0.0333 −0.0092 0.0015
+> Dataset B 0.0198 −0.0073 −0.0009
+
+our datasets, once the consistency stays within K
+
+percentage points over a 30 -run window, it remains within K for the rest of the runs with empirical probability 0.995 . The fixed W -run window also gives a concrete way to evaluate convergence: de-ciding whether run n has converged requires the next W runs as a verification window, so conver-gence is hard to evaluate once too few runs remain to fill it. 
+
+Are runs i.i.d., and what does this imply? 
+
+Whether repeated runs are independent shapes how we model them, in particular whether to account for temporal correlation. Recent work shows they are not fully i.i.d.: even at temperature 0, the same prompt can produce different outputs depending on serving conditions such as batch size and load (He and Thinking Machines Lab, 2025). This matters because, if we model each run’s True /False out-come as i.i.d. Bernoulli with success probability 
+
+p, the running consistency is the empirical mean 
+
+¯Xn = Sn/n (where Sn counts the True outcomes in the first n runs), whose variance is 
+
+Var( ¯Xn) = p(1 − p)
+
+n , (3) Since this variance is highly correlated with con-vergence and shrinks as p grows, the running con-sistency at run n is itself a good feature: it pre-dicts how quickly the variance will become small, which in turn signals convergence. The lag-k au-tocorrelation of each question’s outcome sequence (k = 1 , 2, 3) stays near zero across datasets (Ta-ble 1), so the i.i.d. assumption is a reasonable ap-proximation. 
+
+4 Methodology 
+
+We treat the running consistency as a 1-D signal and predict when it has converged, combining two input schemes with two task variants , evaluated both under clean ground-truth labels and under in-jected label noise (Section 5). The injected noise flips each True /False comparison outcome with some probability, a realistic and fairly close approx-imation of an imperfect judge, though still not an exact model of a real one, whose errors need not be random. 
+
+4.1 Inputs and Tasks 
+
+Let con (n) denote the consistency after n
+
+runs (Equation 1). We feed the sequence  con (1) , . . . , con (n) to the model in two ways: • Feature-based scheme: a hand-crafted fea-ture vector mn ∈ Rd summarizing the tra-jectory up to run n. We use d = 6 features: (i) the run index n; (ii) the current consistency con (n); and (iii) the local sample variance 
+
+σ2
+
+> w
+
+(n) = 1
+
+> w
+
+Pnt=n−w+1 
+
+ con (t) − ¯con w(n)2
+
+of the consistency over the most recent w runs for w ∈ { 5, 10 , 15 , 30 }, where ¯con w(n) is the window mean. When n < w , we use the runs available so far. • Raw-signal scheme: the raw consistency tra-jectory  con (1) , . . . , con (n) fed directly to a 1-D deep model. On top of either scheme, we train two task vari-ants. The first is classification : predict, at each run 
+
+n, the binary label yn = Converged (n, 30 , 0.05) 
+
+from Equation 2, evaluated with ROC AUC. The second is detection : we reuse the same models but tune them for this task , which classify, at any given run, whether convergence has been reached, and stop at the first run they flag as converged, optimized to fire as close as possible to the first 
+
+converged run, evaluated with RMSE between the detected run ndetected and the true first converged run nfirst_conv :
+
+Ldetect =
+
+vuut 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+ n(i) 
+
+> detected
+
+− n(i)
+
+> first_conv
+
+2. (4) Here N is the number of test examples. Because a premature stop returns an unconverged estimate, we bias the detector toward later stopping: although the natural classification threshold is 0.5, we tune the decision threshold on the validation set toward later detection, so the method is biased against firing too early. Figure 1 illustrates the per-step decision pipeline. 
+
+4.2 Data Augmentation via Permutation 
+
+Since runs exhibit weak temporal dependence (Ta-ble 1), we train on a mix of the natural run order and permuted variants. A hyperparameter βshuffle 
+
+weights the original order against the permutations, tuned per dataset during training. At test time the run order is never permuted, so evaluation reflects the actual sequential setting. 
+
+4.3 Models 
+
+For the feature-based scheme we use XGBoost ,which is more expressive, and logistic regression ,which is simpler and harder to overfit on our mod-est data. For the raw-signal scheme we use a small 1-D temporal convolutional network (TCN) (Bai et al., 2018) that learns its own representation through dilated 1-D convolutions. With more data, we expect deeper and more complex mod-els, such as transformer-based 1-D networks like PatchTST (Nie et al., 2023), to be a better fit. 
+
+5 Experiments and Results 
+
+5.1 Datasets 
+
+Our dataset consists of multiple user-asked ques-tions, each associated with multiple runs of the same user question. Each run is assigned a binary outcome, True or False , based on whether the gen-erated SQL produces a result matching that of the manually labeled expected SQL (Figure 2). Our Text-to-SQL system is inspired by BIRD (Li et al., 2023) and uses chain-of-thought reasoning over the database schema, business rules, target SQL dialect, and few-shot similar-question patterns. All generations were produced with Azure OpenAI GPT-4.1 (OpenAI, 2025). We evaluate on three datasets (Table 2). The first is the finance-domain subset of the public BIRD benchmark (Li et al., 2023), which we refer to as BIRD throughout. The other two are anonymized customer datasets from the solar-energy and outdoor-products manufacturing do-mains, used with the data providers’ permission. The three differ in number of questions ( 83 , 25 , 19 )and mean Text-to-SQL consistency ( ∼84%–95%), where a question’s consistency is the majority frac-tion over its 100 runs, the larger share of runs agree-ing on whether the generated SQL’s result matches that of the expected SQL. 
+
+Ground-truth labeling. For each run, the binary outcome True /False comes from comparing the Table 2: Summary statistics for the three evaluation datasets. The BIRD row corresponds to a subset of the public BIRD benchmark; the remaining two are anonymized customer datasets. All use 100 runs per question.             
+
+> Dataset Questions Max runs Mean consistency (%)
+> BIRD 83 100 95.30 Dataset A 25 100 84.08 Dataset B 19 100 93.53
+
+table executed from the generated SQL against the table from the manually annotated expected SQL. The rule is tailored to our product needs but can be tightened or loosened per deployment: • Identical tables (same rows, columns, values) are labeled True .• Otherwise, the run is labeled True if (i) the expected columns are a subset of the gener-ated columns (so all expected information is present, possibly alongside extras) and (ii) the subset tables extracted from the shared columns are identical. Figure 2 (Appendix A) illustrates the labeling pipeline. 
+
+5.2 Classification Scheme: Convergence Prediction 
+
+We evaluate every model with strict question-level 
+
+5-fold cross-validation: each fold holds out the data extracted from ∼20% of questions for test, and the data from the remaining four folds is split into ∼70% train and ∼10% validation (used for early stopping and hyperparameter selection). All metrics are averaged over the five folds. 
+
+Training data. For each question, we slide over runs and form examples of the prefix up to n (as feature vector or raw consistency sequence) paired with the label yn = Converged (n, 30 , 0.05) from Equation 2. To leave room for the 30 -run verifica-tion window, we restrict n ≤ 70 . For instance, in BIRD this extracts 70 prefixes from each of its 83 questions, a binary-classification dataset of 
+
+70 × 83 = 5810 examples (unshuffled; the shuffled regime adds 10 × more, the optimum from our grid search). 
+
+Per-dataset training. A separate model is trained per dataset, reflecting realistic deployment and serving as a generalization check across the three domains. 
+
+Models. XGBoost, logistic regression, and a 1-D TCN, together with the Beta-Bernoulli stopping rule as a principled statistical baseline. For each learned model, hyperparameters are selected by grid search on the validation fold. 
+
+Shuffled vs. unshuffled. In the shuffled regime we add 10 × permuted prefixes per question, ran-dom permutations of the original run order, fixed once to keep the comparison strict, with βshuffle 
+
+weighting the original ordering against the permu-tations. The unshuffled regime uses only the natural order. Test order is never permuted. 
+
+Baselines. We compare against two baselines. The first, runs-only , is the de-facto fixed-budget rule used in production. The second is a Beta-Bernoulli stopping rule, the binary-case reduc-tion of Adaptive-Consistency (Aggarwal et al., 2023): after each run we form the posterior 
+
+Beta(1+ NTrue , 1+ NFalse ) over the success proba-bility and stop once its credible-interval width falls below a threshold. Its parameters, the interval level and width threshold, are tuned on the validation fold, as with the learned models. For completeness we also evaluate single-feature inputs (consistency only, variation only). 
+
+5.3 Classification: AUC across Configurations 
+
+Table 3 reports ROC AUC averaged across the three datasets and five folds. Shuffled augmentation im-proves every model, dramatically for the raw-signal TCN (from 0.760 to 0.881 ) and marginally for the feature-based models. XGBoost with the full fea-ture set is best on clean labels at 0.913 AUC , with logistic regression ( 0.908 ) and the TCN ( 0.881 )close behind. Under label noise the models degrade gracefully: XGBoost holds at 0.887 at 5% flips and 
+
+0.878 at 15% , and the feature-based models stay above 0.85 even at 15% . All comfortably outper-form the Beta-Bernoulli (ASC) baseline, which reaches 0.876 on clean labels and falls to 0.808 at 
+
+15% .
+
+5.4 Detection Scheme 
+
+The detection scheme reuses the classification scheme’s data construction, splits, model families, hyperparameter grid, and shuffled/unshuffled vari-ants. The objective is what changes: detection predicts when convergence first happens. Working at the level of the whole question rather than indi-vidual run prefixes, we compare the model’s first-firing run ndetected to the true first converged run Table 3: ROC AUC for convergence prediction, av-eraged across three datasets and five folds. Headline configurations per model family, the run-count baseline, and the Beta-Bernoulli (Adaptive-Consistency, ASC) stopping rule. The full single-feature ablation is in Ap-pendix A (Table 7). “Shuf.” indicates permutation-based augmentation; the 5% and 15% noise columns randomly flip that fraction of the True /False labels.                                                   
+
+> Method Features Shuf. clean 5% 15%
+> Logistic runs+cons.+var. yes 0.908 0.876 0.870 Logistic runs+cons.+var. no 0.905 0.867 0.861 Logistic runs only yes 0.744 0.836 0.859 Logistic runs only no 0.735 0.835 0.857 XGBoost runs+cons.+var. yes 0.913 0.887 0.878 XGBoost runs+cons.+var. no 0.899 0.882 0.856 TCN raw signal yes 0.881 0.862 0.861 TCN raw signal no 0.760 0.837 0.860 ASC Beta posterior —0.876 0.848 0.808
+
+nfirst_conv , then select the configuration minimizing the RMSE between them (Equation 4), reported as an average across folds and models. Hyperpa-rameters here are tuned to place the stopping run correctly, minimizing this run-level RMSE, rather than to maximize accuracy at each individual run. The decision threshold, fixed at 0.5 for classifica-tion, is itself tuned in this setting, controlling how sensitive detection is and hence whether it fires too early or too late. 
+
+5.5 Detection: RMSE across Configurations 
+
+Table 4 reports detection RMSE across model fam-ilies. Logistic regression with the full feature set is best at RMSE 8.18 , ahead of XGBoost, the TCN, and the runs-only baseline. It is resilient to noise, holding at 8.21 at 5% flips and 8.30 at 
+
+15% . Shuffled augmentation again helps across models, with its clearest payoff on detection (lo-gistic: 8.18 vs. 9.43 unshuffled). All outperform the Beta-Bernoulli (ASC) baseline, which trails at 12 .82 and degrades further under noise. Our method also reduces total LLM calls: summed across all questions, it uses 35% fewer than the Beta-Bernoulli baseline. If we focus on the ques-tions that converge very fast, within the first 10 
+
+runs ( 21% of the dataset), our method saves 42% of runs compared to the Beta-Bernoulli baseline and is also more accurate over that interval (RMSE ≈ 5
+
+vs. ≈ 12 runs). These call savings are not uniform across questions: the method reduces calls when consistency converges early but may use more than the baseline when it converges late, where the addi-tional calls yield a more accurate consistency esti-mate. We expect this adaptivity to matter most on datasets with large variation in convergence points, where no single fixed budget fits all questions well. 
+
+Table 4: Detection RMSE between ndetected and the true first converged run nfirst_conv , averaged across three datasets and five folds (lower is better). Headline config-urations per family, the run-count baseline, and the Beta-Bernoulli (ASC) rule; the full single-feature ablation is in Appendix A (Table 8). “Shuf.” indicates permutation-based augmentation; the 5% and 15% noise columns randomly flip that fraction of the True /False labels.                                                   
+
+> Method Features Shuf. clean 5% 15%
+> Logistic runs+cons.+var. yes 8.18 8.21 8.30 Logistic runs+cons.+var. no 9.43 8.98 8.59 Logistic runs only yes 12.25 11.49 9.70 Logistic runs only no 14.22 13.14 10.02 XGBoost runs+cons.+var. yes 9.13 10.18 9.44 XGBoost runs+cons.+var. no 9.32 11.70 10.00 TCN raw signal yes 12.07 10.69 9.86 TCN raw signal no 14.22 16.28 15.41 ASC Beta posterior —12.82 14.56 18.33
+
+6 Conclusion and Future Directions 
+
+We present a framework that plugs a Text-to-SQL correctness judge into a convergence-prediction pipeline: from the running consistency of its binary labels, we predict when that consistency has con-verged and stop sampling early, saving compute and improving accuracy over a fixed-run budget. Beyond classifying whether convergence has oc-curred, our method also detects when it first hap-pens, and it outperforms both a statistical (non-learning) Beta-Bernoulli stopping rule and the fixed-run regime. We further use the run auto-correlation to quantify how close the data is to i.i.d., and apply order-permutation augmentation at a strength tuned to that measurement, yielding more useful training data. It also degrades grace-fully under label noise (AUC 0.908 → 0.876 at 
+
+5% flips), making it a promising candidate for pro-duction settings where the judge is itself a learned, noisy component. One natural direction follows: identifying which execution-correctness judge models best fit this framework by studying how each judge’s error pro-file interacts with the convergence signal. Limitations 
+
+Our labeled-data volume is limited: with more data, deeper sequence models could overtake the feature-based models that dominate this regime. The ex-pected (gold) SQL is written by human annotators, so defining correctness involves subjective judg-ment and the resulting binary labels are noisy. Fi-nally, all runs use one model (GPT-4.1), so results may not fully transfer to other models or serving conditions. 
+
+References 
+
+Pranjal Aggarwal, Aman Madaan, Yiming Yang, and Mausam. 2023. Let’s sample step by step: Adaptive-consistency for efficient reasoning and coding with LLMs. In Proceedings of EMNLP .Arian Askari, Christian Poelitz, and Xinye Tang. 2024. MAGIC: Generating self-correction guide-line for in-context Text-to-SQL. arXiv preprint arXiv:2406.12692 .Shaojie Bai, J. Zico Kolter, and Vladlen Koltun. 2018. An empirical evaluation of generic convolutional and recurrent networks for sequence modeling. arXiv preprint arXiv:1803.01271 .Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald Clark, Quoc V. Le, Christopher Ré, and Azalia Mirho-seini. 2024. Large language monkeys: Scaling infer-ence compute with repeated sampling. arXiv preprint arXiv:2407.21787 .Jikai Chen, Leilei Gan, Ziyu Zhao, Zechuan Wang, Dong Wang, and Chenyi Zhuang. 2025. SQLCritic: Correcting Text-to-SQL generation via clause-wise critic. arXiv preprint arXiv:2503.07996 .Lingjiao Chen, Matei Zaharia, and James Zou. 2023a. FrugalGPT: How to use large language models while reducing cost and improving performance. arXiv preprint arXiv:2305.05176 .Xinyun Chen, Renat Aksitov, Uri Alon, Jie Ren, Ke-fan Xiao, Pengcheng Yin, Sushant Prakash, Charles Sutton, Xuezhi Wang, and Denny Zhou. 2023b. Uni-versal self-consistency for large language model gen-eration. arXiv preprint arXiv:2311.17311 .Dawei Gao, Haibin Wang, Yaliang Li, Xiuyu Sun, Yichen Qian, Bolin Ding, and Jingren Zhou. 2024. Text-to-SQL empowered by large language models: A benchmark evaluation. Proceedings of the VLDB Endowment .Zhibin Gou, Zhihong Shao, Yeyun Gong, Yelong Shen, Yujiu Yang, Nan Duan, and Weizhu Chen. 2024. CRITIC: Large language models can self-correct with tool-interactive critiquing. In ICLR .Horace He and Thinking Machines Lab. 2025. Defeating nondeterminism in LLM infer-ence. https://thinkingmachines.ai/blog/ defeating-nondeterminism-in-llm-inference/ .Thinking Machines Lab: Connectionism. Heegyu Kim, Jeon Taeyang, SeungHwan Choi, Seung-taek Choi, and Hyunsouk Cho. 2025. FLEX: Expert-level false-less EXecution metric for Text-to-SQL benchmark. In Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Asso-ciation for Computational Linguistics: Human Lan-guage Technologies (Volume 1: Long Papers) , pages 4448–4475. Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. 2023. Semantic uncertainty: Linguistic invariances for un-certainty estimation in natural language generation. In ICLR .Fangyu Lei, Jixuan Chen, Yuxiao Ye, Ruisheng Cao, Dongchan Shin, Hongjin Su, Zhaoqing Suo, Hongcheng Gao, Wenjing Hu, Pengcheng Yin, Victor Zhong, Caiming Xiong, Ruoxi Sun, Qian Liu, Sida Wang, and Tao Yu. 2025. Spider 2.0: Evaluating lan-guage models on real-world enterprise Text-to-SQL workflows. In International Conference on Learning Representations (ICLR) . ArXiv:2411.07763. Jinyang Li, Binyuan Hui, Ge Qu, Jiaxi Yang, Binhua Li, Bowen Li, Bailin Wang, Bowen Qin, Ruiying Geng, Nan Huo, Xuanhe Zhou, Chenhao Ma, Guo-liang Li, Kevin C.C. Chang, Fei Huang, Reynold Cheng, and Yongbin Li. 2023. Can LLM already serve as a database interface? a big bench for large-scale database grounded Text-to-SQLs (BIRD). In 
+
+Advances in Neural Information Processing Systems (NeurIPS) .Yiwei Li, Peiwen Yuan, Shaoxiong Feng, Boyuan Pan, Xinglin Wang, Bin Sun, Heda Wang, and Kan Li. 2024. Escape sky-high cost: Early-stopping self-consistency for multi-step reasoning. In ICLR .Yang Liu, Dan Iter, Yichong Xu, Shuohang Wang, Ruochen Xu, and Chenguang Zhu. 2023. G-Eval: NLG evaluation using GPT-4 with better human alignment. In Proceedings of EMNLP .Scott M. Lundberg and Su-In Lee. 2017. A unified approach to interpreting model predictions. In Ad-vances in Neural Information Processing Systems (NeurIPS) .Yuqi Nie, Nam H. Nguyen, Phanwadee Sinthong, and Jayant Kalagnanam. 2023. A time series is worth 64 words: Long-term forecasting with transformers. In 
+
+ICLR .OpenAI. 2025. GPT-4.1. https://openai.com/ index/gpt-4-1/ .Mohammadreza Pourreza, Hailong Li, Ruoxi Sun, Yeounoh Chung, Shayan Talaei, Gaurav Tarlok Kakkar, Yu Gan, Amin Saberi, Fatma Ozcan, and Sercan O. Arik. 2025. CHASE-SQL: Multi-path rea-soning and preference-optimized candidate selection in Text-to-SQL. In ICLR .Mohammadreza Pourreza and Davood Rafiei. 2023. DIN-SQL: Decomposed in-context learning of Text-to-SQL with self-correction. In Advances in Neural Information Processing Systems (NeurIPS) .Huaizhi Qu, Inyoung Choi, Zhen Tan, Song Wang, Suk-won Yun, Qi Long, Faizan Siddiqui, Kwonjoon Lee, and Tianlong Chen. 2025. Efficient MAP estimation of LLM judgment performance with prior transfer. 
+
+arXiv preprint arXiv:2504.12589 .Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. 2023. Self-consistency improves chain of thought reasoning in language models. In ICLR .Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie Fu, Junxian He, and Bryan Hooi. 2024. Can LLMs express their uncertainty? an empirical evaluation of confidence elicitation in LLMs. In ICLR .Tao Yu, Rui Zhang, Kai Yang, Michihiro Yasunaga, Dongxu Wang, Zifan Li, James Ma, Irene Li, Qingn-ing Yao, Shanelle Roman, Zilin Zhang, and Dragomir Radev. 2018. Spider: A large-scale human-labeled dataset for complex and cross-domain semantic parsing and Text-to-SQL task. In Proceedings of EMNLP .Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. 2023. Judging LLM-as-a-Judge with MT-Bench and chatbot arena. In Advances in Neural Information Processing Sys-tems (NeurIPS) .Ziyang Zheng, Haipeng Jing, Canyu Rui, Askar Ham-dulla, and Dong Wang. 2024. An actor-critic approach to boosting Text-to-SQL large language model. arXiv preprint arXiv:2410.22082 .Victor Zhong, Caiming Xiong, and Richard Socher. 2017. Seq2SQL: Generating structured queries from natural language using reinforcement learning. arXiv preprint arXiv:1709.00103 .
+
+A Experimental Setup 
+
+This appendix provides additional details on our experimental setup, hyperparameter search, and per-dataset performance. 
+
+Hyperparameter search. For each fold and each model family we ran a grid search over the hy-perparameters below and kept the configuration with the best validation performance (ROC AUC for classification, RMSE for detection). For the learned models, the shuffled-data weight βshuffle ,which trades the natural run order against its per-muted copies, is searched jointly with each model’s own hyperparameters. • Logistic regression: the regularization param-eter C and the elastic-net mixing l1_ratio ,with the penalty fixed to elastic-net and the 
+
+saga solver. • XGBoost: max_depth , learning_rate ,
+
+n_estimators , min_child_weight , and 
+
+gamma .• 1-D TCN: the architecture is fixed (described below); we search dropout, learning rate, and batch size, with the number of epochs set by early stopping on the validation fold. • Beta-Bernoulli baseline: the credible-interval level and the interval-width thresh-old at which to stop, with the prior fixed to 
+
+Beta(1 , 1) .
+
+TCN architecture. The raw-signal model is a small fixed network: three dilated 1-D convolutions (kernel 3, 16 channels, dilations 1, 2, 4, a 15 -run receptive field, with “same” padding to preserve length), then global average pooling and a linear head to a single sigmoid logit. The pooling makes it length-agnostic, so the same model applies at every run n; dropout, tuned on the validation fold, is its main regularizer. 
+
+Per-dataset performance. Best full-feature con-figuration per dataset (Table 5), showing perfor-mance is consistent across domains: AUC stays in 
+
+[0 .892 , 0.920] and RMSE in [7 .63 , 8.59] .
+
+Table 5: Per-dataset performance of the best logistic-regression configuration using all features. AUC mea-sures convergence-prediction quality, and RMSE mea-sures the error in detecting the first converged run.         
+
+> Dataset AUC RMSE
+> BIRD 0.920 8.33 Dataset A 0.911 8.59 Dataset B 0.892 7.63
+
+Feature importance. Mean absolute SHAP val-ues (Lundberg and Lee, 2017) for the XGBoost full-feature classification model (Table 6); run count and current consistency dominate. 
+
+Full ablation tables. Complete single-feature ab-lations for classification (Table 7) and detection (Table 8). Figure 2: Ground-truth labeling pipeline. For each run, the table executed from the generated SQL is compared against the table executed from the manually annotated expected SQL. Identical tables are labeled True ; otherwise, if the generated table has at least as many columns as expected (so all expected information is present), a value-by-value comparison is performed. 
+
+Figure 3: Consistency as a function of the number of runs for an example question. As runs accumulate the consistency settles; our model detects the run at which it has converged and reads off the consistency estimate at that point, close to the first truly converged run. The shaded band marks the ±5 pp convergence window checked over the following W = 30 runs. Table 6: Mean absolute SHAP values for the XGBoost full-feature convergence-classification model.            
+
+> Feature Mean SHAP
+> Number of runs ( n)1.931 Current consistency C (n)0.906 Variation σ230 0.685 Variation σ215 0.350 Variation σ210 0.107 Variation σ250.057
+
+Table 7: Full classification results (ROC AUC), all fea-ture configurations. The 5% and 15% noise columns randomly flip that fraction of the True /False labels. 
+
+Method Features Shuf. clean 5% 15% 
+
+Logistic runs+cons.+var. yes 0.908 0.876 0.870 Logistic runs+cons.+var. no 0.905 0.867 0.861 Logistic cons. only yes 0.812 0.468 0.557 Logistic cons. only no 0.826 0.563 0.557 Logistic variation only yes 0.784 0.642 0.668 Logistic variation only no 0.812 0.612 0.660 Logistic runs only yes 0.744 0.836 0.859 Logistic runs only no 0.735 0.835 0.857 XGBoost runs+cons.+var. yes 0.913 0.887 0.878 XGBoost runs+cons.+var. no 0.899 0.882 0.856 XGBoost cons. only yes 0.741 0.718 0.683 XGBoost cons. only no 0.723 0.730 0.664 XGBoost variation only yes 0.805 0.715 0.672 XGBoost variation only no 0.794 0.707 0.674 XGBoost runs only yes 0.739 0.830 0.858 XGBoost runs only no 0.725 0.828 0.853 TCN raw signal yes 0.881 0.862 0.861 TCN raw signal no 0.760 0.837 0.860 ASC Beta posterior — 0.876 0.848 0.808 
+
+Table 8: Full detection results (RMSE), all configura-tions (lower is better). The 5% and 15% noise columns randomly flip that fraction of the True /False labels. 
+
+Method Features Shuf. clean 5% 15% 
+
+Logistic runs+cons.+var. yes 8.18 8.21 8.30 Logistic runs+cons.+var. no 9.43 8.98 8.59 Logistic cons. only yes 14.32 18.27 19.86 Logistic cons. only no 14.32 18.22 19.76 Logistic variation only yes 14.32 18.42 19.37 Logistic variation only no 14.32 19.34 19.36 Logistic runs only yes 12.25 11.49 9.70 Logistic runs only no 14.22 13.14 10.02 XGBoost runs+cons.+var. yes 9.13 10.18 9.44 XGBoost runs+cons.+var. no 9.32 11.70 10.00 XGBoost cons. only yes 14.32 20.60 19.63 XGBoost cons. only no 14.32 19.66 19.45 XGBoost variation only yes 14.32 18.70 19.55 XGBoost variation only no 14.32 19.08 19.58 XGBoost runs only yes 13.52 13.93 10.48 XGBoost runs only no 13.39 14.20 11.03 TCN raw signal yes 12.07 10.69 9.86 TCN raw signal no 14.22 16.28 15.41 ASC Beta posterior — 12.82 14.56 18.33 B Labeling Examples 
+
+This appendix shows three illustrative examples from the public BIRD financial database, each with the expected (gold) SQL and a model-generated SQL. The two proprietary customer datasets (A and B) follow a similar relational structure (a small number of joined business tables) and are labeled the same way. A run is labeled True when the generated query’s execution result matches the gold result, and False otherwise. 
+
+Example 1. 
+
+Question: How many accounts who choose is-suance after transaction are staying in the East Bohemia region? 
+
+Expected SQL: 
+
+SELECT COUNT(T2.account_id) FROM public.district AS T1 INNER JOIN public.account AS T2 ON T1.district_id = T2.district_id WHERE T1.A3 = ’east Bohemia’ AND T2.frequency = ’POPLATEK PO OBRATU’ 
+
+Generated SQL: 
+
+SELECT COUNT(a.account_id) AS account_count FROM public.account AS a INNER JOIN public.district AS d ON a.district_id = d.district_id WHERE a.frequency = ’POPLATEK PO OBRATU’ AND d.a3 = ’east Bohemia’ 
+
+Result: both execute to 13 , match (True) .
+
+Example 2. 
+
+Question: How many customers who choose statement of weekly issuance are Owner? 
+
+Expected SQL: 
+
+SELECT COUNT(T1.account_id) FROM public.account AS T1 INNER JOIN public.disp AS T2 ON T1.account_id = T2.account_id WHERE T2.type = ’OWNER’ AND T1.frequency = ’POPLATEK TYDNE’ 
+
+Generated SQL: 
+
+SELECT COUNT(DISTINCT disp.client_id) AS owner_count FROM public.disp INNER JOIN public.account ON disp.account_id = account.account_id WHERE disp.type = ’OWNER’ AND account.frequency = ’POPLATEK TYDNE’ 
+
+Result: both execute to 240 , despite the struc-turally different queries, match (True) .
+
+Example 3. 
+
+Question: What is the gender of the oldest client who opened his/her account in the highest aver-age salary branch? 
+
+Expected SQL: 
+
+SELECT T2.gender FROM public.district AS T1 INNER JOIN public.client AS T2 ON T1.district_id = T2.district_id ORDER BY T1.A11 DESC NULLS LAST, T2.birth_date ASC NULLS FIRST LIMIT 1 
+
+Generated SQL: 
+
+SELECT client.gender FROM district INNER JOIN account ON account.district_id = district.district_id INNER JOIN disp ON disp.account_id = account.account_id INNER JOIN client ON disp.client_id = client.client_id WHERE district.a11 = (SELECT MAX(a11) FROM district) ORDER BY client.birth_date ASC LIMIT 1 
+
+Result: gold returns M, generated returns F, mis-match (False) .
