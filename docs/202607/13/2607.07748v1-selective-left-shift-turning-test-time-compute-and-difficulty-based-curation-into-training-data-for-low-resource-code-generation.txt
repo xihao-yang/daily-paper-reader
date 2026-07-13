@@ -1,0 +1,592 @@
+Title: Selective Left-Shift: Turning Test-Time Compute and Difficulty-based Curation into Training Data for Low-Resource Code Generation
+
+URL Source: https://arxiv.org/pdf/2607.07748v1
+
+Published Time: Fri, 10 Jul 2026 00:05:32 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Selective Left-Shift: Turning Test-Time Compute and Difficulty-based Curation into Training Data for Low-Resource Code Generation 
+
+# Didula Samaraweera 
+
+WSO2 Santa Clara, CA, USA didula@wso2.com 
+
+# Anjana Supun 
+
+WSO2 Santa Clara, CA, USA anjanas@wso2.com 
+
+# Srinath Perera 
+
+WSO2 Santa Clara, CA, USA srinath@wso2.com 
+
+## Abstract 
+
+Large Language Models achieve strong code generation for high resource languages like Python and Java but suffer sharp perfor-mance drops on Low-Resource Programming Languages (LRPLs) such as Julia. Improving Small Language Models (SLMs) for these languages faces a trilemma: Supervised Fine-Tuning (SFT) is bottle-necked by data scarcity, inference-time scaling is too expensive for deployment, and Reinforcement Learning from scratch yields near zero advantages. We propose a three-phase pipeline that resolves this trilemma by decoupling syntax acquisition from algorithmic reasoning. First, we left-shift inference-time compute to an offline data synthesis engine that uses iterative compiler and test feed-back to generate verified training examples. Second, we fine-tune an SLM on this synthetic, verified data to embed strong syntactic priors. Third, we apply Reinforcement Learning with Verifiable Reward (RLVR) grounded by language-agnostic Input/Output tests, where the SFT prior constrains exploration away from syntax er-rors. Applied to Qwen3-8B, our pipeline improves pass@1 by up to +7.6 points on MultiPL-E and +14.2 points on the Agnostics LiveCodeBench for Julia compared to SOTA results. Furthermore, the pipeline only used 13 data and 16 cost over the previous state-of-the-art. We further demonstrate that the pipeline generalizes to Ballerina achieving 49.7% MultiPL-E Pass@1, a language with near-zero pretraining representation. Ablations confirm that both the SFT phase and execution-grounded rewards are necessary for stable training. 
+
+## Keywords 
+
+Code Generation, Low-resource Programming Languages, Small Language Models, Reinforcement Learning, Inference-time Scaling, Supervised Fine-tuning 
+
+## 1 Introduction 
+
+Large Language Models (LLMs) have achieved remarkable pro-ficiency in code generation for high-resource programming lan-guages(HRPLs) like Python and Java [6]. However, their perfor-mance sharply declines when applied to Low-Resource Program-ming Languages (LRPLs) [3, 14]. This disparity is not merely aca-demic: languages such as Julia (scientific computing) and Ballerina (cloud-native microservices) serve critical roles across diverse soft-ware engineering domains. As the ecosystem of programming lan-guages continues to grow, with new languages emerging to address    
+
+> arXiv,
+> 2026. ACM ISBN 978-x-xxxx-xxxx-x/YYYY/MM https://doi.org/10.1145/nnnnnnn.nnnnnnn
+> MultiPL-E (Julia) Ag-LCB (Julia) MultiPL-E (Bal.) Ag-LCB (Bal.)
+
+0
+
+20 
+
+40 
+
+60 
+
+80 
+
+100     
+
+> 44
+> 9
+> 4.4
+> 2.9
+> 28 .4 41 .2 62
+> 15
+> 61
+> 25
+> 57 .9
+> 18 .8
+> 56
+> 9.9
+> 68 .6
+> 39 .2
+> 49 .7
+> 25
+> Pass@1 (%)
+> Qwen3-8B CodeLlama-7B DeepSeek Coder
+> Qwen3-4B-MBPP Qwen3-8B-CF Ours (SFT)
+> Ours (Full)
+
+Figure 1: Comprehensive evaluation of code generation per-formance (Pass@1 %). Our full pipeline improves over the Qwen3-8B base model across all splits, matching or substan-tially outperforming other baselines and prior state-of-the-art methodologies. 
+
+specialized needs, enabling reliable code generation for LRPLs is an increasingly pressing challenge for the software engineering com-munity, mirroring the historical trajectory of low-resource Natural Language Processing [23]. Enhancing Small Language Models (SLMs) for LRPLs presents a trilemma of distinct challenges. First , Supervised Fine-Tuning (SFT) is highly effective for smaller parameter models [9], but it is fundamentally bottlenecked by severe data scarcity. For exam-ple, datasets like CodeNet [20] contain only 10.8k Julia samples compared to 3.2M for Python. Second , Test-time Scaling (e.g. itera-tive self-correction, reflection-based refinement) effectively boosts performance [30, 24], but introduces unacceptable latency and com-putational overhead for real-world deployments. Third , applying Reinforcement Learning (RL) directly to a base model suffers from sparse rewards: e.g., the model generates so many syntax errors that it rarely receives 4 positive feedback to learn from. This paper uses on two key hypotheses to improve SLMs for LRPLs. Our first hypothesis is that inference-time scaling and supervised fine-tuning are not competing strategies but can be complementary arXiv:2607.07748v1 [cs.LG] 8 Jul 2026 arXiv, 2026, Samaraweera et al. 
+
+phases of a single pipeline . Rather than deploying computationally expensive iterative refinement during live usage, we can “left-shift” this computation, repurposing it strictly as an offline data curation engine. By utilizing iterative compiler and test-case feedback, where compilation errors or a single failed test case showing the expected versus actual output are fed back to the model for self-correction, we synthesize missing ground-truth data to enable high-quality SFT. A central challenge in this pipeline is ensuring the quality of the synthetically generated data: an LLM can produce fluent but seman-tically incorrect code, and training on such examples would embed faulty priors. We address this through a flexible verification strategy adapted to the available resources. When a ground-truth solution exists in a high-resource language (e.g. Python), we can employ 
+
+differential testing , executing both the candidate LRPL solution and the reference implementation on shared inputs and comparing their outputs. Differential testing is preferred when available because it catches subtle semantic divergences that fixed IO test suites may miss, such as floating-point precision differences, locale-dependent string formatting, or edge cases in boundary conditions that the original test suite does not explicitly cover. When no reference solution is available, we fall back to input/output test verification ,running the candidate against a suite of I/O test cases derived from the problem specification. In practice, the majority of our seed prob-lems originate from competitive programming datasets that provide IO test suites but not reference solutions in the target LRPL, making IO verification the dominant verification path in our experiments. This two-tiered approach is deliberately pragmatic: the verification method is determined entirely by what artifacts are available for a given problem, requiring no additional human annotation. Our second hypothesis is that the improvement achieved via Reinforcement Learning is dependent on the difficulty of the problems it gets feedback on . With very easy problems, there is little to learn, and with very hard problems, the model’s answers will all be wrong; thus, the model will not know how to make progress. Problems with the correct difficulty can speed up the learning. For example, Pikus et al. [19] have also observed that hard samples help with GRPO learning. This idea can also be seen as a variation of active learning (Ren et al.[25]), where we actively select the right data to be included in the training set to maximize the model outcome. Building on this idea, we create a dataset for Reinforcement Learning with Verifiable Rewards (RLVR) training by using diffi-culty scores (ELO rating for problems) to curate the data. Subse-quently, we apply RLVR via Group Relative Policy Optimization (GRPO) [26], directly adopting the language-agnostic IO-based eval-uation framework proposed by Boruch-Gruszecki et al. [1]. To max-imize the learning signal, we employ partial rewards proportional to the fraction of test cases passed and successful compilation, al-lowing the advantage estimates to capture fine-grained differences between completions. As we will see in our results analysis, because the SFT prior constrains the action space away from trivial syntax errors, the RL phase can efficiently navigate the richer landscape of functional logic. Furthermore, to prevent the policy from converging to sub-optimal states, we use zero-advantage masking [5]: if no completion within a group achieves the maximum reward, the entire group’s advantage is set to zero, effectively discarding the update. This avoids reinforcing mediocre solutions and ensures that the policy only updates toward genuinely strong completions. We evaluate our pipeline on Qwen3-8B [22] using two bench-marks: MultiPL-E [3] and the Agnostics LiveCodeBench (Ag-LCB) [1]. For Julia, our full pipeline improves pass@1 by +24.6 points on MultiPL-E and +30.2 points on Ag-LCB. For Ballerina, where the base model has near-zero prior knowledge, we observe +45.3 points improvement on MultiPL-E and +22.1 points on Ag-LCB over the baseline. Notably, the SFT phase alone achieves on-par results with the current state-of-the-art, demonstrating that left-shifted inference-time compute can match expensive online scaling strate-gies through a one-time offline investment. Furthermore, validating our second hypothesis, we achieved the above results while using  
+
+> 13
+
+of the data and 16 of the cost. We further demonstrate that the pipeline generalizes to Balle-rina, a cloud-native programming language for integration and microservices that has near-zero representation in LLM pretraining corpora. Unlike Julia, which benefits from some incidental coverage in training data, Ballerina presents a true cold-start scenario: the base model has effectively no prior exposure to its syntax, type system, or standard library. Despite this, our pipeline bootstraps functional Ballerina code generation by relying solely on compiler feedback and language-agnostic test suites, requiring no human-written Ballerina training examples. This result provides strong evidence that any LRPL can be bootstrapped making the pipeline immediately applicable as new programming languages emerge. Our contributions are as follows: 
+
+• We propose a three-phase pipeline, offline inference scaling via iterative compiler and test feedback, SFT, and GRPO with a dataset curated by difficulty, that achieves state-of-the-art results on MultiPL-E and Ag-LCB for Julia and Ballerina using an 8B-parameter model, with much fewer training rounds and lower cost. 
+
+• We demonstrate that left-shifting inference-time computa-tion to offline data synthesis resolves the data scarcity bottle-neck without human annotation, turning expensive iterative refinement into a one-time investment. 
+
+• We show that the pipeline generalizes to an extreme LRPL (Ballerina) with minimal adaptation, establishing a practical recipe for bootstrapping code generation for any LRPL. 
+
+• We extend the MultiPL-E benchmark for Ballerina, adding a new language to the evaluation suite and providing a stan-dardized testbed for future research on LRPL code genera-tion. 
+
+## 2 Related Work 
+
+Benchmarking LLMs on LRPLs relies on frameworks adapted from high-resource environments, such as MultiPL-E [3] and Agnostic-LiveCodeBench [13]. While these benchmarks effectively measure performance, improving that performance requires navigating se-vere data limitations and choosing optimal learning strategies. We organize prior work along three axes that correspond to the phases of our pipeline. Selective Left-Shift: Turning Test-Time Compute and Difficulty-based Curation into Training Data for Low-Resource Code Generation arXiv, 2026, 
+
+## 2.1 SFT and the Challenge of Data Scarcity 
+
+Supervised Fine-Tuning remains the most prevalent strategy for adapting models to LRPLs. Cassano et al. [2] introduced MultiPL-T, a pipeline for translating training data from high-resource to low-resource languages, demonstrating significant gains for mod-els up to 8B parameters. Giagnorio et al. [9] further showed that smaller models ( ∼1B parameters) trained on specialized, domain-specific data often outperform larger, general-purpose models, as SFT can inversely degrade larger models better suited for Retrieval-Augmented Generation. WizardCoder [17] and OpenCoder [11] advanced SFT through instruction-tuning and open-source training recipes, though their focus remains on high-resource languages. Joel et al. [14] provide a comprehensive survey of LLM-based code generation for low-resource and domain-specific languages. The fundamental bottleneck for SFT is data scarcity. Datasets like CodeNet [20] provide a foundation, but the available data for LRPLs pales in comparison to high-resource languages. Utilizing organic data requires rigorous curation, including deduplication and strict decontamination to prevent benchmark leakage. To by-pass organic data limitations, recent research emphasizes synthetic data pipelines: Magicoder [31] leverages OSS-Instruct to generate training data from open-source snippets, while KODCODE [32] constructs a diverse, verifiable synthetic dataset. Our work extends this line by introducing compiler/test feedback driven data synthesis, where iterative execution and error correction provides verification that purely generative pipelines lack. 
+
+## 2.2 Reinforcement Learning and Grounding 
+
+Beyond SFT, Reinforcement Learning is establishing new state-of-the-art results for code generation. Early approaches used Proxi-mal Policy Optimization (PPO): CodeRL [15] combined pretrained models with execution-based RL rewards, while Shojaee et al. [27] demonstrated that execution-based feedback outperforms static heuristics for policy optimization. More recently, Group Relative Policy Optimization (GRPO) [26] has emerged as a simpler al-ternative that eliminates the need for a separate value network. CodeReasoner [28] applies GRPO to enhance code reasoning in general-purpose models. For LRPLs specifically, recent techniques rely on language ag-nostic datasets and test-feedback loops. Concurrently, self-play frameworks enable iterative refinement without human annota-tion [16]. However, ungrounded self-play often yields sub-optimal results. To address this problem, Boruch-Gruszecki et al. [1] intro-duced Agnostics, a universal RL environment capable of learning to synthesize code in any programming language via execution-based rewards. Ma et al. [18] demonstrate that interleaving online fine-tuning with RL addresses the hardest questions that reinforcement learn-ing alone cannot solve, highlighting the complementary nature of supervised and RL-based training. Our work grounds RL with IO tests similar to Boruch-Gruszecki et al. and, crucially, initializes the RL policy from a syntax-primed 
+
+SFT model rather than the base model, which dramatically reduces the sparse-reward problem. 
+
+## 2.3 Test-time Scaling and Its Limitations 
+
+To compensate for limited training data, the current state-of-the-art often allocates more computational resources during execution, a paradigm known as Test-time Scaling. A prominent family of techniques uses iterative refinement : the model generates a candi-date solution, receives feedback (compiler errors, test failures, or self-reflection), and refines its output across multiple rounds. Reflec-tionCoder [24] leverages reflection sequences to iteratively correct one-off generations, while Origen [7] uses code-to-code augmenta-tion with self-reflection for RTL code generation. AgentCoder [10] employs a multi-agent framework where a programmer agent, test designer agent, and test executor agent collaborate through itera-tive testing and optimization. CodeSim [12] extends this paradigm with simulation-driven planning and debugging. Another family uses selection-based scaling : CodeT [4] gener-ates multiple candidate solutions along with tests and selects the best via dual execution agreement. CodeChemist [30] applies func-tional knowledge transfer with test-time scaling specifically for low-resource code generation. While these methods form a critical pillar of modern code gen-eration, their high computational cost at inference time makes them impractical for efficient SLM deployment. Our work reframes iterative refinement, the most effective form of inference-time scal-ing, not as a deployment strategy but as an offline data curation 
+
+mechanism, amortizing the compute cost across all future queries. 
+
+## 3 Methodology 3.1 Pipeline Overview 
+
+Our pipeline consists of three sequential phases, each addressing a distinct aspect of the LRPL code generation challenge. Figure 2 provides an architectural overview. Given a target low-resource language 𝐿 , a set of language inde-pendent seed problems P = {𝑝 1, . . . , 𝑝 𝑁 } with corresponding test suites T = {𝑡 1, . . . , 𝑡 𝑁 }, and a pretrained base model 𝑀 𝜃 , our goal is to produce a fine-tuned model 𝑀 𝜃 ∗ that maximizes pass@1 on held-out problems in 𝐿 . The pipeline proceeds as follows: (1) Data Synthesis uses 𝑀 𝜃 with iterative compiler feedback to construct a verified dataset D𝐿 ; (2) Syntax-Aware SFT fine-tunes 𝑀 𝜃 on D𝐿 to produce 𝑀 𝜃 sft with strong syntactic priors; (3) RLVR applies GRPO starting from 𝑀 𝜃 sft to optimize functional correctness, producing the final model 𝑀 𝜃 ∗ .
+
+## 3.2 Phase 1: Data Synthesis via Offline Inference Scaling 
+
+To overcome the LRPL data bottleneck, we repurpose expensive inference-time scaling, specifically iterative self-correction with compiler/test-case feedback, strictly as an automated, offline data curation engine. 
+
+3.2.1 Problem Formulation. Let P = {𝑝 1, . . . , 𝑝 𝑁 } be a set of lan-guage independent algorithmic problems, each paired with a test suite 𝑡 𝑖 ∈ T consisting of IO pairs. For a target language 𝐿 , we seek to construct a supervised dataset: 
+
+D𝐿 = {( 𝑝 𝑖 , 𝑐 ∗ 
+
+> 𝑖
+
+) | 𝑐 ∗ 
+
+> 𝑖
+
+passes all tests in 𝑡 𝑖 when executed in 𝐿 } (1) arXiv, 2026, Samaraweera et al.           
+
+> Seed Problems
+> P,T
+> Base LLM/SLM
+> 𝑀 𝜃
+> Candidate Code 𝑐 (𝑘 )
+> 𝑖
+> Sandbox Execution Pass? Verified
+> 𝑐 ∗
+> 𝑖
+> Dataset
+> D𝐿
+> Compiler Error + Failed Test Case
+> Yes
+> Iterative Refinement No
+> Phase 1: Offline Data Synthesis
+> D𝐿
+> Base SLM
+> 𝑀 𝜃
+> Causal LM Fine-Tuning
+> SFT Model
+> 𝑀 𝜃 sft
+> Phase 2: Syntax-Aware SFT
+> 𝑀 𝜃 sft
+> GRPO Optimization
+> Final Model
+> 𝑀 𝜃 ∗
+> IO Test Sandbox
+> Lang.-Agnostic IO Tests
+> Completions Reward 𝑟
+> Phase 3: RLVR (GRPO)
+
+Figure 2: Overview of the three-phase pipeline. Phase 1 repurposes iterative refinement as an offline data curation engine: compiler errors and failed test cases (with expected vs. actual output) are fed back to the model for self-correction until all tests pass. Phase 2 fine-tunes the base model on synthesized data to embed syntax priors. Phase 3 applies GRPO with language-agnostic IO tests, exploiting the constrained action space from SFT for efficient RL exploration. Takeaway: Expensive inference compute is invested once offline, yielding a deployment-efficient SLM. 
+
+3.2.2 Iterative Compiler/Test Feedback Refinement. For each prob-lem 𝑝 𝑖 , the base model 𝑀 𝜃 generates an initial candidate solution 
+
+𝑐 (0) 
+
+> 𝑖
+
+. This candidate is executed in an isolated sandbox against the test suite 𝑡 𝑖 , yielding either success or a feedback signal 𝑒 (0) 
+
+> 𝑖
+
+. The feedback comprises either one from two components: (1) any com-pilation or runtime error message, or in case of compilation success and test cases are failing (2) a single failed test case showing the expected output alongside the actual output produced by the can-didate. If a candidate fails, we inject this structured feedback back into the model’s context, prompting iterative refinement: 
+
+𝑐 (𝑘 +1) 
+
+> 𝑖
+
+= 𝑀 𝜃 
+
+
+
+𝑝 𝑖 , 𝑐 (𝑘 ) 
+
+> 𝑖
+
+, 𝑒 (𝑘 )
+
+> 𝑖
+
+
+
+, 𝑘 = 0, 1, . . . , 𝐾 max (2) The loop terminates when pass (𝑐 (𝑘 ) 
+
+> 𝑖
+
+, 𝑡 𝑖 ) = 1 (all tests pass) or 𝑘 >
+
+𝐾 max . Successful trajectories contribute the final solution 𝑐 ∗ 
+
+> 𝑖
+
+= 𝑐 (𝑘 )
+
+> 𝑖
+
+to D𝐿 ; failed trajectories are discarded. This process is identical to iterative refinement used at inference time by approaches like ReflectionCoder [24] and AgentCoder [10], but we perform it once, offline , and retain only the final verified solutions as training data. 
+
+Algorithm 1 summarizes the complete data synthesis proce-dure. 
+
+3.2.3 Seed Selection. We initialize the pipeline with language in-dependent algorithmic problems sourced from [dataset]. These problems are specified via natural-language descriptions and IO test pairs, ensuring no dependence on any specific programming language. 
+
+3.2.4 Generation Prompt. Each problem is presented to the base model 𝑀 𝜃 using a structured system prompt that constrains the output format and encourages reasoning before coding. Key design 
+
+Algorithm 1 Offline Data Synthesis via Compiler/Test-Case Feed-back 
+
+Require: Seed problems P, test suites T , base model 𝑀 𝜃 , max iterations 𝐾 max , target language 𝐿 
+
+Ensure: Verified dataset D𝐿  
+
+> 1:
+
+D𝐿 ← ∅  
+
+> 2:
+
+for each (𝑝 𝑖 , 𝑡 𝑖 ) ∈ (P , T ) do  
+
+> 3:
+
+𝑐 (0) 
+
+> 𝑖
+
+← 𝑀 𝜃 (𝑝 𝑖 , 𝐿 ) {Initial generation}  
+
+> 4:
+
+for 𝑘 = 0 to 𝐾 max do  
+
+> 5:
+
+(𝑠, 𝑒 (𝑘 ) 
+
+> 𝑖
+
+) ← SandboxExec (𝑐 (𝑘 ) 
+
+> 𝑖
+
+, 𝑡 𝑖 , 𝐿 ) 
+
+> 6:
+
+if 𝑠 = PASS then  
+
+> 7:
+
+D𝐿 ← D 𝐿 ∪ {( 𝑝 𝑖 , 𝑐 (𝑘 ) 
+
+> 𝑖
+
+)}  
+
+> 8:
+
+break  
+
+> 9:
+
+end if  
+
+> 10:
+
+𝑐 (𝑘 +1) 
+
+> 𝑖
+
+← 𝑀 𝜃 (𝑝 𝑖 , 𝑐 (𝑘 ) 
+
+> 𝑖
+
+, 𝑒 (𝑘 ) 
+
+> 𝑖
+
+) {Feedback-guided refinement}  
+
+> 11:
+
+end for  
+
+> 12:
+
+end for  
+
+> 13:
+
+return D𝐿 
+
+decisions include: (1) requiring step-by-step reasoning in comments before the solution, mirroring chain-of-thought prompting; (2) en-forcing a strict output structure with separate <CODE> and <TESTS> 
+
+blocks to facilitate automated extraction and validation; (3) man-dating a main() function that reads from standard input, enabling execution against IO test suites; and (4) requesting at least four unit test assertions per problem to provide additional verification signal. 
+
+3.2.5 Worked Example. Figure 3 illustrates the iterative refine-ment process on a concrete Julia problem: writing a function to Selective Left-Shift: Turning Test-Time Compute and Difficulty-based Curation into Training Data for Low-Resource Code Generation arXiv, 2026,        
+
+> Problem: “Write a function to calculate the sum of the digits in a given number.”
+> Iteration 1 Test Failure
+> function sum_digits(n::Integer) total = 0 while n > 0 # fails for negative input total += n % 10 n = div(n, 10) end return total end
+> ×0 passed, 4 failed
+> Iteration 2 Correct →added to D𝐿
+> function sum_of_digits(n::Integer) s = string(abs(n)) return sum(c - ’0’ for c in s) end using Test @testset "Sum of digits" begin @test sum_of_digits(123) == 6 @test sum_of_digits(-456) == 15 @test sum_of_digits(0) == 0 @test sum_of_digits(1000) == 1 end
+
+✓ All 4 tests pass 
+
+Figure 3: Worked example of iterative compiler-feedback refinement for Julia. The base model’s first attempt com-piles but fails all tests due to incorrect handling of negative numbers and modular arithmetic. After one round of test feedback, the model self-corrects to an idiomatic Julia solu-tion using abs and character arithmetic. Only the verified solution enters D𝐿 .
+
+sum the digits of a number. The base model’s initial attempt pro-duces syntactically valid Julia but fails all four test cases, a com-mon pattern where models transfer Python semantics (e.g., integer division behavior or string-conversion idioms) that do not gen-eralize to Julia. The sandbox feeds back the test failure summary (0 passed, 4 failed ), which is appended to the prompt. In the second iteration, the model self-corrects by using Julia’s idiomatic 
+
+string /abs /character-arithmetic approach, producing a solution that passes all tests. This single-retry success demonstrates that even one round of compiler-and-test feedback is often sufficient to bridge the gap between high-resource habits and LRPL-correct code. The final, verified solution is added to D𝐿 .
+
+## 3.3 Phase 2: Syntax-Aware Supervised Fine-Tuning 
+
+Using the synthesized dataset D𝐿 , we fine-tune the pretrained base model 𝑀 𝜃 using standard causal language modeling. The SFT objective minimizes the cross-entropy loss over verified prompt-completion pairs: 
+
+LSFT = −∑︁   
+
+> (𝑝,𝑐 ∗) ∈ D 𝐿
+> |𝑐 ∗|
+
+∑︁  
+
+> 𝑡 =1
+
+log 𝜋 𝜃 (𝑐 ∗ 
+
+> 𝑡
+
+| 𝑝, 𝑐 ∗ 
+
+> <𝑡
+
+) (3) where 𝜋 𝜃 denotes the model’s output distribution. This phase serves a specific purpose: because LRPLs possess id-iosyncratic syntaxes and niche standard libraries that differ substan-tially from high-resource languages, SFT embeds strong structural and grammatical priors into the model. Consider the differences between Julia and Python that a model must internalize: Julia uses 1-based indexing, true /false instead of True /False , function /end 
+
+blocks instead of indentation-delimited scopes, multiple dispatch instead of class-based OOP, and a distinct standard library (e.g., 
+
+sort(arr, rev=true) vs. sorted(arr, reverse=True) ). After this phase, the model can reliably produce syntactically valid Ju-lia code structures before being required to optimize for complex algorithmic logic in the subsequent RL phase. For Ballerina, the syntactic gap is even larger: the language uses a unique type system with union types ( int|string ), built-in concurrency via workers, explicit error handling with check 
+
+expressions, and a service-oriented programming model unlike any high-resource language. The SFT phase is therefore essential for Ballerina, as the base model has effectively zero prior exposure to these constructs. In practice, each training example in D𝐿 is formatted as a prompt-completion pair: the prompt contains the natural-language problem description along with a language-specific instruction header (e.g. “Write a Julia function that...”), and the completion is the verified solution from Phase 1. During fine-tuning, we apply completion-only loss masking , computing the cross-entropy loss exclusively over the solution tokens rather than the prompt tokens, which focuses the learning signal on code generation rather than problem comprehension. 
+
+## 3.4 Phase 3: RLVR with Verifiable Rewards with Difficulty-curated Data 
+
+3.4.1 Data Curation by Difficulty. With a robust syntax prior es-tablished, we transition to exploration via Reinforcement Learning. Crucially, we initialize the GRPO policy with the syntax-aware SFT model 𝑀 𝜃 sft from Phase 2, rather than the base model 𝑀 𝜃 .
+
+3.4.2 GRPO Objective. For a given problem 𝑝 , we sample a group of 𝐺 candidate completions {𝑐 1, . . . , 𝑐 𝐺 } from the current policy 
+
+𝜋 𝜃 . Each completion receives a reward 𝑟 𝑖 from the execution-based oracle. We compute group-relative advantages: 
+
+ˆ𝐴 𝑖 = 𝑟 𝑖 − 𝜇 𝐺 
+
+𝜎 𝐺 + 𝜖 (4) where 𝜇 𝐺 and 𝜎 𝐺 are the mean and standard deviation of rewards within the group, and 𝜖 is a small constant for numerical stability. The policy is updated to maximize: 
+
+LGRPO = E𝑝 ∼P 
+
+"
+
+1
+
+𝐺 
+
+> 𝐺
+
+∑︁ 
+
+> 𝑖 =1
+
+ˆ𝐴 𝑖 · log 𝜋 𝜃 (𝑐 𝑖 | 𝑝 )
+
+#
+
+− 𝛽 · 𝐷 KL (𝜋 𝜃 ∥𝜋 ref ) (5) arXiv, 2026, Samaraweera et al. 
+
+where 𝜋 ref = 𝜋 𝜃 sft is the SFT model serving as the reference pol-icy, and 𝛽 controls the strength of the KL divergence penalty that prevents the policy from deviating too far from the syntactic prior. 
+
+3.4.3 Reward Function. Each completion 𝑐 receives a composite reward that decomposes into a test score 𝑟 test and a build-quality score 𝑟 build , reflecting the two distinct failure modes in LRPL code generation: syntactic/compilation failures and logical/algorithmic failures. The test score is proportional to the number of passed test cases 
+
+𝑝 :
+
+𝑟 test (𝑐, 𝑝 ) = min 
+
+ 𝑝 
+
+|T 𝑝 | , 1.0
+
+
+
+(6) This partial reward provides a gradient signal even for completions that solve only a subset of test cases, avoiding the sparsity of binary pass/fail rewards. The build-quality score 𝑟 build captures whether the completion compiles and produces well-structured code. If the code fails to compile, 𝑟 build receives a small positive value inversely propor-tional to the number of compiler errors, rewarding completions that are “closer” to compiling. If compilation succeeds, 𝑟 build receives a fixed credit regardless of test outcomes. Additionally, a structure penalty is applied based on the presence of expected code constructs (function definitions, test blocks, assertions), acting as a negative offset that is reduced for well-formed outputs. This ensures that structural compliance alone cannot produce a high reward, only test-passing code is strongly reinforced. The build-quality score is down-weighted relative to the test score, ensuring that functional correctness dominates the learning signal: 
+
+𝑟 (𝑐, 𝑝 ) = 𝑟 test (𝑐, 𝑝 ) + 𝛼 · 𝑟 build (𝑐, 𝑝 ) (7) where 𝛼 < 1 controls the relative weight of the build-quality shap-ing signal. 
+
+3.4.4 Zero-Advantage Masking. A key challenge in GRPO for LR-PLs is that groups may contain no meaningfully correct completion, all candidates fail most tests, producing near-uniform low rewards. Naively computing advantages in such groups reinforces the “least bad” completion, causing the policy to converge on sub-optimal heuristics (e.g. hardcoding common outputs). We address this via 
+
+zero-advantage masking : if no completion within a group achieves the maximum reward, we set ˆ𝐴 𝑖 = 0 for all 𝑖 in that group, effec-tively discarding the update. This ensures the policy only learns from groups containing at least one genuinely strong completion, preventing noisy gradients from degrading the SFT prior. Formally, let 𝑟 max = max 𝑖 ∈𝐺 (𝑟 𝑖 ) denote the highest reward in a group. We define the masked advantage as: 
+
+˜𝐴 𝑖 =
+
+( ˆ𝐴 𝑖 if 𝑟 max = 1.0 (at least one fully correct completion) ,
+
+0 otherwise .
+
+(8) Substituting ˜𝐴 𝑖 into Eq. 5 yields the masked GRPO objective: 
+
+Lmasked GRPO = E𝑝 ∼P 
+
+"
+
+1
+
+𝐺 
+
+> 𝐺
+
+∑︁ 
+
+> 𝑖 =1
+
+˜𝐴 𝑖 · log 𝜋 𝜃 (𝑐 𝑖 | 𝑝 )
+
+#
+
+− 𝛽 · 𝐷 KL (𝜋 𝜃 ∥𝜋 ref ) (9) When 𝑟 max < 1.0, the policy gradient term vanishes entirely for that group, since we set 𝛽 = 0 similar to DAPO[33] the entire sample is ignored. 
+
+3.4.5 Data Curation by Difficulty. As discussed in the introduction, we aim to create a curated dataset for GRPO that can maximize learning. We use the ELO rating used by the Codeforces platform (see Quan et al. [21] to measure problem difficulty, where both humans, models, and problems are given ELO ratings, which get adjusted using outcomes from humans and models attempting problems. Using the problem and ELO ratings data available from the Code-forces platform, we have built a model to predict the ELO rating given a problem. For GRPO, we use data that has IO-based ground truth as dis-cussed by Agnostics paper, where we convert ground truth exam-ples to test cases and then give feedback to GRPO using those tests as described in the subsection 3.4.3, Given reward function 𝑟 𝑡𝑒𝑠𝑡 , model 𝑝ℎ𝑖 𝑟𝑒 𝑓 , and a dataset 𝐷 , that comprises a collection of problems, the ELO rating for the problem, and groundtruth data, we build a GRPO dataset as follows. 
+
+𝐸𝐿𝑂 𝑚 = min 
+
+
+
+𝑒𝑙𝑜 𝑑𝑟 𝑡𝑒𝑠𝑡 
+
+𝑑𝑒𝑙𝑜 < −𝜃 
+
+
+
+for a threshold theta (10) This defines 𝐸𝐿𝑂 𝑚 as the supremum (the highest point) of prob-lem difficulty where the model maintains a stable reward: When 𝑑.𝑒𝑙𝑜 is the elo rating of problem 𝑑 , curated dataset is defined as follows. 
+
+𝐷 𝑐𝑢𝑟𝑎𝑡𝑒𝑑 = {𝑑 ∈ 𝐷𝑠.𝑡 .𝐸𝐿𝑂 𝑚 ≤ 𝑑.𝑒𝑙𝑜 ≤ 𝐸𝐿𝑂 𝑚 + 400 𝐷.𝑒𝑙𝑜 } (11) 
+
+3.4.6 Why SFT Initialization Matters. The interaction between Phase 2 and Phase 3 is the central design choice of our pipeline. GRPO works by generating candidate solutions, computing relative advantages from execution feedback, and adjusting the output dis-tribution to favor better solutions. However, if all solutions within a group receive the same reward (e.g. all compile but no test passes), the advantages collapse to zero and GRPO cannot learn. When GRPO is initialized from the base model without an SFT prior, the vast majority of sampled completions contain syntax errors and receive near-zero rewards dominated by the build-quality compo-nent. With no test-passing signal to differentiate completions, the advantages within each group lack meaningful variance and the policy stagnates. In contrast, the SFT-initialized policy produces syntactically valid completions that compile and execute, even if they produce wrong outputs. This means the reward distribution within each group has meaningful variance, some completions pass more tests than others, providing a rich gradient signal. This en-ables GRPO to learn effectively, and the compute budget is thus spent exploring functional logic rather than rediscovering basic language syntax. 
+
+## 4 Experimental Setup 4.1 Base Model 
+
+We use Qwen3-8B [22] as our base SLM. We select this model for four reasons: (1) it demonstrates strong baseline performance on high-resource code generation, providing a capable starting point; (2) at 8B parameters, it represents a realistic model size for on-premise deployment on a single GPU; (3) its training data cutoff aligns with the LiveCodeBench v5 temporal split, enabling Selective Left-Shift: Turning Test-Time Compute and Difficulty-based Curation into Training Data for Low-Resource Code Generation arXiv, 2026, 
+
+contamination-free evaluation on Ag-LCB; and (4) supports a fair comparison with the previous work, which reported against the same model. While more widely adopted recent models such as the Qwen3.5 family and DeepSeek-V3.2 series demonstrate stronger performance on high-resource languages, their later training cutoffs risk data contamination against our evaluation benchmarks. 
+
+## 4.2 Target Languages 
+
+We evaluate on two languages that represent different points on the resource spectrum: 
+
+Julia is designed for high-performance scientific computing. De-spite a growing community, Julia remains underrepresented in LLM training corpora, CodeNet contains only 10.8k Julia samples versus 3.2M for Python. Julia’s syntax combines familiar imperative struc-tures with distinctive features: 1-based array indexing, multiple dispatch as the core paradigm, function /end block delimiters, and a rich type system with parametric types. These features make Julia a representative “moderate LRPL”, present in pretraining data but insufficiently represented for reliable code generation. 
+
+Ballerina is a cloud-native programming language for building distributed applications and microservices. It features a unique type system with structural typing, union types ( int|string|error ), built-in concurrency via workers, first-class support for network services, and explicit error handling with check expressions. Bal-lerina has near-zero representation in LLM pretraining corpora, making it our “extreme LRPL” test case, a language where the base model has effectively no prior knowledge of the syntax or standard library. 
+
+## 4.3 Datasets 
+
+We source seed problems from the Stanford Alpaca dataset [29], se-lecting language-independent algorithmic tasks. For each problem and target language, we generate candidate solutions using Claude Code or OpenAI OSS-120B based on it’s difficulty, then verify each candidate by executing its accompanying test suite. Only problems whose generated solutions pass all test cases are retained in the SFT dataset D𝐿 . This process is applied identically for both Julia and Ballerina, yielding fewer than 1,000 verified examples per language. For the RL phase, we curate approximately 500 training problems from Codeforces (filtered to ≤1,300 ELO) and CodeNet [20]. Each problem is paired with language-agnostic IO test suites that serve as the verifiable reward signal during GRPO training. 
+
+## 4.4 Benchmarks 
+
+4.4.1 MultiPL-E. [3] has translated HumanEval [6] problems to 18+ programming languages, enabling standardized cross-lingual evaluation. We report pass@1 on the Julia split. As part of this work, we extend MultiPL-E to include Ballerina by manually translating 159 HumanEval problems into idiomatic Ballerina with correspond-ing test harnesses. Unlike automated translation approaches, our extension is entirely human-annotated to ensure correctness and idiomatic usage of Ballerina’s distinctive features (e.g. structural typing, check expressions, union types). This constitutes the first standardized code generation benchmark for Ballerina, which we 
+
+Table 1: Pass@1 (%) on MultiPL-E and Ag-LCB. Δ shows im-provement over the base model. Model MultiPL-E Ag-LCB 
+
+Julia Bal. Julia Bal. Qwen3-8B (Base) 44.0 4.4 9 2.9 + SFT Only 57.9 56.0 18.8 9.9 Ours (Full Pipeline) 68.6 49.7 39.2 25.0 
+
+Δ vs. Base +24.6 +45.3 +30.2 +22.1 release to support future research on emerging LRPLs. MultiPL-E problems are relatively straightforward, testing basic language competence and standard library knowledge. 
+
+4.4.2 Ag-LCB. [1] is the LiveCodeBench [13] evaluation adapted through the Agnostics framework, using problems published after the base model’s training cutoff to ensure contamination-free as-sessment. These problems are substantially harder than MultiPL-E, reflecting competitive programming difficulty with complex algo-rithmic reasoning requirements. We report pass@1 for both Julia and Ballerina. 
+
+## 4.5 Baselines 
+
+We compare the following configurations to isolate the contribution of each pipeline component: 
+
+• Qwen3-8B (Base) : The unmodified pretrained model, estab-lishing the baseline performance. 
+
+• + SFT Only : Phase 2 only, the base model fine-tuned on our compiler-feedback synthetic data, without the subsequent RL phase. This isolates the contribution of syntax-aware SFT. 
+
+• Ours (Full Pipeline) : The complete three-phase pipeline (Phase 1 data synthesis + Phase 2 SFT + Phase 3 GRPO). 
+
+## 4.6 Training Details 
+
+We fine-tune Qwen3-8B using a two-stage pipeline: Supervised Fine-Tuning (SFT) followed by GRPO reinforcement learning. Both stages utilize 4-bit quantization and LoRA adapters ( 𝑟 = 16 , 𝛼 = 32 ) on all linear layers via the Unsloth-TRL framework. SFT is conducted for 4 epochs with a 1e-4 learning rate and a 16,384 token context window. Subsequently, we perform 1 epoch of GRPO using curated data from Section 3.4.5, employing 8 generations per prompt ( 𝐺 = 8)and a 5e-5 learning rate. Both phases use the AdamW optimizer, a cosine schedule, and bf16 mixed precision, with the RL phase capping prompt and completion lengths at 4,096 tokens each. 
+
+## 5 Results 5.1 Main Results 
+
+Table 1 summarizes the pass@1 results for Julia and Ballerina across both benchmarks. For each language, we report the base model, the SFT-only variant, and the full three-phase pipeline. Since Agnos-tics [1] already provides a thorough evaluation of RL-only training across multiple configurations, we include the RL-only variant solely as an ablation under our specific setup (Section 6). The key finding is that each successive phase yields additive gains: SFT alone substantially improves over the base model by embedding arXiv, 2026, Samaraweera et al. 
+
+Table 2: Comparison with prior work on Julia code generation (pass@1 %). Results for Giagnorio et al. and Agnostics are taken from the respective papers. Method Base Model MultiPL-E Ag-LCB 
+
+Giagnorio et al. [9] DeepSeek Coder 41.2 -CodeLlama-7B 28.4 -Agnostics [1] Qwen3-4B-MBPP 62 15 Qwen3-8B-CF 61 25 Ours (SFT Only) Qwen3-8B 57.9 18.8 Ours (Full Pipeline) Qwen3-8B 68.6 39.2 
+
+syntactic priors, and GRPO further boosts performance by opti-mizing functional correctness. We discuss each language in detail below. 
+
+5.1.1 Julia. Compared to vanilla Qwan mode baseline, our pipeline improves Julia pass@1 from 28.3% to 68.6% (+40.3 points) on MultiPL-E and from 9% to 39.2% (+30 points) on Ag-LCB. Table 2 places these results in context. Most importantly, we surpass the previous state of the art (Agnostics [1]) by 7.6 percentage points on MultiPL-E and 14.2 percentage points on Ag-LCB, despite using a single base model rather than separate task-specific variants. 
+
+5.1.2 Ballerina. For the extreme-LRPL case, SFT increased balle-rina scores 4.4% to 56% and LCB scores by 2.9% to 9.9%. GRPO training using a curated dataset increased ballerina scores for LCB from 9.9% to 25%, but reduced the MultiPL-E results to 49.7%. We believe this is overall positive given that LCB is a much harder benchmark Applying the pipeline to Ballerina required minimal language-specific modifications: (1) a working Ballerina compiler and run-time for sandbox execution, (2) translation of seed problem descrip-tions to specify Ballerina-specific IO formats where necessary, and (3) no changes to the GRPO configuration, as IO tests are inherently language-agnostic. The fact that our pipeline produces functional code generation capability from near-zero provides strong evidence that, given a compiler and language-agnostic problems, any lan-guage can be bootstrapped. 
+
+5.1.3 Data and Cost Efficiency. These results are achieved with fewer than 1,000 SFT samples and approximately 500 GRPO train-ing problems, a 3× reduction in training data compared to Ag-nostics, which uses ∼5,000 GRPO samples. The cost advantage is equally striking: Agnostics requires $320.3 ( 13 h × 8 GPUs ×
+
+$3 .08 /GPU-h ), whereas our total cost is $54.02, comprising fine-tuning ( 45 h × $0 .42 /GPU-h ), OpenAI GPT OSS-120B API calls (5M input × $0 .25 /1M + 3M output × $0 .60 /1M ), and Sonnet API calls ( 4.1M input × $3 /1M + 1.3M output × $15 /1M ). Our pipeline thus costs only 16 of Agnostics. The key enablers are left-shifting inference-time compute to offline data synthesis and training with a compact, difficulty-filtered RL set. Furthermore, by left-shifting, 
+
+Table 3: Error distribution (%) on MultiPL-E across pipeline phases. Error Category Base +SFT Full 
+
+Julia 
+
+Syntax / Compilation 45.9 0.6 0.6 Runtime (type, bounds, etc.) 7.5 13.8 9.4 Wrong Output 2.5 27.7 26.4 Timeout 0.0 0.0 0.0 Correct 44.0 57.9 63.5 rather than spending GPU hours on large-scale RL exploration, we invest a one-time API cost to curate high-quality SFT data. 
+
+## 5.2 Error Category Analysis 
+
+To understand why each pipeline phase improves performance, we categorize errors from the base model, SFT-only model, and full pipeline on MultiPL-E problems for Julia. Table 3 reveals a clear progression. The base model’s failures are dominated by syntax and compilation errors, the model frequently produces Python-influenced constructs that fail to compile in Julia. After SFT, syntax errors drop substantially, but runtime errors and wrong outputs increase, indicating that the model now produces valid Julia code that compiles but does not yet implement correct algorithms. The full pipeline further reduces wrong-output errors, as the GRPO phase optimizes for functional consistency within the space. 
+
+## 6 Ablation Studies 
+
+As ablations to difficulty-based data curation, we performed two experiments with Julia. For that purpose, in addition to the curated dataset, we created a random difficulty dataset by sampling 500 problems from the full ELO range (spanning ELO 800–2200). This acts as a control dataset as opposed to our curated dataset. As the first experiment, we started with the vanilla Qwan model (no-SFT) and then fine-tuned it with GRPO using the random diffi-culty dataset. As the second experiment, we started with the Qwan model already fine-tuned with SFT, and further fine-tuned it with GRPO using the random difficulty dataset. In the following discussion, we compare our default pipeline (Qwan model + SFT + GRPO with curated dataset). 
+
+## 6.1 Default pipeline vs. experiment 1 (qwan + GRPO with random dataset) 
+
+The Figure 5 plots compares GRPO test reward against difficulty (ELO rating). The left-hand side shows our pipeline (Qwan + SFT + GRPO with curated dataset) produces remarkably stable reward signals: mean between 0.4 and 0.5 across the training ELO range (800- 1250), and max reward stays near 1.0, indicating that at least one completion per GRPO group fully solves each problem. This confirms our default pipeline provides effective rewards. In contrast, the right-hand side of the Figure showing data from experiment 1 (no SFT and GRPO random dataset) exhibits substan-tially higher variance in both mean and max reward, particularly as Selective Left-Shift: Turning Test-Time Compute and Difficulty-based Curation into Training Data for Low-Resource Code Generation arXiv, 2026, 
+
+Table 4: Comparison of GRPO with problem selected ran-domly and ELO based selection Method pass@1 
+
+Random Dataset 52.2 Curated Dataset (ELO <1250) 68.6 problem difficulty increases beyond ELO 1400. The growing error bars reflect the instability of RL exploration when the policy must simultaneously discover language syntax and algorithmic logic. 
+
+## 6.2 Default pipeline vs. experiment 2 (qwan + SFT + GRPO with random dataset) 
+
+Table 4 compares the Pass@1 scores between SFT mode trained with GRPO using curated vs random datasets. Random baseline yields 52.2% pass@1, 16.4 percentage points below the difficulty-curated variant. These results confirm that for low-resource languages, curating RL training data by difficulty amplifies the effectiveness of GRPO by concentrating training signal on problems at the frontier of model capability. 
+
+Figure 4: Reward standard deviation across training steps after zero-advantage masking when we loose the ‘deliberate practice’ 
+
+## 7 Discussion 7.1 Zero-advantage Masking 
+
+Figure 4 illustrates this phenomenon empirically. After zero-advantage masking, the vast majority of training samples are discarded, visible as long stretches where 𝜎 𝐺 = 0. This occurs when all completions within a group either uniformly succeed or uniformly fail, col-lapsing the advantage to zero. The isolated spikes where 𝜎 𝐺 > 0
+
+represent the small fraction of samples that actually produce a meaningful gradient signal, problems at the edge of the model’s current capability. This sparse pattern highlights the inefficiency of training without difficulty-based curation: most computational effort is spent on samples that contribute nothing to learning. 
+
+## 7.2 New Languages Require the SFT Phase 
+
+The Ballerina experiment validates that the SFT phase is essential for severely low-resource programming language (S-LRPL) adop-tion. Without syntactic priors, the RL exploration space is too un-constrained: the model spends its compute budget rediscovering basic syntax rather than learning algorithmic patterns. This sug-gests that for any new LRPL, investing in Phase 1 data synthesis and Phase 2 SFT is a prerequisite before RL can be effective. The pipeline thus provides a practical recipe: given a compiler for lan-guage 𝐿 and a set of language-agnostic algorithmic problems, one can bootstrap code generation capability for 𝐿 through offline data synthesis followed by SFT and GRPO. 
+
+## 7.3 Right Level of Difficulty Amplifies Pipeline Benefits 
+
+Our difficulty-based curation results echo the principle of deliberate practice [8]: learning is most effective when training is concentrated at the boundary of current competence. The mechanism is intuitive within the GRPO framework. Given a problem, GRPO generates multiple candidate solutions and updates the policy based on the relative advantage between them. If a problem is too easy, all can-didates succeed and the advantage collapses to zero; if too hard, all candidates fail with the same outcome. Only when problems lie at the edge of the model’s capability, where some candidates succeed and others fail, does the advantage carry a meaningful gradient signal. This follows directly from the GRPO advantage (Eq. 4). With binary pass/fail rewards 𝑟 𝑖 ∈ { 0, 1}:
+
+• Too easy (𝑟 𝑖 = 1 ∀ 𝑖 ): 𝜇 𝐺 = 1, 𝜎 𝐺 = 0 =⇒ ˆ𝐴 𝑖 = 0.
+
+• Too hard (𝑟 𝑖 = 0 ∀ 𝑖 ): 𝜇 𝐺 = 0, 𝜎 𝐺 = 0 =⇒ ˆ𝐴 𝑖 = 0.
+
+• Edge of capability (mixed pass/fail): 𝜎 𝐺 > 0, so correct so-lutions receive ˆ𝐴 𝑖 > 0 and incorrect ones ˆ𝐴 𝑖 < 0, producing a meaningful gradient signal. This provides a mathematical justification for difficulty-based data curation: selecting problems near the model’s decision boundary maximizes the effective gradient from each GRPO update. This principle extends beyond LRPLs; Zhang et al. [34] independently demonstrate that dynamically alternating between SFT and RL enables automatic weakness identification and targeted resource allocation, further corroborating the value of difficulty-aware train-ing. 
+
+## 7.4 Compute Allocation: Offline vs. Online 
+
+Our results contribute to the broader debate about where to invest compute for code generation. The field currently allocates substan-tial resources to inference-time scaling, multiple generation rounds, self-correction loops, and agent-based frameworks [10, 12]. Our pipeline demonstrates that the same iterative refinement mech-anism yields strictly greater returns when deployed offline as a data synthesis engine. The key difference is amortization: offline synthesis invests compute once to produce training data, while arXiv, 2026, Samaraweera et al. 
+
+Figure 5: Comparison of GRPO reward vs. Codeforces problem ELO between our pipeline (Left) and the Agnostics pipeline [1] (Right). Our SFT-initialized policy achieves on average higher mean reward and maintains stable advantage signals across the training ELO range, indicating consistent and stable RL training. In contrast, the Agnostics pipeline exhibits degrading rewards and growing variance at higher ELO ratings. 
+
+inference-time scaling imposes a per-query cost. To illustrate, con-sider an IDE code-completion plugin serving 1,000 Julia queries per day. An inference-time scaling approach requiring five rounds of refinement per query would consume 5× the compute of a single forward pass on every query, accumulating substantial cost over weeks. In contrast, our pipeline pays a fixed one-time cost of ap-proximately $54 for data synthesis and fine-tuning, after which every query is served at single-pass inference cost. The crossover point is reached within days of deployment, and the cost advan-tage compounds indefinitely. Moreover, the offline synthesis cost is dominated by API calls for the initial data generation, a component whose price continues to decline as model serving becomes more efficient, making the approach increasingly economical over time. 
+
+## 7.5 Practical Deployment Considerations 
+
+At 8B parameters, the resulting model can run on a single consumer GPU, making it suitable for on-premise deployment where organiza-tions cannot send proprietary code to external APIs. Combined with the pipeline’s language-agnostic design, this enables organizations to bootstrap code generation for internal or niche programming languages without relying on cloud-based LLM services. 
+
+## 8 Conclusion and Future work 
+
+We presented a three-phase pipeline for adapting Small Language Models to Low-Resource Programming Languages that reframes inference-time scaling as offline data synthesis. By decoupling syn-tax acquisition (via compiler-feedback SFT) from algorithmic rea-soning (via GRPO with IO tests), our pipeline resolves the trilemma of data scarcity, inference cost, and sparse RL rewards. Furthermore, by curating the data for GRPO use, we amplify and stabilize the reward signal. Applied to Qwen3-8B, it exceeded state-of-the-art results on MultiPL-E (+7.6 pass@1) and Ag-LCB (+14.2 pass@1) for Julia. Furthermore, the pipeline generalizes to Ballerina, a language with near-zero pretraining representation, achieving Pass@1 56% with MultiPL-E and 25% with LCB. Our ablation studies confirm that iterative compiler-feedback data synthesis is essential for high-quality SFT, as it stabilizes the reward, eliminates the subtle errors present in naively generated synthetic data, and yields a cleaner training signal. Future research will focus on scaling the pipeline across diverse model architectures and expanding its support for a wider range of low-resource programming languages. We plan to investigate the synergy between continued pretraining and SFT, develop au-tomated metrics for code idiomaticity, and integrate offline data synthesis with inference-time refinement to further boost perfor-mance. 
+
+## Data Availability 
+
+The source code and datasets supporting the findings of this study are available at the following Zenodo repository [Click Here]. Selective Left-Shift: Turning Test-Time Compute and Difficulty-based Curation into Training Data for Low-Resource Code Generation arXiv, 2026, 
+
+## References 
+
+[1] Aleksander Boruch-Gruszecki, Yangtian Zi, Zixuan Wu, Tejas Oberoi, Carolyn Jane Anderson, Joydeep Biswas, and Arjun Guha. 2026. Agnostics: learning to synthesize code in any programming language with a universal reinforcement learning environment. In The Fourteenth International Conference on Learning Representations . https://openreview.net/forum?id=mjDT60Ffms. [2] Federico Cassano, John Gouwar, Francesca Lucchetti, Claire Schlesinger, Car-olyn Jane Anderson, Molly Q Feldman, Michael Greenberg, Abhinav Jangda, and Arjun Guha. 2024. Knowledge transfer from high-resource to low-resource programming languages for code LLMs. Proceedings of the ACM on Program-ming Languages (PACMPL) , 8, OOPSLA. [3] Federico Cassano et al. 2023. Multipl-e: a scalable and polyglot approach to benchmarking neural code generation. IEEE Trans. Softw. Eng. , 49, 7, (July 2023), 3675–3691. doi:10.1109/TSE.2023.3267446. [4] Bei Chen, Fengji Zhang, A. Nguyen, Daoguang Zan, Zeqi Lin, Jian-Guang Lou, and Weizhu Chen. 2022. Codet: code generation with generated tests. ArXiv ,abs/2207.10397. https://api.semanticscholar.org/CorpusID:250920542. [5] Hanting Chen et al. 2025. Pangu embedded: an efficient dual-system llm rea-soner with metacognition. ArXiv , abs/2505.22375. https://api.semanticscholar .org/CorpusID:278959233. [6] Mark Chen et al. 2021. Evaluating large language models trained on code. arXiv preprint arXiv:2107.03374 .[7] Fan Cui et al. 2024. Origen: enhancing RTL code generation with code-to-code augmentation and self-reflection. In Proceedings of the 43rd IEEE/ACM International Conference on Computer-Aided Design .[8] K. Anders Ericsson. 2008. Deliberate practice and acquisition of expert perfor-mance: a general overview. Academic emergency medicine : official journal of the Society for Academic Emergency Medicine , 15 11, 988–94. [9] Alessandro Giagnorio, Alberto Martin-Lopez, and Gabriele Bavota. 2025. En-hancing code generation for low-resource languages: no silver bullet. arXiv preprint arXiv:2501.19085 .[10] Dong Huang, Jie M. Zhang, Michael Luck, Qingwen Bu, Yuhao Qing, and Hem-ing Cui. 2023. Agentcoder: multi-agent-based code generation with iterative testing and optimisation. arXiv preprint arXiv:2312.13010 .[11] Siming Huang et al. 2024. Opencoder: the open cookbook for top-tier code large language models. In https://arxiv.org/pdf/2411.04905. [12] Md. Ashraful Islam, Mohammed Eunus Ali, and Md Rizwan Parvez. 2025. CodeSim: multi-agent code generation and problem solving through simulation-driven planning and debugging. In Findings of the Association for Computational Linguistics: NAACL 2025 . https://aclanthology.org/2025.findings-naacl.285.pdf. [13] Naman Jain et al. 2024. Livecodebench: holistic and contamination free evalua-tion of large language models for code. arXiv preprint arXiv:2403.07974 .[14] Sathvik Joel, Jie Wu, and Fatemeh Fard. 2024. A survey on LLM-based code generation for low-resource and domain-specific programming languages. 
+
+ACM Transactions on Software Engineering and Methodology .[15] Hung Le, Yue Wang, Akhilesh Deepak Gotmare, Silvio Savarese, and Steven Hoi. 2022. CodeRL: mastering code generation through pretrained models and deep reinforcement learning. In Advances in Neural Information Processing Systems . Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, (Eds.) https://openreview.net/forum?id=WaGvb7OzySA. [16] Zi Lin, Sheng Shen, Jingbo Shang, Jason E Weston, and Yixin Nie. 2025. Learning to solve and verify: a self-play framework for mutually improving code and test generation. In NeurIPS 2025 Fourth Workshop on Deep Learning for Code .[17] Ziyang Luo et al. 2024. Wizardcoder: empowering code large language mod-els with evol-instruct. In The Twelfth International Conference on Learning Representations .[18] Lu Ma et al. 2026. Learning what reinforcement learning can’t: interleaved online fine-tuning for hardest questions. In The Fourteenth International Con-ference on Learning Representations . https://openreview.net/forum?id=LzCBLr NoyM. [19] Benjamin Pikus, Pratyush Ranjan Tiwari, and Burton Ye. 2025. Hard examples are all you need: maximizing grpo post-training under annotation budgets. 
+
+arXiv preprint arXiv:2508.14094 .[20] Ruchir Puri et al. 2021. Codenet: a large-scale AI for code dataset for learning a diversity of coding tasks. (2021). https://arxiv.org/abs/2105.12655 arXiv: 2105.12655 [cs.SE] .[21] Shanghaoran Quan et al. 2025. Codeelo: benchmarking competition-level code generation of llms with human-comparable elo ratings. arXiv preprint arXiv:2501.01257 .[22] Qwen Team. 2025. Qwen3 technical report. arXiv preprint arXiv:2505.09388 .[23] Surangika Ranathunga, En-Shiun Annie Lee, Marjana Prifti Skenduli, Ravi Shekhar, Muhidin Alam, and Rishemjit Kaur. 2023. Neural machine translation for low-resource languages: a survey. ACM Computing Surveys , 55, 11, 1–37. [24] Houxing Ren et al. 2024. Reflectioncoder: learning from reflection sequence for enhanced one-off code generation. arXiv preprint arXiv:2405.17057 .[25] Pengzhen Ren, Yun Xiao, Xiaojun Chang, Po-Yao Huang, Zhihui Li, Brij B Gupta, Xiaojiang Chen, and Xin Wang. 2021. A survey of deep active learning. 
+
+ACM computing surveys (CSUR) , 54, 9, 1–40. [26] Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Mingchuan Zhang, Y.K. Li, Y. Wu, and Daya Guo. 2024. Deepseekmath: pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 .[27] Parshin Shojaee, Aneesh Jain, Sindhu Tipirneni, and Chandan K. Reddy. 2023. Execution-based code generation using deep reinforcement learning. Transac-tions on Machine Learning Research . https://openreview.net/forum?id=0XBuax qEcG. [28] Lingxiao Tang, He Ye, Zhongxin Liu, Xiaoxue Ren, and Lingfeng Bao. 2025. Codereasoner: enhancing the code reasoning ability with reinforcement learn-ing. (2025). https://arxiv.org/abs/2507.17548 arXiv: 2507.17548 [cs.SE] .[29] Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos Guestrin, Percy Liang, and Tatsunori B. Hashimoto. 2023. Stanford alpaca: an instruction-following llama model. https://github.com/tatsu-lab/stanford_alpa ca. (2023). [30] Kaixin Wang, Tianlin Li, Xiaoyu Zhang, Aishan Liu, Xianglong Liu, Ziqi Liu, Zhiqiang Zhang, Jun Zhou, and Bin Shi. 2025. Codechemist: functional knowl-edge transfer for low-resource code generation via test-time scaling. ArXiv ,abs/2510.00501. https://api.semanticscholar.org/CorpusID:281705760. [31] Yuxiang Wei, Zhe Wang, Jiawei Liu, Yifeng Ding, and Lingming Zhang. 2024. Magicoder: empowering code generation with OSS-instruct. In Proceedings of the 41st International Conference on Machine Learning (Proceedings of Machine Learning Research). Vol. 235. PMLR, (July 2024), 52632–52657. https://proceedi ngs.mlr.press/v235/wei24h.html. [32] Zhangchen Xu, Yang Liu, Yueqin Yin, Mingyuan Zhou, and Radha Poovendran. 2025. Kodcode: a diverse, challenging, and verifiable synthetic dataset for coding. https://arxiv.org/abs/2503.02951 arXiv: 2503.02951 [cs.LG] .[33] Qiying Yu et al. 2025. Dapo: an open-source llm reinforcement learning system at scale. ArXiv , abs/2503.14476. [34] Yi Zhang et al. 2025. Bridging vlms and embodied intelligence with deliberate practice policy optimization. ArXiv , abs/2511.16602.
