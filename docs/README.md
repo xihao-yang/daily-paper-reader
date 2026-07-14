@@ -6,68 +6,71 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-13
-- 运行时间：2026-07-13 20:23:48 UTC
+- 最新运行日期：2026-07-14
+- 运行时间：2026-07-14 21:16:51 UTC
 - 运行状态：成功
-- 本次总论文数：15
-- 精读区：4
+- 本次总论文数：16
+- 精读区：5
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 15 篇推荐（精读 4 篇，速读 11 篇）
-- 精读：《The Patchwork Problem in LLM-Generated Code》（9.0/10）, 《Writing Bug Reports for Software Repair Agents: What Information Matters Most?》（9.0/10）
-- 速读：《RuBench: A Repository-Level Agentic Coding Benchmark with Natively Authored Russian Task Specifications》（7.0/10）, 《Programmers Are Poor and Overconfident Judges of LLM-Generated Assertions》（7.0/10）, 《ARCANA: A Reflective Multi-Agent Program Synthesis Framework for ARC-AGI-2 Reasoning》（7.0/10）
+- 今日共生成 16 篇推荐（精读 5 篇，速读 11 篇）
+- 精读：《From Business Requirements to Test Assertions: Evaluating LLM-Generated Oracles on Real Bugs》（10.0/10）, 《Fail-Aware and Explainable Test Oracle Prediction》（10.0/10）
+- 速读：《ReProAgent: Tool-Augmented Multi-Stage Agentic Generation of Bug Reproduction Tests from Issue Reports》（7.0/10）, 《Diversifying to Verify: When Task-Equivalent Programs Differ in Verifiability》（7.0/10）, 《Writing Bug Reports for Software Repair Agents: What Information Matters Most?》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202607/13/README](/202607/13/README)
+- 详情：[/202607/14/README](/202607/14/README)
 
 ### 精读区论文标签
-1. [The Patchwork Problem in LLM-Generated Code](/202607/13/2607.08981v1-the-patchwork-problem-in-llm-generated-code)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：检测LLM代码中局部有效但全局不一致的补丁
-2. [Writing Bug Reports for Software Repair Agents: What Information Matters Most?](/202607/13/2607.09553v1-writing-bug-reports-for-software-repair-agents-what-information-matters-most)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：用于生成修复和评估补丁正确性的AI智能体
-3. [LLM-as-a-Verifier: A General-Purpose Verification Framework](/202607/13/2607.05391v1-llm-as-a-verifier-a-general-purpose-verification-framework)  
+1. [From Business Requirements to Test Assertions: Evaluating LLM-Generated Oracles on Real Bugs](/202607/14/2607.10277v1-from-business-requirements-to-test-assertions-evaluating-llm-generated-oracles-on-real-bugs)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：在Defects4J真实缺陷上评估LLM生成的测试预言
+2. [Fail-Aware and Explainable Test Oracle Prediction](/202607/14/2607.11342v1-fail-aware-and-explainable-test-oracle-prediction)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：基于学习的测试预言预测与故障检测方法
+3. [SCATE: Learning to Supervise Coding Agents for Cost-Effective Test Generation](/202607/14/2607.08983v1-scate-learning-to-supervise-coding-agents-for-cost-effective-test-generation)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：确定解决方案的正确性
-4. [LLM-as-a-Verifier: A General-Purpose Verification Framework](/202607/13/2607.05391v2-llm-as-a-verifier-a-general-purpose-verification-framework)  
+   evidence：学习监督编码智能体以进行自动测试生成
+4. [RepTran: Search-Based Repair of Transformer Models](/202607/14/2607.11193v1-reptran-search-based-repair-of-transformer-models)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：确定解决方案的正确性
+   evidence：针对 Transformer 模型和深度神经网络的搜索式修复
+5. [TerraRepair: A Tool-Grounded LLM Agent for Infrastructure-as-Code Repair](/202607/14/2607.11390v1-terrarepair-a-tool-grounded-llm-agent-for-infrastructure-as-code-repair)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：基于大语言模型的IaC修复，用于修复配置错误
 
 ### 速读区论文标签
-1. [RuBench: A Repository-Level Agentic Coding Benchmark with Natively Authored Russian Task Specifications](/202607/13/2607.06411v1-rubench-a-repository-level-agentic-coding-benchmark-with-natively-authored-russian-task-specifications)  
+1. [ReProAgent: Tool-Augmented Multi-Stage Agentic Generation of Bug Reproduction Tests from Issue Reports](/202607/14/2607.09123v1-reproagent-tool-augmented-multi-stage-agentic-generation-of-bug-reproduction-tests-from-issue-reports)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：通过上游维护者的回归测试来评判智能体编码任务
-2. [Programmers Are Poor and Overconfident Judges of LLM-Generated Assertions](/202607/13/2607.08885v1-programmers-are-poor-and-overconfident-judges-of-llm-generated-assertions)  
+   evidence：生成缺陷复现测试以提供可执行反馈
+2. [Diversifying to Verify: When Task-Equivalent Programs Differ in Verifiability](/202607/14/2607.09366v1-diversifying-to-verify-when-task-equivalent-programs-differ-in-verifiability)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估生成的断言的正确性和完整性
-3. [ARCANA: A Reflective Multi-Agent Program Synthesis Framework for ARC-AGI-2 Reasoning](/202607/13/2607.09059v1-arcana-a-reflective-multi-agent-program-synthesis-framework-for-arc-agi-2-reasoning)  
+   evidence：基于大语言模型的验证器引导注释修复流水线，关注软件正确性
+3. [Writing Bug Reports for Software Repair Agents: What Information Matters Most?](/202607/14/2607.09553v1-writing-bug-reports-for-software-repair-agents-what-information-matters-most)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：符号执行器验证候选方案，反射代理合成故障驱动的反馈进行修正
-4. [Agentic Proof and Property-Based Testing via Property-Templates in Data-Intensive Computing](/202607/13/2607.09072v1-agentic-proof-and-property-based-testing-via-property-templates-in-data-intensive-computing)  
+   evidence：评估软件修复智能体的缺陷报告以产生正确的修复
+4. [AfterVibe: What Remains When the Conversation Ends](/202607/14/2607.09900v1-aftervibe-what-remains-when-the-conversation-ends)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：AI驱动编码的意图验证和基于属性的测试
-5. [Multi-Agent LLM Collaboration for Unit Test Generation via Human-Testing-Inspired Workflows](/202607/13/2607.09101v1-multi-agent-llm-collaboration-for-unit-test-generation-via-human-testing-inspired-workflows)  
+   evidence：用于代码等价性和意图验证的多层验证流水线
+5. [Using LLMs to Adjudicate Static-Analysis Alerts with Error Reduction Techniques](/202607/14/2607.09979v1-using-llms-to-adjudicate-static-analysis-alerts-with-error-reduction-techniques)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：基于LLM且具有实时反馈的单元测试生成
-6. [SQL-RewriteBench: A Correctness-Gated, Full-Denominator Benchmark for Statement-Level SQL Rewriting [Experiment,Analysis & Benchmark]](/202607/13/2607.09251v1-sql-rewritebench-a-correctness-gated-full-denominator-benchmark-for-statement-level-sql-rewriting-experimentanalysis--benchmark)  
+   evidence：使用LLM判定静态分析告警是真实漏洞还是误报
+6. [Know Before Fix: QA-Driven Repository Knowledge Acquisition for Software Issue Resolution](/202607/14/2607.11111v1-know-before-fix-qa-driven-repository-knowledge-acquisition-for-software-issue-resolution)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：SQL重写的正确性门控和结果一致性
-7. [A Mechanistic Lens on Semantic Conflicts: Using Activation Patching to Understand LLM Behavior](/202607/13/2607.05587v1-a-mechanistic-lens-on-semantic-conflicts-using-activation-patching-to-understand-llm-behavior)  
+   evidence：用于软件问题解决的问答驱动仓库知识获取
+7. [Mizzle: A Complete Concurrent Incorrectness Logic for Preventing False Alarms in Agentic Bug Finding](/202607/14/2607.11611v1-mizzle-a-complete-concurrent-incorrectness-logic-for-preventing-false-alarms-in-agentic-bug-finding)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：机器检查证明以防止错误发现中的虚假警报
+8. [When Should LLMs Search? Counterfactual Supervision for Search Routing](/202607/14/2607.05752v1-when-should-llms-search-counterfactual-supervision-for-search-routing)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：对代码语义冲突下LLM行为的机理性研究
-8. [Reliable and Developer-Aligned Evaluation of Agents for Software Engineering](/202607/13/2607.06713v1-reliable-and-developer-aligned-evaluation-of-agents-for-software-engineering)  
+   evidence：基于任务成功构建预言机以监督搜索路由决策
+9. [HiFuzz: Hierarchical Reinforcement Learning for Semantic-Aware and Adaptive CPU Fuzzing](/202607/14/2607.06619v1-hifuzz-hierarchical-reinforcement-learning-for-semantic-aware-and-adaptive-cpu-fuzzing)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：软件工程中LLM驱动智能体的评估方法论
-9. [Search, Fail, Recover: A Training Framework for Correction-Aware Reasoning](/202607/13/2607.07492v1-search-fail-recover-a-training-framework-for-correction-aware-reasoning)  
+   evidence：用于提高缺陷检测准确性的强化学习和语义感知编码器
+10. [Retrieval-Oriented Code Representations in Agentic Bug Localization](/202607/14/2607.11046v1-retrieval-oriented-code-representations-in-agentic-bug-localization)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：通过任务验证器对推理链进行验证搜索
-10. [Selective Left-Shift: Turning Test-Time Compute and Difficulty-based Curation into Training Data for Low-Resource Code Generation](/202607/13/2607.07748v1-selective-left-shift-turning-test-time-compute-and-difficulty-based-curation-into-training-data-for-low-resource-code-generation)  
+   evidence：用于代理式缺陷定位的代码表示
+11. [Knowledge-Guided Synthetic Bug Feedback for LLM-Based Unit Test Generation](/202607/14/2607.11573v1-knowledge-guided-synthetic-bug-feedback-for-llm-based-unit-test-generation)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于代码生成的迭代编译器反馈
-11. [Functional and Secure Code Generation with Task Vectors](/202607/13/2607.07881v1-functional-and-secure-code-generation-with-task-vectors)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：利用任务向量改进功能性代码生成
+   evidence：用于单元测试生成和真实缺陷检测的合成缺陷反馈
 
 
 <div class="dpr-home-promo-card">
