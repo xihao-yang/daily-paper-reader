@@ -1,0 +1,1013 @@
+Title: Taming the Drift: Context-aware Repair of Dockerfile Drift during Software Evolution
+
+URL Source: https://arxiv.org/pdf/2607.12541v1
+
+Published Time: Wed, 15 Jul 2026 12:01:23 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+RESEARCH ARTICLE - TECHNOLOGY OPEN ACCESS 
+
+# Taming the Drift: Context-aware Repair of Dockerfile Drift during Software Evolution 
+
+Chengjie Wang 1,2  | Jingzheng Wu 1,3  | Xiang Ling 1,3  | Tianyue Luo 1 | Chen Zhao 1
+
+> 1
+
+Intelligent Software Research Center, Institute of Software, Chinese Academy of Sciences, Beijing, China | 2University of Chinese Academy of Sciences, Beijing, China | 3Key Laboratory of System Software (Chinese Academy of Sciences), Beijing, China |
+
+Correspondence: Jingzheng Wu (jingzheng08@iscas.ac.cn) | Xiang Ling (lingxiang@iscas.ac.cn) 
+
+Received: 22 May 2026 | Revised: Accepted: Keywords: Dockerfile drift | software evolution | automated program repair 
+
+ABSTRACT 
+
+Docker has become the de facto standard for reproducible build environments in modern software engineering. Its benefits are undermined, however, by Dockerfile drift: a divergence between a Dockerfile and its evolving source code that causes builds to fail silently in CI/CD pipelines. Existing rule-based and retrieval-based repair approaches operate on the Dockerfile in isolation from the surrounding build context and therefore cannot address context-dependent drift failures. To close this gap, we present 
+
+Cadre , a context-aware framework for the automated repair of Dockerfile drift. The key design insight is that context structure determines repair quality more than context volume. Specifically, Cadre performs a static analysis to construct a Context-aware Dependency Graph (CDG) that maps each Dockerfile instruction to its file-level and inter-instruction dependencies. Cadre then uses the CDG to guide an LLM in a two-step workflow: the first step selects only the context causally relevant to the observed failure, and the second step generates a targeted patch from that focused context. We also introduce DodeX , a pipeline that continuously mines real-world Dockerfile drift instances from GitHub Actions CI logs and captures the complete build configurations that static-snapshot datasets omit. Using DodeX , we construct 𝐷 3, a benchmark of 1,040 drift instances each reproducible locally using the exact parameters from the original CI run. Across 𝐷 3, Cadre achieves a repair rate of 35.22%, which is 2.78 × that of the rule-based baseline and 1.24 × that of the best LLM-based baseline. The two-step context-selection workflow keeps 95.25% of prompts below 30k tokens, eliminating the prompt-overflow failures that cause competing LLM-based methods to produce no patch in 41– 58 cases per method. Ablation results confirm that the CDG and the two-step workflow each contribute independently and are mutually reinforcing. These results indicate that explicit dependency modeling is a durable repair signal: its advantage over diff-only approaches widens as drift ages across commits, suggesting that context-aware IaC maintenance is a productive direction for future tool development. All the code and dataset are open-sourced at https://github.com/dw763j/Cadre for review. 
+
+1 Introduction 
+
+Modern software development is characterized by rapid, itera-tive evolution, driven by methodologies such as Agile and De-vOps [2, 14]. Continuous Integration and Continuous Deploy-ment (CI/CD) pipelines are the backbone of this paradigm, requir-ing consistent and reproducible build environments [34, 41]. Docker has emerged as the de facto standard for achieving envi-ronmental consistency across development, testing, and produc-tion [6, 9, 26]. Developers encode the environment as a Dockerfile, an executable build script that specifies all dependencies and setup steps from the source repository [11, 22]. In the modern software development process, every source-code commit in a CI/CD pipeline triggers an automated image build and test cycle [22, 43, 15]. The health of a Dockerfile, therefore, directly determines the health of the pipeline. Prior work finds that more than one in four Docker builds in open-source projects fail [46, 23, 49, 47], and each failure demands days of developer repair effort. These failures stem from heterogeneous root causes: base-image tag deprecation, network-level package unavailabil-ity, and test regressions introduced by dependency updates. One category is structurally distinct from the others. Dockerfile drift oc-curs when the Dockerfile fails to absorb a change that has already  
+
+> , 2026;vx:1–18 https://doi.org/10.1002/0000 1 of 18 arXiv:2607.12541v1 [cs.SE] 14 Jul 2026
+
+landed in the application source code, causing the mismatch to persist silently until the next build attempt exposes it. Drift is an internal co-evolution problem. Specifically, the fix information resides in the same repository that produced the failure. Drift manifests as incorrect file paths, mismatched environment variables, changed architecture platforms, and outdated depen-dency specifications, among other forms. For instance, a devel-oper may update a dependency version in application configura-tion files while leaving the corresponding ARG or ENV declarations in the Dockerfile unchanged, breaking the image build. Dockerfile drift causes significant disruptions in CI/CD pipelines, leading to build failures, deployment delays, and increased main-tenance overhead [27, 54]. Repairing drift is non-trivial because Dockerfile instructions are tightly coupled with the build con-text: the state of the source code, external dependencies, and the target deployment environment at build time. Three challenges compound the difficulty. 
+
+∙ C1. Extracting the precise build context from the soft-ware: The Docker build process interacts with the source code and external dependencies through a combination of file copies, shell commands, and build-tool invocations. Ac-curately capturing which files and environment variables each instruction depends on requires understanding these interactions, not reading the Dockerfile text alone. Existing rule-based methods [1, 7, 12] apply static patterns or heuris-tics and do not model the build context. Recent LLM-based approaches [29, 40, 48] similarly focus on the Dockerfile and error logs without incorporating the surrounding software context. 
+
+∙ C2. Inferring dependencies within and across Dock-erfile instructions: Instructions can depend on artifacts produced by earlier instructions in non-obvious ways. A RUN 
+
+instruction may operate on files introduced by an earlier 
+
+COPY step, or reference environment variables set by a prior 
+
+ARG instruction, without any syntactic marker linking the two. These inter-instruction dependencies are not recover-able from any single instruction in isolation and require a global model of the build process. 
+
+∙ C3. Locating the information relevant to a specific fail-ure: When a build fails, the error log identifies the failing instruction but rarely points directly to the root cause, es-pecially when the failure originates from a context change introduced in a prior commit. A systematic approach is needed to trace back from the observed error to the spe-cific source-code changes that caused the drift, without requiring human inspection. The key insight behind our solution is that context structure de-termines repair quality more than context volume : knowing which files each instruction depends on, and how those dependencies propagate across instruction boundaries, is more valuable than supplying the LLM with a large unstructured context. Building on this insight, we propose Cadre (Context-aware drift repair frame-work), which models the build context explicitly and uses LLM-based reasoning to generate targeted repairs. Cadre addresses each challenge with a dedicated component. 
+
+The Instruction-level Context Profiler addresses C1 by make-ing a stateful simulation of the Docker build process, tracking the working directory, environment variables, and files in the con-tainer at each instruction. Rather than treating build-tool invoca-tions as opaque shell commands, it applies build system parsers to infer the file dependencies that each invocation implies. 
+
+The Context-aware Dependency Graph (CDG) addresses C2 by converting the per-instruction context profile into a directed graph that makes inter-instruction dependencies explicit. File vertices connect to the instructions that depend on them, and se-quential edges represent the control flow of the build, allowing a repair agent to trace failure causes across instruction boundaries. 
+
+The Context-refined Repair workflow addresses C3 by using the CDG to guide a two-step LLM interaction. Rather than supply-ing all available context in a single prompt, the first step asks the LLM to select the most relevant files from the CDG and the code-change diff; the second step retrieves those files and generates a targeted repair. This separation keeps each prompt focused and within the model’s operational context limit. Progress in this area has also been hampered by the absence of realistic benchmarks. Existing Dockerfile repair datasets [21, 29, 40] capture the Dockerfile text but not the build configura-tion or dynamic build parameters required to reproduce builds locally, making evaluation results difficult to interpret. We there-fore design DodeX (Dockerfile drift eXtractor), a pipeline that continuously mines Dockerfile drift instances from GitHub Ac-tions CI logs and captures their complete build configurations, including dynamic build arguments and target platform specifi-cations. Using DodeX , we construct 𝐷 3, the first Dockerfile drift benchmark in which each instance is locally reproducible using the exact parameters recorded from the original CI run. We evaluate Cadre on 𝐷 3, comparing it against a rule-based baseline [12], a retrieval-based baseline [40], and a vanilla LLM baseline. The context-aware dependency modeling substantially raises the repair rate. Cadre achieves a repair rate of 35.22% on the benchmark, against 9.34% for the rule-based baseline and 28.48% for the best LLM-based baseline without context modeling. Be-yond accuracy, context selection eliminates prompt-overflow fail-ures entirely. Each LLM-based baseline produces between 41 and 58 cases per method in which no patch is generated, because the prompt exceeds the model’s context limit. Cadre produces zero such cases: its two-step workflow filters context before loading file content, keeping every prompt within the operational range. The performance advantage widens further as drift becomes stale. When a build failure persists across multiple commits, the most recent code diff becomes an increasingly unreliable repair signal. At five or more commits of distance, Cadre ’s repair rate of 25.9% exceeds the best baseline’s 19.7% by a proportionally larger mar-gin than at the first commit, confirming that the CDG provides a signal that is robust to commit distance. In summary, the contributions of this paper are as follows. 
+
+∙ Cadre : A context-aware Dockerfile drift repair framework grounded on the insight that context structure determines repair quality more than context volume. Cadre realizes this through an Instruction-level Context Profiler, a Context-aware Dependency Graph, and a two-step LLM repair work-flow that together relieve the prompt-overflow failures that affect all competing methods while achieving a repair rate 2.78 × that of the rule-based baseline and 1.24 × that of the best LLM-based baseline.  
+
+> 2 of 18 , 2026
+
+∙ DodeX and 𝐷 3: A continuously operable pipeline that mines Dockerfile drift instances from GitHub Actions CI logs and captures the complete build configuration, i.e. , in-cluding dynamic build arguments and multi-platform spec-ifications, that static-snapshot datasets omit, together with 
+
+𝐷 3, the first Dockerfile drift benchmark in which every in-stance is locally reproducible using the exact parameters from the original CI run. 
+
+∙ Empirical evaluation: A comparison of Cadre against rule-based, retrieval-based, and vanilla LLM baselines un-der a reproducible evaluation protocol, covering repair ef-fectiveness, token efficiency, robustness to stale drift, and component-level ablation, providing a multi-dimensional characterization of context-aware repair. We organize the remainder of the paper as: Section §2 pro-vides background on Dockerfiles and the Docker build process. Section §3 details the design of Cadre . Section §4 describes the ex-perimental setup and the construction of 𝐷 3. Section §5 presents experimental results. Section §6 discusses findings and threats to validity. Section §7 reviews related work. Section §8 concludes. 
+
+2 Background 
+
+To understand why Dockerfile drift is difficult to repair auto-matically, this section covers two prerequisites: the build-time semantics of Dockerfile instructions, and the precise technical meaning of Dockerfile drift as an evolutionary phenomenon. Both are illustrated with a real drift instance from the 𝐷 3 dataset. 
+
+2.1 Docker Build Process and Context Coupling 
+
+A Dockerfile is an ordered sequence of instructions that Docker executes to assemble a container image layer by layer [11]. Un-derstanding how each instruction type interacts with the build environment is necessary to understand why a repair tool cannot operate on the Dockerfile text in isolation. 
+
+State-accumulating instructions. Three instruction types modify the build state without producing file content. FROM des-ignates the base image for a build stage and implicitly establishes the runtime environment, including the version of any language toolchain bundled in that image. WORKDIR sets the working direc-tory inside the container; all subsequent relative paths in COPY ,
+
+ADD , and RUN instructions are resolved against this value. ARG and 
+
+ENV declare build-time and runtime variables, respectively; later instructions can reference these variables via ${VAR} parameter. 
+
+Context-ingesting instructions. COPY and ADD transfer files from the host build context, which is typically the repository root, into the container image. Their source paths are resolved against the repository root, making them a direct coupling point between the Dockerfile and the source tree. 
+
+Execution instructions. RUN executes a shell command inside the container at build time. Its behavior depends on three inher-ited states: the working directory established by prior WORKDIR 
+
+instructions, the environment variables accumulated by prior 
+
+ARG and ENV instructions, and the files present in the container from prior COPY or ADD instructions. Critically, none of these dependencies is syntactically visible in the RUN instruction itself. 
+
+Multi-stage builds. A Dockerfile may contain multiple FROM 
+
+instructions, each initiating a new build stage with its own in-dependent working directory, environment, and file set. Files may be transferred from an earlier stage to a later one via COPY –from= stage , creating cross-stage dependencies that are not visible from the receiving instruction alone. 
+
+Listing 1 shows a representative two-stage Dockerfile from the httpx project [37]. The first stage at lines 1–8 compiles the Go binary: WORKDIR on line 4 establishes /app as the work-ing directory; COPY on line 5 brings the entire repository into 
+
+/app , including go.mod and go.sum ; RUN go mod download on line 6 then resolves Go module dependencies against those files. The second stage at lines 10–14 assembles the runtime image and retrieves the compiled binary from the first stage via COPY –from=builder on line 13, a cross-stage dependency. 
+
+2.2 Dockerfile Drift 
+
+Dockerfile drift occurs when a code change in the source reposi-tory invalidates one or more Dockerfile instructions, causing the next CI build to fail. The defining characteristic of drift is that the Dockerfile itself is syntactically unchanged; the failure arises from the broken correspondence between Dockerfile semantics and the evolved repository state. The httpx instance in Listing 1 illustrates drift concretely. In this commit, the developers updated go.mod to declare go 1.23.0 
+
+Listing 1: Dockerfile of httpx at the failing commit bb3154ff [37] 
+
+1 # Stage 1: Build 
+
+2 FROM golang :1.21.4 - alpine AS builder 
+
+3 RUN apk add --no - cache git build - base gcc musl - dev 
+
+4 WORKDIR / app 
+
+5 COPY . / app 
+
+6 RUN go mod download 
+
+7 RUN go build ./ cmd / httpx 
+
+8 # Stage 2: Runtime 
+
+9 FROM alpine :3.18.2 
+
+10 RUN apk upgrade --no - cache && apk add --no - cache bind - tools ca - certificates chromium 
+
+11 COPY -- from = builder / app / httpx / usr / local / bin / 
+
+12 ENTRYPOINT [ " httpx " ] 
+
+> 3 of 18
+
+as the minimum required toolchain, while also bumping dozens of transitive dependency versions. The Dockerfile was not mod-ified. When GitHub Actions executed the Docker build, the RUN go mod download instruction at line 6 failed with the follow-ing error: go: go.mod requires go >= 1.23.0 (running go 1.21.4; GOTOOLCHAIN=local). 
+
+The error message correctly attributes the failure to line 6, but the root cause is not located there. Line 6 fails because two earlier instructions have produced an incompatible state: FROM golang:1.21.4-alpine on line 2 establishes a Go 1.21.4 run-time, and COPY . /app on line 5 brings in the updated go.mod 
+
+that declares a minimum version of Go 1.23.0. No static analy-sis of any single instruction reveals this incompatibility. A repair tool must trace the dependency path from the FROM instruction through the COPY instruction to the RUN instruction to identify that the correct fix is to update the base image on line 2. This gap between the error’s visible location and its actual root cause is the central challenge that motivates Cadre ’s design. With-out a model of how the build-time state propagates across instruc-tions, a repair tool cannot reliably distinguish the instruction that needs to change from the instruction that happens to fail. 
+
+3 Methodology 3.1 Overview 
+
+This section details the method we designed to repair the Dock-erfile Drift problem by dealing the three challenges identified in Section 1, i.e. , extracting build-time context (C1), modeling cross-instruction dependencies (C2), and locating causally relevant information (C3). Cadre deals these challenges with dedicated components, organized into four phases together with the DodeX 
+
+extractor, as illustrated in Figure 1. 
+
+(1) Dockerfile Drift Extractor ( DodeX ): The first step in repair-ing Dockerfile drift is locating instances of it in the wild. Existing Dockerfile repair datasets [21, 29, 40] focus on the Dockerfile text alone, without capturing the build context that surrounds it. 
+
+DodeX uses GitHub Actions as a natural observation point that simultaneously records software evolution and Docker build out-comes, enabling the extraction of drift instances together with their full build configurations and dynamic build parameters. 
+
+(2) Instruction-level Context Profiler: This phase performs an instruction-level static analysis to profile the build context, main-taining a context state that tracks file accesses, working-directory changes, and environment variables. By processing each Docker-file instruction against this evolving state, the profiler produces a detailed context profile for the entire Dockerfile to deal with C1. 
+
+(3) Context-aware Dependency Graph (CDG) Construction: 
+
+This phase models the dependencies among Dockerfile instruc-tions as a directed acyclic graph, using the context profile pro-duced in the previous phase. The graph makes explicit both the control flow among instructions and the data-flow relationships between instructions and the repository files they access, en-abling systematic reasoning about failure propagation paths that can deal with C2. 
+
+(4) Context-refined Repair: This phase employs an LLM to rea-son about which context is essential for repairing the specific build failure, guided by the CDG and the failure log. Through a two-step agentic workflow, the LLM first selects the most relevant files and then generates a targeted repair to deal with C3. We detail each phase in the following sections. 
+
+3.2 Dockerfile Drift Extractor 
+
+Existing studies on Dockerfile analysis primarily rely on static snapshots of Dockerfiles collected at a single point in time [21, 40]. Such datasets capture syntactical issues but cannot repre-sent Dockerfile drift, which is an evolutionary problem: it arises from desynchronization between a project’s source code and its build configuration across successive commits. To fill this gap, we developed the Dockerfile drift eXtractor ( DodeX ), a system-atic pipeline that mines genuine drift instances directly from the software evolution history of real-world projects. The core design rationale of DodeX is to use GitHub Actions as a natural laboratory for observing Dockerfile drift. A GitHub Ac-tions workflow is triggered by a push , pull_request , or other commit-level event that represents a discrete software change. When a Docker build step within such a workflow fails, the fail-ure provides a verifiable signal that the current source code has diverged from the Dockerfile. DodeX captures this signal together with the complete build configuration, making each extracted instance fully reproducible. The DodeX pipeline automates the discovery and capture of these instances through the following stages. 
+
+(1) Repository Collection: The pipeline begins by collecting a large set of high-quality open-source projects from GitHub. 
+
+DodeX uses the GitHub GraphQL API and applies filters on repos-itory creation date, primary programming language, star count, and the presence of a Dockerfile to select projects that are mature and actively maintained. 
+
+(2) Workflow Identification: DodeX downloads and parses the workflow YAML files from the collected repositories. It selects only those workflows that contain an explicit Docker build step, such as the widely used docker/build-push-action action, and discards CI jobs unrelated to containerized builds. 
+
+(3) Failure Log Acquisition: For each Docker-centric workflow, 
+
+DodeX uses the GitHub REST API to fetch its complete execution history. It targets all failed workflow runs and downloads their line-by-line execution logs for offline analysis. 
+
+(4) Drift Instance Extraction and Context Capture: The downloaded logs are parsed to isolate failures that occurred specifically within the Docker build step. DodeX applies a two-stage filtering procedure to distinguish Docker build failures from other CI failures in the same workflow run. Firstly, DodeX identi-fies the workflow step that triggered the failure by matching the step name and action type against a curated list of Docker-build action identifiers, e.g. , docker/build-push-action and docker build commands. Secondly, DodeX verifies that the failure log contains Docker-specific error patterns, such as layer-build errors and Dockerfile instruction traces, rather than generic exit codes produced by testing or deployment steps. Only instances that pass both stages are retained as confirmed drift instances. For each confirmed instance, DodeX extracts and stores the fol-lowing metadata: 
+
+∙ The full build error log from the failed Docker build step. 
+
+∙ The complete Dockerfile build configuration, including the target Dockerfile path, build context path, dynamic build ar-guments, and target platforms. This information is extracted from both the workflow file at the failing commit and the        
+
+> 4 of 18 , 2026 FROM golang:1.22
+> WORKDIR /app
+> COPY ./app /app
+> RUN make
+> ......
+> Software Context Dockerfile
+
+(2) Instruction-level Context Profiler 
+
+> Software Evolution
+> GitHub
+> Actions
+> Workflo w
+> Identify
+> Error Log
+> Extract
+> Code Diff
+> Extract
+> Build
+> Params
+
+(1) Dockerfile Drift Extractor      
+
+> Inst ruction
+> Context Map
+> Context-aware
+> Dependency Graph
+> Inst File Inst File
+
+(3) CDG Construction 
+
+(4) Context-refined Repair      
+
+> CDG
+> Error Log
+> Diff List
+> LLM
+> Context
+> Inquiry
+> Key Files Context
+> Key Diffs
+> Error Log
+> Context-aware
+> Repair
+> Repaired
+> Dockerfile
+> 1
+> 2
+> 3
+> 4
+> Inst-File Dep Control Flow Dataflow
+> *.go
+> go.mod
+> go.sum
+> *.css
+> html/
+> img/
+> *.cpp
+> Makefile
+> *.h
+
+F I G U R E 1 | The overview of the Cadre framework. 
+
+build log itself; DodeX cross-validates the two sources to resolve discrepancies and obtain accurate parameter values. 
+
+∙ The commit hash of the failed build, which allows the ex-act source repository state that triggered the failure to be reconstructed locally. 
+
+∙ The code-change diffs introduced by the failing commit, which provide the evolutionary signal used by repair tools. The output of the DodeX pipeline is a collection of drift instances. Each instance encapsulates not only a failing Dockerfile and an error log, but the entire evolutionary context: the specific software change that triggered the failure and the precise, dynamic build parameters recorded by the CI environment. This provides the foundation for constructing our high-fidelity dataset. 
+
+3.3 Instruction-level Context Profiler 
+
+C1 requires that every Dockerfile instruction be associated with the precise build-time state visible to it at the moment of execu-tion. This state is determined by the cumulative effect of all prior instructions in the same build stage. Static analysis of the Dock-erfile text alone is therefore insufficient: the working directory, active environment variables, and the set of available files are all functions of prior execution, not of text structure. Correct con-text extraction requires simulating the build process instruction by instruction, propagating a shared state model across the full instruction sequence. The Instruction-level Context Profiler implements this simula-tion. It traverses the Dockerfile’s instructions in order and main-tains a model of the evolving container environment. By the time a repair agent queries the profiler for the context of a failed in-struction, the profiler has already recorded the full state that instruction could see at build time. 
+
+Context State. The core data structure of this simulation is the 
+
+Context State , which formally captures the container’s environ-ment at a given point in the build. We define the Context State immediately before instruction 𝐼 𝑗 executes as: 
+
+𝜎 𝑗 = ( 𝛿 𝑗 , 𝜀 𝑗 , Φ𝑗 
+
+) (1) where 𝛿 𝑗 ∈ 𝒫 is the current working directory, drawn from the set of all absolute container paths 𝒫 ; 𝜀 𝑗 ∶ 𝒦 ⇀ 𝒱 is a partial function mapping environment variable names 𝒦 to their resolved string values 𝒱 , populated by ENV and ARG instructions; and Φ𝑗 ⊆ ℱ is the set of file paths present in the current build stage immediately before 𝐼 𝑗 runs, where ℱ denotes the universe of all file paths. The profiler initializes each build stage with 𝜎 0 = ( /, ⊥, ∅) , where 
+
+⊥ denotes the empty mapping, and advances the state through a deterministic transition function: 
+
+𝜎 𝑗 +1 = 𝒯 (𝐼 𝑗 +1 , 𝜎 𝑗 ) (2) 
+
+> 5 of 18
+
+Algorithm 1 Instruction-level Context Profiler  
+
+> 1:
+
+Input: 𝐷 : Parsed Dockerfile Instructions, 𝑅 :Repository root path  
+
+> 2:
+
+Output: 𝐼𝐶𝑀 : Instruction Context Map  
+
+> 3:
+
+function Profiling (𝐷, 𝑅 ) 
+
+> 4:
+
+𝑆𝑡𝑎𝑔𝑒𝑆𝑡𝑎𝑡𝑒𝑠 ← new map of stage names to 𝜎  
+
+> 5:
+
+𝐼𝐶𝑀 ← new map of instructions to 𝜎  
+
+> 6:
+
+𝑐𝑢𝑟𝑟𝑒𝑛𝑡 _𝑠𝑡𝑎𝑔𝑒 ← null  
+
+> 7:
+
+for each instruction 𝐼 in 𝐷 do  
+
+> 8:
+
+𝜎 ← 𝑆𝑡𝑎𝑔𝑒𝑆𝑡𝑎𝑡𝑒𝑠 [𝑐𝑢𝑟𝑟𝑒𝑛𝑡 _𝑠𝑡𝑎𝑔𝑒 ] 
+
+> 9:
+
+if 𝐼.𝑡𝑦𝑝𝑒 = FROM then  
+
+> 10:
+
+𝑐𝑢𝑟𝑟𝑒𝑛𝑡 _𝑠𝑡𝑎𝑔𝑒 ← 𝐼.𝑠𝑡𝑎𝑔𝑒 _𝑛𝑎𝑚𝑒  
+
+> 11:
+
+𝜎 𝑛𝑒𝑤 ← (𝛿 ← “/” , 𝜀 ← ⊥, Φ ← ∅)  
+
+> 12:
+
+𝑆𝑡𝑎𝑔𝑒𝑆𝑡𝑎𝑡𝑒𝑠 [𝑐𝑢𝑟𝑟𝑒𝑛𝑡 _𝑠𝑡𝑎𝑔𝑒 ] ← 𝜎 𝑛𝑒𝑤  
+
+> 13:
+
+𝜎 ← 𝜎 𝑛𝑒𝑤  
+
+> 14:
+
+else if 𝐼.𝑡𝑦𝑝𝑒 ∈ { WORKDIR , ARG , ENV } then  
+
+> 15:
+
+𝜎 ← UpdateState (𝜎, 𝐼 ) 
+
+> 16:
+
+else if 𝐼.𝑡𝑦𝑝𝑒 ∈ { COPY , ADD } then  
+
+> 17:
+
+if 𝐼 has –from flag then  
+
+> 18:
+
+𝑠𝑜𝑢𝑟𝑐𝑒 _𝑠𝑡𝑎𝑔𝑒 ← 𝐼.𝑠𝑜𝑢𝑟𝑐𝑒 _𝑠𝑡𝑎𝑔𝑒 _𝑛𝑎𝑚𝑒  
+
+> 19:
+
+𝜎 𝑠𝑟𝑐 ← 𝑆𝑡𝑎𝑔𝑒𝑆𝑡𝑎𝑡𝑒𝑠 [𝑠𝑜𝑢𝑟𝑐𝑒 _𝑠𝑡𝑎𝑔𝑒 ] 
+
+> 20:
+
+𝑆𝑜𝑢𝑟𝑐𝑒𝐹𝑖𝑙𝑒𝑠 ← FindFiles (𝜎 𝑠𝑟𝑐 .Φ, 𝐼.𝑠𝑟𝑐 ) 
+
+> 21:
+
+else  
+
+> 22:
+
+𝑆𝑜𝑢𝑟𝑐𝑒𝐹𝑖𝑙𝑒𝑠 ← ResolveHostPaths (𝑅, 𝐼.𝑠𝑟𝑐 ) 
+
+> 23:
+
+end if  
+
+> 24:
+
+𝜎. Φ ← 𝜎. Φ ∪ MapToDest (SourceFiles , 𝐼.𝑑𝑒𝑠𝑡 ) 
+
+> 25:
+
+else if 𝐼.𝑡𝑦𝑝𝑒 ∈ { RUN , SHELL , CMD } then  
+
+> 26:
+
+𝑐𝑜𝑚𝑚𝑎𝑛𝑑𝑠 ← Preprocess (I.value , 𝜎.𝜀 ) 
+
+> 27:
+
+for each 𝑐𝑚𝑑 in 𝑐𝑜𝑚𝑚𝑎𝑛𝑑𝑠 do  
+
+> 28:
+
+𝜎 ← UpdateStateForPathChanges (𝜎, 𝑐𝑚𝑑 ) 
+
+> 29:
+
+𝑖𝑛𝑓𝑒𝑟𝑟𝑒𝑑 _𝑓𝑖𝑙𝑒𝑠 ← AnalyzeBuild (𝑐𝑚𝑑, 𝜎 ) 
+
+> 30:
+
+𝜎. Φ ← 𝜎. Φ ∪ 𝑖𝑛𝑓𝑒𝑟𝑟𝑒𝑑 _𝑓𝑖𝑙𝑒𝑠  
+
+> 31:
+
+end for  
+
+> 32:
+
+end if  
+
+> 33:
+
+𝐼𝐶𝑀 [𝐼 ] ← copy (𝜎 ) 
+
+> 34:
+
+end for  
+
+> 35:
+
+return 𝐼𝐶𝑀  
+
+> 36:
+
+end function 
+
+The concrete semantics of 𝒯 are instruction-type-specific and defined in the per-type analysis below. A key invariant of this sim-ulation is that Φ is monotonically non-decreasing within a build stage: Φ𝑗 ⊆ Φ𝑗 +1 for all 𝑗 . This reflects Docker’s union filesystem, in which each layer accumulates files from prior layers and never removes them within a stage. Modern Dockerfiles frequently employ multi-stage builds to sep-arate build-time from runtime dependencies. Cadre respects this structure by instantiating an independent Context State 𝜎 
+
+for each build stage initiated by a FROM instruction. A map of these stage-specific states is maintained throughout the analy-sis, enabling correct resolution of cross-stage file transfers, e.g. ,
+
+COPY –from=<stage> . We provide the profiling pseudocode in Algorithm 1 and describe the per-instruction-type analysis below. 
+
+(1) State-Modifying Instructions: Directives such as WORKDIR ,
+
+ARG , and ENV directly update the Context State. A WORKDIR in-struction updates 𝛿 , resolving relative paths against the current value. ARG and ENV instructions populate 𝜀 , with later definitions overriding earlier ones as per Docker’s semantics. 
+
+(2) Context-Ingesting Instructions: COPY and ADD instructions ingest files into the container. The profiler resolves their source paths against either the host repository root or a previous stage’s file set Φ, and adds the corresponding file paths to Φ of the current state. The destination path is computed relative to the current working directory 𝛿 . This step explicitly links each Dockerfile instruction to its file-level dependencies. 
+
+(3) Execution Instructions: Analyzing RUN , CMD , and 
+
+ENTRYPOINT instructions requires handling arbitrary shell commands. For a RUN instruction, the profiler proceeds as below. 
+
+∙ Preprocessing: Chained shell commands, i.e. , joined by && 
+
+or ;, are decomposed into a sequence of commands. 
+
+∙ Variable substitution: Environment variable references, 
+
+e.g. , ${VAR} , in each command are substituted using the current environment map 𝜀 .
+
+∙ Build-system-aware analysis: Rather than treating com-mands as opaque strings, the profiler applies build-tool-specific parsers to infer file dependencies from recog-nized build-tool invocations. For example, a go build com-mand triggers the Go parser, which infers dependencies on 
+
+go.mod , go.sum , and all *.go source files within the work-ing directory 𝛿 . A uv sync command triggers the Python-uv parser, which infers a dependency on pyproject.toml .This build-system-aware approach allows the profiler to re-cover file dependencies that are implicit in the build-tool contract rather than stated in the Dockerfile text. The profiler implements build-system-aware parsers for 11 ma-jor ecosystems. Table 1 summarizes the trigger commands and inferred file dependencies for each ecosystem. The parser system is implemented as a pluggable architecture. A dispatcher module routes each command to the appropriate parser based on the command’s prefix. A new parser can add new build systems without modifying existing ones. The final output of the Instruction-level Context Profiler is the 
+
+Instruction Context Map (ICM) : a mapping from each instruction 
+
+𝐼 in the Dockerfile to the Context State 𝜎 that existed immediately before its execution. The ICM provides the foundational data for constructing the dependency graph in the next phase. 
+
+3.4 Context-aware Dependency Graph Construct 
+
+C2 requires a representation of how dependencies propagate across instruction boundaries. A per-instruction context profile is insufficient for this purpose. Consider a COPY instruction that introduces a file later consumed by a RUN instruction. When the build fails at the RUN step, the root cause is a change to the file introduced by COPY . This causal link spans an instruc-tion boundary and is invisible when instructions are analyzed in isolation. The repair agent must be able to trace it. To model these cross-instruction relationships explicitly, we construct the Context-aware Dependency Graph (CDG), a directed representa-tion of both the control flow and data flow of the build process. Formally, the CDG is a directed acyclic graph 𝐺 = ( 𝑉, 𝐸 ) as below. 
+
+∙ Vertices ( 𝑉 ): 𝑉 = 𝑉 𝐼 ∪ 𝑉 𝐹 , where the two sets are disjoint. 
+
+⋅ 𝑉 𝐼 : instruction vertices, one per Dockerfile instruction. 
+
+⋅ 𝑉 𝐹 : file vertices, one per unique file path from the build context that is referenced by at least one instruction. When  
+
+> 6 of 18 , 2026
+
+T A B L E 1 | Build-system-aware parsers implemented in Cadre . Each parser is triggered by a recognized command prefix and infers the correspond-ing file dependencies relative to the current working directory 𝛿 .
+
+Ecosystem Trigger commands Inferred file dependencies 
+
+Go go build , go test , go install , go run , go mod , go get , go fmt , go vet go.mod , go.sum , *.go in 𝛿 
+
+npm npm install , npm ci , npm build , npm run , npm start , npm test package.json , package-lock.json 
+
+yarn yarn install , yarn build , yarn run , yarn start , yarn test package.json , yarn.lock 
+
+pnpm pnpm install , pnpm run , pnpm build , pnpm add package.json , pnpm-lock.yaml 
+
+pip pip install , python install , poetry install , pipenv install requirements*.txt , setup.py ,
+
+pyproject.toml , Pipfile 
+
+uv uv sync , uv run , uv lock , uv add , uv build pyproject.toml , uv.lock 
+
+Maven mvn , mvnw pom.xml 
+
+Gradle gradle , gradlew build.gradle , build.gradle.kts ,
+
+settings.gradle , settings.gradle.kts 
+
+Cargo cargo build , cargo test , cargo run , cargo check , cargo clippy , cargo install Cargo.toml , Cargo.lock 
+
+.NET dotnet build , dotnet restore , msbuild , nuget *.csproj , *.vbproj , *.fsproj , *.sln 
+
+Composer composer install , composer update , composer require composer.json , composer.lock 
+
+Make make GNUmakefile , Makefile , *.c , *.cpp , *.h 
+
+in 𝛿 
+
+CMake cmake –build , cmake -D... CMakeLists.txt 
+
+multiple instructions depend on the same file path, a sin-gle shared 𝑉 𝐹 is used. The CDG thus does not duplicate structural information across shared dependencies. 
+
+∙ Edges ( 𝐸 ): 𝐸 = 𝐸 𝑆 ∪ 𝐸 𝐷 , where the two sets are disjoint. 
+
+⋅ 𝐸 𝑆 : sequential edges. For any two consecutively appearing instructions 𝐼 𝑗 and 𝐼 𝑗 +1 , a sequential edge (𝑣 𝑗 , 𝑣 𝑗 +1 ) ∈ 𝐸 𝑆 
+
+represents the control flow of the build. 
+
+⋅ 𝐸 𝐷 : dataflow edges. If instruction 𝐼 𝑗 depends on file 𝐹 𝑘 (by its file set Φ𝑗 ), a dataflow edge (𝑣 𝑘 , 𝑣 𝑗 ) ∈ 𝐸 𝐷 represents the “read-from” dependency from context to instruction. 
+
+Transitive dependencies. The CDG represents only direct de-pendencies. Specifically, a dataflow edge (𝑣 𝑘 , 𝑣 𝑗 ) exists if and only if instruction 𝐼 𝑗 directly references file 𝐹 𝑘 according to the ICM. Transitive relationships are not added as explicit edges. For example, a change to 𝐹 𝑘 may affect instruction 𝐼 𝑚 via an inter-mediate instruction 𝐼 𝑗 ; adding this as a direct edge would cause quadratic graph growth. Instead, such relationships are recover-able by path traversal and are exploited as such during the repair F1 
+
+## I0 
+
+## I1 
+
+## F0 
+
+## I2 
+
+## I3 
+
+## I4 
+
+## F2 
+
+## F2 F3 F4   
+
+> Inst-File Dep Control Flow Dataflow
+> I~
+> Instruction
+> Node
+> F~
+> File Node
+
+F I G U R E 2 | Illustration of the Context-aware Dependency Graph. 
+
+phase. This design keeps the graph compact while preserving all dependency information needed for reasoning. The construction procedure is detailed in Algorithm 2. All in-struction vertices are created first and linked by sequential edges. The algorithm then iterates over the ICM: for each instruction, it examines the associated file set Φ, creates a file vertex for each unique path (or reuses an existing one), and adds a dataflow edge from the file vertex to the instruction vertex. The resulting CDG supports efficient causal reasoning about drift root causes. Given that a code change modifies file 𝐹 𝑘 and the build fails at instruction 𝐼 𝑗 , a repair agent traverses the CDG to determine whether a dependency path from 𝑣 𝑘 to 𝑣 𝑗 exists. If such 
+
+Algorithm 2 CDG Construction  
+
+> 1:
+
+Input: 𝐷 : Parsed Dockerfile Instructions, 𝐼𝐶𝑀 :Instruction Context Map  
+
+> 2:
+
+Output: 𝐺 = ( 𝑉, 𝐸 ): Context-aware Dependency Graph  
+
+> 3:
+
+function ConstructCDG (𝐷, 𝐼𝐶𝑀 ) 
+
+> 4:
+
+𝑉 𝐼 ← ∅, 𝑉 𝐹 ← ∅, 𝐸 𝑆 ← ∅, 𝐸 𝐷 ← ∅ 
+
+> 5:
+
+𝑣 𝑝𝑟𝑒𝑣 ← null  
+
+> 6:
+
+for each instruction 𝐼 𝑗 in 𝐷 do  
+
+> 7:
+
+𝑣 𝑗 ← create_instruction_vertex (𝐼 𝑗 ) 
+
+> 8:
+
+𝑉 𝐼 ← 𝑉 𝐼 ∪ { 𝑣 𝑗 } 
+
+> 9:
+
+if 𝑣 𝑝𝑟𝑒𝑣 ≠ null then  
+
+> 10:
+
+𝐸 𝑆 ← 𝐸 𝑆 ∪ {( 𝑣 𝑝𝑟𝑒𝑣 , 𝑣 𝑗 )}  
+
+> 11:
+
+end if  
+
+> 12:
+
+𝑣 𝑝𝑟𝑒𝑣 ← 𝑣 𝑗  
+
+> 13:
+
+end for  
+
+> 14:
+
+for each instruction 𝐼 𝑗 in 𝐷 do  
+
+> 15:
+
+𝜎 𝑗 ← 𝐼𝐶𝑀 [𝐼 𝑗 ] 
+
+> 16:
+
+𝑣 𝑗 ← get_vertex (𝐼 𝑗 ) 
+
+> 17:
+
+for each file path 𝐹 𝑘 in 𝜎 𝑗 .Φ do  
+
+> 18:
+
+𝑣 𝑘 ← get_or_create_file_vertex (𝐹 𝑘 ) 
+
+> 19:
+
+𝑉 𝐹 ← 𝑉 𝐹 ∪ { 𝑣 𝑘 } 
+
+> 20:
+
+𝐸 𝐷 ← 𝐸 𝐷 ∪ {( 𝑣 𝑘 , 𝑣 𝑗 )}  
+
+> 21:
+
+end for  
+
+> 22:
+
+end for  
+
+> 23:
+
+𝑉 ← 𝑉 𝐼 ∪ 𝑉 𝐹 , 𝐸 ← 𝐸 𝑆 ∪ 𝐸 𝐷  
+
+> 24:
+
+return 𝐺 = ( 𝑉, 𝐸 ) 
+
+> 25:
+
+end function 
+
+> 7 of 18
+
+a path exists, the code change is a plausible cause of the observed failure. The CDG thus supports the context-refined repair phase. 
+
+3.5 Context-refined Repair 
+
+C3 requires identifying the minimal context that is causally suf-ficient for generating a correct repair. Supplying all available context to the LLM is counterproductive. The token budget is consumed by files irrelevant to the specific failure, and repair accuracy degrades as the model’s attention spreads across noise. The repair phase must therefore identify, from the CDG and the failing commit’s change set, the smallest subset of context that is sufficient to generate a correct repair. To achieve this, we propose Context-refined Repair, which uses the reasoning capability of an LLM to actively select the context it needs. Rather than a single-shot repair attempt, we design a two-step agentic workflow: (1) Context Inquiry and (2) Context Augmentation and Repair Generation . This design follows the retrieval-augmented generation paradigm [30], in which a re-triever supplies evidence that the generator alone cannot reliably hallucinate [5]. 
+
+(1) Context Inquiry. The goal of this step is to identify which files and code regions are most relevant to the specific build failure, before any file contents are loaded. The workflow begins by assembling an initial context package 
+
+𝒞 𝑖𝑛𝑖𝑡 containing three inputs: the build failure log 𝐿 𝑒𝑟𝑟 , the list of changed files ∆𝐹 derived from the failing commit’s diff, and the CDG 𝐺 . To bound the size of the serialized graph, a pruning strat-egy is applied. For any instruction vertex whose in-degree from file vertices exceeds a threshold 𝛼 = 20 , its file dependencies are condensed into directory-level representations. This produces a pruned graph 𝐺 ′ that preserves the high-level dependency struc-ture while eliminating noise from instructions like “ COPY . . ”that reference entire directory trees. 
+
+Prompt structure. The inquiry prompt 𝑃 𝑖𝑛𝑞𝑢𝑖𝑟𝑦 is organized into five sections: (1) the serialized CDG ( BUILD CHANNELS ), listing each instruction alongside its linked prior instructions and asso-ciated file dependencies; (2) the build failure log; (3) a structured summary of code changes, containing new, modified, and deleted file lists; (4) a system role description; and (5) an output specifi-cation requiring a JSON object with fields for new, modified, and deleted files selected from ∆𝐹 , and a key_files list specifying file paths and grep keywords for non-diff context files. The formal representation is: 
+
+𝑅 𝑓𝑖𝑙𝑒𝑠 = LLM (𝑃 𝑖𝑛𝑞𝑢𝑖𝑟𝑦 (𝐿 𝑒𝑟𝑟 , ∆𝐹 , 𝐺 ′)) (3) where 𝑅 𝑓𝑖𝑙𝑒𝑠 is the LLM’s structured response identifying the files and grep keywords needed for repair. For example, given an npm install failure, the LLM would typically request package.json 
+
+and package-lock.json from the changed file list, along with any npm-related grep keywords. 
+
+(2) Context Augmentation and Repair Generation. The sec-ond step retrieves the specific context identified by the LLM and uses it to generate the repair. For each file in 𝑅 𝑓𝑖𝑙𝑒𝑠 that belongs to the changed set ∆𝐹 , the full diff content is retrieved from the repository. For each file in 𝑅 𝑓𝑖𝑙𝑒𝑠 
+
+that belongs to the broader build context, the ICM maps the path back to the repository, the file’s content is then retrieved, and it is filtered using the grep keywords supplied by the LLM. This produces the augmented context 𝒞 𝑎𝑢𝑔 , which contains only the information the LLM identified as relevant. 
+
+Prompt structure. The repair prompt 𝑃 𝑟𝑒𝑝𝑎𝑖𝑟 is organized into five sections: (1) the original buggy Dockerfile; (2) the serial-ized CDG augmented with the retrieved key-file contents ( BUILD COMMAND section); (3) the detailed code changes for the selected diff files; (4) the build failure log; and (5) an output specifica-tion requiring only a fenced Dockerfile block with no additional commentary. The formal representation is: 
+
+𝑃 𝑝𝑎𝑡𝑐ℎ = LLM (𝑃 𝑟𝑒𝑝𝑎𝑖𝑟 (𝐿 𝑒𝑟𝑟 , 𝒞 𝑎𝑢𝑔 , 𝐷 𝑜𝑟𝑖𝑔 )) (4) where 𝐷 𝑜𝑟𝑖𝑔 is the original failing Dockerfile and 𝑃 𝑝𝑎𝑡𝑐ℎ is the generated patch. 
+
+Design rationale. The two-step workflow separates the what-to-look-at decision from the how-to-fix decision, delegating each to a different LLM capability. The first step exploits the LLM’s abil-ity to reason about failure semantics from a compact structural description. The second step then applies its code-generation ca-pability to a focused, task-relevant context. This separation avoids the token waste that a single-prompt approach incurs by conflat-ing context selection with patch generation. It also grounds the repair in verifiable evidence from the CDG rather than in the LLM’s parametric memory alone. 
+
+4 Experiment Setup 
+
+The Methodology section defined the four phases of Cadre and the design rationale for each component. This section instanti-ates those design decisions as a concrete evaluation. Specifically, it describes the 𝐷 3 dataset used as the benchmark, the baselines compared against, and the implementation and configuration details needed to reproduce the experiments. 
+
+4.1 The Dockerfile Drift Dataset 
+
+Using the DodeX pipeline described in Section 3.2, we construct the Dockerfile Drift Dataset, 𝐷 3, a benchmark for evaluating Dockerfile repair techniques. We collected repositories from GitHub with at least 500 stars, cre-ated after 2020, covering nine popular programming languages: Python, C ++ , Java, C, C#, JavaScript, SQL, Go, and Pascal. This yielded 13,360 repositories, of which 1,775 contained Dockerfiles.                                                      
+
+> T A B L E 2 |Comparison of 𝐷 3with existing Dockerfile-related datasets.
+> Characteristic 𝐷 3Shipwright [21] Ksontini. et al[29]
+> Source of Data Real-world Evolution GitHub Snapshots GitHub Snapshots Includes Full Build Context Yes No No Includes Build Arguments Yes No No Includes Build Architectures Yes No No
+> 8 of 18 , 2026 T A B L E 3|Statistical overview of the 1,040 𝐷 3instances across build structure, Dockerfile complexity and co-change scope.
+> Metric Count / Value %
+> Build stages (# FROM )
+> 1 stage 257 24.71 2 stages 484 46.54 3 stages 162 15.58 4+ stages 137 13.17
+> Dockerfile structure (median / mean; min–max)
+> #Non-comment instructions 27 / 37.63 (6–264) –
+> #RUN instructions 7 / 8.07 (0–57) –
+> #COPY +ADD instructions 5 / 7.77 (0–162) –Distinct base image references 234 –
+> Co-change: files changed per failing commit
+> 0 file 10.10 1 file 453 43.56 2–5 files 319 30.67 5+ files 267 25.66
+
+From these, DodeX identified 2,616 drift instances over a three-month collection window ending in September 2025. The GitHub Actions platform archives workflow build logs on a 90-day rota-tion cycle [16], so the dataset can be extended by repeating the collection process or broadening the repository filters. From the 2,616 candidates, we retained only instances satisfying three reproducibility criteria: the source repository could be lo-cally cloned, the failing commit could be checked out, and the Dockerfile referenced by the drift instance existed at that com-mit. After this validation, the final 𝐷 3 dataset consists of 1,040 instances. Table 2 compares 𝐷 3 with existing Dockerfile datasets. Unlike prior static-snapshot datasets, 𝐷 3 captures the complete build configuration required to reproduce each instance locally. Specifically, 575 instances involve dynamic build arguments, and 869 instances specify a non-default build architecture. Among the architecture-specified instances, 259 target two platforms, 27 target three platforms, and 18 target four platforms. Table 3 characterizes the structural properties of these instances across three dimensions. Build structure. 75.29% of instances involve multi-stage Dockerfiles with two or more FROM instruc-tions; two-stage builds are the most common form with 484 instances. This prevalence directly motivated the stage-aware design of Cadre ’s Context Profiler, which maintains an indepen-dent context state per build stage and resolves cross-stage “ COPY –from ” dependencies. Dockerfile complexity. Instances span a wide range, with a median of 27 non-comment instructions and a median of 7 RUN instructions per Dockerfile, confirming that 𝐷 3 covers both compact and complex build configurations. 
+
+Co-change scope. In 43.56% of instances, the failing commit modifies only one file, providing a clean repair signal. In 25.66% of instances, the failing commit changes more than 5 files. These high-co-change cases correspond to stale drift scenarios where the most recent diff is a poor indicator of the root cause, and where the CDG’s structural analysis provides the primary repair signal independently of the diff content; they are the focus of the stale-drift robustness analysis in Section 5. Not all 1,040 instances admit a Dockerfile-only repair. The Docker build process can itself invoke software build steps, e.g. , go build within a RUN instruction. Existing studies find that 26.5%– 37% of CI builds fail due to internal software errors [19, 39]. Such failures embedded within Dockerfile builds cannot be resolved by modifying the Dockerfile alone and represent an inherent difficulty in the benchmark. Table 4 reveals three patterns that define the repair challenge. Application build-tool failures within RUN instructions dominate at 65.4%. The three largest contributors are uv , npm , and pip ,underscoring how frequently dependency-resolution errors drive Dockerfile drift. By contrast, only 31 instances fail at the Docker-file instruction level via malformed COPY , ADD , or FROM directives, the class of error that syntax-based linters can detect. A further 142 instances lie outside the scope of Dockerfile repair. Specif-ically, 112 stem from CI infrastructure failures, such as cache interaction, disk exhaustion, registry push, and 30 from software-internal logic errors. The remaining 898 instances are, in prin-ciple, addressable by Dockerfile modification. For all but the 31 instruction-level cases, a correct repair requires knowing which repository files and environment variables each RUN instruction depends on at build time, not just what the instruction text states. To keep the repairing process consistent with the original GitHub Action, the 𝐷 3 dataset records the complete build configuration for each instance, including the exact commit hash, Dockerfile path, build context path, dynamic build arguments, and target platforms. These parameters are identical to those used in the original CI environment, ensuring that a local build initiated with the provided configuration is equivalent to the GitHub Actions run. The dataset, the DodeX tool, and all analysis scripts will be made publicly available upon publication. 
+
+4.2 Experimental Environment 
+
+All experiments ran on a server equipped with dual AMD EPYC 7543 32-core processors (128 threads total), 1.0 TB of RAM, 21 TB of disk storage, and Ubuntu 22.04.4 LTS. The experiments with LLM are conducted using DeepSeek-V3 [31]. We built a Docker build infrastructure with 16 isolated 
+
+docker buildx builders using the docker-container driver. This driver provides full build isolation and supports multi-platform image construction via buildx . The 16 builders ran in parallel to reduce the total wall-clock time of the experiment. For each drift instance, we checked out the corresponding com-mit to reconstruct the exact source state. A repair was counted as successful if the patched Dockerfile built without error using the precise build arguments and platform specifications from 𝐷 3.Each build attempt had a 30-minute timeout, consistent with prior work [21, 40]. We pruned each builder’s build cache every 8 builds to prevent cross-contamination between experiments. 
+
+5 Experimental Results 
+
+Section 4 defined the 𝐷 3 benchmark, and this section reports what the experiments reveal across three research questions, each targeting a distinct dimension of Cadre ’s behavior. 
+
+∙ RQ1: How effective is Cadre in repairing real-world Dockerfile drift? This question measures the absolute and relative repair capability of Cadre , verifying whether context-aware dependency modeling translates into higher repair rates on a realistic benchmark. 
+
+∙ RQ2: How efficient and robust is Cadre in repairing Dockerfile drift? This question examines two practical 
+
+> 9 of 18
+
+T A B L E 4 | Three-level taxonomy of the 1,040 Dockerfile drift root causes in 𝐷 3. Bold rows give the high-level category (L1) with its subtotal. Indented rows give the sub-category (L2) and specific root cause (L3) with individual counts. 
+
+Sub-category (L2) Specific root cause (L3) Count %Application Dependency & Build 680 65.4 
+
+Python ecosystem uv : dependency sync & operational errors 201 19.3 
+
+pip : installation errors (version conflicts, package not found) 122 11.7 Python package build failures ( setup.py , wheel) 17 1.6 JavaScript ecosystem npm : build/install/CI failures 142 13.7 
+
+pnpm : build failures 8 0.8 Go ecosystem Go: build, install, and dependency download failures 82 7.9 Other build systems Other tools ( yarn , poetry, Gradle, Maven, Cargo, etc.) 96 9.2 Makefile execution failures 12 1.2 
+
+System & Environment 157 15.1 
+
+OS package management Missing system dependencies ( gcc , ffmpeg , libssl ) 77 7.4 OS package manager errors ( apt-get , apk add ) 35 3.4 Runtime environment Python version incompatibility 30 2.9 External resources File download errors ( wget , curl ) 15 1.4 
+
+Dockerfile-specific 31 3.0 
+
+Image specification Base image errors (not found, auth error, invalid tag) 21 2.0 Context specification File copy/add failure ( COPY , ADD ) 10 1.0 
+
+Script & Command 30 2.9 
+
+Custom execution Developer custom script failure 25 2.4 Instruction syntax RUN command syntax error 5 0.5 
+
+CI Infrastructure 112 10.8 
+
+Build environment CI cache interaction error 52 5.0 Insufficient disk space during image export/build 23 2.2 Registry & distribution Docker image push/upload failure 37 3.6 
+
+Software Internal † 30 2.9 
+
+Software-internal Build failure unrelated to Dockerfile (logic bug, test failure) 27 2.6 Undetermined Cannot determine cause from log (general error code, no useful output) 3 0.3 
+
+Total 1040 100.0  
+
+> †Failures in this category cannot be resolved by Dockerfile modification alone.
+
+characteristics. The first is efficiency: whether Cadre con-sumes fewer tokens than competing LLM-based methods. The second is robustness: whether its performance degrades more slowly as drift instances become “stale” over suc-cessive commits. These two properties determine whether 
+
+Cadre remains useful in realistic CI/CD deployments where build failures may persist across multiple commits. 
+
+∙ RQ3: How do individual components of Cadre con-tribute to its overall effectiveness? This question uses controlled ablation to attribute performance improvements to components of Cadre , verifying that each design choice is independently justified. 
+
+5.1 RQ1: Overall Repair Effectiveness 
+
+To examine the repair capability of each method, we evaluated all tools on the 653-instance executable benchmark derived from 𝐷 3.The 653-instance subset excludes the 387 instances that consis-tently timed out across all tools due to network-bound factors that are unrelated to the logical correctness of a repair. These cases typ-ically involve multi-gigabyte base image downloads like CUDA images or large dependency installations like PyTorch with cuda-runtime. This filtering is applied uniformly to all methods, and the resulting benchmark is still larger than the 344-instance dataset used in the FlakiDock evaluation [40]. 
+
+T A B L E 5 | Per-method outcome breakdown on the 653-instance 𝐷 3
+
+benchmark. |𝒮 |: builds successfully after patching; |ℱ𝑟 |: no valid patch generated; |ℱ𝑏 |: patch generated but build fails; |𝒯 |: build timeout; RR: repair rate. 
+
+Method 𝑁 |𝒮 | |ℱ𝑟 | |ℱ𝑏 | |𝒯 | RR (%) Parfum 653 61 35 546 11 9.34 FlakiDock 653 133 48 462 10 20.37 FlakiDock-DS-V3 † 653 0 41 612 0 0.00 FlakiDock-DS-V3 ‡ 653 185 43 397 28 28.33 Vanilla-LLM 653 186 58 380 29 28.48 
+
+Cadre 653 230 0 399 24 35.22                                                 
+
+> †FlakiDock with DeepSeek-V3, original output handling from FlakiDock.
+> ‡FlakiDock with DeepSeek-V3 and Cadre ’s output-parsing. 10 of 18 , 2026 T A B L E 6 |Per-category repair rates on the 653-instance 𝐷 3benchmark. Rates are computed at the L1 taxonomy level as defined in Table 4.
+> Category (L1) 𝑁 Parfum FlakiDock-DS-V3 Vanilla-LLM Cadre
+> Application Dependency & Build 346 4.9% 19.1% 20.2% 25.1%
+> System & Environment 135 14.1% 51.9% 51.9% 60.0%
+> Dockerfile-specific 30 0.0% 50.0% 53.3% 60.0%
+> Script & Command 29 0.0% 3.4% 17.2% 27.6%
+> CI Infrastructure 85 28.2% 36.5% 28.2% 40.0%
+> Software Internal 28 3.6% 7.1% 3.6% 7.1% All 653 9.3% 28.3% 28.5% 35.2%
+
+Table 5 reports the outcome breakdown for each method. We clas-sify each repair attempt into one of four disjoint categories: 𝒮 
+
+means successful repair, that the patched Dockerfile builds with-out error. ℱ𝑟 means a repair failure, that no valid Dockerfile is generated. ℱ𝑏 means a build failure, that a patch is produced, but the build fails. 𝒯 means the build process exceeds the time limit we defined. For 𝑁 instances, the Repair Rate is RR = |𝒮 |∕𝑁 .
+
+Cadre achieves RR = 35 .22% , successfully repairing 230 of the 653 benchmark instances. Cadre outperforms the best LLM-based baseline, Vanilla-LLM, by 6.74 percentage points, and the rule-based Parfum by 25.88 percentage points. Expressed as a ra-tio, Cadre ’s repair rate is 3.77× that of Parfum and 1.24× that of the best LLM-based baseline. The comparison against FlakiDock warrants careful interpreta-tion. When FlakiDock is run with DeepSeek-V3 under its origi-nal output-handling procedure, |𝒮 | = 0 because excessive context length causes the LLM to deviate from the expected output for-mat. After applying Cadre ’s output-parsing procedure to enable fair comparison, FlakiDock-DS-V3 reaches RR = 28 .33% . The performance ceiling of the knowledge-base retrieval strategy is apparent: the pre-constructed example pairs do not cover the di-versity of build contexts in 𝐷 3, whereas Cadre extracts context directly from the live repository without any prior knowledge. A notable characteristic of Cadre is |ℱ𝑟 | = 0 : the framework al-ways produces a candidate patch, regardless of whether the patch succeeds. Vanilla-LLM and the FlakiDock variants each produce 
+
+|ℱ𝑟 | between 41 and 58, indicating that their prompts periodically trigger refusals or format failures due to the model’s token limits. Figure 3 visualizes the intersection of successfully repaired in-stances across all methods. Cadre repairs the largest set of unique instances that no other method repairs, confirming that its context-aware approach recovers cases that alternative strategies cannot address. 
+
+Per-category repair analysis. We mapped each benchmark in-stance to the taxonomy in Table 4 and computed RR per L1 category. Table 6 presents the results. Cadre achieves the high-est rate in every fixable category, with System & Environment and Dockerfile-specific both reaching 60.0%. Within System & Environment, missing-dependency failures reach 78.1% under 
+
+Cadre , the highest rate of any sub-category, because the CDG directly infers which system packages each RUN instruction re-quires through build-system-aware parsers. While rule-based and retrieval-based methods stall near zero on Script & Command fail-ures, Cadre reaches 27.6% by tracing script invocations through CDG file-dependency edges. In the Application Dependency cat-egory, Cadre achieves 17.0% on less common build tools such as Gradle, Maven, and Cargo, four times Vanilla-LLM’s 4.3%, be-cause live CDG extraction covers tools absent from FlakiDock’s training corpus. The one exception is OS package manager er-rors, where FlakiDock’s 52.9% exceeds Cadre ’s 26.5%, reflecting the template coverage that retrieval-based repair provides for 
+
+apt-get and apk add patterns. The elevated CI Infrastructure rates are a measurement artifact: registry push failures occur after the Docker build succeeds, so any produced patch trivially passes local verification. Cadre                                                                 
+
+> Vanilla-LLM
+> FlakiDock-DS-V3
+> FlakiDock-GPT4
+> Parfum
+> 0200
+> 230
+> 186
+> 185
+> 133
+> 61
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> Intersection size
+> 66
+> 45
+> 33
+> 17 16 16
+> 10 998765544433222221111
+> F I G U R E 3 |Upset plot of successfully repaired cases per method. Horizontal bars show individual method totals. Intersection bars show the number of cases repaired by exactly the indicated combination of methods. The third intersection bar represents cases repaired by Cadre and by no other method.
+> 11 of 18 T A B L E 7 |Repair rate distribution by Dockerfile build-stage count.
+> Method 1(𝑁 =200) 2(𝑁 =171) 3(𝑁 =155) 4+ (𝑁 =127) All (𝑁 =653) Parfum 24/200 (12.0%) 25/171 (14.6%) 2/155 (1.3%) 10/127 (7.9%) 61/653 (9.3%) FlakiDock 20/200 (10.0%) 82/171 (48.0%) 21/155 (13.6%) 10/127 (7.9%) 133/653 (20.4%) FlakiDock-DS-V3 30/200 (15.0%) 103/171 (60.2%) 35/155 (22.6%) 17/127 (13.4%) 185/653 (28.3%) Vanilla-LLM 33/200 (16.5%) 111/171 (64.9%) 29/155 (18.7%) 13/127 (10.2%) 186/653 (28.5%)
+> Cadre 45/200 (22.5%) 121/171 (70.8%) 42/155 (27.1%) 22/127 (17.3%) 230/653 (35.2%)
+
+Multi-stage Dockerfile analysis. Table 7 disaggregates RR by the number of FROM instructions, which determines the num-ber of independent build stages and the depth of cross-stage dependency tracking required. On two-stage builds, Cadre achieves 70.8% and Vanilla-LLM reaches 64.9%, the highest repair rates for any stage count. The canonical build-plus-runtime structure, common to Go, Node.js, and Python projects, gives LLMs strong prior familiarity with repair patterns for this configuration. A more telling pattern emerges at higher stage counts. Cadre ’s relative advantage over Vanilla-LLM grows from 36% at one stage to 45% at three stages and to 70% at four or more. This widening confirms that the CDG’s stage-aware tracking provides increasing value as cross-stage dependencies accumulate with structural complexity. 
+
+Failure analysis: The 423 unrepaired Cadre attempts ( |ℱ𝑏 | +
+
+|𝒯 |) distribute across identifiable failure families rather than forming a uniform residual. To characterize these families, we performed a log-signature clustering analysis. For each case, we extracted the most diagnostically specific line from the post-patch build log, preferring inner build-system error messages over the generic Docker wrapper line when both were present. We then normalized instance-specific tokens such as paths, hashes, URLs, and numerals, grouped identical normalized signatures into ex-act buckets, and iteratively merged buckets whose representative signatures exceeded a Jaccard–sequence similarity of 0.88. The analysis produced 75 clusters, with a strongly head-concentrated distribution: 32 clusters (42.7%) are singletons, yet the five largest clusters account for 231 cases, which are 54.6% of all unrepaired attempts. The dominant cluster, comprising 57 cases, groups Maven and Java package construction failures that the patch did not resolve. The second-largest pattern, at 52 cases, consists of opaque RUN -command exits in which the post-patch log records only that a package-manager or build-tool command exited non-zero, without a more specific inner diagnostic. Af-fected commands span package managers such as npm , pnpm , and 
+
+uv , as well as build tools such as go generate . Python depen-dency resolution accounts for two further clusters totalling 85 cases (20.1%), in which the representative signature in both is a pip version-constraint unsatisfiability error. The remaining no-table clusters cover 37 cases of missing build-context files, where 
+
+BuildKit reports a checksum failure for a file absent from the build context, e.g. , uv.lock ,; 24 hard timeouts; and 10 failures caused by base images unavailable from a local registry. Taken together, the clustering results show that Cadre ’s unre-solved cases are concentrated in three structurally distinct fail-ure families: build-tool constraint failures that require runtime package-registry state unavailable at static analysis time; context-file mismatches where the patch identifies but does not fully resolve the dependency on a newly added file; and environment-dependent replay failures caused by infrastructure limits rather 0-10k       
+
+> 10k-20k
+> 20k-30k
+> 30k-40k
+> 40k-50k
+> 50k-60k
+> 60k-65k
+> 65k+
+> Prompt tokens (bins)
+> 0
+> 10 0
+> 10 1
+> 10 2
+> Count of results (symlog scale)
+> 406
+> 134
+> 41
+> 15
+> 4
+> 6
+> 43
+> 500
+> 58
+> 22
+> 15
+> 54
+> 1
+> 45
+> 477
+> 119
+> 26
+> 810 12
+> 1
+> Token usage distribution across results (symlog y-scale)
+> FlakiDock-DS-V3
+> Vanilla-LLM
+> Cadre
+> F I G U R E 4 |Distribution of prompt token counts per repair attempt. The y-axis uses a symmetric log scale. Counts above 65,535 tokens exceed the DeepSeek-V3 context limit [8].
+> 12 of 18 , 2026
+
+than Dockerfile logic. None of these families arises from prompt-format failures or context overflow, the failure modes that the two-step workflow is designed to prevent. 
+
+Answer to RQ1. Cadre achieves 35.22% on 𝐷 3, outperforming Vanilla-LLM by 6.74 percentage points and Parfum by 25.88 per-centage points. The largest per-category gains appear in Script & Command failures with 27.6% compared to 0.0% for Parfum ,and System & Environment failures with 60.0%, with the rela-tive advantage over Vanilla-LLM growing to 70% at four or more build stages. The unresolved cases concentrate on build-tool constraint failures, context-file mismatches, and environment-dependent replay failures that fall outside the reach of static dependency analysis. 
+
+5.2 RQ2: Efficiency and Robustness 
+
+Beyond repair accuracy, RQ2 examines two practical characteris-tics: how efficiently Cadre uses the LLM’s token budget, and how well it handles drift instances that have persisted across commits. 
+
+5.2.1 Token Efficiency 
+
+An important property of any LLM-based tool is the size of the prompts it constructs. Oversized prompts increase operational cost, consume a larger fraction of the model’s context window, and risk diluting the model’s attention across irrelevant content. We measured the prompt token count for each repair attempt by every LLM-based method. Figure 4 shows the token distribution. Cadre holds the prompt below 30k tokens in 95.25% of cases. In contrast, Vanilla-LLM and FlakiDock-DS-V3 produce 43 and 45 instances that exceed DeepSeek-V3’s 65k-token context limit. These over-limit cases ac-count for the non-zero |ℱ𝑟 | counts in Table 5: when the prompt exceeds the context window, the LLM can’t generate a valid patch. The efficiency advantage of Cadre is a direct consequence of the Context Inquiry step, which serves as a filter before any file con-tents are loaded. By first selecting the most relevant files from the CDG, Cadre avoids supplying the LLM with large, irrelevant source files, producing shorter and more focused prompts than approaches that supply all available information upfront. 
+
+5.2.2 Robustness to Stale Drift 
+
+A unique feature of 𝐷 3 is the presence of stale drift instances: cases where a build failure introduced at one commit persists across several subsequent commits. In these later builds, the code-change diffs are unrelated to the root cause of the failure. Tools that rely exclusively on the most recent diff for repair context are misled by this noise. In contrast, a tool that analyzes the struc-tural dependency graph can trace the failure back to its origin regardless of how many commits have elapsed. To measure this, we define the Cluster Failure Distance as the number of failed builds between the commit that introduced the drift and the build being repaired. We identify clusters of related failures by grouping build logs using character 5-gram Jaccard similarity with a threshold of 𝜏 = 0 .8. Within each cluster, the position of each failure, i.e. , 1st, 2nd, 3rd, etc. , gives its distance. Figure 5 shows RR as a function of cluster failure distance. All methods show a declining trend as distance increases, confirm-ing that stale drifts are harder to repair. Cadre maintains a higher success rate than all baselines at every distance level. At the first position, i.e. , the fresh failures, Cadre achieves 38.5%, com-pared to 32.2% for Vanilla-LLM. At the fifth position and beyond, 
+
+i.e. , stale failures, Cadre achieves 25.9%, compared to 19.7% for Vanilla-LLM. This gap is proportionally larger than at the first position, indicating that the CDG’s structural analysis provides a repair signal that remains informative when the recent diff is noisy. Diff-only approaches, by contrast, degrade more steeply as commit distance grows. 1st (n=273) 2nd (n=83) 3rd (n=42) 4th (n=27) 5th+ (n=228) Cluster position of failed run 0.0 0.1 0.2 0.3 0.4 Repair success rate      
+
+> 25.6% 22.9% 16.7% 11.1% 14.9% 29.7% 39.8% 40.5% 33.3% 19.7% 38.5% 44.6% 45.2% 37.0% 25.9% 12.5% 13.3% 14.3% 14.8% 2.6% 32.2% 37.3% 33.3% 29.6% 19.7%
+> Per-tool repair success rate by failed-run position in cluster
+> Tool FlakiDock-GPT4 FlakiDock-DS-V3 Cadre Parfum Vanilla-LLM
+
+F I G U R E 5 | Repair success rate by cluster failure distance. Higher distance means the drift has persisted through more subsequent commits, making the most recent diff increasingly misleading. 
+
+> 13 of 18
+
+Answer to RQ2. The Context Inquiry step keeps every prompt within the model’s operational range, producing |ℱ𝑟 | = 0 while LLM-based baselines fail to generate a valid patch in 41–58 cases due to context overflow. On stale drift persisting five or more commits, Cadre achieves 25.9% against Vanilla-LLM’s 19.7%. The proportionally larger gap than at fresh positions confirms that the CDG’s structural signal degrades more slowly than diff-based context as failures age. 
+
+5.3 RQ3: Ablation on Individual Components 
+
+RQ3 uses controlled ablation to verify that the CDG and the two-step repair workflow independently contribute to Cadre ’s performance. The two ablation variants form a gradient from no CDG to the full framework. Table 8 presents the results. 
+
+Removing the CDG ( Cadre -CDG). This variant removes the CDG. The LLM receives only the code-change list and the failure log, processed through the Context-refined Repair workflow. This variant tests whether any graph-structured context, as opposed to raw diffs and logs, contributes to repair performance. Without any graph-structured context, RR drops from 35.22% to 30.93%. At this level, Cadre degenerates to a workflow-augmented version of Vanilla-LLM: it still uses the two-step repair process but lacks the structural context that guides the first step. The 4.29-percentage-point gap confirms that the CDG contributes independently of the repair workflow. 
+
+Removing the two-step workflow ( Cadre -CRR). This vari-ant retains the complete CDG but removes the two-step agentic workflow. It operates in a single shot, supplying the LLM with all available information at once: the error log, the full CDG, the original Dockerfile, and the raw diffs of all changed files. This variant tests whether the iterative context-selection step is neces-sary or whether a richer single-shot prompt achieves equivalent performance. Without the iterative context-selection step, RR drops to 31.55% and |ℱ𝑟 | rises from 0 to 44. The increase in |ℱ𝑟 | is the direct consequence of context overload. When all available information is supplied in a single prompt, a substantial fraction of prompts exceed the 65k-token context limit. This confirms that the Con-text Inquiry step is not merely a performance optimization but a necessary mechanism for keeping prompts within the model’s operational range. 
+
+Component interaction. The CDG and the two-step workflow are super-additive in their combined contribution. Relative to Vanilla-LLM, the CDG alone ( Cadre -CRR) contributes 3.07 per-centage points and the workflow alone ( Cadre -CDG) contributes 2.45 percentage points. Under an independence assumption, their combined gain would be 5.52 percentage points. The ob-served gain is 6.74 percentage points, exceeding the additive                                                
+
+> T A B L E 8|Ablation study on the 653-instance 𝐷 3benchmark. Each variant removes one structural layer of the full Cadre framework. Column definitions follow Table 5.
+> Method 𝑁 |𝒮 ||ℱ𝑟 ||ℱ𝑏 ||𝒯 |RR (%)
+> Cadre -CDG †653 202 2413 36 30.93
+> Cadre -CRR ‡653 206 44 373 36 31.55 Vanilla-LLM 653 186 58 380 29 28.48
+> Cadre 653 230 0399 24 35.22
+> †Removes the CDG; supplies only code-change diffs and error log.
+> ‡Retains the CDG; removes the two-step repair workflow (single-shot). 18
+> 13
+> 11
+> 29
+> 23
+> 24
+> 154
+> Success Venn within Cadre domain
+> Cadre
+> Cadre-CDG
+> Cadre-CRR
+> F I G U R E 6|Venn diagram of successfully repaired cases across
+> Cadre ablation variants. The region unique to the full Cadre represents cases that require all components to be simultaneously active.
+
+expectation by 1.22 percentage points. This surplus indicates mu-tual reinforcement. The CDG provides higher-quality input to the Context Inquiry step. In turn, the Context Inquiry step allows the CDG’s structural information to be applied without exhausting the model’s token budget. Figure 6 confirms that the components are not redundant. Cadre -CDG and Cadre -CRR each repair a distinct subset of cases that the other variant misses. The region exclusive to the full Cadre 
+
+system represents failures that require both structural context and selective loading to resolve, cases that neither variant can address alone. 
+
+Answer to RQ3. Both the CDG and the two-step workflow con-tribute independently, with CDG removal reducing RR by 4.29 percentage points and workflow removal by 3.67 points while raising |ℱ𝑟 | from 0 to 44. The combined gain over Vanilla-LLM exceeds the additive expectation by 1.22 percentage points, indi-cating that the two components are mutually reinforcing. The CDG provides higher-quality evidence for the Context Inquiry step, which in turn keeps the CDG’s structural information within the model’s context budget. 
+
+5.4 Case Study: Context-Dependent Drift Repair 
+
+We trace a representative drift instance from PeerBanHelper [35], an open-source BitTorrent peer management application, to illus-trate how Cadre ’s file-level dependency tracking enables repairs that context-free approaches cannot produce. 
+
+The drift. The project introduced a LoongArch64-specific SQLite JDBC driver as a local Maven dependency by adding “lib/sqlite-jdbc-loongarch64-3.47.0.0.jar ” to the repos-itory. Because the artifact is not available on Maven Central, it must be installed into the local Maven repository before the build. The Dockerfile was not updated accordingly, causing the Maven build stage to fail.  
+
+> 14 of 18 , 2026
+
+Case Study: PeerBanHelper 
+
+Original (failing) 
+
+RUN apk add git && \ mvn -B clean package --file pom.xml -T 1.5C -P thin-sqlite-packaging 
+
+Vanilla-LLM (incorrect) 
+
+RUN apk add git && \ mvn -B clean package --file pom.xml -T 1.5C -P thin-sqlite-packaging \ + -Dmaven.wagon.http.ssl.insecure=true \ + -Dmaven.wagon.http.ssl.allowall=true 
+
+Cadre (correct) 
+
+RUN apk add git && \ + mvn install:install-file \+ -Dfile=lib/sqlite-jdbc-loongarch64-3.47.0.0.jar \+ -DgroupId=com.ghostchu.peerbanhelper.external-libs\ + -DartifactId=sqlite-jdbc-loongarch64 \+ -Dversion=3.47.0.0 -Dpackaging=jar && \ mvn -B clean package --file pom.xml -T 1.5C -P thin-sqlite-packaging         
+
+> F I G U R E 7 |A case study from PeerBanHelper [35]. The failing RUN instruction and the two repairs. Cadre correctly installs the local JAR before building. Vanilla-LLM misdiagnoses the failure as an SSL connectivity issue.
+
+How Cadre traces the repair evidence. The “COPY . /build ” instruction copies the entire repository into the Maven build stage, including “lib/sqlite-jdbc-loongarch64-3.47.0.0.jar ”. Cadre ’s Context Profiler captures this file in the stage’s context state Φ, and the CDG records a dataflow edge from the file vertex to the “ RUN mvn package ” instruction ver-tex that follows. During Context Inquiry, the LLM receives this CDG structure alongside the commit diff. From the failure log and the CDG edge, the LLM identifies that the JAR is a prereq-uisite of the failing instruction. The repair is then direct: insert “mvn install:install-file ” to register the JAR in the local repository before the package step. 
+
+Why context-free approaches fail. Without the CDG, Vanilla-LLM receives only the error log and the diff. Maven’s dependency resolution error, “Could not find artifact 
+
+com.ghostchu.peerbanhelper.external-libs:sqlite-jdbc -loongarch64:jar:3.47.0.0 ”, is superficially indistinguish-able from SSL-related network failures that arise when Maven cannot reach a remote repository. Vanilla-LLM applies a text-book fix for SSL failures, adding certificate bypass flags that are entirely irrelevant here. The JAR is present in the repository and is visible in the container filesystem via “ COPY . /build ”, but this evidence is accessible only through file-level context model-ing. All other baselines fail for the same reason: no mechanism connects the newly introduced binary file to the RUN instruction that depends on it. This instance represents a class of drifts where the repair evidence is a binary artifact that appears in neither the Dockerfile text nor the error log. The CDG’s dataflow edges, seeded by context-ingesting instructions such as “ COPY . /build ” and propagated to dependent RUN instructions, are the mechanism that surfaces this evidence and makes the repair tractable. 
+
+6 Discussion 6.1 Implications and Limitations 
+
+The consistent pattern across all three research questions is that context structure determines repair quality more than context vol-ume. In RQ1, Cadre outperforms Vanilla-LLM despite both tools receiving the same categories of information. In RQ2, the per-formance gap widens precisely where diff-based context is least reliable: at high commit distances, the CDG’s structural signal remains stable while diff-only approaches degrade. In RQ3, re-moving either the CDG or the two-step workflow costs more than their individual contributions would predict independently, con-firming that the two components are mutually reinforcing rather than separable. The practical consequence for tool builders is that dependency graph construction and context selection should be co-designed. Prompt engineering addresses how information is presented; a dependency graph addresses what information is rel-evant, and the latter problem does not disappear as LLMs grow stronger. Three limitations bound these findings. First, the CDG is built from static analysis and cannot represent runtime factors such as package registry state at resolution time or network-conditional build behavior; failures caused by these dynamic factors account for a portion of the unresolved |ℱ𝑏 | cases. Second, 𝐷 3 covers only public GitHub repositories, so enterprise environments with private registries, internal package mirrors, or confidential build secrets introduce failure modes not represented in the bench-mark. Third, whether the repair rates observed on Dockerfiles generalize to other IaC formats depends on the quality of static analysis achievable for those instruction semantics, which war-rants a dedicated empirical study. 
+
+> 15 of 18
+
+6.2 Threats to Validity 
+
+Internal Validity. Transient environmental factors, i.e. , network instability, resource contention, or registry unavailability, could cause a build to fail for reasons unrelated to the Dockerfile re-pair. We address this through 16 isolated docker buildx builders, an automatic retry mechanism for network errors up to three attempts, and manual review of a sample of recorded failures. The residual risk is that some failures reflect upstream registry changes between the original CI run and our local reproduction; this risk affects all compared methods equally and does not bias the relative ranking. 
+
+External Validity. The dataset is drawn exclusively from pub-lic GitHub repositories across nine programming languages, so enterprise environments with private base images or organiza-tional build secrets introduce failure modes not captured. Among the nine languages, compiled toolchains with complex build configurations may present different repair challenges from the interpreted-language cases that dominate 𝐷 3. Despite these con-straints, 𝐷 3 is the largest real-world Dockerfile drift benchmark to date and covers a broader range of build configurations, includ-ing dynamic build arguments and multi-platform targets, than any prior dataset. 
+
+7 Related Work 7.1 Dockerfile Quality Analysis 
+
+Large-scale empirical studies have characterized the Docker ecosystem at scale [6, 52], tracked how Dockerfile instructions evolve as projects develop [45, 20], and cataloged the mainte-nance challenges developers face [18]. Image-level analyses fur-ther show that technical lag in base layers [53] and divergence among images nominally for the same system [25] sustain qual-ity problems that instruction-level rules cannot detect. Static analysis tools detect Dockerfile issues by matching instructions against fixed rule sets. Hadolint [7] flags best-practice violations, 
+
+Dockle [1] targets security anti-patterns, and Docker’s built-in check subsystem [10] provides similar coverage at build time. Em-pirical studies have cataloged Dockerfile smells, measured their prevalence, and linked them to build failures [38, 28, 49]. Both lines of work operate on the Dockerfile text alone and cannot model how instruction correctness depends on the external repos-itory state. A COPY instruction referencing a renamed source path passes all rule checks yet causes a build failure at the next CI run. Cadre ’s Instruction-level Context Profiler addresses this gap by tracking file-level and environment-variable dependencies per instruction. 
+
+7.2 Automated Repair of Dockerfiles 
+
+The automated program repair literature has progressed from search-based mutation [17, 32] to zero-shot and conversational LLM patching [50, 51, 3]. Dockerfile-specific repair has followed the same arc from rule-based templates toward LLM-driven gen-eration. DockerizeMe [24] showed that graph-based reasoning over package indices can automatically infer environment de-pendencies for code snippets, establishing that structured depen-dency representations benefit automated environment problem-solving. Rule-based tools such as Parfum [12] apply template-based fixes to AST-detected smell patterns. They achieve reliable coverage within their rule library but cannot address repository-specific failures such as renamed dependency files or changed build-tool invocations; on 𝐷 3, Parfum achieves 9.34%. LLM-based approaches [29, 4] generate patches from error logs without ex-plicit context modeling. Zhu et al. [56] extend instruction-level analysis to build-time efficiency rather than fault correction, demonstrating that build-process analysis is productive beyond correctness repair. FlakiDock [40] augments LLM repair with a retrieved knowledge base of historical Dockerfile repair pairs but does not incorporate live build context, limiting coverage to pat-terns present in the training corpus. None of these approaches tracks which repository files each instruction depends on or how these dependencies propagate across instruction boundaries. 
+
+Cadre addresses this gap through the CDG, which provides the LLM with a structured dependency representation rather than a flat list of changed files or retrieved historical examples. 
+
+7.3 Dockerfile and IaC Benchmarks 
+
+Prior Dockerfile datasets consist of static GitHub snapshots that capture only Dockerfile text, without the failing commit, the triggering code-change diff, or the dynamic build arguments passed to the CI runner [21, 29, 46]. Cassano et al. [40] extracted Dockerfile-error pairs from GitHub Actions logs but omitted build arguments and platform specifications, causing 38% of in-stances to fail local reproduction. 𝐷 3 records the complete build configuration from actual CI runner logs, including dynamic build arguments and multi-platform specifications. Table 2 com-pares 𝐷 3 with prior datasets. The key differentiator is the capture of dynamic build parameters and multi-platform specifications, which are absent from all prior datasets. 
+
+7.4 Configuration Drift in Software Evolution 
+
+Dockerfile drift is one instance of a broader class of problems in which configuration files fall out of synchronization with the source code they configure. Zhang et al. [55] and Jiang et al. [13] documented recurring IaC desynchronization patterns and identified the change-induced drift in cloud deployment en-vironments. At the build-system level, Mukherjee et al. [33], Peng et al. [36], and Sun et al. [42] respectively linked dependency spec-ification drift, build configuration complexity, and CI pipeline smells to elevated build failure rates during software evolution. These studies characterize how drift occurs but do not address au-tomated repair. Cadre contributes an automated repair approach designed for the dependency structure of Dockerfile builds, with 
+
+𝐷 3 as a reproducible benchmark for measuring effectiveness under realistic evolutionary conditions. 
+
+8 Conclusion 
+
+Dockerfile drift arises when a project’s Dockerfile falls out of syn-chronization with its evolving source code, causing build failures  
+
+> 16 of 18 , 2026
+
+that existing tools cannot repair because they analyze the Docker-file in isolation from the build context. This paper presents Cadre ,which addresses this gap by explicitly modeling the build context through an instruction-level context profiler, a context-aware de-pendency graph, and a two-step LLM repair workflow. Evaluated on 𝐷 3, a benchmark of real-world drift instances, Cadre achieves a repair rate of 35.22%, which is 2.78 × that of the rule-based baseline and 1.24 × that of the best LLM-based baseline, while eliminating the prompt-overflow failures that affect all compet-ing methods. The stateful context simulation and dependency graph representation underlying Cadre are general abstractions applicable to other sequential IaC languages, pointing toward a broader program of context-aware, AI-assisted IaC maintenance. 
+
+Data Availability 
+
+The code and dataset that support the findings of this study are openly available in the Cadre repository on GitHub [44] at https: //github.com/dw763j/Cadre, reference number [56]. 
+
+Conflicts of Interest 
+
+The authors declare no conflicts of interest. 
+
+References 
+
+1. Tomoya Amachi. Dockle - container image linter for secu-rity, helping build the best-practice docker image, easy to start. http://github.com/goodwithtech/dockle, 2025. 2. Ricardo Amaro, Ruben Pereira, and Miguel Mira Da Silva. Ca-pabilities and practices in devops: a multivocal literature re-view. IEEE Transactions on Software Engineering , 49(2):883–901, 2022. 3. Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. Re-pairagent: An autonomous, llm-based agent for program repair. In Proc. IEEE/ACM Int. Conf. Softw. Eng. (ICSE) , pages 1–12, 2025. doi: 10.1145/3597503.3639181. 4. Quang-Cuong Bui, Malte Laukötter, and Riccardo Scandariato. Dockercleaner: Automatic repair of security smells in docker-files. In 2023 IEEE International Conference on Software Main-tenance and Evolution (ICSME) , pages 160–170, 2023. doi: 10. 1109/ICSME58846.2023.00026. 5. Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Hen-rique Pondé de Oliveira Pinto, Jared Kaplan, Harrison Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, et al. Evalu-ating large language models trained on code. arXiv preprint arXiv:2107.03374 , 2021. 6. Jürgen Cito, Gerald Schermann, John Erik Wittern, Philipp Leit-ner, Sali Zumberi, and Harald C. Gall. An empirical analysis of the Docker container ecosystem on GitHub. In Proc. IEEE/ACM Int. Conf. Mining Softw. Repositories (MSR) , pages 323–333, 2017. doi: 10.1109/MSR.2017.67. 7. Hadolint contributors. Hadolint: Dockerfile linter. https://github.com/hadolint/hadolint, 2025. 8. DeepSeek. Deepseek-v3-0324 release. https://api-docs.deepseek.com/zh-cn/news/news250325, 2025. 9. Inc Docker et al. Docker. lınea.[Junio de 2017]. Disponible en: https://www.docker.com/what-docker , 2020. 10. Inc Docker et al. Build checks. https://docs.docker.com/develop/develop-images/dockerfile_best-practices/, 2025. 11. Inc Docker et al. Dockerfile reference. https://docs.docker.com/reference/dockerfile/, 2025. 12. Thomas Durieux. Empirical study of the docker smells im-pact on the image size. In Proceedings of the IEEE/ACM 46th International Conference on Software Engineering , pages 1–12, 2024. 13. Isac Sacchi e Souza, Daniel Pinheiro Franco, and João Pedro São Gregorio Silva. Infrastructure as code as a foundational tech-nique for increasing the devops maturity level: Two case studies. 
+
+IEEE Software , 40(1):63–68, 2022. 14. Fatiha El Aouni, Karima Moumane, Ali Idri, Mehdi Najib, and Saeed Ullah Jan. A systematic literature review on agile, cloud, and devops integration: Challenges, benefits. Information and Software Technology , 177:107569, 2025. 15. Cloud Native Computing Foundation. Cncf annual survey 2023. Technical report, Cloud Native Computing Foundation, 2023. URL https://www.cncf.io/reports/cncf-annual-survey-2023/. 16. Inc GitHub et al. Configuring the retention period for github actions artifacts and logs in your organization. https://docs.github.com/en/organizations/managing-organization-settings/configuring-the-retention-period-for-github-actions-artifacts-and-logs-in-your-organization, 2025. 17. Claire Le Goues, ThanhVu Nguyen, Stephanie Forrest, and West-ley Weimer. Genprog: A generic method for automatic software repair. IEEE Trans. Softw. Eng. , 38(1):54–72, 2012. doi: 10.1109/ TSE.2011.104. 18. Mubin Ul Haque, Leonardo Horn Iwaya, and M. Ali Babar. Chal-lenges in Docker development: A large-scale study using Stack Overflow. In Proc. ACM/IEEE Int. Symp. Empirical Softw. Eng. and Meas. (ESEM) , pages 1–11, 2020. doi: 10.1145/3382494. 3410660. 19. Foyzul Hassan and Xiaoyin Wang. Hirebuild: An automatic approach to history-driven repair of build scripts. In 2018 IEEE/ACM 40th International Conference on Software Engineer-ing (ICSE) , pages 1078–1089, 2018. doi: 10.1145/3180155. 3180181. 20. Jordan Henkel, Christian Bird, Shuvendu K. Lahiri, and Thomas Reps. Learning from, understanding, and supporting DevOps artifacts for Docker. In Proc. IEEE/ACM Int. Conf. Softw. Eng. (ICSE) , pages 38–49, 2020. doi: 10.1145/3377811.3380406. 21. Jordan Henkel, Denini Silva, Leopoldo Teixeira, Marcelo d’Amorim, and Thomas Reps. Shipwright: A human-in-the-loop system for dockerfile repair. In 2021 IEEE/ACM 43rd International Conference on Software Engineering: Companion Proceedings (ICSE-Companion) , pages 198–199, 2021. doi: 10. 1109/ICSE-Companion52605.2021.00087. 22. Michael Hilton, Timothy Tunnell, Kai Huang, Darko Marinov, and Danny Dig. Usage, costs, and benefits of continuous inte-gration in open-source projects. In Proc. IEEE/ACM Int. Conf. Automated Softw. Eng. (ASE) , pages 426–437, 2016. doi: 10.1145/ 2970276.2970358. 23. Michael Hilton, Nicholas Nelson, Timothy Tunnell, Darko Mari-nov, and Danny Dig. Trade-offs in continuous integration: Assur-ance, security, and flexibility. In Proc. ACM Joint Eur. Softw. Eng. Conf. and Symp. Found. Softw. Eng. (ESEC/FSE) , pages 197–207, 2017. doi: 10.1145/3106237.3106270. 24. Eric Horton and Chris Parnin. DockerizeMe: Automatic infer-ence of environment dependencies for Python code snippets. In 
+
+Proc. IEEE/ACM Int. Conf. Softw. Eng. (ICSE) , pages 328–338, 2019. doi: 10.1109/ICSE.2019.00047. 25. Md Hasan Ibrahim, Mohammed Sayagh, and Ahmed E. Hassan. Too many images on DockerHub! How different are images for the same system? Empir. Softw. Eng. , 25(5):4250–4281, 2020. doi: 10.1007/s10664-020-09846-3. 26. WMCJT Kithulwatta, Wiraj Udara Wickramaarachchi, KPN Jayasena, BTGS Kumara, and RMKT Rathnayaka. Adoption of docker containers as an infrastructure for deploying software ap-plications: A review. Advances on Smart and Soft Computing: Proceedings of ICACIn 2021 , pages 247–259, 2021. 27. Emna Ksontini, Marouane Kessentini, Thiago do N Ferreira, and Foyzul Hassan. Refactorings and technical debt in docker projects: An empirical study. In 2021 36th IEEE/ACM Inter-national Conference on Automated Software Engineering (ASE) ,pages 781–791. IEEE, 2021. 
+
+> 17 of 18
+
+28. Emna Ksontini, Aycha Abid, Rania Khalsi, and Marouane Kessentini. Drminer: A tool for identifying and analyzing refac-torings in dockerfile. In Proceedings of the 21st international conference on mining software repositories , pages 584–594, 2024. 29. Emna Ksontini, Meriem Mastouri, Rania Khalsi, and Wael Kessentini. Refactoring for Dockerfile Quality: A Dive into Developer Practices and Automation Potential . In 2025 IEEE/ACM 22nd International Conference on Mining Software Repositories (MSR) , pages 788–800, Los Alamitos, CA, USA, Apr. 2025. IEEE Computer Society. doi: 10.1109/MSR66628. 2025.00116. URL https://doi.ieeecomputersociety.org/10.1109/ MSR66628.2025.00116. 30. Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen tau Yih, Tim Rocktäschel, Sebastian Riedel, and Douwe Kiela. Retrieval-augmented generation for knowledge-intensive NLP tasks. In Adv. Neural Inf. Process. Syst. (NeurIPS) ,volume 33, pages 9459–9474, 2020. 31. Aixin Liu, Bei Feng, Bing Xue, Bingxuan Wang, Bochao Wu, Chengda Lu, Chenggang Zhao, Chengqi Deng, Chenyu Zhang, Chong Ruan, et al. Deepseek-v3 technical report. arXiv preprint arXiv:2412.19437 , 2024. 32. Martin Monperrus. Automatic software repair: A bibliography. 
+
+ACM Comput. Surv. , 51(1):1–24, 2018. doi: 10.1145/3105906. 33. Suchita Mukherjee, Abigail Almanza, and Cindy Rubio-González. Fixing dependency errors for python build reproducibility. In Proceedings of the 30th ACM SIGSOFT in-ternational symposium on software testing and analysis , pages 439–451, 2021. 34. Aakash Nakarmi, Harshit Kesharwani, Tamoshree Mallick, Sushant Jhingran, and Gaurav Raj. An optimized framework for microservice deployment using containerization and orches-tration. In International Conference on Paradigms of Communi-cation, Computing and Data Analytics , pages 213–226. Springer, 2024. 35. PBH-BTN. Pbh-btn/peerbanhelper ci record. https://github.com/PBH-BTN/PeerBanHelper/actions/runs/15517936574, 2025. 36. Yun Peng, Ruida Hu, Ruoke Wang, Cuiyun Gao, Shuqing Li, and Michael R Lyu. Less is more? an empirical study on configu-ration issues in python pypi ecosystem. In Proceedings of the IEEE/ACM 46th international conference on software engineering ,pages 1–12, 2024. 37. ProjectDiscovery. httpx. https://github. com/projectdiscovery/httpx, 2026. Commit: 
+
+bb3154ffd92db9b919087c01cd2c1d12f8d6e040 .38. Giovanni Rosa, Federico Zappone, Simone Scalabrino, and Rocco Oliveto. Fixing dockerfile smells: an empirical study. 
+
+Empirical Software Engineering , 29(5):108, 2024. 39. Hyunmin Seo, Caitlin Sadowski, Sebastian Elbaum, Edward Af-tandilian, and Robert Bowdidge. Programmers’ build errors: a case study (at google). In Proceedings of the 36th International Conference on Software Engineering , ICSE 2014, page 724–734, New York, NY, USA, 2014. Association for Computing Machin-ery. ISBN 9781450327565. doi: 10.1145/2568225.2568255. URL https://doi.org/10.1145/2568225.2568255. 40. Taha Shabani, Noor Nashid, Parsa Alian, and Ali Mesbah. Dockerfile Flakiness: Characterization and Repair . In 2025 IEEE/ACM 47th International Conference on Software Engi-neering (ICSE) , pages 1793–1805, Los Alamitos, CA, USA, May 2025. IEEE Computer Society. doi: 10.1109/ICSE55347. 2025.00238. URL https://doi.ieeecomputersociety.org/10.1109/ ICSE55347.2025.00238. 41. Eliezio Soares, Gustavo Sizilio, Jadson Santos, Daniel Alencar Da Costa, and Uirá Kulesza. The effects of continuous inte-gration on software development: a systematic literature review. 
+
+Empirical Software Engineering , 27(3):78, 2022. 42. Weifeng Sun, Meng Yan, Zhongxin Liu, Xin Xia, Yan Lei, and David Lo. Revisiting the identification of the co-evolution of production and test code. ACM Transactions on Software Engi-neering and Methodology , 32(6):1–37, 2023. 43. Bogdan Vasilescu, Yue Yu, Huaimin Wang, Premkumar De-vanbu, and Vladimir Filkov. Quality and productivity outcomes relating to continuous integration in github. In Proc. ACM Joint Eur. Softw. Eng. Conf. and Symp. Found. Softw. Eng. (ESEC/FSE) ,pages 805–816, 2015. doi: 10.1145/2786805.2786850. 44. Chengjie Wang. [code and dataset] cadre: Context-aware drift repair framework. https://github.com/dw763j/Cadre, 2026. 45. Yiwen Wu, Yang Zhang, Tao Wang, Bing Ding, and Huaimin Wang. Dockerfile changes in practice: A large-scale empiri-cal study of 4,110 projects on GitHub. In Proc. Asia-Pacific Softw. Eng. Conf. (APSEC) , pages 247–256, 2020. doi: 10.1109/ APSEC51365.2020.00033. 46. Yiwen Wu, Yang Zhang, Tao Wang, and Huaimin Wang. An empirical study of build failures in the Docker context. In Proc. IEEE/ACM Int. Conf. Mining Softw. Repositories (MSR) , pages 76– 80, 2020. doi: 10.1145/3379597.3387464. 47. Yiwen Wu, Yang Zhang, Tao Wang, and Huaimin Wang. An empirical study of build failures in the docker context. In Pro-ceedings of the 17th international conference on mining software repositories , pages 76–80, 2020. 48. Yiwen Wu, Yang Zhang, Tao Wang, and Huaimin Wang. Atransformer-based model for assisting dockerfile revising. In 
+
+Proceedings of the 2024 IEEE/ACM 46th International Confer-ence on Software Engineering: Companion Proceedings , ICSE-Companion ’24, page 312–313, New York, NY, USA, 2024. Asso-ciation for Computing Machinery. ISBN 9798400705021. doi: 10. 1145/3639478.3643083. URL https://doi.org/10.1145/3639478. 3643083. 49. Yiwen Wu, Yang Zhang, Tao Wang, Bo Ding, and Huaimin Wang. Towards understanding docker build faults in practice: Symptoms, root causes, and fix patterns. Proceedings of the ACM on Software Engineering , 2(FSE):868–890, 2025. 50. Chunqiu Steven Xia and Lingming Zhang. Less training, more repairing please: Revisiting automated program repair via zero-shot learning. In Proc. ACM Joint Eur. Softw. Eng. Conf. and Symp. Found. Softw. Eng. (ESEC/FSE) , pages 959–971, 2022. doi: 10.1145/3540250.3549101. 51. Chunqiu Steven Xia, Yifeng Ding, and Lingming Zhang. Au-tomated program repair via conversation: Fixing 162 out of 337 bugs for $0.42 each using chatgpt. In Proc. ACM SIGSOFT Int. Symp. Softw. Testing and Analysis (ISSTA) , pages 819–831, 2024. doi: 10.1145/3650212.3680355. 52. Tianyin Xu and Darko Marinov. Mining container image repositories for software configuration and beyond. In Proc. IEEE/ACM Int. Conf. Softw. Eng. New Ideas and Emerging Results (ICSE-NIER) , pages 49–52, 2018. doi: 10.1145/3183399.3183421. 53. Ahmed Zerouali, Tom Mens, Alexandre Decan, Jesús González-Barahona, and Gregorio Robles. A multi-dimensional analysis of technical lag in Debian-based Docker images. Empir. Softw. Eng. , 26(2):1–45, 2021. doi: 10.1007/s10664-020-09908-6. 54. Yang Zhang, Bogdan Vasilescu, Huaimin Wang, and Vladimir Filkov. One size does not fit all: an empirical study of con-tainerized continuous deployment workflows. In Proceedings of the 2018 26th ACM joint meeting on european software engi-neering conference and symposium on the foundations of software engineering , pages 295–306, 2018. 55. Yuanliang Zhang, Haochen He, Owolabi Legunsen, Shanshan Li, Wei Dong, and Tianyin Xu. An evolutionary study of config-uration design and implementation in cloud systems. In 2021 IEEE/ACM 43rd International Conference on Software Engineer-ing (ICSE) , pages 188–200. IEEE, 2021. 56. Zhiling Zhu, Tieming Chen, Chengwei Liu, Han Liu, Qijie Song, Zhengzi Xu, and Yang Liu. Doctor: Optimizing container rebuild efficiency by instruction re-orchestration. Proc. ACM Softw. Eng. ,2(ISSTA), June 2025. doi: 10.1145/3728870. URL https://doi. org/10.1145/3728870.
