@@ -6,65 +6,47 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-15
-- 运行时间：2026-07-15 21:23:24 UTC
+- 最新运行日期：2026-07-16
+- 运行时间：2026-07-16 20:08:46 UTC
 - 运行状态：成功
-- 本次总论文数：14
-- 精读区：4
-- 速读区：10
+- 本次总论文数：8
+- 精读区：3
+- 速读区：5
 
 ### 今日简报（AI）
-- 今日共生成 14 篇推荐（精读 4 篇，速读 10 篇）
-- 精读：《Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs》（9.5/10）, 《RepTran: Search-Based Repair of Transformer Models》（8.5/10）
-- 速读：《Beyond Test Presence: Assessing the Quality and Robustness of Agent-Generated Tests in Open-Source Projects》（7.5/10）, 《Predicting Acceptance and Review Effort in Human and Agent Pull Requests》（7.0/10）, 《Code-MUE: Measuring Code LLMs' Uncertainty through Execution-based Semantic Interaction Graphs》（7.0/10）
+- 今日共生成 8 篇推荐（精读 3 篇，速读 5 篇）
+- 精读：《Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs》（9.5/10）, 《Faithful Autoformalization of Natural Language Assertions》（8.0/10）
+- 速读：《SemaDiff: Identifying Semantic-Changing Commits with Generated Code and Tests》（7.0/10）, 《Why Not Fix It Once and for All? An Empirical Study of Multiple Patches for Vulnerability Fixes in Open-Source Software》（7.0/10）, 《Self-Evolving Agent Harnesses via Gated Semantic Quality-Diversity》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202607/15/README](/202607/15/README)
+- 详情：[/202607/16/README](/202607/16/README)
 
 ### 精读区论文标签
-1. [Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs](/202607/15/2607.12605v1-multi-perspective-agentic-program-repair-via-code-property-graphs-and-temporal-execution-graphs)  
+1. [Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs](/202607/16/2607.12605v1-multi-perspective-agentic-program-repair-via-code-property-graphs-and-temporal-execution-graphs)  
    标签：评分：9.5/10、query:apr-oracle
-   evidence：使用大语言模型和执行图进行有证据支撑的代理程序修复框架
-2. [RepTran: Search-Based Repair of Transformer Models](/202607/15/2607.11193v2-reptran-search-based-repair-of-transformer-models)  
-   标签：评分：8.5/10、query:apr-oracle
-   evidence：针对Transformer模型和深度神经网络的搜索式修复方法
-3. [Taming the Drift: Context-aware Repair of Dockerfile Drift during Software Evolution](/202607/15/2607.12541v1-taming-the-drift-context-aware-repair-of-dockerfile-drift-during-software-evolution)  
+   evidence：利用静态和动态证据进行补丁生成的智能体程序修复
+2. [Faithful Autoformalization of Natural Language Assertions](/202607/16/2607.13303v1-faithful-autoformalization-of-natural-language-assertions)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：用于自动化 Dockerfile 漂移修复的上下文感知框架
-4. [Form, Not Content? A Preregistered, Placebo-Controlled Evaluation of Learned Error-Conditioned Self-Repair Through Prompts and Weights in Frozen Small Code Models](/202607/15/2607.12962v1-form-not-content-a-preregistered-placebo-controlled-evaluation-of-learned-error-conditioned-self-repair-through-prompts-and-weights-in-frozen-small-code-models)  
+   evidence：将自然语言断言自动形式化，用于软件测试和验证
+3. [VisualRepair: Dynamic Tool Calling and Region Focusing for Visual Software Issue Repair](/202607/16/2607.14075v1-visualrepair-dynamic-tool-calling-and-region-focusing-for-visual-software-issue-repair)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：代码模型中基于学习的错误条件自修复
+   evidence：使用多模态大模型进行视觉缺陷的自动程序修复
 
 ### 速读区论文标签
-1. [Beyond Test Presence: Assessing the Quality and Robustness of Agent-Generated Tests in Open-Source Projects](/202607/15/2607.12068v1-beyond-test-presence-assessing-the-quality-and-robustness-of-agent-generated-tests-in-open-source-projects)  
-   标签：评分：7.5/10、query:apr-oracle
-   evidence：评估代理生成的测试的质量和鲁棒性，而不仅仅是简单的通过率
-2. [Predicting Acceptance and Review Effort in Human and Agent Pull Requests](/202607/15/2607.12057v1-predicting-acceptance-and-review-effort-in-human-and-agent-pull-requests)  
+1. [SemaDiff: Identifying Semantic-Changing Commits with Generated Code and Tests](/202607/16/2607.13111v1-semadiff-identifying-semantic-changing-commits-with-generated-code-and-tests)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：预测代理编写的拉取请求的接受度和评审工作量
-3. [Code-MUE: Measuring Code LLMs' Uncertainty through Execution-based Semantic Interaction Graphs](/202607/15/2607.12273v1-code-mue-measuring-code-llms-uncertainty-through-execution-based-semantic-interaction-graphs)  
+   evidence：通过基于行为的分析和测试执行对比识别语义变更提交。
+2. [Why Not Fix It Once and for All? An Empirical Study of Multiple Patches for Vulnerability Fixes in Open-Source Software](/202607/16/2607.13206v1-why-not-fix-it-once-and-for-all-an-empirical-study-of-multiple-patches-for-vulnerability-fixes-in-open-source-software)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：通过基于执行的语义交互图测量代码LLM的不确定性
-4. [Antiproof: Synthesizing Vulnerability Detectors and Proofs of Exploitability](/202607/15/2607.12316v1-antiproof-synthesizing-vulnerability-detectors-and-proofs-of-exploitability)  
+   evidence：验证多补丁漏洞修复中的修复状态
+3. [Self-Evolving Agent Harnesses via Gated Semantic Quality-Diversity](/202607/16/2607.13683v1-self-evolving-agent-harnesses-via-gated-semantic-quality-diversity)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于自动验证的可利用性证明预言机
-5. [Trust but Verify? Uncovering the Security Debt of Autonomous Coding Agents](/202607/15/2607.12428v1-trust-but-verify-uncovering-the-security-debt-of-autonomous-coding-agents)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：评估代理生成的拉取请求的功能正确性和安全性
-6. [When is LLM-Based Program Reasoning Correct? A Completion Semantics for LLM-Based Code Inference](/202607/15/2607.12490v1-when-is-llm-based-program-reasoning-correct-a-completion-semantics-for-llm-based-code-inference)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：相对于程序推理补全模型的推断正确性
-7. [Evaluating Semantic and Quality-Aware Retrieval for Source Code Repositories](/202607/15/2607.09161v1-evaluating-semantic-and-quality-aware-retrieval-for-source-code-repositories)  
+   evidence：将提议更改与信用归属分离以避免过拟合
+4. [Self-Improving AI Coding Agents Through Accumulated Behavioral Rules: A Closed-Loop Framework](/202607/16/2607.13091v1-self-improving-ai-coding-agents-through-accumulated-behavioral-rules-a-closed-loop-framework)  
+   标签：评分：6.5/10、query:apr-oracle
+   evidence：AI编码智能体的自动验证和自我审查，以确保代码提交的完整性
+5. [PROBE: Benchmarking Code Generation in Large Language Models](/202607/16/2607.13820v1-probe-benchmarking-code-generation-in-large-language-models)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：使用代码表示和LLM衍生的元数据进行语义和质量感知检索
-8. [BackendForge: Benchmarking Agentic End-to-End Code Generation with Backend Services](/202607/15/2607.11042v1-backendforge-benchmarking-agentic-end-to-end-code-generation-with-backend-services)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：基准测试执行下的行为正确代码生成
-9. [AutoTrace: From Patches to Triggers via Agentic Interprocedural Exploration](/202607/15/2607.12058v1-autotrace-from-patches-to-triggers-via-agentic-interprocedural-exploration)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：从补丁中定位漏洞触发点的代理流水线
-10. [Cross-Cutting Security Analysis of LLM-Generated Code via Metamorphic Testing and Association Rule Mining](/202607/15/2607.12089v1-cross-cutting-security-analysis-of-llm-generated-code-via-metamorphic-testing-and-association-rule-mining)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：使用蜕变测试检测大模型生成代码中的漏洞
+   evidence：超越单元测试的评估代码生成质量的基准测试
 
 
 <div class="dpr-home-promo-card">
