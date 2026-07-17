@@ -6,47 +6,50 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-16
-- 运行时间：2026-07-16 20:08:46 UTC
+- 最新运行日期：2026-07-17
+- 运行时间：2026-07-17 21:31:22 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：3
-- 速读区：5
+- 本次总论文数：9
+- 精读区：2
+- 速读区：7
 
 ### 今日简报（AI）
-- 今日共生成 8 篇推荐（精读 3 篇，速读 5 篇）
-- 精读：《Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs》（9.5/10）, 《Faithful Autoformalization of Natural Language Assertions》（8.0/10）
-- 速读：《SemaDiff: Identifying Semantic-Changing Commits with Generated Code and Tests》（7.0/10）, 《Why Not Fix It Once and for All? An Empirical Study of Multiple Patches for Vulnerability Fixes in Open-Source Software》（7.0/10）, 《Self-Evolving Agent Harnesses via Gated Semantic Quality-Diversity》（7.0/10）
+- 今日共生成 9 篇推荐（精读 2 篇，速读 7 篇）
+- 精读：《Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs》（10.0/10）, 《Structured Feedback Improves Repair in an LLM Agent Loop》（9.0/10）
+- 速读：《Detecting Rendering Bugs in Imperative Data Visualization Libraries via Equivalent Mutations》（7.0/10）, 《Generative Compilation: On-the-Fly Compiler Feedback as AI Generates Code》（7.0/10）, 《Proof-or-Stop: Don't Trust the Agent, Trust the Evidence -- Loop Engineering for Verifiable Evidence-Gated Lifecycle Control》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202607/16/README](/202607/16/README)
+- 详情：[/202607/17/README](/202607/17/README)
 
 ### 精读区论文标签
-1. [Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs](/202607/16/2607.12605v1-multi-perspective-agentic-program-repair-via-code-property-graphs-and-temporal-execution-graphs)  
-   标签：评分：9.5/10、query:apr-oracle
-   evidence：利用静态和动态证据进行补丁生成的智能体程序修复
-2. [Faithful Autoformalization of Natural Language Assertions](/202607/16/2607.13303v1-faithful-autoformalization-of-natural-language-assertions)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：将自然语言断言自动形式化，用于软件测试和验证
-3. [VisualRepair: Dynamic Tool Calling and Region Focusing for Visual Software Issue Repair](/202607/16/2607.14075v1-visualrepair-dynamic-tool-calling-and-region-focusing-for-visual-software-issue-repair)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：使用多模态大模型进行视觉缺陷的自动程序修复
+1. [Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs](/202607/17/2607.12605v1-multi-perspective-agentic-program-repair-via-code-property-graphs-and-temporal-execution-graphs)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：使用LLM和执行图进行基于证据的智能自动化程序修复
+2. [Structured Feedback Improves Repair in an LLM Agent Loop](/202607/17/2607.14167v1-structured-feedback-improves-repair-in-an-llm-agent-loop)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：来自外部验证器的结构化反馈提高了代理循环中的修复成功率
 
 ### 速读区论文标签
-1. [SemaDiff: Identifying Semantic-Changing Commits with Generated Code and Tests](/202607/16/2607.13111v1-semadiff-identifying-semantic-changing-commits-with-generated-code-and-tests)  
+1. [Detecting Rendering Bugs in Imperative Data Visualization Libraries via Equivalent Mutations](/202607/17/2607.12363v3-detecting-rendering-bugs-in-imperative-data-visualization-libraries-via-equivalent-mutations)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：通过基于行为的分析和测试执行对比识别语义变更提交。
-2. [Why Not Fix It Once and for All? An Empirical Study of Multiple Patches for Vulnerability Fixes in Open-Source Software](/202607/16/2607.13206v1-why-not-fix-it-once-and-for-all-an-empirical-study-of-multiple-patches-for-vulnerability-fixes-in-open-source-software)  
+   evidence：缺乏预期渲染的测试预言
+2. [Generative Compilation: On-the-Fly Compiler Feedback as AI Generates Code](/202607/17/2607.13921v1-generative-compilation-on-the-fly-compiler-feedback-as-ai-generates-code)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：验证多补丁漏洞修复中的修复状态
-3. [Self-Evolving Agent Harnesses via Gated Semantic Quality-Diversity](/202607/16/2607.13683v1-self-evolving-agent-harnesses-via-gated-semantic-quality-diversity)  
+   evidence：获取部分程序的编译器反馈以确保语义正确性
+3. [Proof-or-Stop: Don't Trust the Agent, Trust the Evidence -- Loop Engineering for Verifiable Evidence-Gated Lifecycle Control](/202607/17/2607.14890v1-proof-or-stop-dont-trust-the-agent-trust-the-evidence----loop-engineering-for-verifiable-evidence-gated-lifecycle-control)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：将提议更改与信用归属分离以避免过拟合
-4. [Self-Improving AI Coding Agents Through Accumulated Behavioral Rules: A Closed-Loop Framework](/202607/16/2607.13091v1-self-improving-ai-coding-agents-through-accumulated-behavioral-rules-a-closed-loop-framework)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：AI编码智能体的自动验证和自我审查，以确保代码提交的完整性
-5. [PROBE: Benchmarking Code Generation in Large Language Models](/202607/16/2607.13820v1-probe-benchmarking-code-generation-in-large-language-models)  
+   evidence：自主编程代理输出的可验证证据门控控制
+4. [TTHE: Test-Time Harness Evolution](/202607/17/2607.08124v1-tthe-test-time-harness-evolution)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：超越单元测试的评估代码生成质量的基准测试
+   evidence：优化用于验证中间结果的测试框架
+5. [How Do Software Professionals Evaluate AI-Generated Code? (Registered Report)](/202607/17/2607.09434v1-how-do-software-professionals-evaluate-ai-generated-code-registered-report)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：关于专业人员如何评估AI生成代码正确性的研究
+6. [Detecting Rendering Bugs in Imperative Data Visualization Libraries via Equivalent Mutations](/202607/17/2607.12363v2-detecting-rendering-bugs-in-imperative-data-visualization-libraries-via-equivalent-mutations)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：缺乏预期渲染的测试预言以及自动化测试方法
+7. [Line-Anchored Feedback Cuts Token Costs and Improves Correctness in AI Code Editing](/202607/17/2607.12713v1-line-anchored-feedback-cuts-token-costs-and-improves-correctness-in-ai-code-editing)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：行锚定反馈提高了AI代码编辑的正确性
 
 
 <div class="dpr-home-promo-card">
