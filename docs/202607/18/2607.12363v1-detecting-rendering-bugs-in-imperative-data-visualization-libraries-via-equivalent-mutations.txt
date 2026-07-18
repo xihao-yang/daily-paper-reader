@@ -1,0 +1,642 @@
+Title: Detecting Rendering Bugs in Imperative Data Visualization Libraries via Equivalent Mutations
+
+URL Source: https://arxiv.org/pdf/2607.12363v1
+
+Published Time: Wed, 15 Jul 2026 11:57:41 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Detecting Rendering Bugs in Imperative Data Visualization Libraries via Equivalent Mutations 
+
+Weiqi Lu 
+
+Hong Kong University of Science and Technology 
+
+Hong Kong, China wluak@connect.ust.hk 
+
+Yongqiang Tian 
+
+Monash University 
+
+Melbourne, Australia yongqiang.tian@monash.edu 
+
+Abstract —Imperative data visualization libraries construct plots through a sequence of stateful API calls that incrementally create and update graphic elements. Rendering bugs in these libraries often manifest as incorrect visual outputs rather than crashes or exceptions, making them difficult to detect auto-matically. A fundamental challenge is the lack of an oracle that specifies the expected rendering of an arbitrary plotting script. Furthermore, an update to one graphic element may inadvertently affect other elements or properties, leading to subtle inconsistencies in the final rendered image. This paper presents V IZ DETOUR , an automated testing ap-proach for detecting rendering bugs in imperative data visu-alization libraries via equivalent mutations. The key idea is to transform the oracle problem into an equivalence-checking problem. Starting from a seed plotting script, VIZ DETOUR 
+
+appends a short sequence of semantically equivalent API calls that temporarily modify the visualization state and then restore it to its original state. Although these mutations exercise different execution paths, they should preserve the final rendering. Any visual discrepancy between the original and mutated scripts therefore indicates a rendering bug. To generate such mutations, VIZ DETOUR constructs a render tree from the seed script, identifies traceable graphic elements and mutable properties, and synthesizes endpoint-preserving mutation sequences. It then compares the rendered outputs using perceptual hashing. We evaluate V IZ DETOUR on matplotlib, bokeh, and plotly using scripts collected from their official example galleries. V IZ DE- 
+
+> TOUR
+
+discovers 47 previously unknown bugs, of which 39 are confirmed and 18 are fixed. 
+
+Index Terms —automatic software testing, data visualization, mutation-based testing, visual bug detection. 
+
+I. I NTRODUCTION 
+
+Data visualization (DataViz) libraries are a fundamental component of modern data analysis pipelines. They turn raw data into graphical figures, or plots , that make patterns, comparisons, and structures visually accessible. Libraries such as matplotlib [1], bokeh [2], plotly [3], seaborn [4], Vega-Lite [5], and ggplot2 [6] are widely used in statistical analy-sis [7], exploratory data science [8], academic publication [9], dashboards [10], and GUI-based applications [11], where plots serve as the primary interface between raw data and human interpretation. Internally, these libraries expose APIs that transform data into visual encodings ( e.g. , heights, po-sitions, colors) and encapsulate them into graphic elements (e.g. , lines, bars, points). These elements are further annotated with labels, legends, and axes, forming a hierarchy. Users then read these plots by combining perceptual understanding of the visual encodings with textual understanding of the annotations, mapping them back to the underlying data to recognize distributions, trends, and anomalies. Since users rely on such visualizations as evidence for interpreting data, the correctness of DataViz libraries is critical: a silently mis-rendered plot can lead users to misinterpret the underlying data, draw incorrect conclusions, or make faulty decisions. Implementation defects in DataViz libraries are particularly insidious. Unlike crashes or exceptions, which surface im-mediately, visualization bugs typically produce a plausible-looking but semantically incorrect plot. A user may write a correct plotting script, invoke the intended APIs, and inspect the resulting plots assuming the library faithfully realizes the requested encodings. If the library erroneously mutates visual properties, mishandles interactions between APIs, or wrongly propagates updates through stateful graphic elements, the resulting plots can still look correct while incorrectly capturing user intent. Recent empirical evidence [12] confirms that such silent errors are widespread in mainstream DataViz li-braries, span multiple components ( e.g. , visual encodings [13], annotations [14], layouts [15], scales [16]), and frequently escape the regression test suites. The prevalence and stealth of these defects motivate systematic testing of DataViz li-braries. Designing an effective methodology, however, requires understanding how these libraries are structured and the defect patterns they exhibit. DataViz libraries fall into two categories that differ sub-stantially in programming model. Imperative libraries ( e.g. ,matplotlib, bokeh) expose stateful APIs that incrementally construct and mutate graphic elements. Declarative libraries (e.g. , seaborn, Vega-Lite, ggplot2) specify a high-level map-ping from data to visual representations that is subsequently evaluated or compiled into rendering operations. We focus on imperative libraries for three reasons. First, they serve as rendering backends for much of the DataViz ecosystem [17], so their defects propagate to downstream declarative libraries, making them high-impact testing targets. Second, imperative and declarative scripts follow different API patterns: impera-tive scripts rely on stateful calls that mutate graphic elements, while declarative scripts follow a grammar of graphics [18]. A single testing methodology is unlikely to address both effectively. Third, the dominant bug patterns diverge accord-ingly: imperative libraries are uniquely prone to errors in arXiv:2607.12363v1 [cs.SE] 14 Jul 2026 state management, particularly initial element construction and subsequent update propagation [12]. Conversely, declar-ative libraries are prone to errors in specification translation and semantic mapping. Concentrating on imperative DataViz libraries thus enables a focused and internally consistent methodology and evaluation. 
+
+Motivating defect patterns. As imperative DataViz libraries build plots through sequences of stateful API calls, each call incrementally updates the internal element hierarchy. Locally sensible updates are therefore prone to violating non-local invariants among graphic elements. As a result, incorrect updating of visual properties is the second most common root cause of bugs in DataViz libraries [12]. We examined 74 bugs from prior work [12] and found 44 (59.5%) reproducible by appending API calls that update properties or modify the element hierarchy. The prevalence of such defects, exposed through subsequent state mutations, motivates our work. 
+
+A motivating example. To illustrate how stateful update defects manifest, the left column of Fig. 1 presents a bug-reproducing script adapted from matplotlib Issue #31257 [19], uncovered by VIZ DETOUR . The script visualizes a syn-thetic wind field on a regular grid. At each grid cell, an arrow marker ( ’$\\rightarrow$’ ) is rotated by the local wind direction via an Affine2D transform, sized by wind speed, and added to the plot through ax.plot . A subsequent loop encodes humidity into the fillstyle of each marker by calling set_fillstyle(’full’) for high-humidity cells and  
+
+> set_fillstyle(’none’)
+
+otherwise. After this loop, the user expects arrows to keep their local wind-direction rotation while fillstyle encodes humidity (Fig. 1b). Instead, matplotlib silently removes marker rotation, snapping arrows to the rightward orientation (Fig. 1e). All API calls are locally correct, no warning is raised, and the plot still looks plausible. The defect is rooted in the stateful update logic for marker styles. Each line stores its marker as a MarkerStyle instance, which encapsulates the marker shape, the Affine2D transform, and the fillstyle. When set_fillstyle(fs) is invoked, the library reconstructs a fresh MarkerStyle instead of updating the existing instance in place. Because this reinitialization starts from the marker shape alone, the previously attached rotation transform is silently dropped. 
+
+Challenges. Detecting the motivating defect, and silent visualization defects of this kind more generally, through automated testing poses three challenges. 
+
+C1: Demand for a generalized visual oracle. For an arbitrary plotting script, there is no general specification of what the rendered image should look like, so absolute image-level oracles are unavailable [12], [20]. Manually authored reference images cover only a tiny fraction of the input space and cannot generalize to mutated or synthesized scripts. 
+
+C2: Requirement for syntactically and semantically valid API sequences. Triggering the bug requires a specific se-quence of multiple interacting API calls, not a single one. Furthermore, this sequence must mirror real-world data vi-sualization practices. Random fuzzing with unreasonable or undocumented API combinations may generate corrupted plots rather than exposing genuine bugs [21], [22]. Even when a random fuzzer happens to follow the documentation and trigger a valid defect, the unconstrained mutation of unrelated properties and elements can obscure the buggy component. For instance, a mutation might render a large rectangle over it. 
+
+C3: Necessity for validating both related and unrelated properties. Validating a stateful API update must confirm both that the target property changes and that unrelated properties remain unchanged. In our example, after set_fillstyle , this means checking fillstyle and invariance of color, markersize, transform, linestyle, z-order, etc. Checking only fillstyle misses the bug because corruption appears in an unrelated rotation property. But exhaustive checks after every API call are im-practical: the number of elements grows with plot complexity, and properties vary by library and version. 
+
+Insight. We observe that defects in stateful update logic can be exposed without predicting each update’s correct out-come. The key is to extend the original execution with an additional update path that should return to a state semantically equivalent to the terminal state. The rendered plot after this path should therefore match the original plot. Any residual corruption introduced along the path manifests as a difference between the two images. Taking Fig. 1 as an example, we append code that restores the fillstyle after the original update. The restored plot should be identical to the original plot. This holds for the correct execution (Fig. 1c ≡ Fig. 1a). However, the actual restored plot differs from the original plot because the rotation loss persists (Fig. 1f ̸ ≡ Fig. 1d). This comparison exposes the defective state transition without an oracle for the intermediate plot. 
+
+Our approach. We generalize this observation as endpoint-preserving mutation . Given a seed script, V IZ DETOUR ap-pends a short sequence of valid API calls that may traverse different intermediate states but should preserve the terminal state. Under this construction, a correct library should render the seed script and the mutated script identically. If the two rendered images differ, V IZ DETOUR reports the augmented script as a self-contained reproducing script. Concretely, V IZ DETOUR approximates the internal state of a seed script with its render-tree, a tree-structured represen-tation of graphic elements and their mutable properties. It samples traceable graphic elements and properties to identify mutation targets. It then synthesizes endpoint-preserving mu-tants via three operators: set-revert , redundant-set , and remove-readd . Each mutant is executed, and its rendered image is compared against the seed image by perceptual-hash distance. This formulation resolves the three challenges as follows. For C1 , the endpoint-preserving construction replaces an ab-solute oracle with a relative oracle: two executions that reach semantically equivalent terminal states should produce percep-tually identical images. For C2 , each mutation is appended to a real seed script and operates only on elements and properties already present in the plot. The augmented script is therefore a valid, usage-grounded API sequence that exercises stateful update logic without obscuring the defect. For C3 , endpoint fig, ax = plt.subplots(figsize=(8, 8)) markers = [] 
+
+for i in range (grid_size): 
+
+for j in range (grid_size): x, y = x_coords[i, j], y_coords[i, j] angle = wind_directions[i, j] msize = 10 + wind_speeds[i, j] * 1.5 marker = MarkerStyle (’$\\rightarrow$’, transform= 
+
+Affine2D ().rotate_deg(angle)) line, = ax. plot (x, y, marker=marker, markersize=msize , color=’#2c3e50’, linestyle=’None’) markers.append((line, humidity_levels[i, j], line. 
+
+get_fillstyle ())) 
+
+# Appended update : encode humidity in fillstyle 
+
+for line, humidity, _ in markers: line. set_fillstyle (’full’ if humidity == ’high’ else ’none’) 
+
+# Appended restore : return fillstyle to its original 
+
+for line, _, original_fillstyle in markers: line. set_fillstyle (original_fillstyle) 
+
+Bug-reproducing script (data generation omitted). Humidity Level 
+
+> High Humidity
+> Low Humidity
+
+(a) Expected original plot. 
+
+↓ Update Fillstyles Humidity Level 
+
+> High Humidity
+> Low Humidity
+
+(b) Expected updated plot. 
+
+↓ Restore Fillstyles Humidity Level 
+
+> High Humidity
+> Low Humidity
+
+(c) Expected restored plot. Humidity Level 
+
+> High Humidity
+> Low Humidity
+
+(d) Actual original plot. 
+
+↓ Update Fillstyles Humidity Level 
+
+> High Humidity
+> Low Humidity
+
+(e) Actual updated plot. 
+
+↓ Restore Fillstyles Humidity Level 
+
+> High Humidity
+> Low Humidity
+
+(f) Actual restored plot. 
+
+equiv. 
+
+Fig. 1: Motivating example adapted from a matplotlib bug [19] detected by V IZ DETOUR : updating marker fillstyles unexpectedly resets the rotation transforms of markers. The left column shows the plotting script. Both transitions start from the same original input (Fig. 1a ≡ Fig. 1d). The middle column shows the expected transitions: updating fillstyles only restyles the arrows (Fig. 1b), and the restored plot matches the original (Fig. 1c ≡ Fig. 1a). The right column shows the actual buggy behavior: updating fillstyles silently strips the rotation of every marker (Fig. 1e), and the corruption persists after restoring (Fig. 1f ̸ ≡ Fig. 1d). While checking only the updated fillstyle misses the hidden rotation corruption, a straightforward equality comparison between the original and restored plots successfully exposes the bug. preservation reduces per-property validation to a single image comparison. Any corruption on a related or unrelated property surfaces as a perceptual difference between the seed and restored plots. 
+
+Contributions. This paper contributes the following:  
+
+> •
+
+Problem formulation. We formalize imperative DataViz li-brary testing as a state-equivalence problem, with endpoint-preserving mutation as the central test generation strategy.  
+
+> •
+
+Render-tree as state approximation. We introduce the render-tree as a tractable approximation of DataViz library internal state, and develop algorithms for render-tree con-struction and traceable element sampling.  
+
+> •
+
+Semantics-preserving mutation operators. We design three semantics-preserving operators ( set-revert , redundant-set , remove-readd ) to realize endpoint-preserving mutation.  
+
+> •
+
+Implementation and evaluation. We implement the above as V IZ DETOUR and evaluate it on matplotlib, bokeh, and plotly. V IZ DETOUR discovers 47 previously unknown bugs, of which 39 are confirmed and 18 fixed. We make our imple-mentation and detected-bug dataset publicly available [23]. II. P RELIMINARIES 
+
+This section introduce imperative DataViz libraries, mutation-based test generation, and image-based test oracles. 
+
+A. Imperative Data Visualization Libraries 
+
+Imperative DataViz libraries ( e.g. , matplotlib, bokeh) expose stateful APIs through which scripts incrementally construct and configure a collection of graphic elements (called artists in matplotlib [24], glyphs in bokeh [25]). A typical plotting script first allocates a figure and its axes, then adds graphic elements via calls ( e.g. , plot , add_artist , add_glyph ), and configures their visual properties. Each call updates a hierarchy rooted at a Figure . The hierarchy’s interior nodes are composite elements ( e.g. , axes, legends, containers) that group child elements and manage a shared configuration. Its leaf nodes are primitive elements ( e.g. , Line2D , Patch , Point ) with concrete visual attributes such as geometry, color, transform, and z-order [26]. Declarative DataViz libraries (e.g. , Vega-Lite, ggplot2), in contrast, compile an immutable specification to pixels in one shot and expose no per-element mutable state. The stateful nature of imperative libraries provides a unique advantage for automated testing, exploiting two key archi-tectural features. First, these libraries expose internal visual attributes via runtime mutable properties, allowing an external framework to both read and rewrite the state of any graphic element. Second, the structural hierarchy of the library’s internal state is itself mutable, meaning that graphic elements can be added or removed after initial construction. Together, these property mutations and structural mutations define the state transitions that the library must keep internally consistent. These two mutable surfaces are the exact targets for the testing technique introduced in § III. 
+
+B. Mutation-Based Test Generation 
+
+Mutation-based test generation produces new inputs by transforming existing valid inputs [27]–[29]. It takes as input a corpus of seed scripts that execute successfully and a set of mutation operator s that rewrite a seed script by inserting, deleting, or replacing code fragments. Each rewritten script is a mutant that is subsequently executed and assessed by a test or-acle [20]. In automated testing, mutation reframes verification from absolute correctness to relative correctness [30], [31], requiring only that the mutant and seed satisfy the relation defined by the mutation operator. For imperative DataViz libraries, directly deleting or re-placing fragments is often problematic because API calls and parameters are interdependent. Instead, we mimic deletion or replacement by inserting new statements rather than modifying existing ones. Since these changes can be appended to a completed plot without breaking prior dependencies, mutants are generated by inserting code fragments at the end of a seed script. The inserted calls are constructed to revert their intermediate effects, so the mutant remains equivalent to the seed script while exercising the library’s stateful update logic. 
+
+C. Image-Based Test Oracles 
+
+Automated testing of visual systems requires an image-based oracle to decide whether rendered output matches expec-tations [32]–[34]. Existing oracles range from pixel-level met-rics such as MSE and SSIM [35], to image-processing meth-ods [36], deep feature extractors [37], and vision-language models [38]. Although learning-based oracles capture high-level semantics, their cost, non-determinism, and runtime overhead make them poorly suited to high-throughput testing. For mutation-based testing of imperative DataViz libraries, the oracle must be efficient and robust to benign rendering noise [12]. Pixel-level comparisons are brittle because anti-aliasing, font hinting, and floating-point variation can trigger false positives between equivalent plots. Perceptual hashing (pHash) offers a practical alternative by encoding an image as a compact binary fingerprint whose Hamming distance reflects perceptual similarity [39]. Used in browser regression testing and GUI diffing [29], [40], [41], pHash tolerates minor visual noise while remaining sensitive to structural visualization faults such as missing elements, incorrect shapes, layouts, positions, colors, or corrupted plots. Thus, pHash provides a fast, deterministic oracle aligned with human perception and suitable for scalable DataViz library testing. III. A PPROACH 
+
+This section presents V IZ DETOUR , a framework for testing imperative DataViz libraries. We formalize the testing problem via internal rendering states and endpoint-preserving muta-tions, then detail the core components of V IZ DETOUR .Fig. 2 shows the workflow of V IZ DETOUR , and Fig. 3 illustrates it on a concrete matplotlib script used as a running example throughout this section. Given a seed script S0 (e.g. ,the script plotting three rotated star-shaped markers in Fig. 3a), VIZ DETOUR proceeds in four stages. In Step 1, it executes 
+
+S0 to obtain a reference image I0 (Fig. 3d) and builds a 
+
+render-tree T0 from the program’s runtime state (detailed in § III-B; see Fig. 3b). The render-tree captures the hierarchy of graphic elements and provides programmatic access paths for later mutation. In Step 2, V IZ DETOUR uniformly sam-ples a target graphic element e ∈ T0, one of its mutable properties, and an access expression p that can syntactically refer to e from the seed script (detailed in § III-C). In the running example, it samples the first Line2D marker, address-able as fig.get_children()[1].get_children()[0] , and its  
+
+> fillstyle
+
+property. In Step 3, V IZ DETOUR synthesizes an 
+
+endpoint-preserving mutation ∆ using the sampled element, property, and access expression p (detailed in § III-D), then appends it to the seed script. As shown in Fig. 3c, ∆ reads the marker’s current fillstyle , temporarily sets it to ’left’ , and immediately restores the original value, yielding an augmented script Sk whose terminal state should match that of S0. In Step 4, V IZ DETOUR executes Sk to obtain a follow-up image Ik
+
+and compares it with the reference image I0 using a visual oracle based on image distance (detailed in § III-E). It repeats this process for up to K rounds and reports Sk as suspicious if the distance exceeds a threshold τ . In the running example, one round ( k = 1) exposes the discrepancy: matplotlib’s  
+
+> set_fillstyle
+
+restores the marker’s fill style but loses its  
+
+> Affine2D
+
+rotation, producing axis-aligned stars in I1 instead of the rotated ones in I0 (Fig. 3e). § III-F presents the overall test generation algorithm that integrates these four stages. 
+
+A. Problem Formalization 
+
+Internal rendering state and its approximation. An imper-ative DataViz script S = ⟨c1, . . . , c n⟩ is a sequence of API calls that incrementally constructs a plot. Each call updates the internal rendering state , the program state the library uses to render the plot. We distinguish two views of this state. The expected internal rendering state is the state that should hold according to the library documentation and the script. The 
+
+actual internal rendering state is the concrete runtime program state. Fully modeling the actual state is impractical due to its complex internal attributes and backend dependencies [42]. We approximate the internal rendering state with a render-tree that structurally captures the library’s element hierarchy. A render-tree is a tree of graphic elements of a plot, rooted at the figure. Its interior nodes are composite elements ( e.g. ,axes, legends) that group child elements, and its leaf nodes are primitive elements ( e.g. , lines, markers). Each node exposes the mutable visual properties of its element, and § III-B details its construction. The render-tree gives V IZ DETOUR astructured view of these elements and the access expressions used to reference them from the script. 
+
+State transitions and rendering. Each call ci induces a state transition σi−1
+
+> ci
+
+−→ σi. We distinguish the actual 
+
+transition the runtime library performs from the expected 
+
+transition the documentation and script prescribe. We refer to 
+
+π(S) = σ0σ1 · · · σn as the execution path of S, where σ0 is the empty canvas, and the final state σn is the endpoint . In Fig. 3a, the seed issues seven API calls, with the endpoint σ7.Let σ ≡ σ′ denote equivalence between two internal rendering states. It holds if and only if corresponding graphic elements carry equal visual property values. We model render-ing as a function R : Σ → I that maps a state to its rendered image, with state set Σ and image set I. A correctly imple-mented library must render equivalent states to perceptually Seed Script                     
+
+> S0Run Reference Image
+> I0
+> Render-tree guided endpoint-preserving mutation
+> Build render-tree
+> Tk−1
+> 1
+> Sample
+> ⟨elem ,prop ⟩
+> 2
+> Append mutation
+> ∆kto ∆acc
+> 3
+> Augmented Script
+> Sk=S0⊕∆acc Run Follow-up Image
+> Ik
+> Visual Oracle
+> d(I0, I k)
+> 4
+> Report Incorrect Plot
+> d > τ
+> No Deviation
+> d≤τ
+> Next iteration: k←k+ 1 (while k < K )
+
+Fig. 2: Overview of V IZ DETOUR . The framework executes a seed script S0 to obtain the reference image I0. It then uses the render-tree to create endpoint-preserving mutations that should keep the terminal state equivalent to the seed state. The augmented script produces a follow-up image Ik, and the visual oracle compares Ik with I0. If the distance exceeds the calibrated threshold τ , V IZ DETOUR reports an incorrect plot. Otherwise, the workflow continues until the budget K is exhausted. 
+
+fig, ax = plt.subplots() 
+
+for x, theta in enumerate ([-20, 0, 20]): marker = MarkerStyle (’*’, transform= Affine2D 
+
+().rotate_deg(theta)) ax. plot (x, 0, marker=marker, markersize=100) 
+
+(a) Seed script S0 written in matplotlib that generates the reference image I0 in Fig. 3d. Import statements are omitted       
+
+> Figure
+> Rectangle Axes
+> [Line2D] [Spine] XAxis YAxis [Text] Rectangle
+
+(b) Render-tree T0 of S0. The red path marks the element sampled in Fig. 3c. Square brackets ([]) denote multiple elements of the same type, and nodes deeper than the third level are omitted for brevity. 
+
+# ... plotting script unchanged... 
+
+elem = fig. get_children ()[1]. 
+
+get_children ()[0] # get the first Line2D marker (blue marker) 
+
+v = elem. get_fillstyle () elem. set_fillstyle (’left’) elem. set_fillstyle (v) 
+
+(c) Set-revert mutation ∆1 appended to S0 to produce the augmented script S1.−0.5 0.0 0.5 1.0 1.5 2.0 2.5 
+
+> −0.03
+> −0.02
+> −0.01
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+
+(d) Reference image I0 (expected out-put of the augmented script S1). −0.5 0.0 0.5 1.0 1.5 2.0 2.5 
+
+> −0.03
+> −0.02
+> −0.01
+> 0.00
+> 0.01
+> 0.02
+> 0.03
+> Rotation lost!
+
+(e) Actual output of the augmented script S1 (rotation of the star is lost). 
+
+Fig. 3: An Illustrative Example of the Testing Framework V IZ DETOUR .identical images, i.e. σ ≡ σ′ implies R(σ) ≈ R(σ′). We use perceptual equality ≈ rather than pixel equality because rendering admits benign noise (§ III-E). 
+
+From validating state to validating state change. Deciding whether the actual endpoint or image matches its expected counterpart is hard, because both are difficult to derive from the documentation and script alone. We instead validate a state change, which isolates the elements and properties targeted by a short update sequence. To keep validation tractable, we focus on state changes specified to return to an equivalent state, whose the rendered image should not change. 
+
+Endpoint-preserving mutation. Given a seed script S0
+
+with endpoint σn, V IZ DETOUR synthesizes a sequence of additional calls ∆ = ⟨cn+1 , . . . , c n+m⟩ that modify the sampled graphic elements. We call ∆ an endpoint-preserving mutation when its calls are specified to restore the state, so that the expected endpoint σexp  
+
+> n+m
+
+of S0 ⊕ ∆ satis-fies σexp  
+
+> n+m
+
+≡ σn by construction. The mutation ∆ =
+
+⟨set_fillstyle(’left’) , set_fillstyle(v) ⟩ in Fig. 3c is endpoint-preserving, prescribing σexp  
+
+> n+2
+
+≡ σn. A correctly implemented library reaches an actual endpoint σact  
+
+> n+m
+
+≡ σn,and hence renders R(σact 
+
+> n+m
+
+) ≈ R(σn). Contrapositively, any 
+
+∆ for which R(σact 
+
+> n+m
+
+)̸ ≈ R(σn) witnesses σact 
+
+> n+m
+
+̸ ≡ σn.Such a divergence exposes a defect in the library’s stateful update logic. V IZ DETOUR therefore uses image comparison as a visual oracle to surface these inconsistencies. 
+
+B. Render-Tree Construction 
+
+VIZ DETOUR builds the render-tree from the runtime state of the library after executing the seed script. It serves two purposes: enumerating candidate elements for mutation and deriving an executable expression that refers to a sampled element from the seed script. Building the tree traverses the native object model of the specific library. Imperative DataViz libraries differ in how they expose this structure ( e.g. ,matplotlib exposes an Artist hierarchy via get_children() ,while bokeh exposes its component graph via children and 
+
+renderers ). V IZ DETOUR therefore confines this dependence to a single Children (e) hook, which returns the ordered immediate children of e with the syntax to reference each child from the script. Subsequent stages operate on this tree, making the rest of the framework library-agnostic. 
+
+Tree representation. The render-tree consists of nodes 
+
+Node (e, C, par, a ), where e is the underlying graphic element, 
+
+C is the ordered list of immediate child nodes, par is a pointer to the parent node, and a is the accessor fragment Algorithm 1: Render-Tree Construction                                          
+
+> Input: Root element r, root access expression proot
+> Output: Render-tree root T
+> 1Function Build( e, par, a ):
+> 2v←new Node
+> 3v.e ←e, v.C ←[ ] ,v.par ←par, v.a ←a
+> 4foreach (e′, a ′)∈children (e)do
+> 5u←Build (e′, v, a ′)// a′: accessor of child e′
+> 6v.C. append (u)
+> 7return v
+> 8return Build (r, null , p root )
+
+that references e from its parent (the root binding proot for the root node). We materialize this annotated tree rather than reuse the native hierarchy, because the native object model exposes neither an upward pointer to the parent nor the accessor syntax to reference each element from the script. The sampler of § III-C relies on the parent pointers and accessor fragments to recover the access expression of any sampled node by a single walk to the root. Algorithm 1 builds this representation by a depth-first traversal starting at the root r
+
+(e.g. , the Figure in matplotlib), recording each parent pointer and accessor fragment as it descends. Applied to the terminal state of Fig. 3a, the procedure walks from the root Figure 
+
+to its children (the background Rectangle and Axes ), then recursively into the Axes , yielding the tree in Fig. 3b with three Line2D markers alongside spine, axis, and text elements. 
+
+C. Element and Property Sampling 
+
+Given the render-tree, this stage samples a single mutation target. Each target consists of three parts: the graphic element, its access expression in the script, and a mutable property. 
+
+Algorithm 2: Uniform Node Sampling with Element Access Expression                                              
+
+> Input: Render-tree root T
+> Output: Sampled node vand its element access expression p
+> 1Function Flatten( v, L ):
+> 2L. append (v)
+> 3foreach u∈v.C do Flatten( u, L )
+> 4Function AccessExpr( v):
+> 5if v.par =null then return v.a // root binding proot
+> 6return AccessExpr( v.par )+v.a
+> 7L←[ ]
+> 8Flatten( T, L )// collect all nodes into a flat list
+> 9v←L[Rand (0 ,|L|)] // sample a node uniformly
+> 10 p←AccessExpr( v)// recover access expression via parents
+> 11 return (v, p )
+
+Uniform element sampling. Algorithm 2 samples every element uniformly, so each element in the render-tree, from high-level containers to individual primitives, has the same probability of selection. It flattens the render-tree into a list 
+
+L of all nodes by a depth-first traversal, then draws one node uniformly from L. Each node therefore has an exact 
+
+1/|L| probability of selection. Because building the render-tree requires traversing all elements, generating this flat list intro-duces negligible overhead.V IZ DETOUR rebuilds the render-tree and resamples every round, because mutations may cause the DataViz library to alter element hierarchy or ordering. 
+
+Element access expression. Beyond returning a node v,the sampler recovers an access expression p for it. When substituted directly into the seed script, this expression eval-uates to v.e within the script’s existing execution flow. To construct the expression, the sampler walks upward from v
+
+through the parent pointers to the root, concatenating the accessor fragment a recorded at each node. This upward traversal prepends successive parent contexts to the accu-mulated accessor fragment, concluding at a library-specific root binding proot (e.g. , fig in matplotlib). In the run-ning example, the sampled Line2D marker is resolved as  
+
+> fig.get_children()[1].get_children()[0]
+
+in Fig. 3c. This access expression ensures every generated mutation is a syn-tactically valid, self-contained extension of the seed script. 
+
+Property sampling. It remains to choose which property of the sampled element to perturb. For each element e ∈ T ,we collect its set of mutable properties Props (e) by match-ing getter-setter pairs through naming conventions ( e.g. , a  
+
+> get_x
+
+method with its set_x counterpart). For the Line2D 
+
+element sampled in Fig. 3c, Props (e) includes fillstyle ,
+
+> markersize
+
+, color , linestyle , transform , and thirty other properties. We draw one property uniformly at random from 
+
+Props (e) as the mutation target. For this property, we require only the weak contract that set_x accepts values of the same format that get_x returns. We do not assume that  
+
+> set_x(get_x())
+
+is the identity operation on the underlying state. Violations of that stronger identity assumption are among the defects that the subsequent mutation aim to expose. 
+
+D. Endpoint-Preserving Mutation Operators 
+
+Given a sampled element e with access expression p and a mutable property prop ∈ Props (e), V IZ DETOUR instantiates one of three mutation operators, each producing a ∆ that is endpoint-preserving by construction. The mutation operators differ in applicability. Redundant-set operator applies to any property with a getter–setter pair, provided the setter accepts the same format that the getter returns. Set-revert additionally requires candidate values for the property type that are distinct from the original value. Remove-readd applies only when the 
+
+> add
+
+/remove API pair is exposed by either the element itself or its parent element. Among the operators applicable to the sampled target, V IZ DETOUR selects one uniformly at random. 
+
+1) Set-Revert (SR): Let v = get prop (p) be the current value of the property. The set-revert operator emits 
+
+∆SR = ⟨set prop (p, v ′), set prop (p, v )⟩,
+
+for some v′̸ = v drawn from a set of candidate values selected based on the property type. The second call restores the property to its original value, so σexp  
+
+> n+2
+
+≡ σn by construction. Figure 3c is a set-revert instance with prop = fillstyle and 
+
+v′ = ’left’ . The operator targets bugs where a library fails to re-derive equivalent internal rendering state after a property is modified and reset. In the running example, changing and reverting the fillstyle causes the library to reconstruct the marker from scratch, accidentally discarding its rotation and causing the visual defect in Fig. 3e. 
+
+Mutation Value Selection. The set-revert operator requires a candidate value v′̸ = v, drawn from a type-dependent value pool. For a numeric property ( int , float ), we draw boundary values, special floats ( e.g. , infinity, NaN), and scaled or offset perturbations of the original value. For a boolean property, we set v′ = ¬v. For an enumeration property, we parse the valid set from the library documentation or the runtime enum definition and sample v′̸ = v uniformly. For fillstyle in Fig. 3c, matplotlib documents the valid set as {full , left , right , bottom , top , none }, and since the current value is full , the sampler drew v′ = left . When the property type cannot be resolved through introspection or documentation, we fall back to resampling v itself, which reduces the operator to redundant-set and probes idempotency. 
+
+2) Redundant-Set (RS): The redundant-set operator reap-plies the value already held by the property: 
+
+∆RS = ⟨set prop (p, get prop (p)) ⟩.
+
+Although trivially endpoint-preserving in specification, a cor-rect implementation must be idempotent. We observe cases where such calls fail due to getter-setter incompatibilities [43] or unintended side effects on other properties [44]. 
+
+3) Remove-Readd (RR): For elements that can be manipu-lated via an add /remove API pair ( e.g. , add_artist /remove ), the remove-readd operator evaluates the access expression p to retrieve the target element reference e = eval (p), then emits 
+
+∆RR = ⟨remove (e), add (e)⟩.
+
+The add call re-inserts e at the end of the sibling order rather than at its original position, because the add APIs of the target libraries append by default. We therefore restrict this operator to elements whose draw order does not affect the rendered image. Under this restriction the re-added element carries the same visual property values and renders identically, so σexp  
+
+> n+2
+
+≡ σn holds by construction and a correct library reproduces I0. Applying remove-readd to an element whose sibling order influences the rendered image would change the draw order and the image even in a correct library, so these cases are excluded. This operator probes whether removing and re-adding an element correctly restores its original state and rendered image. It also doubles as a crash probe : underly-ing bugs in internal state tracking, such as deleting a reference while other components still hold pointers to it, can cause 
+
+> remove
+
+(e) to crash the runtime, directly exposing a defect. 
+
+E. Visual Oracle 
+
+The endpoint-preserving mutation reduces bug detection to one decision: whether the seed and its mutant render to perceptually identical images. The visual oracle makes this decision. It takes the reference image I0 rendered from the seed S0 and the follow-up image Ik rendered from the augmented script Sk = S0⊕∆ (§ III-D). It then operationalizes the relation ≈ used to define perceptual identity. Following § II-C, we instantiate ≈ with perceptual hashing (pHash), which absorbs benign rendering noise while remain-
+
+Algorithm 3: GENERATE TESTS                                                                     
+
+> Input: Seed script S0, root access expression proot , budget K,threshold τ
+> Output: A verdict with a reproducing script or ∅
+> 1(r0, I 0)←Execute( S0)// r0: root element, I0: reference image
+> 2∆acc ← ⟨⟩
+> 3for k←1to Kdo
+> 4Tk−1←BuildRenderTree( rk−1, p root )// Alg. 1
+> 5(v, p )←UniformNodeSampling( Tk−1)// Alg. 2
+> 6prop ←PropertySampling( v.e )// § III-C
+> 7op ←Rand (ApplicableOps( v.e, prop ))// uniform over applicable ⊆ { SR, RS, RR }
+> 8∆k←GenMutation( v.e, p, prop , op )
+> 9∆acc ←∆acc ⊕∆k
+> 10 (rk, I k)←Execute( S0⊕∆acc )
+> 11 if d(I0, I k)> τ then return ⟨Report , S 0⊕∆acc ⟩
+> 12 return ⟨Pass ,∅⟩
+
+ing sensitive to the structural corruptions that characterize stateful update defects. We compute the Hamming distance 
+
+d(I0, I k) between their perceptual hashes and report Sk as a suspicious reproducing script when d(I0, I k) > τ . Because the appended mutation is endpoint-preserving by construction, a correct library renders Ik perceptually identical to I0 and satisfies d(I0, I k) ≤ τ . Any larger distance is evidence of a defect in the library’s stateful update logic. The threshold τ is calibrated during evaluation (discussed in § V-A). 
+
+F. Test Generation Algorithm 
+
+Algorithm 3 assembles the components above into the full test-generation loop. For each seed S0, we execute up to K
+
+rounds of mutation, each targeting a freshly sampled element. Each round rebuilds the render-tree (§ III-B), then samples the mutation target in two steps. U NIFORM NODE SAMPLING 
+
+draws a node v uniformly together with its access expression 
+
+p, and PROPERTY SAMPLING draws one mutable property 
+
+prop uniformly from Props (v.e ) (§ III-C). The round then selects an operator uniformly at random from the subset of {SR, RS, RR } applicable to the sampled element and property, and instantiates the corresponding ∆k (§ III-D). Because the concatenation of endpoint-preserving mutations is itself endpoint-preserving, the invariant σexp  
+
+> terminal
+
+≡ σn is maintained throughout the test. The loop halts early and emits a reproducing script as soon as a suspicious rendered image is observed. If no deviation is observed within K rounds, the seed passes under the current budget. On Fig. 3a, the algorithm terminates at k = 1 with the reproducing script of Fig. 3c. The accumulated ∆acc , once appended to S0, forms a self-contained, executable reproducing script. Because every mutation is a syntactic extension of the seed script, it runs against the library under test with no auxiliary harness, letting developers reproduce the defect by executing it as is. IV. E VALUATION 
+
+We evaluated V IZ DETOUR via three research questions:  
+
+> •
+
+RQ1 (Bug Detection): Can V IZ DETOUR effectively find new bugs in real-world imperative DataViz libraries? TABLE I: New bugs detected by V IZ DETOUR across three libraries. The column Pending Fix denotes confirmed bugs for which developers have opened a pull request not yet merged.                      
+
+> Library Reported Confirmed Pending Fix Fixed matplotlib 20 20 19 11
+> bokeh 18 13 11 7
+> plotly 9620
+> Total 47 39 32 18
+> •
+
+RQ2 (Baseline Comparison): How does VIZ DETOUR 
+
+compare against other testing techniques in terms of code coverage and bug detection?  
+
+> •
+
+RQ3 (Ablation Study): How much does each mutation operator contribute to V IZ DETOUR ’s effectiveness? 
+
+A. Experiment Setup 
+
+Hardware and software environment. We conducted all ex-periments on a Linux server (AlmaLinux 10.1, kernel 6.12.0) with a AMD Ryzen Threadripper 3970X and 256 GiB of memory, running Python 3.13.11. A NVIDIA RTX 6000 Ada Generation was used only for the baseline experiments. 
+
+Subjects. We evaluated V IZ DETOUR on three widely used Python DataViz libraries: matplotlib 3.10.8, bokeh 3.10.0, and plotly 6.8.0. matplotlib and bokeh follow an imperative object model in which a script incrementally mutates a hierarchy of graphic elements through sequences of API calls. Although plotly exposes a declarative specification interface, its internal rendering updates can be modeled as imperative state transi-tions, so V IZ DETOUR applies to plotly without modification. We excluded libraries that are non-imperative or merely wrap another backend, such as seaborn over matplotlib. All three subjects are actively maintained and still receive recent bug reports, making them realistic bug-finding targets. For each library, we collected seed scripts from its official example gallery, because gallery examples are curated, self-contained, and exercise diverse plot types and visual properties. After discarding scripts that failed to execute, we collected 2,487 
+
+seeds: 934 for matplotlib, 471 for bokeh, and 1,082 for plotly. Each serves as a starting point S0 for V IZ DETOUR . We ran VIZ DETOUR on each library with a budget of 120 hours. 
+
+Parameter settings. We fixed the per-seed mutation budget to K = 10 rounds. A smaller K raises script-loading cost, while a larger K makes the reproducing script harder to minimize. Following the calibration in § V-A, we set the oracle threshold to τ = 2 , flagging any mutation with a pHash distance above τ as a candidate visual defect. 
+
+B. RQ1: Bug Detection 
+
+We ran V IZ DETOUR on the seed corpus of each library and manually triaged every reproducing script emitted. We report 47 previously unknown bugs to the GitHub repositories of the respective libraries. Table I summarizes the outcome. Developers have confirmed 39 of these reports and already fixed 18 . The rest are pending a fix or under triage. The con-firmed bugs span all three libraries, showing that V IZ DETOUR 
+
+exposes bugs across diverse imperative DataViz libraries. 
+
+Symptoms. The confirmed bugs fall into two symptom classes. VIZ DETOUR found 34 visual defects, where the library silently renders an incorrect plot, and 5 crashes, where a semantics-preserving mutation raises an exception. Visual defects dominate. These silent corruptions produce no error message and would escape any approach that detects crashes alone. This confirms the value of comparing the rendered images of a script and its endpoint-preserving mutant. 
+
+Affected components. The confirmed bugs span four cat-egories of graphic element. V IZ DETOUR found 11 defects in visual encoding, 12 in annotations, 11 in layout, and 5
+
+in scales. This spread indicates that stateful update bugs are not confined to a single subsystem but pervade the rendering pipeline. 
+
+Case studies. We detail three confirmed bugs to illustrate how endpoint-preserving mutations expose defects. Figure 4 shows their correct and defective outputs. 
+
+matplotlib: 3D aspect ratio not restored. On a filled 3D contour plot (Issue #31276 [45], Fig. 4a), a set-revert mutation sets the axes aspect to ’equal’ and immediately reverts it to 
+
+> ’auto’
+
+. A correct library restores the projection, but matplotlib keeps the intermediate aspect and renders a distorted plot. Developers confirmed the bug and opened a fix. 
+
+bokeh: scientific tick format not restored. On a line drawn over a range on the order of 10 −5, where the axis uses a compact scientific tick format (Issue #15031 [46], Fig. 4b), a set-revert mutation toggles the use_scientific property off and then on. The restored formatter falls back to a verbose format whose labels overlap, which differs from the seed. The developers fixed and merged the bug. 
+
+plotly: contour size ignored in the seed. On a contour plot whose contour size is set to 0.25 , a value that the figure model registers correctly (Issue #5613 [47], Fig. 4c), a redundant-set mutation reassigns the same value. The seed render produces discrete bands, while the redundant-set render produces a smooth gradient (with finer contour lines). The mutation therefore exposes that the seed render was already incorrect. This case shows that an endpoint-preserving mutation validates not only the state transition it introduces, but also the initial state, since a buggy initial render becomes detectable once the mutation produces a divergent image. 
+
+RQ1 : V IZ DETOUR discovers 47 previously unknown bugs across matplotlib, bokeh, and plotly, of which developers confirmed 39 and already fixed 18 . Most are silent visual defects that crash-based testing would miss. 
+
+C. RQ2: Baseline Comparison 
+
+As no existing fuzzing technique targets visual defects in DataViz libraries, we adopted two general-purpose fuzzers as baselines. We compared VIZ DETOUR against them on matplotlib 3.9.2: Atheris [48] (a byte-level coverage-guided fuzzer) and Fuzz4All [49] (an LLM-based generation fuzzer). Both baselines can only flag scripts that raise runtime ex-30 20 10 0 10 20 30 30   
+
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> 60
+> 40
+> 20
+> 0
+> 20
+> 40
+> 60
+> 80 30 20 10 010 20 30 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> 60
+> 40
+> 20
+> 0
+> 20
+> 40
+> 60
+> 80
+
+(a) matplotlib: aspect lost after set-revert. (b) bokeh: overlapping ticks after set-revert. (c) plotly: contour size ignored in the seed render. 
+
+Fig. 4: Case studies of three confirmed bugs that V IZ DETOUR detected across matplotlib, bokeh, and plotly. In each pair, the left image is the correct render and the right image is the visual defect that the endpoint-preserving mutation reveals. 0 4 8 12 16 20 24 
+
+> Time (h)
+> 10
+> 20
+> 30
+> 40
+> Code Coverage (%)
+> VizDetour
+> Atheris
+> Fuzz4All
+
+Fig. 5: Line coverage on matplotlib 3.9.2 over 24 hours. Atheris terminates early due to memory exhaustion. ceptions ( e.g. , recursion overflows, memory exhaustion, or deep exceptions in the rendering stack), as they rely on a crash oracle with no mechanism to detect silent visual defects. We initialized Atheris with valid matplotlib seed scripts and filtered shallow exceptions to focus on core rendering errors. For Fuzz4All, we used starcoder2-7b [50] and replayed all generated scripts against matplotlib 3.11.0 to verify defects. Each tool got 24 hours on the same machine to measure coverage and historical bug detection. 
+
+Code Coverage. Figure 5 shows that V IZ DETOUR achieves the fastest growth and the highest final line coverage ( ∼37%). Atheris quickly reaches ∼33% due to its seed corpus but stagnates and crashes from memory exhaustion around hour nine, as byte-level mutations rarely produce valid programs. Fuzz4All grows steadily to ∼35% but stays below V IZ DE-
+
+> TOUR
+
+. Figure 6 compares the covered-line sets of the three tools. Although the tools share a common core of covered lines, their exclusive coverage differs significantly. Fuzz4All contributes the most exclusive coverage, but it concentrates in peripheral output backends ( e.g. , PDF and SVG exporters). In contrast, V IZ DETOUR covers core rendering and layout modules ( e.g. , patches , constrained_layout ) where visual defects typically arise. 
+
+Historical Bug Detection. We evaluate each tool against historical bugs present in matplotlib 3.9.2 but fixed in the latest stable version 3.11.0. V IZ DETOUR detects three of these visual defects within the budget. Atheris finds only one crash before running out of memory, and Fuzz4All finds none. This shows why a relative visual comparison matters: the baselines target crashes and miss the silent corruptions that dominate 3,349 106 4,560  
+
+> 5,118
+> 2,915 297
+> 32,143
+> VizDetour
+> (42,967)
+> Atheris
+> (37,106)
+> Fuzz4All
+> (40,473)
+
+Fig. 6: Coverage composition on matplotlib 3.9.2. V IZ DE-
+
+> TOUR
+
+, Atheris, and Fuzz4All cover 48,488 lines in total. TABLE II: Contribution of mutation operators in bug detec-tion. The reduction relative to V IZ DETOUR is in parentheses.           
+
+> Variant New bugs Confirmed bugs
+> VIZ DETOUR 47 39
+> w/o Set-Revert 14 (-70.2%) 14 (-64.1%) w/o Redundant-Set 40 (-14.9%) 32 (-17.9%) w/o Remove-Readd 40 (-14.9%) 32 (-17.9%)
+
+imperative DataViz libraries. 
+
+RQ2 : V IZ DETOUR achieves the highest and fastest line coverage, concentrated in core rendering modules. Aided by its visual oracle, V IZ DETOUR detects three historical visual defects that neither baseline finds. 
+
+D. RQ3: Ablation Study 
+
+We evaluate the contribution of the three mutation operators by removing each component individually. Table II reports the resulting drop in detected bugs. Among the mutation operators, removing set-revert causes the sharpest decline in effectiveness. It reduces the new bugs by 70.2% and the confirmed bugs by 64.1%. Removing redundant-set or remove-readd each reduces the new bugs by 14.9% and the confirmed bugs by 17.9%. Though redundant-set is a specialized case of set-revert , we keep it separate because it is highly cost-effective. It simply reassigns the current value, eliminating the need to search for or generate alternative valid values. Each operator contributes uniquely to the overall effectiveness of VIZ DETOUR , justifying its inclusion. 
+
+RQ3 : All three operators matter, but set-revert dominates: removing it cuts new bugs by 70.2% and confirmed by 64.1%, versus 14.9% and 17.9% for the other two. V. D ISCUSSION 
+
+A. Oracle Calibration 
+
+A naive threshold for the pHash distance ( e.g. , d > 0) is im-practical because floating-point non-determinism in rendering backends, sub-pixel anti-aliasing, and font rasterization pro-duces non-zero distances even between semantically identical images. Instead, we calibrate the anomaly threshold τ from the empirical distribution of pHash distances under mutations where no structural bug is present. We executed our mutation pipeline across the collected seed scripts, evaluating 38,158 mutations to construct the empiri-cal null distribution NullDist . Because the vast majority of mutations are strictly semantics-preserving, NullDist is over-whelmingly concentrated at zero (38,096 cases, ∼99 .84% ). A minor, benign noise floor occurs at distance 2 (53 cases, 
+
+∼0.14% ), representing imperceptible pixel rounding variances. Genuine structural anomalies emerge only in the sparse tail where d ≥ 4. To cleanly isolate these structural anomalies from rasterization noise, we set τ = 2 , matching the 99th percentile boundary clear of the baseline noise floor. A mutant with d(I0, I k) > τ is reported as suspicious. 
+
+B. False Positives 
+
+Not every reproducing script V IZ DETOUR reports witnesses a genuine defect. Developers rejected some reports as intended behavior, and these false positives follow three recurring pat-terns. First, a mutation can combine two incompatible APIs. In Issue #31229 [51], set_position disables constrained layout, so adjusting and restoring an axes position need not preserve the figure. Second, a getter and its setter can be asymmetric, so set_x(get_x()) is not an identity. In Issue #31136 [52],  
+
+> get_transform
+
+of a spine returns a composite transform whereas set_transform assigns only one component, recov-ered through get_data_transform . Third, a setter can carry a hidden side effect on coupled state. In Issue #31246 [53], enabling text wrapping also changes the rotation mode, so disabling wrapping alone does not restore the layout. To filter these reports, VIZ DETOUR currently relies on hardcoded blacklists of non-invertible API combinations. This static approach is brittle across library versions and misses deep, implicit side effects. A promising direction is to leverage LLM-powered semantic agents [54] that inspect the library’s source code and documentation. By analyzing API implemen-tations to deduce hidden state dependencies ( e.g. , recognizing that set_wrap implicitly modifies rotation_mode ) and ver-ifying whether a sequence is truly invertible per developer contracts, these agents can prune false positives and make VIZ DETOUR a context-aware semantic oracle. 
+
+C. Threats to Validity 
+
+The visual oracle is the primary internal threat: perceptual hashing can yield false positives from rasterization noise or false negatives from subtle deviations. We mitigate this by calibrating τ on 38 ,158 null mutations (§ V-A) and validating all defects with developers. Second, manual triage involves human judgment. We reduce this by minimizing mutation sequences to isolate root causes and submitting only distinct failures upstream. Finally, random element sampling may affect defect discovery, which we address by running each library for approximately 120 hours. The primary external threat is subject selection: we eval-uate V IZ DETOUR on three prominent Python libraries with imperative APIs. These cover the dominant imperative DataViz paradigms in Python, but our findings may not generalize to declarative frameworks or other language ecosystems. Our seeds, harvested from official galleries, may not capture the complexity of real-world user scripts, but they provide an id-iomatic baseline that maximizes API coverage while ensuring initial validity. Finally, because V IZ DETOUR targets stateful update bugs via endpoint-preserving mutations, extending it to orthogonal defect categories, such as parameter validation errors or static rendering bugs, remains future work. VI. R ELATED WORK 
+
+Fuzzing. Fuzzing automatically generates test inputs that expose software defects [22]. Mutation-based fuzzers perturb existing inputs, while generation-based fuzzers synthesize in-puts from a grammar or model. Coverage-guided engines such as Atheris [48] mutate inputs under code-coverage feedback. Compiler testing has relied on these strategies to generate random programs [21] and catch bugs via differential or metamorphic oracles [55], [56]. Recent work applies lan-guage models to fuzzing, including Fuzz4All for universal input generation [49], CovRL-Fuzz for JS interpreters [28], and COMFUZZ for compilers [27]. Most of these fuzzers target crashes or differential mismatches across independent implementations. In contrast, V IZ DETOUR requires no second implementation, targeting a single DataViz library by deriving a relative oracle via endpoint-preserving mutations. 
+
+GUI and rendering testing. GUI testing explores appli-cation states via simulated interactions to find functional and visual faults [57]–[59]. In contrast, V IZ DETOUR mutates plotting API calls rather than interactive event sequences. Closest to our work, Janus detects rendering bugs across browsers [40], while Metamong targets inconsistencies be-tween initial browser rendering and render-update behav-ior [29]. Like them, V IZ DETOUR assumes equivalent inputs yield consistent visuals. However, browsers are governed by shared standards, whereas DataViz libraries have no common specifications, ruling out differential testing. VIZ DETOUR 
+
+therefore derives a relative oracle from the library’s own state-ful semantics, enabling testing of a single implementation. VII. C ONCLUSION 
+
+We presented V IZ DETOUR , an automated testing approach for detecting silent visual defects in imperative DataViz libraries. Using endpoint-preserving mutation, V IZ DETOUR 
+
+compares a seed script with a semantics-equivalent mutant, turning the missing-oracle problem into a relative visual com-parison. Applied to matplotlib, bokeh, and plotly, V IZ DETOUR 
+
+discovers 47 previously unknown bugs, with 39 confirmed by developers and 18 already fixed. It also achieves higher cov-erage than established, domain-agnostic fuzzers and exposes visual defects they miss. These results show that endpoint-preserving mutation tests visualization libraries without an absolute oracle. Future work will extend it to declarative libraries, additional language ecosystems, and richer semantic oracles and triage support. VIII. D ATA AVAILABILITY 
+
+We make our artifact, including the experiment results and the replication code, publicly available at https://github.com/ smith2936/vizdetour to facilitate follow-up research studies. REFERENCES [1] S. Tosi, Matplotlib for Python developers . Packt Publishing Birming-ham, UK, 2009, vol. 307. [2] K. Jolly, Hands-on data visualization with Bokeh: Interactive web plotting for Python using Bokeh . Packt Publishing Ltd, 2018. [3] N. Kruchten, A. Seier, and C. Parmer, “An interactive, open-source, and browser-based graphing library for Python,” Jun. 2026. [Online]. Available: https://github.com/plotly/plotly.py [4] M. L. Waskom, “Seaborn: statistical data visualization,” Journal of open source software , vol. 6, no. 60, p. 3021, 2021. [5] A. Satyanarayan, D. Moritz, K. Wongsuphasawat, and J. Heer, “Vega-lite: A grammar of interactive graphics,” IEEE transactions on visual-ization and computer graphics , vol. 23, no. 1, pp. 341–350, 2016. [6] H. Wickham, “ggplot2,” Wiley interdisciplinary reviews: computational statistics , vol. 3, no. 2, pp. 180–185, 2011. [7] M.-C. ENACHE, “Data analysis in e-commerce,” Economics and Ap-plied Informatics Journal , no. 1, pp. 1584–0409, 2023. [8] X. Li, Y. Zhang, J. Leung, C. Sun, and J. Zhao, “Edassistant: Supporting exploratory data analysis in computational notebooks with in situ code search and recommendation,” ACM Trans. Interact. Intell. Syst. , vol. 13, no. 1, Mar. 2023. [Online]. Available: https://doi.org/10.1145/3545995 [9] F. P. Zadeh, J. Kim, J.-H. Kim, and G. Kim, “Text2chart31: Instruction tuning for chart generation with automatic feedback,” in Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , 2024, pp. 11 459–11 480. [10] L. Jiang, N. K. Tran, and M. Ali Babar, “Mod2dash: A framework for model-driven dashboards generation,” Proceedings of the ACM on Human-Computer Interaction , vol. 6, no. EICS, pp. 1–28, 2022. [11] V. Bala Dhandayuthapani, “Python data analysis and visualization in java gui applications through tcp socket programming,” International Journal of Information Technology and Computer Science , vol. 16, no. 3, pp. 72–92, 2024. [12] W. Lu, Y. Tian, X. Zhong, H. Ma, Z. Xu, S.-C. Cheung, and C. Sun, “An empirical study of bugs in data visualization libraries,” Proc. ACM Softw. Eng. , vol. 2, no. FSE, Jun. 2025. [Online]. Available: https://doi.org/10.1145/3729363 [13] “hexbin is broken · Issue #5037 · tidyverse/ggplot2 — github.com,” https://github.com/tidyverse/ggplot2/issues/5037, 2022, [Accessed 29-05-2026]. [14] “[Bug]: Additive offset with trailing zeros · Issue #22065 · matplotlib/-matplotlib — github.com,” https://github.com/matplotlib/matplotlib/ issues/22065, 2021, [Accessed 29-05-2026]. [15] “[Bug]: ‘constrained layout‘ merging similar subgrids · Issue #22143 · matplotlib/matplotlib — github.com,” https://github.com/matplotlib/ matplotlib/issues/22143, 2022, [Accessed 29-05-2026]. [16] “[Bug]: ax.hist density not auto-scaled when using histtype=’step’ · Issue #24097 · matplotlib/matplotlib — github.com,” https://github.com/ matplotlib/matplotlib/issues/24097, [Accessed 25-06-2026]. [17] L. Vaughan, “Declarative vs. Imperative Plotting — Towards Data Science — towardsdatascience.com,” https://towardsdatascience.com/ declarative-vs-imperative-plotting-3ee9952d6bf3/, 2024, [Accessed 06-05-2026]. [18] L. Wilkinson, “The grammar of graphics,” in Handbook of computa-tional statistics: Concepts and methods . Springer, 2011, pp. 375–414. [19] “[Bug]: Update of markers’ fillstyle removes rotation transform · Is-sue #31257 · matplotlib/matplotlib — github.com,” https://github.com/ matplotlib/matplotlib/issues/31257, 2026, [Accessed 18-05-2026]. [20] E. T. Barr, M. Harman, P. McMinn, M. Shahbaz, and S. Yoo, “The oracle problem in software testing: A survey,” IEEE Transactions on Software Engineering , vol. 41, no. 5, pp. 507–525, 2015. [21] X. Yang, Y. Chen, E. Eide, and J. Regehr, “Finding and understanding bugs in C compilers,” in Proceedings of the 32nd ACM SIGPLAN Conference on Programming Language Design and Implementation, PLDI 2011, San Jose, CA, USA, June 4-8, 2011 , M. W. Hall and D. A. Padua, Eds. ACM, 2011, pp. 283–294. [Online]. Available: https://doi.org/10.1145/1993498.1993532 [22] M. B¨ ohme, C. Cadar, and A. Roychoudhury, “Fuzzing: Challenges and reflections,” IEEE Softw. , vol. 38, no. 3, pp. 79–86, 2021. [Online]. Available: https://doi.org/10.1109/MS.2020.3016773 [23] “VizDetour: implementation and detected-bug dataset,” https://github. com/smith2936/vizdetour, 2026. [24] Matplotlib Development Team, “Artists — Matplotlib documenta-tion,” https://matplotlib.org/stable/users/explain/artists/index.html, [Ac-cessed 21-06-2026]. [25] Bokeh Development Team, “Glyphs — Bokeh documentation,” https: //docs.bokeh.org/en/latest/docs/reference/models/glyphs.html, [Accessed 21-06-2026]. [26] A. Brown and G. Wilson, The architecture of open source applications, volume ii . Lulu. com, 2012, vol. 2. [27] G. Ye, T. Hu, Z. Tang, Z. Fan, S. H. Tan, B. Zhang, W. Qian, and Z. Wang, “A generative and mutational approach for synthesizing bug-exposing test cases to guide compiler fuzzing,” in Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering ,ser. ESEC/FSE 2023. New York, NY, USA: Association for Computing Machinery, 2023, p. 1127–1139. [Online]. Available: https://doi.org/10.1145/3611643.3616332 [28] J. Eom, S. Jeong, and T. Kwon, “Fuzzing javascript interpreters with coverage-guided reinforcement learning for llm-based mutation,” in 
+
+Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis , ser. ISSTA 2024. New York, NY, USA: Association for Computing Machinery, 2024, p. 1656–1668. [Online]. Available: https://doi.org/10.1145/3650212.3680389 [29] S. Song and B. Lee, “Metamong: Detecting render-update bugs in web browsers through fuzzing,” in Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering , ser. ESEC/FSE 2023. New York, NY, USA: Association for Computing Machinery, 2023, p. 1075–1087. [Online]. Available: https://doi.org/10.1145/3611643.3616336 [30] N. Diallo, W. Ghardallou, and A. Mili, “Correctness and relative correctness,” in 2015 IEEE/ACM 37th IEEE International Conference on Software Engineering , vol. 2, 2015, pp. 591–594. [31] S. AlBlwi, I. Marsit, B. Khaireddine, A. Ayad, J. Loh, and A. Mili, “Subsumption, correctness and relative correctness: Implications for software testing,” Science of Computer Programming , vol. 239, p. 103177, 2025. [Online]. Available: https://www.sciencedirect.com/ science/article/pii/S016764232400100X [32] E. Al´ egroth, R. Feldt, and L. Ryrholm, “Visual gui testing in practice: challenges, problemsand limitations,” Empirical Software Engineering ,vol. 20, no. 3, pp. 694–744, 2015. [33] A. F. Donaldson, H. Evrard, A. Lascu, and P. Thomson, “Automated testing of graphics shader compilers,” Proceedings of the ACM on Programming Languages , vol. 1, no. OOPSLA, pp. 1–29, 2017. [34] J. Mayer and R. Guderlei, “On random testing of image processing ap-plications,” in 2006 Sixth International Conference on Quality Software (QSIC’06) . IEEE, 2006, pp. 85–92. [35] G. Palubinskas, “Image similarity/distance measures: what is really behind mse and ssim?” International Journal of Image and Data Fusion ,vol. 8, no. 1, pp. 32–53, 2017. [36] M. Hassaballah, A. A. Abdelmgeid, and H. A. Alshazly, “Image features detection, description and matching,” in Image Feature Detectors and Descriptors: Foundations and Applications . Springer, 2016, pp. 11–45. [37] S. Dara and P. Tumma, “Feature extraction by using deep learning: A survey,” in 2018 Second international conference on electronics, communication and aerospace technology (ICECA) . IEEE, 2018, pp. 1795–1801. [38] J. S. Roberts, T. Lee, C. H. Wong, M. Yasunaga, Y. Mai, and P. Liang, “Image2struct: Benchmarking structure extraction for vision-language models,” in Advances in Neural Information Processing Systems ,A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. Tomczak, and C. Zhang, Eds., vol. 37. Curran Associates, Inc., 2024, pp. 115 058– 115 097. [Online]. Available: https://proceedings.neurips.cc/paper files/ paper/2024/file/d0718553fd6b227a353c6432cf893285-Paper-Datasets and Benchmarks Track.pdf [39] C. Zauner, “Implementation and benchmarking of perceptual image hash functions,” 2010. [40] C. Zhou, Q. Zhang, B. Qian, and Y. Jiang, “Janus: Detecting rendering bugs in web browsers via visual delta consistency,” in Proceedings of the IEEE/ACM 47th International Conference on Software Engineering ,2025, pp. 2702–2713. [41] R. Yandrapally, A. Stocco, and A. Mesbah, “Near-duplicate detection in web app model inference,” in Proceedings of the ACM/IEEE 42nd International Conference on Software Engineering , ser. ICSE ’20. New York, NY, USA: Association for Computing Machinery, 2020, p. 186–197. [Online]. Available: https://doi.org/10.1145/3377811.3380416 [42] linkurious dev, “Choosing the right tools to test avisualization library — dev.to,” https://dev.to/linkuriousdev/ choosing-the-right-tools-to-test-a-visualization-library-45po, 2020, [Accessed 01-07-2026]. [43] “[Bug]: Colorbar get ticks() return the incorrect array · Issue #31086 · matplotlib/matplotlib — github.com,” https://github.com/matplotlib/ matplotlib/issues/31086, [Accessed 01-07-2026]. [44] “[Bug]: Adjusting the facecolors of Poly3DCollection accidentally shuffles the color order · Issue #31233 · matplotlib/matplotlib —github.com,” https://github.com/matplotlib/matplotlib/issues/31233, [Ac-cessed 01-07-2026]. [45] “[Bug]: Setting aspect back to auto cannot recover the original 3D plot · Issue #31276 · matplotlib/matplotlib — github.com,” https://github.com/ matplotlib/matplotlib/issues/31276, [Accessed 29-06-2026]. [46] “Cannot recover the original state of the plot after toggling scientific notation · Issue #15031 · bokeh/bokeh — github.com,” https://github. com/bokeh/bokeh/issues/15031, [Accessed 29-06-2026]. [47] “[BUG]: contours.size initialization does not apply the specified value, but updates via dropdown work correctly · Issue #5613 · plotly/-plotly.py — github.com,” https://github.com/plotly/plotly.py/issues/5613, [Accessed 29-06-2026]. [48] “GitHub - google/atheris — github.com,” https://github.com/google/ atheris, [Accessed 24-06-2026]. [49] C. S. Xia, M. Paltenghi, J. Le Tian, M. Pradel, and L. Zhang, “Fuzz4all: Universal fuzzing with large language models,” in Proceedings of the IEEE/ACM 46th International Conference on Software Engineering , ser. ICSE ’24. New York, NY, USA: Association for Computing Machinery, 2024. [Online]. Available: https://doi.org/10.1145/3597503.3639121 [50] A. Lozhkov, R. Li, L. B. Allal, F. Cassano, J. Lamy-Poirier, N. Tazi, A. Tang, D. Pykhtar, J. Liu, Y. Wei et al. , “Starcoder 2 and the stack v2: The next generation,” arXiv preprint arXiv:2402.19173 , 2024. [51] “[Bug]: Axes unexpectedly shrinks when adjusting the position in constrained layout · Issue #31229 · matplotlib/matplotlib — github.com,” https://github.com/matplotlib/matplotlib/issues/31229, 2026, [Accessed 24-06-2026]. [52] “[Bug]: Cannot properly set transform for polar axes spine · Is-sue #31136 · matplotlib/matplotlib — github.com,” https://github.com/ matplotlib/matplotlib/issues/31136, 2026, [Accessed 24-06-2026]. [53] “[Bug]: Cannot reset to original positions of x-tick labels after wrapping · Issue #31246 · matplotlib/matplotlib — github.com,” https://github. com/matplotlib/matplotlib/issues/31246, 2026, [Accessed 24-06-2026]. [54] J. He, C. Treude, and D. Lo, “Llm-based multi-agent systems for software engineering: Literature review, vision, and the road ahead,” 
+
+ACM Trans. Softw. Eng. Methodol. , vol. 34, no. 5, May 2025. [Online]. Available: https://doi.org/10.1145/3712003 [55] V. Le, M. Afshari, and Z. Su, “Compiler validation via equivalence modulo inputs,” in Proceedings of the 35th ACM SIGPLAN Conference on Programming Language Design and Implementation , ser. PLDI ’14. New York, NY, USA: Association for Computing Machinery, 2014, pp. 216–226. [Online]. Available: https://doi.org/10.1145/2594291.2594334 [56] T. L. Wang, Y. Tian, Y. Dong, Z. Xu, and C. Sun, “Compilation consistency modulo debug information,” in Proceedings of the 28th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2, ser. ASPLOS 2023. New York, NY, USA: Association for Computing Machinery, 2023, pp. 146–158. [Online]. Available: https://doi.org/10.1145/3575693.3575740 [57] T.-H. Chang, T. Yeh, and R. C. Miller, “Gui testing using computer vision,” in Proceedings of the SIGCHI Conference on Human Factors in Computing Systems , ser. CHI ’10. New York, NY, USA: Association for Computing Machinery, 2010, p. 1535–1544. [Online]. Available: https://doi.org/10.1145/1753326.1753555 [58] T. Su, G. Meng, Y. Chen, K. Wu, W. Yang, Y. Yao, G. Pu, Y. Liu, and Z. Su, “Guided, stochastic model-based gui testing of android apps,” in Proceedings of the 2017 11th Joint Meeting on Foundations of Software Engineering , ser. ESEC/FSE 2017. New York, NY, USA: Association for Computing Machinery, 2017, p. 245–256. [Online]. Available: https://doi.org/10.1145/3106237.3106298 [59] C. Wang, T. Liu, Y. Zhao, M. Yang, and H. Wang, “Llmdroid: Enhancing automated mobile app gui testing coverage with large language model guidance,” Proc. ACM Softw. Eng. , vol. 2, no. FSE, Jun. 2025. [Online]. Available: https://doi.org/10.1145/3715763
