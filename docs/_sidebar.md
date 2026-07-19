@@ -1,6 +1,9 @@
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link dpr-sidebar-noactive-link" href="javascript:void(0)" data-dpr-hash="#/tutorial/README">使用教程</a>
 * Daily Papers
+  * 2026-07-19 <!--dpr-date:20260719-->
+    * 精读区
+      * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/19/2607.12605v1-multi-perspective-agentic-program-repair-via-code-property-graphs-and-temporal-execution-graphs" data-sidebar-item="{&quot;title&quot;: &quot;Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.12605v1-multi-perspective-agentic-program-repair-via-code-property-graphs-and-temporal-execution-graphs&quot;, &quot;score&quot;: &quot;10.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;apr-oracle&quot;}], &quot;evidence&quot;: &quot;使用代码属性图和执行轨迹的代理程序修复&quot;}">Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs</a>
   * 2026-07-18 <!--dpr-date:20260718-->
     * 精读区
       * <a class="dpr-sidebar-item-link dpr-sidebar-item-structured" href="#/202607/18/2607.12605v1-multi-perspective-agentic-program-repair-via-code-property-graphs-and-temporal-execution-graphs" data-sidebar-item="{&quot;title&quot;: &quot;Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs&quot;, &quot;link&quot;: &quot;https://arxiv.org/abs/2607.12605v1-multi-perspective-agentic-program-repair-via-code-property-graphs-and-temporal-execution-graphs&quot;, &quot;score&quot;: &quot;10.0&quot;, &quot;tags&quot;: [{&quot;kind&quot;: &quot;query&quot;, &quot;label&quot;: &quot;apr-oracle&quot;}], &quot;evidence&quot;: &quot;使用LLM和执行图进行基于证据的代理程序修复&quot;}">Multi-Perspective Agentic Program Repair via Code Property Graphs and Temporal Execution Graphs</a>
