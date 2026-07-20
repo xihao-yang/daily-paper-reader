@@ -1,0 +1,500 @@
+Title: READU: Inconsistency-Driven Just-in-Time Detection and Repair of README Bugs
+
+URL Source: https://arxiv.org/pdf/2607.15780v1
+
+Published Time: Mon, 20 Jul 2026 00:42:47 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# READU: Inconsistency-Driven Just-in-Time Detection and Repair of README Bugs 
+
+Doehyun Baek 
+
+CISPA Helmholtz Center for Information Security Stuttgart, Germany doehyunbaek@gmail.com 
+
+Kilian Krampf 
+
+University of Stuttgart Stuttgart, Germany kilian@krampf.de 
+
+Michael Pradel 
+
+CISPA Helmholtz Center for Information Security Stuttgart, Germany michael@binaervarianz.de 
+
+Abstract —Repository-level documentation, such as READMEs, is often the first point of contact between users and a repository. When this documentation is incorrect, users may encounter runtime errors or waste their time debugging. We call such mistakes in repository-level documentation README bugs . Ad-dressing README bugs is challenging because documentation mixes prose with code, its connection to the source of truth is loose, and finding a bug still leaves developers to craft a repair. This paper presents READU, an inconsistency-driven technique for just-in-time detection and repair of README bugs. The key insight behind READU is that README bugs often manifest as inconsistencies between documentation and another source of truth: either repository-internal facts, such as source code, or repository-external facts, such as external dependencies. READU applies a high-recall commit filter, runs internal and external con-sistency checkers in parallel, uses an alert judge to remove false positives, and automatically synthesizes documentation patches. On 6,000 recent commits from six popular repositories including Linux and Spring Boot, READU detects 244 true positives with 75% precision, while consuming less than $0.01 and less than one minute per commit, on average. Of these true positives, READU correctly repairs 217. We report 66 found README bugs, of which (so far) 44 are confirmed and 26 are fixed. 
+
+I. I NTRODUCTION 
+
+Repository-level documentation—including READMEs, howtos, tutorials, and build or install guides—is often users’ first point of contact with a repository. When it is incorrect, users will likely waste time, e.g., by running into runtime errors triggered by following outdated instructions. We refer to mistakes in repository-level documentation as README bugs ,where “README” refers not only to files with exactly that name, but to any kind of repository-level documentation. README bugs are hard to find and fix for three rea-sons. First, repository-level documentation mixes prose with code, making correctness difficult to reason about. Second, repository-level documentation is loosely tied to its sources of truth: a README may refer to arbitrary code, repository-wide behavior not tied to a specific element, or external facts outside the repository altogether. Finally, developers can easily miss the needed documentation updates and must still manually craft patches once a bug is found. Thus, a useful technique should not merely warn, but also suggest mergeable fixes. Figures 1 and 2 illustrate these challenges. In Fig-ure 1a, the Linux documentation mixes a field signature with prose: mmap in int (*mmap)(...) names a struct 
+
+> Linux documentation
+> Documentation/driver-api/uio-howto.rst int (*mmap)(..., vm area struct *vma) Optional. If you need a special :c:func: ‘mmap()‘ function, you can set it here.
+> Internal source of truth: source code
+> include/linux/uio driver.h
+> int (*mmap_prepare)(..., vm_area_desc *desc)
+
+(a) Stale Linux documentation contradicts the current code.    
+
+> API-changing commit 933f05f58ac6
+> include/linux/uio driver.h
+> - int (*mmap)(..., vm_area_struct *vma); + int (*mmap_prepare)(..., vm_area_desc *desc);
+> Internal inconsistency detected Documentation: struct uio_info.mmap
+> Code: struct uio_info.mmap_prepare
+> Repair synthesized
+> Documentation/driver-api/uio-howto.rst - int (*mmap)(..., vm area struct *vma) + int (*mmap prepare)(..., vm area desc *desc) Optional. If you need a special :c:func:
+
+(b) The bug-inducing commit changes the function signature. 
+
+Fig. 1: Stale Linux documentation contradicts the code [1]; the internal checker detects it leading to a repair [2]. 
+
+uio_info field to implement, whereas mmap() in prose names the memory-mapping operation. Renaming the field to mmap_prepare made the signature stale but left the prose reference to mmap() correct. Figure 2a shows aweak link to external dependency: Spring Boot lists common OAuth2 providers but omits X, which Spring Security, an external dependency of Spring Boot, exposes through its 
+
+CommonOAuth2Provider API. Both bugs slipped through mature projects with rigorous review standards, motivating automated detection and repair. Existing approaches do not adequately address these chal-lenges. Prior work on code-comment inconsistency and API documentation focuses on local code elements [3], [4], [5], [6], [7], [8]. While useful, these techniques are not directly applicable to repository-level documentation that is not tied to a specific code element. More recent work that considers repository-level documentation, DOCER [9] and README-Auto-Update [10], still leaves important gaps. DOCER uses a regular expression to detect a narrow class of stale code arXiv:2607.15780v1 [cs.SE] 17 Jul 2026 Spring Boot documentation  
+
+> documentation/.../security/oauth2.adoc For common providers (Google, Github, Facebook, Okta)
+> External source of truth: external dependency
+> spring-security-config/.../CommonOAuth2Provider
+> public enum CommonOAuth2Provider {
+> GOOGLE, GITHUB, FACEBOOK, X, OKTA
+> }
+
+(a) Stale Spring Boot documentation omits an available provider.      
+
+> Documentation-changing commit d11f64a7
+> documentation/.../security/oauth2.adoc + For common providers (Google, Github, Facebook, Okta)
+> External inconsistency detected Documentation: omits provider X
+> Spring Security API: exposes provider X
+> Repair synthesized
+> documentation/.../security/oauth2.adoc - For common providers (Google, Github, Facebook, Okta) + For common providers (Google, Github, Facebook, X, Okta)
+
+(b) The bug-inducing commit describes incomplete providers. 
+
+Fig. 2: Stale Spring Boot documentation omits the OAuth2 provider [11]; the external checker detects it leading to a repair [12]. element references. README-Auto-Update uses a fixed LLM pipeline to check whether a README should get modified along with a code change. However, the technique assumes that there is a single top-level README file (but some projects, such as Linux, have hundreds of repository-level doc-umentation files), does not validate READMEs against project-external facts and lacks support for repairing READMEs. This paper presents READU, an inconsistency-driven tech-nique for just-in-time detection and repair of README bugs. The key observation behind READU is that README bugs often manifest as inconsistencies between documentation and another source of truth: either repository-internal facts, such as source code, or repository-external facts, such as external dependencies. Based on this observation, READU first applies a high-recall commit filter and then runs two LLM agents that check for inconsistencies between a README file and either repository-internal or repository-external facts. If and only if any of these agents finds two contradictory facts, the approach raises an alert. After validating potential alerts with an LLM-as-judge mimicking a human developer, the final step of READU is to automatically synthesize a repair for the README bug. Returning to the motivating examples, READU de-tects and repairs both bugs by finding the inconsis-tent facts. For Linux, the internal checker compares 
+
+Documentation/driver-api/uio-howto.rst with the changed kernel header, finds that the howto still docu-ments struct uio_info.mmap while the code exposes 
+
+mmap_prepare , and synthesizes the patch shown in Fig-ure 1b. For Spring Boot, the external checker inspects Spring Security’s CommonOAuth2Provider API, detects that the documentation omits the supported provider X, and synthesizes the repair shown in Figure 2b. Both patches created by READU have been accepted and merged into Linux’s master branch and Spring Boot’s main branch, respectively. We evaluate READU on 6,000 recent commits: 1,000 com-mits from each of six popular repositories spanning diverse programming languages. On this dataset, READU detects 244 true positives with 75% precision—3.8 × as many true positives and 12 percentage points higher precision than the strongest baseline, Codex Review—while requiring less than $0.01 and less than one minute per commit, on average. Of these true positives, READU correctly repairs 217. We report 66 found README bugs, of which (so far) 44 are confirmed and 26 are fixed. In summary, this paper makes the following contributions:  
+
+> •
+
+Insight. We observe that README bugs often manifest as inconsistencies between documentation and repository-internal or repository-external facts.  
+
+> •
+
+Technique. We present READU, a just-in-time detection and repair technique for README bugs that exploits this observation.  
+
+> •
+
+Evidence. We empirically show that READU is effective and efficient, and that developers confirm and fix the found bugs.  
+
+> •
+
+Artifacts. We release our code and data as open source: https://github.com/sola-st/readu. II. A PPROACH 
+
+We first define the problem this paper addresses (Sec-tion II-A), explain the design rationale of our approach (Sec-tion II-B), give an overview (Section II-C), and describe each component in detail (Sections II-D–II-H). 
+
+A. Problem Definition 
+
+We define a README bug as factually incorrect repository-level documentation. By repository-level documentation, we mean standalone documentation files intended for users or developers at the repository level, rather than comments or docstrings embedded inside source code. Examples include READMEs, howtos, tutorials, and build or usage guides. In this paper, repository-level documentation files are identified by paths matching a case-insensitive regex 1.We study the just-in-time setting: the input to the task is a repository transition from a parent commit to a target commit. The detection output is a set of alerts for README bugs intro-duced by that transition; each alert should identify the incorrect documentation statement and the rationale for the decision. The repair output is a patch against the target commit that removes the README bug. Detecting bugs at commit time keeps the relevant change small, avoids reporting pre-existing issues, and gives maintainers an opportunity to repair the documentation before users encounter failures. Automatically repairing bugs saves maintainer effort and provides concrete, actionable suggestions instead of noisy warnings. 2Input Commit Filtered Commit   
+
+> Alerts
+> Alerts
+> Triaged Alerts Repaired Commit Commit Filter Internal Consistency Checker External Consistency Checker Alert Judge Commit Repair
+
+Fig. 3: Overview of READU. Blue indicates single-call LLM components; orange indicates LLM-agent components. 
+
+B. Design Rationale 
+
+READU exploits the observation that README bugs often manifest as inconsistencies between documentation and an-other source of truth. Hence, we frame detection as consistency checking rather than open-ended bug finding, which offers two advantages. First, unlike code bugs, README bugs often lack an executable oracle, so detection needs another source of truth. Second, each inconsistency provides a compact, checkable explanation: a documentation statement and the fact that contradicts it. We distinguish two kinds of inconsistencies, depending on whether the contradicting fact is repository-internal or repository-external. We use the following definitions. 
+
+Definition 1 (Internal inconsistency) . An internal inconsis-tency is a contradiction or mismatch between two repository locations where at least one location is repository-level docu-mentation. 
+
+Definition 2 (External inconsistency) . An external inconsis-tency is a repository-level documentation statement or in-struction that is out of sync with a concrete fact outside the repository. Internal facts include other documentation, code, and con-figuration in the same repository; external facts include depen-dency APIs, tools, and services used by the repository. 
+
+C. Overview 
+
+Figure 3 gives an overview of READU. Given an input com-mit, the commit filter (Section II-D) first discards the entire commit if its diff is unlikely to introduce a README bug. A surviving commit is analyzed in parallel by the internal and external consistency checkers (Sections II-E and II-F), which compare repository-level documentation against repository-internal and external facts, respectively. Their alerts are triaged by the alert judge (Section II-G). Alerts deemed to be true positives are then sent to the repair component (Section II-H), which produces a patch that repairs the README bug. 
+
+D. Commit Filter 
+
+Popular projects produce many commits, but only a small fraction of them introduce README bugs. Running the full READU pipeline on every commit would be a substantial waste of computational resources. Therefore, READU first 
+
+> 1
+
+(ˆ|.*/)((README|INSTALL|BUILD|US(AGE|ING)) (_[A-Z][A-Z])?|DOC(S|UMENTATION)/.*) 
+
+\.(MDX?|RST|A(SCII)?DOC|TXT)$ 
+
+This is a high-recall pre-filter: choose true for plausible stale-README risk ... 
+
+(a) Commit filter prompt. 
+
+A true positive is an alert that identifies a real README/documenta-tion bug introduced by the commit: ... A false positive is speculative, not introduced by the commit, not tied to documentation, not supported by the supplied evidence, ... 
+
+(b) Alert judge prompt. 
+
+Prefer editing README-like documentation files... Keep changes minimal and directly tied to the supplied alerts. 
+
+(c) Commit repair prompt. 
+
+Fig. 4: Prompt summaries for the commit filter, alert judge, and commit repair components. Full prompts for these and other components are in the artifact.                    
+
+> diff --git a/.../...Annotation.java b/.../...Annotation.java - * {@link SpringBootTest @SptringBootTest} that are taken into account... + * {@link SpringBootTest @SpringBootTest} that are taken into account...
+
+(a) Should reject: Javadoc typo in Spring Boot [13].                             
+
+> #Code change in the commit diff --git a/fixtures/.../eslint.config.ts b/fixtures/.../eslint.config.ts export default defineConfig([ -{extends: [reactHooks.configs['recommended-latest']] },]); +reactHooks.configs.flat['recommended-latest'],]); #Documentation after the commit (unchanged, now stale) packages/.../README.md export default defineConfig([ {extends: [’react-hooks/recommended-latest’], }, ]);
+
+(b) Should accept: stale README in React [14]. 
+
+Fig. 5: Commit-filter examples. uses a cheap, high-recall commit filter to discard commits unlikely to introduce README bugs. The commit filter receives an input commit and first applies a deterministic pass. If the commit changes a README-like file, the filter keeps the commit without an LLM call, because documentation edits can directly introduce README bugs and should be inspected by the downstream stages. For the remaining commits, the filter invokes an LLM with the definition of a README bug and the code changes obtained with a Git diff 2. We prompt the LLM as a high-recall filter, as summarized in Figure 4a, because precisely determining whether a commit could introduce a README bug with only Git diff is difficult. 
+
+> 2
+
+git show --patch --diff-merges=first-parent 
+
+3Figure 5 shows two commit-filter examples. The first should be rejected because it only fixes a typo in source-level Javadoc and does not change behavior, commands, paths, or configu-ration. The second should be kept: the commit replaces the 
+
+extends -based setup with the configuration style introduced in ESLint v9.0.0 3. Indeed, as determined by a later step of READU, the existing README file becomes stale by this commit, as it still documents an extends -based setup. 
+
+E. Internal Consistency Checker 
+
+Many README bugs are caused by repository-internal changes: code, configuration, paths, commands, or other doc-umentation evolve while the corresponding documentation stays unchanged. These bugs require inspecting the post-commit repository, not just the changed diff. However, placing the entire repository into a single LLM context is neither effective nor efficient: context bloat can make the model miss the relevant contradiction and would waste substantial LLM resources. To explore repository state and possible inconsistencies flexibly, we implement the internal consistency checker as an LLM agent. Starting from the post-commit checkout, the agent first inspects changed files and the diff with git , then performs targeted searches over documentation and repository symbols. It detects inconsistencies between repository-level documentation and repository-internal facts. The agent reads only the relevant documentation and code snippets, compares them, and returns JSON alerts in which each alert identifies the documentation location and the contradicting repository location. For the Linux bug in Figure 1, the checker run pro-ceeds as follows. The agent begins with the changed files and diff, observes that the commit changes UIO code and include/linux/uio_driver.h , and uses these terms to search repository documentation. It opens 
+
+Documentation/driver-api/uio-howto.rst , nar-rows to the bullet documenting the struct uio_info 
+
+callback, and compares the documented callback name and signature with the updated header. It then returns a JSON alert that pairs the stale documentation lines with the contradicting header lines. 
+
+F. External Consistency Checker 
+
+While the internal consistency checker can validate README bugs against repository-internal facts, it cannot validate README bugs that involve repository-external facts. However, some README bugs are caused by changes to external facts, such as APIs of third-party packages, or tools and services the analyzed repository uses. These facts may change outside the repository or differ from what the reposi-tory examples assume. The external consistency checker therefore detects inconsis-tencies between repository-level documentation and external facts. We implement it as an LLM agent whose prompt        
+
+> 3https://eslint.org/blog/2024/04/eslint-v9.0.0-released/
+> Input alert. External checker: frontend README allows Node.js 16.10+, but package.json requires Node.js 22.x.
+> Judge: reject
+> Reason. The mismatch existed before the analyzed commit, so it was not introduced by the commit.
+> (a) Rejected alert example from AutoGPT: pre-existing issue [15].
+> Input alert 1
+> Internal old XLA
+> BUILD path
+> Input alert 2
+> External same link returns 404
+> Judge: keep Judge: duplicate
+> Reason. Both alerts describe the same stale link; the internal alert gives clearer repository evidence for repair.
+> (b) Duplicate alerts example from TensorFlow [16].
+
+Fig. 6: Examples of alert judge decisions. instructs it to verify such facts with external checks, including 
+
+curl for URLs and install commands, package-manager queries such as npm view , and public release or API queries. The agent may also download and inspect published artifacts, such as npm packages, when metadata alone is insufficient. These tools are necessary because the relevant source of truth may be outside the repository and may change independently of the commit. We prompt the agent to return alerts that iden-tify the documentation location, the contradicting external fact, and, when available, an authoritative URL for independent verification. For the Spring Boot bug in Figure 2, the checker run pro-ceeds as follows. The agent follows the changed OAuth2 docu-mentation to OAuth2ClientPropertiesMapper , which delegates common providers to Spring Security, which is an external dependency of Spring Boot. It checks the de-clared Spring Security version, inspects Spring Security’s 
+
+CommonOAuth2Provider implementation for that version, verifies that X is supported, and returns an alert for the incomplete provider lists. 
+
+G. Alert Judge 
+
+The internal and external checkers are intentionally high-recall and use different sources of evidence. Forcing each checker to stay within its nominal scope reduced recall, be-cause real README bugs can straddle repository and external evidence. READU therefore lets both checkers report plausible alerts and delegates final triage to an alert judge. We implement the judge as a single LLM call that takes as input the candidate alerts, the post-commit repository-level documentation, and the commit diff. For each alert, the judge returns a decision and rationale that determine whether the repair component receives the alert. Figure 4b summarizes the rubric specified in the judge prompt. 4First, the alert judge filters false positives. It keeps only alerts that correspond to actionable README bugs introduced by the input commit and rejects alerts that are speculative, unsupported by the supplied evidence, not tied to repository-level documentation, or describe issues that already existed before the input commit. Second, the alert judge deduplicates alerts. Because the internal and external checkers can report the same underlying README bug from different evidence paths, the judge groups duplicate alerts, keeps the clearer alert, and marks the others as duplicates. Thus, the repair component receives at most one request per bug. Figure 6 shows examples of both decisions. For AutoGPT, the external checker reports that the frontend README allows Node.js 16.10+ while package.json requires Node.js 22.x; the judge rejects it because this mismatch existed before the input commit. For TensorFlow, the internal and external checkers both report the same stale XLA BUILD link, so the judge keeps the internal alert and marks the external alert as a duplicate. 
+
+H. Commit Repair 
+
+Detection is most useful when maintainers can act on it immediately, but producing a safe patch still requires navigat-ing the repository and preserving documentation style. Recent work on LLM-based software-engineering agents shows that agents can navigate repositories and synthesize patches for real-world software issues [17], [18], [19], [20]. Compared with general software repair, this task is easier because ac-cepted alerts already identify the stale documentation, the contradicting fact, and a concise rationale. Still, the required patch can still be multi-hunk when the same stale fact appears in several places. Motivated by this progress, the commit repair component employs an LLM agent to produce a patch for each true-positive alert accepted by the alert judge. Figure 4c sum-marizes the repair policy specified in the prompt. The agent starts from the accepted alert, inspects only the relevant doc-umentation and supporting evidence, and produces a minimal documentation-oriented patch to remove the inconsistency. We prompt the agent to prefer README-like documentation files, keep changes minimal and directly tied to the supplied alerts, preserve surrounding style and terminology, and avoid unrelated cleanups. Before finishing, it rereads the changed snippets, runs git diff on the modified files, and returns a JSON object containing a summary, modified files, and the exact patch. It must preserve unrelated content and formatting. For the motivating Linux bug (Figure 1), the synthesized repair updates the UIO howto to use mmap_prepare instead of the stale mmap callback. For the motivating Spring Boot bug (Figure 2), the synthesized repair adds X to the incomplete provider lists. III. E VALUATION 
+
+We evaluate READU with the following research questions: TABLE I: Evaluation dataset.                        
+
+> Repository Language Commits Evaluated Commits
+> Ollama [21] Go 1,140 1,000
+> React [22] JavaScript/TypeScript 1,223 1,000
+> AutoGPT [23] Python 1,642 1,000
+> Spring Boot [24] Java 6,790 1,000
+> TensorFlow [25] C++ 13 ,891 1,000
+> Linux [26] C88 ,707 1,000
+> Total 113 ,393 6,000
+
+RQ1. Effectiveness: How effective is READU at detecting and repairing README bugs? RQ2. Feedback from real-world developers: How do main-tainers respond to README bugs found by READU? RQ3. Efficiency: How efficient is READU in terms of time, token consumption, and monetary cost? RQ4. Component usefulness: How much do individual com-ponents of READU contribute to the overall results? 
+
+A. Experimental Setup 1) Dataset: a) Repository Selection: We select GitHub reposito-ries from six language groups: C, C++, Java, Go, Python, JavaScript/TypeScript. Repositories must have at least 500 
+
+stars, must not be archived, must have been created before 2025-10-06, must have been updated since 2026-01-01, must contain at least one repository-level documentation, and must have that language group account for at least 50% of the repository. We query the GitHub API for candidates ordered descendingly by stars. After manually excluding 10 unsuitable repositories ( 6 educational resources, 3 awesome lists, and 1
+
+with a non-English README), we retain the highest-ranked remaining repository per language group. 
+
+b) Commit Selection: For each selected repository, we select commits on its default branch from 2025-04-07 to 2026-04-07. This results in 113 ,393 commits total. Because some repositories contain many selected commits (e.g., Linux with 
+
+88 ,707 commits), we evaluate the 1,000 most recent commits per repository. Each approach receives one repository-commit pair per task. The approach analyzes the transition from the parent commit to the target commit and raises alerts for README bugs introduced by that transition. For merge commits, we use the first parent as the parent commit. Table I summarizes the repositories, commits, and evaluated commits under consideration. 
+
+2) Metrics: We derive effectiveness metrics from manual annotations. For detection, annotators label each alert as a true positive if it reports a README bug introduced by the evaluated commit, and as a false positive otherwise. We report true positives, false positives, and precision for each approach. We do not report recall because we do not construct acomplete ground truth of all README bugs introduced by the evaluated commits. For repair, annotators label each generated patch as correct, incorrect, or unsure. We use unsure only for repair because patch correctness can depend on project-specific behavior or complex commands that are difficult to 5validate reliably; we conservatively count unsure as incorrect for both agreement and reported metrics. For efficiency, we report wall-clock time, token consumption, and monetary cost. Two authors independently annotated overlapping samples to assess annotation reliability with annotation rubrics. We report Gwet’s 𝐴𝐶 1 [27] because it is robust to skewed label distributions. After an initial calibration phase ( 219 detection and 60 repair labels; 𝐴𝐶 1 = 0.692 and 0.667 ), the authors resolved disagreements and refined the annotation rubrics. In the final pass, agreement improved to 𝐴𝐶 1 = 0.853 for detection ( 270 /292 agreements, 92 .47% ) and 𝐴𝐶 1 = 0.848 
+
+for repair ( 132 /150 agreements, 88 .00% ). Using the finite-population sample-size formula ( 𝑁 det = 849 , 𝑁 rep = 244 ,
+
+𝑝 = 0.5) [28], these overlaps are sufficient for a ±5% margin of error at 95% confidence. For the reported metrics, we use the annotations from the first author. 
+
+3) Baselines: We compare READU against five detection baselines: three general-purpose techniques and two tech-niques specialized for README bugs.  
+
+> •
+
+Single LLM invocation tests whether one structured LLM call is sufficient.  
+
+> •
+
+Mini-SWE-agent represents a general-purpose agentic software-engineering baseline [18], [29].  
+
+> •
+
+Codex Review represents a general-purpose code change review assistant [30].  
+
+> •
+
+DOCER is a regex-based detector for outdated code element references in repository-level documentation [9].  
+
+> •
+
+README-Auto-Update is an LLM-based technique that, given a pull request, predicts whether a README update is needed and localizes the README sections that likely require updates [10]. For detection, we run Codex Review, DOCER, and README-Auto-Update as-is; for Single LLM invocation and Mini-SWE-agent, we prompt them with our README-bug definition. For repair, we only evaluate READU because the baselines do not synthesize documentation patches. 
+
+4) Implementation: We implement READU and the evaluation harness in Python 3.13.13. The agent-based components—the internal consistency checker, external con-sistency checker, and commit repair—are implemented with pi-coding-agent v0.78.0 [31]. The commit filter and alert judge are implemented as structured single-call LLM invoca-tions. For the experiments in this paper, all LLM invocations across the baselines and READU use the same open-weight DeepSeek V4 Flash model with high reasoning effort [32]. 
+
+B. RQ1: Effectiveness 1) Quantitative Results: The effectiveness columns of Ta-ble II show that READU detects 244 README bugs with 75% precision. Table III shows that these results are not driven by a single repository: apart from React, per-repository precision remains between 71% and 82% . Most true positives come from Ollama and AutoGPT ( 196 /244 ), but READU also finds README bugs in Linux, Spring Boot, React, and TensorFlow. Table IV shows that the repair component produces correct patches for 217 of 244 targets ( 89% ). Combining detection TABLE II: Detection evaluation results.                                                 
+
+> Technique / variant Effectiveness Avg. per commit TP FP Precision (%) Time Tokens Cost
+> General-purpose baselines
+> Single LLM invocation 29 18 62% 122.18s 397k $0.0102 Mini-SWE-agent 63 45 58% 24.18s 22k $0.0010 Codex Review 64 38 63% 130.93s 504k $0.0073
+> Task-specific baselines
+> DOCER 030% 86.52s N/A N/A README-Auto-Update 729 19% 10.66s 5k $0.0002
+> Approach
+> READU 244 81 75% 47.08s 337k $0.0066
+> Ablations
+> w/o internal checker 74 35 68% 34.68s 154k $0.0033 w/o external checker 204 51 80% 40.55s 192k $0.0044 w/o alert judge 275 180 60% 45.30s 318k $0.0044
+
+TABLE III: True-positive detection counts by repository, with per-repository false positives and precision for READU.                                                  
+
+> Technique / metric Ollama AutoGPT Linux Spring Boot React TensorFlow
+> Single LLM invocation 16 70330Mini-SWE-agent 27 21 4470Codex Review 39 3516 10DOCER 000000README-Auto-Update 700000
+> READU
+> TP 120 75 26 17 33FP 39 17 6711 1Precision 75% 82% 81% 71% 21% 75%
+
+and repair is useful because accepted alerts already provide the repair component with the affected documentation location and the contradicting fact. The motivating repairs in Figures 1 and 2 are representative: the Linux patch updates the stale 
+
+mmap field reference, while the Spring Boot patch adds the missing X provider. Patch ingredients for both patches are already contained in the alerts. 
+
+2) Characterization of True Positives: We characterize READU’s true positives by theme. The 244 true positives comprise five README-bug themes and one typo; Figure 7 shows one representative bug per theme.  
+
+> •
+
+Implementation–documentation drift (81 ): documentation states values or behavior that no longer match the implemen-tation, rendering the documentation internally inconsistent. The example shows an image-generation README still claiming a fixed 30 -step setting, while the CLI implemen-tation defines the default as 9 steps.  
+
+> •
+
+Incorrect external references (63 ): documentation records externally verifiable references or requirements—such as live URLs, package names, model registry entries, or sup-ported platforms—that do not match the external source of truth. The example pipes an install script from a URL that returns HTTP 404.  
+
+> •
+
+Missing API/feature documentation (48 ): newly added fields, parameters, endpoints, permissions, or features are omitted. The example lists tool_calls and tool_name 
+
+6TABLE IV: Repair evaluation results.                  
+
+> Technique Correct repairs / Targets Avg. per target Time (s) Tokens Cost
+> READU 217/244 (89%) 89.7 107.7k $0.0081
+> <!--x/.../README.md:134 -->
+> -Fixed step count (30)
+> // x/imagegen/cli.go:110
+> Flags().Int("steps", 9, ...)
+
+(a) Implementation–documentation drift [33]            
+
+> #docs/.../opencode.mdx:12
+> curl https://.../install.sh |bash ↩→
+> #HTTP check
+> curl https://.../install.sh
+> #-> HTTP 404 Not Found
+
+(b) Incorrect external references [34]        
+
+> <!--docs/api.md:504-505 -->
+> -`tool_calls `:...
+> -`tool_name `:...
+> // api/types.go:186-188
+> `json:"tool_calls" ``json:"tool_name" ``json:"tool_call_id" `
+
+(c) Missing API/feature documentation [35]       
+
+> #x/README.md:23
+> go build -o imagegen
+> // x/.../engine/main.go:1 //go:build mlx
+
+(d) Invalid usage instructions [36]       
+
+> .. it_IT/changes.rst:37
+> Rust (opzionale) 1.78.0
+> .. en/changes.rst:34
+> Rust (optional) 1.85.0
+
+(e) Cross-document or translation drift [37] 
+
+Fig. 7: Representative READU true positives by theme. Each subfigure contrasts the documented claim (left) with the con-tradicting internal or external fact (right). but omits tool_call_id . 
+
+> •
+
+Invalid usage instructions (27 ): examples, commands, or setup steps are syntactically invalid, refer to missing files, or use the wrong command. The example omits the required -tags mlx build flag for source guarded by 
+
+//go:build mlx . 
+
+> •
+
+Cross-document, translation, or naming drift (24 ): related documents, translations, links, anchors, or names diverge after a partial update. The example leaves the Italian Linux requirements at Rust 1.78 .0 after the English page moves to Rust 1.85 .0.
+
+3) Characterization of False Positives: Although READU achieves 75% precision, its false positives reveal the remaining challenges in distinguishing newly introduced README bugs from plausible but non-actionable inconsistencies. We catego-rize its 81 false positives into five causes:  
+
+> •
+
+Pre-existing issues (32 ): the alert identifies a plausible inconsistency, but it was not introduced by the evaluated commit. While such alerts may still be useful to developers, we count them as false positives because our approach aims to detect bugs introduced by the evaluated commit.  
+
+> •
+
+Misinterpreted implementation semantics or context 
+
+(18 ): the checker misreads code semantics (e.g., inheritance or global behavior) or the intended scope of the code change.  
+
+> •
+
+Intentionally non-exhaustive documentation (14 ): the documentation is an example, partial list, or high-level guide rather than a complete reference.  
+
+> •
+
+Benign equivalence, wording, or optionality (12 ): the checker treats equivalent syntax, wording differences, op-tional steps, or harmless duplication as contradictions. Mini-SWE-agent (63) Codex Review (64)   
+
+> READU (244)
+> 34 44
+> 207
+> 3
+> 20 11
+> 6
+
+Fig. 8: Venn diagram of true positives across agentic ap-proaches.  
+
+> •
+
+Incorrect external evidence or source-of-truth selection 
+
+(5): the external checker relies on incomplete evidence, stale availability checks, or the wrong source of truth. 
+
+4) Characterization of Unsuccessful Repairs: For the 27 repair targets not marked correct, manual annotation marked 11 patches as unsure because they involved complex com-mands that were difficult to validate reliably, and 16 patches as incorrect. The 16 manually annotated incorrect repairs fall into four categories:  
+
+> •
+
+Incomplete or under-specified repair (5): the patch moves in the right direction but omits important qualifiers, links, command details, or device mappings.  
+
+> •
+
+Wrong replacement or root-cause mismatch (5): the patch edits the wrong value, adds redundant guidance, or fixes a surface symptom.  
+
+> •
+
+No usable repair generated (4): the repair run produced no usable patch because of LLM failures.  
+
+> •
+
+Overly destructive repair (2): the patch removes or weak-ens useful documentation instead of preserving the intention. 
+
+5) Comparison with Baselines: READU detects substan-tially more README bugs than all baselines while main-taining the highest precision among complete techniques (Ta-ble II). The task-specific baselines cover narrower problem classes. DOCER’s regex-based matching is too brittle: its only alerts were two false positives, including one that matched a deleted Flux 20 GB VRAM estimate to an unrelated README model-size entry 4. README-Auto-Update is a fixed LLM pipeline for a known target README rather than a full-fledged LLM agent. Targeting only the root README misses most bugs elsewhere: 228 /244 of READU’s true positives are in non-root repository-level documentation. Even when restricted to root READMEs, READU finds 16 true positives (14 in Ollama and 2 in AutoGPT), compared with README-Auto-Update’s seven, all in Ollama. Single LLM invocation improves upon task-specific baselines with 29 true positives with 62% precision, but still lags substantially behind three agentic approaches evaluated. Figure 8 shows substantial non-overlap among the agen-tic approaches, suggesting that they find different classes of README bugs. Mini-SWE-agent is effective at finding 
+
+> 4https://github.com/ollama/ollama/commit/3b3bf6
+
+7TABLE V: Reported, confirmed, and fixed README bugs.                         
+
+> Project Reported Confirmed Fixed
+> Linux 22 22 4Spring Boot 17 17 17 AutoGPT 900Ollama 900TensorFlow 555React 400
+> Total 66 44 26
+
+commands that fail when run, and Codex Review is strong on small localized documentation-quality nits. For Mini-SWE-agent, invalid usage instructions account for most unique true positives ( 22 /34 ), often when documented workflows can be executed. Among Codex Review’s 44 unique true positives, 
+
+14 are typos or grammar mistakes and 9 are formatting issues such as trailing whitespace. The main exception to READU’s otherwise strong per-repository results is React: Mini-SWE-agent finds more true positives (7 versus 3), and READU has low preci-sion ( 21% ). Manual inspection suggests that React favors execution-oriented checks: Mini-SWE-agent’s true positives are mostly concrete execution failures, such as nonexistent 
+
+env.tryRecord() and stale signatures. READU finds in-consistencies in ESLint-config, but also flags illustrative React documentation as non-exhaustive and benign terminology dif-ferences as contradictions. 
+
+C. RQ2: Feedback from Real-World Developers 
+
+To evaluate whether README bugs detected by READU are actionable and useful to developers, we submitted alerts and patches from the main evaluation dataset and from an additional set produced by an earlier execution of READU on the same six repositories. This additional set contains 
+
+290 README-changing commits, plus one non-README-changing commit selected by the commit filter. We deduplicate alerts by location and group related alerts into one report, submitted either as an issue or as a PR (or, for Linux, as a patch submission). To reduce maintainer burden, we keep at most two unconfirmed reports open per repository at any time; once maintainers confirm or fix a report, we may submit another one for that repository. Table V shows that READU finds actionable README bugs in the six evaluated projects. We reported 66 bugs 5,received maintainer confirmation for 44 bugs, and 26 of them have been fixed. Overall, these responses indicate that READU surfaces README bugs that maintainers consider actionable. Reception was strongest in Spring Boot, Linux, and TensorFlow: Spring Boot maintainers confirmed and fixed all 17 reports, Linux maintainers confirmed all 22 reports and fixed 4, and TensorFlow maintainers confirmed and fixed all 5
+
+reports. The remaining 18 confirmed but not-yet-fixed Linux reports have not been rejected; maintainer feedback indicates that they are delayed by normal upstream logistics, such as merge-window timing.          
+
+> 5Refer to https://doehyunbaek.github.io/readu-reports for the complete list. 030 60 90 120 150 180 210 240 270
+> True Positives
+> 100
+> 1,000
+> Analyzed commits per dollar spent
+> Single LLM
+> Mini-SWE-agent
+> Codex Review
+> README-Auto-Update
+> READU
+> Pareto front
+
+Fig. 9: Pareto front of detection effectiveness and cost effi-ciency. The x-axis shows manually confirmed true positives; the y-axis shows commits analyzed per USD spent. We have not yet received maintainer responses for Auto-GPT, Ollama, and React. In this small sample, the number of detected bugs does not clearly explain maintainer response: Table III shows many true positives for Ollama and AutoGPT (120 and 75 ), but only a few for React ( 3). This pattern may reflect project-specific review priorities, but the sample is too small for a definite conclusion. 
+
+D. RQ3: Efficiency 
+
+The efficiency columns of Table II show that READU remains practical despite its strong detection performance. Compared with the two more expensive general-purpose base-lines, Single LLM invocation and Codex Review, READU is faster, uses fewer tokens, and is cheaper per commit, on average: 47 .08 s versus 122 .18 s– 130 .93 s, 337 k versus 397 k– 
+
+504 k tokens, and $0.0066 versus $0.0073–$0.0102. Mini-SWE-agent is cheaper than READU but this lower cost coincides with substantially lower true positives (63 versus 244) and precision (58% versus 75%). This lower cost reflects a shallower exploration: Mini-SWE-agent averages 6.0 LLM turns per commit, whereas READU’s checker agents average 
+
+46 .5 turns combined once a commit passes the filter ( 24 .4
+
+internal and 22 .2 external). Task-specific baselines are also cheaper, but they are much less effective. Figure 9 places detection effectiveness and monetary ef-ficiency on one Pareto plot. The x-axis reports manually confirmed true positives, while the y-axis reports commits analyzed per dollar spent, the inverse of the average per-commit cost in Table II; points closer to the upper right are therefore better. READU is on the Pareto front because no baseline reaches its 244 true positives at equal or higher cost efficiency. Mini-SWE-agent and README-Auto-Update are cheaper per commit, but they trade that efficiency for much lower coverage. Figure 10 explains where this efficiency comes from. For the 4,196 commits discarded by the commit filter, READU pays only the filter cost, averaging $0.00045 per commit. The remaining 1,804 commits incur the detection stages: $0.00052 8Filtered out                       
+
+> (n=4,196) $0.00045
+> Detected
+> (n=1,560) $0.00797 $0.00645 $0.00737 $0.0223
+> 0.000 0.005 0.010 0.015 0.020 0.025 0.030 0.035
+> Average cost (USD)
+> Repaired
+> (n=244) $0.00797 $0.00645 $0.00737 $0.00812 $0.0304
+> Commit fi lter Internal checker External checker Alert judge Repair
+
+Fig. 10: Average READU cost by component for filtered-out commits, detected cases, and repaired targets. TABLE VI: Commit-filter outcomes. Predicted positives are commits passed to downstream analysis; false negatives are proxy bug-inducing commits discarded by the filter. 
+
+Technique Predicted Positives False Negatives 
+
+README-Auto-Update 54 / 6,000 255 / 268 
+
+READU 1,804 / 6,000 9 / 268 
+
+for the filter, $0.00797 for the internal checker, $0.00645 for the external checker, and $0.00737 for the alert judge, totaling $0.0223 for each of the 1,560 detection-only cases. For the 244 
+
+repaired targets, repair adds $0.00812, bringing the end-to-end cost to $0.0304 per target. Thus, the commit filter keeps the overall per-commit cost low by preventing most commits from reaching the checker and judge stages. 
+
+E. RQ4: Component Usefulness 1) Commit Filter: READU uses a commit filter to discard commits unlikely to introduce README bugs. README-Auto-Update uses a similar component, called a relevance clas-sifier, so we compare the two filters using two classifier-style outcomes: predicted positives (commits passed to the next stage) and false negatives (bug-inducing commits discarded by the filter). Because we lack complete ground truth for the evaluated commits, we use the union of commits for which any evaluated approach raised a manually confirmed true-positive alert as a proxy for the set of commits with README bugs. Table VI shows that the commit filter substantially reduces the search space while preserving almost all bug-inducing commits. It marks 1,804 of 6,000 commits as predicted positives and yields only 9 false negatives among the 268 
+
+commits with README bugs. In contrast, README-Auto-Update is much more aggressive, passing only 54 commits but producing 255 false negatives. This highlights the tradeoff between precision and recall: we favor a high-recall commit filter because deciding from the commit diff alone whether a commit introduces a README bug is difficult, and the full pipeline’s cost is acceptable. 
+
+2) Internal Consistency Checker: The ablation rows of Table II show that the internal consistency checker is essential for coverage. Removing it reduces true positives from 244 to 
+
+74 and precision from 75% to 68%, even though it roughly halves token use and cost. Thus, internal repository checks provide most of the detection signal. 
+
+3) External Consistency Checker: The external consistency checker increases coverage at a modest precision cost. Without it, READU finds 204 true positives with 80% precision; adding it raises true positives to 244 . Thus, external consis-tency checker is useful supplement to the internal consistency checker, where it detects bug classes missable with internal checker alone. Specifically, the external consistency checker alone raises 47 of the 63 true positives ( 75% ) in the incorrect external references category. 
+
+4) Alert Judge: The alert judge primarily improves pre-cision. Without it, READU reports 275 true positives but also 180 false positives, yielding 60% precision; with it, false positives drop to 81 and precision rises to 75% . Specifically, alert judge decreases false positives in the category of pre-existing issues from 125 to 32 , showing that the alert judge is an effective strategy for removing these alerts which could be considered noisy to the maintainers. IV. T HREATS TO VALIDITY 
+
+Our repository selection may bias the results toward popular and active projects, limiting generalizability to smaller or less active repositories. Our commit selection may introduce temporal bias because it only considers commits from 2025-04-07 to 2026-04-07. We focus on these repositories and commits because detecting README bugs in recent commits of popular repositories is potentially more impactful. We run each baseline and our approach only once because of cost con-straints; therefore, our results are subject to LLM nondetermin-ism. We consider this acceptable because our evaluation covers a large number of commits (1,000) across multiple repositories (6), and the effectiveness metrics show substantial differences. We use an open-weight model, DeepSeek V4 Flash, and do not evaluate current frontier proprietary models such as GPT-5.5 or Claude Opus 4.8, which could be more effective. We exclude these models because of cost constraints and because efficiency is important for detecting and repairing README bugs, motivating the need for lighter, cheaper approaches. Our monetary cost estimates are influenced by server-side caching behavior of the LLM inference providers. Our evaluation results involving external resources may change as external environments evolve, e.g., because of link rot. V. R ELATED WORK 
+
+a) Empirical research on software documentation: Prior empirical studies provide important context for understanding documentation quality and maintenance [38], [39], [40], [41], [42]. We discuss two papers that are particularly relevant to this paper in detail. Dagenais and Robillard [43] interviewed developers who write and read documentation, finding that keeping documentation synchronized with code changes can improve code quality. This observation motivates READU and similar automated techniques for detecting and repairing docu-mentation bugs. Aghajani et al. [41] mined open-source repos-itories, Stack Overflow, and developer mailing lists to derive 9a taxonomy of documentation issues. Our work complements these empirical studies in two ways. First, we conduct a com-prehensive README bug-detection evaluation spanning 6,000 commits across six repositories and covering three general-purpose LLM-based techniques and two README-specific techniques. This evaluation reveals the relative strengths and weaknesses of these techniques. Second, by reporting detected bugs to maintainers and tracking confirmations and fixes, we provide evidence about the kinds of documentation bugs that occur in practice and how projects respond to them. The results show substantial project-to-project variation in both bug prevalence and maintainer responsiveness. 
+
+b) Detection techniques for general documentation bugs: 
+
+Prior work has studied several forms of documentation bug detection. Code-comment inconsistencies [3], [4], [5], [6] and API-documentation errors [7], [8] have received particular attention; we discuss one representative example from each area. Panthaplackel et al. [5] train a neural just-in-time de-tector that flags when a code change makes its associated natural-language comment inconsistent. Like that work, we use code changes as the trigger for just-in-time bug detection. DOCREF [7] detects API-documentation errors by combining NLP techniques with island parsing. Specifically, DOCREF extracts code names from API-reference prose and examples, then reports mismatches when those names do not resolve to locally declared names or API elements in the latest gen-erated reference. These approaches target local consistency: comments are placed next to code, and DOCREF checks consistency within generated API-reference documentation. In contrast, READU targets repository-level documentation, where relevant documentation can appear anywhere in the repository and the facts needed to validate it may come from elsewhere in the repository or from external resources. An interesting direction for future work is to study whether repository-level approaches like ours can also improve these more local documentation-bug settings. 
+
+c) Repository-level software engineering: Recent work increasingly treats the repository, rather than an isolated file or snippet, as the unit of analysis for software-engineering automation. One central task is repository-level code genera-tion, where a model must use cross-file repository context to synthesize code consistent with the surrounding project [44], [45], [46], [47]. Other repository-level work uses graph repre-sentation learning for security-patch detection [48] and LLM-based agents for Rust issue resolution [49]. READU shares this repository-level setup, which better matches realistic software-engineering tasks but requires gathering repository-wide evidence across code, configuration, and documentation effectively and efficiently. The key difference is the target task: prior systems focus on code generation, patch detection, or issue resolution, whereas READU uses repository-level agents specifically for just-in-time README bug detection and repair. 
+
+d) Detection techniques for README bugs: DOCER [9] and README-Auto-Update [10] are the closest prior works on README-bug detection. DOCER targets README files and wiki pages: it uses regular expressions to extract code elements, then raises an alert when an extracted element’s occurrences in the codebase drop from a positive number to zero, indicating a possible deletion or rename. Due to its simple design, DOCER misses many of the diverse docu-mentation bugs in our evaluation dataset. README-Auto-Update is a five-step LLM pipeline for just-in-time README bug detection. Although README-Auto-Update describes an “agentic” workflow, it remains a fixed pipeline for a narrower task: checking whether a target README file should be updated to stay consistent with a code change. It is therefore less flexible than the three agentic approaches we evaluate, which can gather evidence and inspect repository context across files. This design limits the kinds of README bugs it can detect in two ways. First, README-Auto-Update focuses on a target README file rather than locating documentation bugs across repository-level documentation. READU handles documentation wherever it appears in the repository, and this broader scope accounts for most of the real-world bugs it catches. Second, README-Auto-Update does not target README bugs caused by external factors such as dependen-cies. Our external consistency checker specifically targets such cases. Finally, our evaluation shows that READU outperforms README-Auto-Update on the broader task of just-in-time detection of README bugs. VI. C ONCLUSION 
+
+We present READU, a technique for detecting and re-pairing README bugs. Through the combination of high-recall commit filter, two checkers targeting internal and ex-ternal consistency, and high-precision alert judge, READU successfully detects many real-world documentation bugs. In addition, READU automatically synthesizes patches that resolves these bugs, alleviating the efforts of the maintainers. We envision a future where techniques like READU are integrated to software development life cycles of important projects, contributing to the usability and the maintainability of them. DATA AVAILABILITY 
+
+Our code and data are available at https://github.com/sola-st/ readu. REFERENCES [1] L. Stoakes, “uio: replace deprecated mmap hook with mmap prepare in uio info,” GitHub commit https://github.com/torvalds/linux/commit/ 933f05f58ac6014eaac387d22a76ace8606891d1, 2026, accessed: 2026-06-23. [2] D. Baek, “Docs/driver-api/uio-howto: document mmap prepare callback,” GitHub commit https://github.com/torvalds/linux/commit/ de5c46373eb8148aa92c024cf30d26a6d495e278, 2026. [3] N. Stulova, A. Blasi, A. Gorla, and O. Nierstrasz, “Towards detecting inconsistent comments in java source code automatically,” in 20th IEEE International Working Conference on Source Code Analysis and Manipulation, SCAM 2020, Adelaide, Australia, September 28 - October 2, 2020 . IEEE, 2020, pp. 65–69. [Online]. Available: https://doi.org/10.1109/SCAM51674.2020.00012 
+
+10 [4] S. Panthaplackel, P. Nie, M. Gligoric, J. J. Li, and R. J. Mooney, “Learning to update natural language comments based on code changes,” in Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics, ACL 2020, Online, July 5-10, 2020 , D. Jurafsky, J. Chai, N. Schluter, and J. R. Tetreault, Eds. Association for Computational Linguistics, 2020, pp. 1853–1868. [Online]. Available: https://doi.org/10.18653/v1/2020.acl-main.168 [5] S. Panthaplackel, J. J. Li, M. Gligoric, and R. J. Mooney, “Deep just-in-time inconsistency detection between comments and source code,” in Thirty-Fifth AAAI Conference on Artificial Intelligence, AAAI 2021, Thirty-Third Conference on Innovative Applications of Artificial Intelligence, IAAI 2021, The Eleventh Symposium on Educational Advances in Artificial Intelligence, EAAI 2021, Virtual Event, February 2-9, 2021 . AAAI Press, 2021, pp. 427–435. [Online]. Available: https://doi.org/10.1609/aaai.v35i1.16119 [6] G. Rong, Y. Yu, S. Liu, X. Tan, T. Zhang, H. Shen, and J. Hu, “Code comment inconsistency detection and rectification using a large language model,” in 47th IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa, ON, Canada, April 26 - May 6, 2025 . IEEE, 2025, pp. 1832–1843. [Online]. Available: https://doi.org/10.1109/ICSE55347.2025.00035 [7] H. Zhong and Z. Su, “Detecting API documentation errors,” in 
+
+Proceedings of the 2013 ACM SIGPLAN International Conference on Object Oriented Programming Systems Languages & Applications, OOPSLA 2013, part of SPLASH 2013, Indianapolis, IN, USA, October 26-31, 2013 , A. L. Hosking, P. T. Eugster, and C. V. Lopes, Eds. ACM, 2013, pp. 803–816. [Online]. Available: https: //doi.org/10.1145/2509136.2509523 [8] Y. Zhou, R. Gu, T. Chen, Z. Huang, S. Panichella, and H. C. Gall, “Analyzing apis documentation and code to detect directive defects,” in Proceedings of the 39th International Conference on Software Engineering, ICSE 2017, Buenos Aires, Argentina, May 20-28, 2017 ,S. Uchitel, A. Orso, and M. P. Robillard, Eds. IEEE / ACM, 2017, pp. 27–37. [Online]. Available: https://doi.org/10.1109/ICSE.2017.11 [9] W. S. Tan, M. Wagner, and C. Treude, “Detecting outdated code element references in software repository documentation,” Empir. Softw. Eng. , vol. 29, no. 1, p. 5, 2024. [Online]. Available: https://doi.org/10.1007/s10664-023-10397-6 [10] H. Gao, H. Y. Lin, C. Treude, G. Gay, and M. Zahedi, “Does my README file need to be updated? exploring llm-based README maintenance,” CoRR , vol. abs/2603.00489, 2026. [Online]. Available: https://doi.org/10.48550/arXiv.2603.00489 [11] A. Wilkinson, “Merge branch ’4.0.x’,” GitHub com-mit https://github.com/spring-projects/spring-boot/commit/ d11f64a7af28b2dc65f08945475306bd803c7163, 2026, accessed: 2026-06-30. [12] D. Baek, “Align documentation with changes made during 4.1’s devel-opment,” GitHub commit https://github.com/spring-projects/spring-boot/ commit/f7c2c0b2a691f5828f2cc07b28e723408737b507, 2026. [13] S. Brannen, “Fix typo in Javadoc for SpringBootTestAnnotation,” GitHub commit https://github.com/spring-projects/spring-boot/commit/ 29b82310d7a8b3bbc124c21e4ae8c09e819f6ed5, 2026, accessed: 2026-06-22. [14] lauren, “[eprh] Update plugin config to be compatible with flat and legacy,” GitHub commit https://github.com/facebook/react/commit/ 848e0e3a4f12022d396ddbc2b52fd8fa7ac31fa9, 2025, accessed: 2026-06-22. [15] Z. Majdy, “fix(platform): store submission validation and marketplace improvements,” GitHub commit https://github.com/Significant-Gravitas/ AutoGPT/commit/36fb1ea004132815f78121216e459396c25051b9, 2026, accessed: 2026-06-24. [16] A. Kuegel, “Move tests from service/gpu/tests to backends/gpu/tests,” GitHub commit https://github.com/tensorflow/tensorflow/commit/ 0d5d53b93cecfc3c11f62704608055e8e8be0ba6, 2026, accessed: 2026-06-22. [17] I. Bouzenia, P. T. Devanbu, and M. Pradel, “Repairagent: An autonomous, llm-based agent for program repair,” in 47th IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa, ON, Canada, April 26 - May 6, 2025 . IEEE, 2025, pp. 2188–2200. [Online]. Available: https://doi.org/10.1109/ICSE55347.2025.00157 [18] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. Narasimhan, and O. Press, “Swe-agent: Agent-computer interfaces enable automated software engineering,” in Advances in Neural Information Processing Systems 37: Annual Conference on Neural Information Processing Systems 2024, NeurIPS 2024, Vancouver, BC, Canada, December 10 - 15, 2024 , A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. M. Tomczak, and C. Zhang, Eds., 2024. [Online]. Available: http://papers.nips.cc/paper files/paper/2024/hash/ 5a7c947568c1b1328ccc5230172e1e7c-Abstract-Conference.html [19] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury, “Autocoderover: Autonomous program improvement,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis, ISSTA 2024, Vienna, Austria, September 16-20, 2024 , M. Christakis and M. Pradel, Eds. ACM, 2024, pp. 1592–1604. [Online]. Available: https://doi.org/10.1145/3650212.3680384 [20] P. Rondon, R. Wei, J. Cambronero, J. Cito, A. Sun, S. Sanyam, M. Tufano, and S. Chandra, “Evaluating agent-based program repair at google,” in 47th IEEE/ACM International Conference on Software Engineering: Software Engineering in Practice, SEIP@ICSE 2025, Ottawa, ON, Canada, April 27 - May 3, 2025 . IEEE, 2025, pp. 365–376. [Online]. Available: https://doi.org/10.1109/ICSE-SEIP66354. 2025.00038 [21] Ollama, “Ollama,” https://github.com/ollama/ollama, 2026, accessed: 2026-06-02. [22] react/react, “React,” https://github.com/react/react, 2026, accessed: 2026-06-02. [23] Significant Gravitas, “AutoGPT,” https://github.com/ Significant-Gravitas/AutoGPT, 2026, accessed: 2026-06-02. [24] Spring Projects, “Spring Boot,” https://github.com/spring-projects/ spring-boot, 2026, accessed: 2026-06-02. [25] TensorFlow, “TensorFlow,” https://github.com/tensorflow/tensorflow, 2026, accessed: 2026-06-02. [26] Linux Kernel Organization, “Linux Kernel,” https://github.com/torvalds/ linux, 2026, accessed: 2026-06-02. [27] K. L. Gwet, “Computing inter-rater reliability and its variance in the presence of high agreement,” British Journal of Mathematical and Statistical Psychology , vol. 61, no. 1, pp. 29–48, 2008. [28] R. V. Krejcie and D. W. Morgan, “Determining sample size for research activities,” Educational and Psychological Measurement , vol. 30, no. 3, pp. 607–610, 1970. [29] “SWE-agent/mini-swe-agent,” Mar. 2026, original-date: 2025-06-28T20:18:15Z. [Online]. Available: https://github.com/SWE-agent/ mini-swe-agent [30] OpenAI, “Codex Review,” https://developers.openai.com/codex/app/ review, 2026, accessed: 2026-06-02. [31] Earendil Works, “pi,” https://github.com/earendil-works/pi, 2026, ac-cessed: 2026-06-02. [32] DeepSeek-AI, “Deepseek-v4: Towards highly efficient million-token context intelligence,” CoRR , vol. abs/2606.19348, 2026. [Online]. Available: https://doi.org/10.48550/arXiv.2606.19348 [33] J. Morgan, “Add z-image image generation prototype,” GitHub commit https://github.com/ollama/ollama/commit/ 258494001680241c93fcdda7b71de02c55883e38, 2026, accessed: 2026-06-25. [34] P. Sareen, “docs: ollama launch,” GitHub commit https://github.com/ollama/ollama/commit/ 5267d31d56699446626ca45359302fe362920b05, 2026, accessed: 2026-06-25. [35] Grace, “Add Tool Call ID,” GitHub commit https://github.com/ollama/ ollama/commit/809b9c68fae9ec326df58c35be90722671fef482, 2025, accessed: 2026-06-25. [36] D. Hiltgen, “Add experimental MLX backend and engine with image-gen support,” GitHub commit https://github.com/ollama/ollama/commit/ 33ee7168ba1e16c813b52dc2c9417efa1e2e9f20, 2026, accessed: 2026-06-29. [37] M. Ojeda, “rust: simplify RUSTC VERSION Kconfig conditions,” GitHub commit https://github.com/torvalds/linux/commit/ b28711ac98e8b43bfbf5c918022018a54dcedd45, 2026, accessed: 2026-06-25. [38] A. Forward and T. Lethbridge, “The relevance of software documentation, tools and technologies: a survey,” in Proceedings of the 2002 ACM Symposium on Document Engineering, McLean, Virginia, USA, November 8-9, 2002 . ACM, 2002, pp. 26–33. [Online]. Available: https://doi.org/10.1145/585058.585065 [39] S. C. B. de Souza, N. Anquetil, and K. M. de Oliveira, “A study of the documentation essential to software maintenance,” in 
+
+Proceedings of the 23rd Annual International Conference on Design of Communication: documenting & Designing for Pervasive Information, 
+
+11 SIGDOC 2005, Coventry, UK, September 21-23, 2005 , S. R. Tilley and R. M. Newman, Eds. ACM, 2005, pp. 68–75. [Online]. Available: https://doi.org/10.1145/1085313.1085331 [40] G. A. A. Prana, C. Treude, F. Thung, T. Atapattu, and D. Lo, “Categorizing the content of github README files,” Empir. Softw. Eng. , vol. 24, no. 3, pp. 1296–1327, 2019. [Online]. Available: https://doi.org/10.1007/s10664-018-9660-3 [41] E. Aghajani, C. Nagy, O. L. Vega-M´ arquez, M. Linares-V´ asquez, L. Moreno, G. Bavota, and M. Lanza, “Software documentation issues unveiled,” in Proceedings of the 41st International Conference on Software Engineering, ICSE 2019, Montreal, QC, Canada, May 25-31, 2019 , J. M. Atlee, T. Bultan, and J. Whittle, Eds. IEEE / ACM, 2019, pp. 1199–1210. [Online]. Available: https://doi.org/10.1109/ICSE.2019.00122 [42] H. Gao, C. Treude, and M. Zahedi, “Adapting installation instructions in rapidly evolving software ecosystems,” IEEE Trans. Software Eng. , vol. 51, no. 4, pp. 1334–1357, 2025. [Online]. Available: https://doi.org/10.1109/TSE.2025.3552614 [43] B. Dagenais and M. P. Robillard, “Creating and evolving developer documentation: understanding the decisions of open source contributors,” in Proceedings of the 18th ACM SIGSOFT International Symposium on Foundations of Software Engineering, 2010, Santa Fe, NM, USA, November 7-11, 2010 , G. Roman and A. van der Hoek, Eds. ACM, 2010, pp. 127–136. [Online]. Available: https://doi.org/10.1145/1882291.1882312 [44] F. Zhang, B. Chen, Y. Zhang, J. Keung, J. Liu, D. Zan, Y. Mao, J. Lou, and W. Chen, “Repocoder: Repository-level code completion through iterative retrieval and generation,” in Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing, EMNLP 2023, Singapore, December 6-10, 2023 , H. Bouamor, J. Pino, and K. Bali, Eds. Association for Computational Linguistics, 2023, pp. 2471–2484. [Online]. Available: https://doi.org/10.18653/v1/2023.emnlp-main.151 [45] D. Zheng, Y. Wang, E. Shi, R. Zhang, Y. Ma, H. Zhang, and Z. Zheng, “Humanevo: An evolution-aware benchmark for more realistic evaluation of repository-level code generation,” in 47th IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa, ON, Canada, April 26 - May 6, 2025 . IEEE, 2025, pp. 1372–1384. [Online]. Available: https://doi.org/10.1109/ICSE55347.2025.00228 [46] Y. Wang, Y. Wang, D. Guo, J. Chen, R. Zhang, Y. Ma, and Z. Zheng, “Rlcoder: Reinforcement learning for repository-level code completion,” in 47th IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa, ON, Canada, April 26 - May 6, 2025 . IEEE, 2025, pp. 1140–1152. [Online]. Available: https://doi.org/10.1109/ICSE55347.2025.00014 [47] Y. Liu, L. Zhang, F. Liu, Z. Wang, D. Wei, Z. Yang, K. Zhang, J. Li, and L. Shi, “Reposcope: Leveraging call chain-aware multi-view context for repository-level code generation,” 2025. [Online]. Available: https://arxiv.org/abs/2507.14791 [48] X. Wen, Z. Lin, C. Gao, H. Zhang, Y. Wang, and Q. Liao, “Repository-level graph representation learning for enhanced security patch detection,” in 47th IEEE/ACM International Conference on Software Engineering, ICSE 2025, Ottawa, ON, Canada, April 26 - May 6, 2025 . IEEE, 2025, pp. 1–13. [Online]. Available: https://doi.org/10.1109/ICSE55347.2025.00121 [49] J. Xiang, W. He, X. Wang, H. Tian, and Y. Zhang, “Evaluating and improving automated repository-level rust issue resolution with llm-based agents,” CoRR , vol. abs/2602.22764, 2026. [Online]. Available: https://doi.org/10.48550/arXiv.2602.22764 
+
+12

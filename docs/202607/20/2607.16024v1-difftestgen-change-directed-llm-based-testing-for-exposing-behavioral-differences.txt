@@ -1,0 +1,568 @@
+Title: DiffTestGen: Change-Directed LLM-Based Testing for Exposing Behavioral Differences
+
+URL Source: https://arxiv.org/pdf/2607.16024v1
+
+Published Time: Mon, 20 Jul 2026 01:22:13 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# DiffTestGen: Change-Directed LLM-Based Testing for Exposing Behavioral Differences 
+
+1st Huimin Hu 
+
+CISPA Helmholtz Center for Information Security 
+
+Stuttgart, Germany huhuimin236@gmail.com 
+
+2nd Cristian Cadar 
+
+Department of Computing Imperial College London 
+
+London, United Kingdom c.cadar@imperial.ac.uk 
+
+3rd Michael Pradel 
+
+CISPA Helmholtz Center for Information Security 
+
+Stuttgart, Germany michael@binaervarianz.de 
+
+Abstract —Software testing plays a critical role in maintaining software quality. As software evolves over time, it is important to ensure that any behavioral changes occur as intended by developers. A promising approach for this goal is to generate tests that expose behavioral differences between the old and new versions of a program. However, current approaches fail to trigger behavioral differences for many code changes. This paper presents DiffTestGen, a novel change-directed, LLM-based differential testing approach specifically designed to ex-pose behavioral differences introduced by a code change. The approach is enabled by two key contributions: First, DiffTestGen leverages static call graph analysis and project documentation to identify valid entry points for test generation and to guide the LLM toward reaching the changed code. Second, DiffTestGen iteratively improves our newly introduced union coverage metric, which combines coverage of modified code in the old and the new version, by providing targeted coverage feedback to the LLM. We evaluate DiffTestGen on two datasets comprising a total of 463 PRs. DiffTestGen exposes behavioral differences in 78.2% of the PRs while achieving an average union coverage of 90.7%. Compared with the baselines, DiffTestGen exposes 99 more PRs overall and increases code coverage by 12.5% and 15.6% percentage points, respectively. By integrating DiffTestGen with the Testora regression detector, we show that the identified behavioral differences can be used to detect regression bugs missed by the best existing approaches. 
+
+Index Terms —differential testing, test generation, software evolution, behavioral differences, regression detection 
+
+I. I NTRODUCTION 
+
+Software systems continuously evolve through code changes that implement new features, fix defects, improve performance, or refactor existing implementations. While developers often intend these changes to affect specific aspects of a program, code changes can also introduce behavioral changes that extend beyond their intended scope. Such changes may alter the observable behavior of a system under particular inputs or execution conditions, potentially impacting correctness, compatibility, reliability, or user experience. Understanding the behavioral consequences of code changes is therefore a fundamental challenge in software evolution and maintenance. Several techniques have been proposed to support software evolution, including automated test generation [1], [2], [3], [4], regression testing [5], [6], and differential testing [7], [8], [9]. Automated test generation synthesizes tests to exercise source code, program behavior, or requirements. Regression testing re-executes existing tests to ensure that modifications do not introduce regressions. Differential testing identifies differences by comparing the behavior of multiple program versions. If effective, differential testing provides a promising founda-tion for automatically exposing behavioral differences between program versions. Unlike traditional testing approaches that assess correctness against a specification, differential testing focuses on identifying discrepancies by executing multiple program variants under identical inputs and comparing their outputs or behavior. Applied to software evolution, it can systematically reveal inputs that trigger differences between program versions before and after code changes. For example, the recent Testora approach [10] uses differential testing to detect regression bugs by identifying behavioral changes that contradict the developer’s intent documentation in the description of a pull request (PR). However, such regression testing approaches rely on the availability of tests that exercise the changed code, which is often not the case in practice. Despite significant advances in the proposed techniques, systematically exposing behavioral differences introduced by code changes remains challenging. First, many existing test generation techniques are not explicitly guided by code changes [2], [3], [11], and therefore may fail to exercise newly modified program behavior. Second, changed code regions are often difficult to reach, e.g., because the modified function is not directly reachable from a public entry point into the project. Together, these challenges limit the ability of existing approaches to systematically expose behavioral differences introduced by code changes, which in turn limits the ability of downstream techniques [10] to detect regression bugs. Figure 1 illustrates a motivating example of a code change in a private function _run_validator . Although the change is localized, exposing its behavioral impact is far from straight-forward. Since the private function is not directly accessible, exercising the modified code requires a detailed understanding of how to reach the changed private function. While LLMs have shown promising results for generating tests, they often lack sufficient contextual information to determine how the changed code can be exercised effectively. Consequently, the changed code may remain unexplored, and the behavioral dif-ferences introduced by the modification may not be observed. To address limitations of prior work in effectively per-arXiv:2607.16024v1 [cs.SE] 17 Jul 2026 Fig. 1: Motivating example. forming differential testing of code changes, we present DiffTestGen, a change-directed, LLM-based testing approach for exposing behavioral differences between two program versions. Given a PR, DiffTestGen generates and executes tests to expose behavioral differences between the original and changed program versions. Specifically, it uses static call graph analysis to identify accessible entry points that can be used to reach changed functions. This helps guide test generation toward triggering changed code lines. In addition, it leverages reference tests and their coverage information as feedback to guide the exploration of previously unexecuted changed lines. By making behavioral differences explicit, DiffTestGen could support a wide range of development activities, including re-gression investigation, software maintenance, and code review. To evaluate our work, we apply DiffTestGen to code changes made in a total of 463 PRs from popular open-source projects. DiffTestGen exposes behavioral differences in 78.2% of the PRs, while achieving an average union coverage of 90.7%. The analyzed PRs are from two datasets from prior work [10], [12], enabling us to directly compare DiffTestGen with the best existing approaches. On the two datasets, our approach detects behavioral differences in 61.8% and 79.7% of the PRs, with an average union coverages of 64.5% and 92.7% on the datasets, respectively. Compared with the baselines, DiffTestGen exposes 99 more PRs overall and increases code coverage by 12.5% and 15.6% percentage points, respectively. Integrating DiffTestGen with the Testora regression detector [10], we further show that the identified behavioral differences can be used to detect regression bugs missed by the best existing approaches. In summary, this paper makes the following contributions:  
+
+> •
+
+We study the problem of generating behavior-exposing tests for code changes, identifying two key challenges that limit the effectiveness of existing approaches.  
+
+> •
+
+We present a change-directed LLM-based testing approach that leverages information related to code changes, public API documentation, and static call graph analysis to guide LLMs in producing tests capable of exposing behavioral differences between two versions of a program.  
+
+> •
+
+We conduct a large-scale experimental evaluation demon-strating the effectiveness of the proposed approach in ex-posing behavioral differences.  
+
+> •
+
+To foster future work, we make all code and data associ-ated with DiffTestGen publicly available: https://github.com/ sola-st/DiffTestGen II. A PPROACH 
+
+A. Problem Definition 
+
+We address the problem of generating tests that expose behavioral differences between two program versions, where one version is obtained by applying a code change to the other. 
+
+Definition 1 (Change-directed testing): Given a PR and its associated code base, change-directed testing creates a set T
+
+of test cases that expose behavioral differences between the pre-change and post-change versions of the code. The above definition relies on the following notion of behavioral difference between two program versions: 
+
+Definition 2 (Behavioral difference): Given a test case t,let oold and onew be the outputs produced by executing t
+
+on the pre-change and post-change versions of a code base, respectively, and let eold and enew be the type of runtime errors (if any) produced by executing t on the pre-change and post-change versions, respectively. A behavioral difference exists if one of the following conditions holds:  
+
+> •
+
+Both executions produce runtime errors, but eold ̸ = enew . 
+
+> •
+
+Only one execution produces a runtime error.  
+
+> •
+
+Neither execution produces an error, but oold ̸ = onew .When comparing test behavior, we ignore incidental and flaky differences that do not reflect meaningful behavioral dif-ferences. Specifically, we normalize the outputs by removing incidental information, such as timestamps. Moreover, we re-execute each generated test on both the old and new program versions. If the execution result differs in either version from that observed in the initial run, the test is considered flaky and is discarded. Otherwise, the test is regarded as stable, and any observed difference between the two program versions is reported as a behavioral difference. 
+
+Scope of considered code changes. DiffTestGen targets code changes made in PRs of Python projects. Specifically, we consider PRs that satisfy all of the following criteria:  
+
+> •
+
+To focus on changes that are more likely to affect program behavior, we consider a PR only if it modifies at least one non-test Python source file.  
+
+> •
+
+To focus on behavioral differences, we exclude changes that modify only comments or documentation.  
+
+> •
+
+To mitigate potential scalability issues, we restrict modifi-cations to at most three non-test source files.  
+
+> •
+
+To isolate changes introduced by the PR, we require that it corresponds to a commit with exactly one parent (i.e., it is not a merge commit). 
+
+B. Overview 
+
+Figure 2 summarizes our change-directed LLM-based test-ing approach. The inputs to DiffTestGen are a GitHub PR and its code base. The process begins by extracting PR-related information ( 1), including analyzing the PR and col-lecting static access information. Next, it constructs an initial GitHub        
+
+> Pull Request
+> Code base
+> 1. Information Extraction
+> Static Access
+> Information Extraction
+> 2. Prompt Preparation
+> Initial Prompt - R 0
+> PR-related Information
+> Access Information
+> PR Analysis
+> Coverage Feedback Prompt - R N(N>0)
+> Selected PR-related Information
+> Reference test
+> Coverage Information
+> Selected Access Information
+> Iterative Error Fixing
+> (Static & Runtime)
+> 3. Test Generation and Fixing
+> A. Static Error Fix
+> Update / Filter out
+> B. Runtime Error Fix
+> Update LLM
+> Generated
+> Tests
+> Updated
+> Tests
+> 4. Union Coverage Feedback
+> 5. Tests
+> with Outputs
+> Reference
+> Tests Selection
+> Code Coverage
+> Annotation
+> Loop until:
+> Union coverage = 100%
+> or saturates
+
+Fig. 2: Overview of DiffTestGen. prompt ( 2) and sends it to an LLM to generate tests. The generated tests are then refined through an iterative error-fixing phase ( 3), consisting of two inner loops: one that resolves static validity errors in the generated tests ( 3A ), and another that addresses runtime errors identified during test execution ( 3B ). DiffTestGen also includes an outer coverage feedback loop (with connections between phases indicated by bicolored arrows) that keeps track of how much of the changed code has been covered. Using the updated tests and execution results from Phase 3, it checks the achieved coverage ( 4) to determine whether to initiate another round of test generation. If the coverage reaches 100% or remains unchanged compared with the prior round, DiffTestGen outputs the generated tests and stops ( 5). Otherwise, it selects a reference test, annotates the code with coverage information, and prepares a coverage feedback prompt to resume another round of test generation. In the rest of this section, we describe analysis of code change and static access information extraction (§II-C), con-struction of test generation prompt (§II-D), static validity check and runtime error feedback loop (§II-E), and finally outer coverage feedback loop for subsequent rounds (§II-F). 
+
+C. Analysis of Code Change and Access Information 
+
+To provide the model with information about code changes that helps generate tests that expose behavioral differences, DiffTestGen first identifies what changed and then determines how the changed code can be reached. 
+
+1) Change Analysis: We start by analyzing the change. To obtain the diff of a PR, we query the GitHub API. Based on the diff, DiffTestGen performs an AST-based analysis to extract the changed functions, including their names and bodies. Next, to address the challenge of reaching the changed code, we first categorize the changed functions, which enables subsequent stages to extract information on how to invoke each changed function. In detail, we categorize functions 1 into three types based on their accessibility: (i) changed public functions 
+
+fpub , (ii) changed private functions fpri , or (iii) changed special methods fspe , which are intended to be invoked only through their corresponding operations. To determine the category of a changed function, we consider both naming conventions and the list of public APIs specified by the projects. The public API approach leverages the fact that large projects generally maintain well-structured documentation, which includes an explicit list of their public APIs. For modules documented in the public API list, a function is considered public if it appears in the list, and private if it does not. For modules not covered in the public API documentation, naming conventions are applied: a function is classified as private if its name begins with a single underscore “ ” but not a double underscore “ ”, and public otherwise. A function is classified as a special method if its name begins with “ ”. 
+
+2) Access Information: Providing the model with infor-mation about how to reach the changed functions, called 
+
+access information , is crucial for generating tests that can exercise the modified code. The exact access information we provide depends on the category of the changed function; Table I summarizes the details for changed public functions, changed private functions, and changed special methods. One common component is import lines , i.e. lines of the form 
+
+from ...import ... that indicate how the target symbol should be loaded. For example, an import line such as from scipy.sparse import random_array specifies explicitly how to load the function random_array .    
+
+> 1In this paper, we use function for general procedures, and method for functions defined within classes, following language-specific terminology.
+
+To access changed function ‘style’: from pandas.core.frame.DataFrame import style 
+
+* Signature and docstring of class ‘pandas.core.frame.DataFrame’:          
+
+> class DataFrame(data=None, index: Axes | None=None, columns: Axes |None=None, ...)
+
+Two-dimensional, size-mutable, potentially heterogeneous tabular data. Data structure also contains labeled axes ... 
+
+(a) Changed public function. To access changed function marshmallow.schema.Schema._run_validator :Method #0: by calling function ‘validate’ To access it: from marshmallow.schema.Schema import validate 
+
+* Signature and docstring:         
+
+> def validate(self, data: (typing.Mapping[str, typing.Any]| ...)) -> dict[str, list[str]]
+
+Validate ‘data’ against the schema, returning a dictionary of validation errors ... * Signature and docstring of class ’marshmallow.schema.Schema’:         
+
+> class Schema(*, only: types.StrSequenceOrSet |None=None, exclude: types.StrSequenceOrSet=(), ...)
+
+Base schema class with which to define schemas. Example usage: ... - ‘only’: Whitelist of the declared fields to select when instantiating the Schema... Method #1: ... (b) Changed private function. To trigger changed method marshmallow.types.SchemaValidator.__call__ , which is a special method of the class ‘marshmallow.types.SchemaValidator’, access the class with:    
+
+> from marshmallow.types.SchemaValidator import SchemaValidator
+
+* Hints: “ call ” is a special method that makes an object callable, i.e., it allows an instance of a class to be used like a function. * Signature and docstring of class ’marshmallow.types.SchemaValidator’: ... (c) Changed special method. 
+
+Fig. 3: Access information examples for changed public functions, changed private functions, and changed special methods. TABLE I: Access information for each function category.                   
+
+> Category Access information Changed public functions
+> •Import line for changed public function.
+> •Signature and docstring of the class to which the changed public function belongs. Changed private functions •Entry function fentry . (The publicly accessible function that leads to the changed private function).
+> •Import line for fentry .
+> •Signature and docstring of fentry .
+> •Signature and docstring of the class to which fentry
+> belongs. Changed special methods
+> •Import line for the class to which the changed special method belongs.
+> •Signature and docstring of the class to which the changed special method belongs.
+> •Usage guideline for the changed special method.
+
+Figure 3 provides illustrative examples of the access in-formation associated with each category. Figure 3a shows an example for changed public functions, where style is identified as public based on the public API documentation check and belongs to class DataFrame . Its access information includes the relevant import line, together with the signature and docstrings of class DataFrame . Figure 3b presents an example for changed private functions, which corresponds to the case shown in Figure 1; in this case, the access information is defined with respect to a publicly accessi-ble entry function fentry from which the changed private function can be accessed, so that generated tests exercise only the project’s public (user-accessible) APIs. For example, the changed private function is _run_validator , and one such entry function is validate . We therefore provide the signatures and docstrings of these entry functions, and if an entry function belongs to a class (e.g., the class Schema ), we additionally include the class’s signature and docstring. This access information enables DiffTestGen to address the second challenge (changed code regions are often hard to reach) mentioned in §I. Figure 3c presents an example for changed special methods in which the special method is __call__ . For such methods, the access information is defined with respect to the base class in which the changed special method is defined, including the import line, the signature and docstrings of the base class, as well as the usage guideline (“hints”) on how the special method can be invoked. 
+
+3) Extracting Access Information: To extract the access information for changed functions, we perform static analysis on the modified code, focusing on identifying import lines, obtaining the signatures and docstrings of both functions and classes, and in the case of private functions also extracting call paths. We first construct a static call graph, defined as a directed graph in which nodes represent functions and edges represent call relationships between functions. Based on this graph, we derive call paths that describe how one function can reach another. These call paths contribute to a key component of the access information used to guide the model toward the changed functions. Algorithm 1: Extract access information for a fpri 
+
+Input: func info : The information of the changed function, specifically its name and location as (file, line, col). 
+
+k: The number of expected shortest call paths (top-k). 
+
+Output: shortests : The corresponding access information extracted from the top-k shortest call paths  
+
+> 1
+
+all , shortests , access info ← ∅  
+
+> 2
+
+checked callers .append (func info ) 
+
+> 3
+
+Queue .append (func info , access info )
+
+// Step 1: Explore call paths to the private function and record access information  
+
+> 4
+
+while Queue do  
+
+> 5
+
+func info , access info ← Queue .extract ()  
+
+> 6
+
+if “recursion ” in access info then  
+
+> 7
+
+continue // discard the path  
+
+> 8
+
+f tmp  
+
+> entry
+
+= all call path [0]  
+
+> 9
+
+if isPubliclyAccessible (f tmp  
+
+> entry
+
+) then  
+
+> 10
+
+all .append (access info ) 
+
+> 11
+
+continue  
+
+> 12
+
+callers ← getFunctionCallers (func info ) 
+
+> 13
+
+for caller in callers do  
+
+> 14
+
+caller info , access info ← checkCaller (caller ) 
+
+> 15
+
+if caller in checked callers then  
+
+> 16
+
+access info ′
+
+←
+
+updateAccessInfo (“ recursion ”)  
+
+> 17
+
+continue  
+
+> 18
+
+checked callers .append (caller )
+
+access info ′
+
+← updateAccessInfo (access info ) 
+
+> 19
+
+Queue .append (caller info , access info ′
+
+)
+
+// Step 2: Select the shortest call path and its corresponding access information 
+
+// 2.1 Select the shortest for each fentry  
+
+> 20
+
+Shortests entry level ← ∅  
+
+> 21
+
+entry to paths ← groupByEntryF uncs (all ) 
+
+> 22
+
+for ep in entry to paths do  
+
+> 23
+
+Shortests entry level .append (min (ep )) 
+
+// 2.2 Select the top-k shortest from 2.1  
+
+> 24
+
+Shortests ← getShortestK (Shortests entry level , k ) 
+
+> 25
+
+return Shortests 
+
+For a changed private function, Algorithm 1 traces backward from the changed private function, following its callers until reaching publicly accessible entry functions, and returns a list of access information, each associated with a publicly accessible entry function. It begins by initializing a queue with the changed function (line 3) and then repeatedly expands callers in the while loop (lines 4–19). The exploration of a call path stops once a publicly accessible entry function is reached (lines 9–11), while recursive cycles are filtered out to avoid revisiting the same path (lines 15–17). After this search phase, Step 2 groups the discovered paths by entry function and keeps the shortest one per group (lines 20–23), then selects the top-k shortest remaining paths (line 24, with k=5), yielding a compact set of access information that captures the most direct ways to reach the changed private function. For a changed public function, this static analysis directly yields the required access information. For a changed special TABLE II: Initial and coverage feedback prompt information.                             
+
+> Information Initial prompt Coverage feedback prompt 1Name of the project ✓✓
+> 2Diff of the code change ✓✓
+> 3Fully qualified names of the changed functions
+> ✓✓
+> 4Bodies of non-test functions in old and new versions
+> ✓*✗
+> 5Reference test ✗✓
+> 6Commented non-test function bodies ✗✓#
+> 7Access information ✓*✓*#
+> 8Bodies of test functions in old and new versions
+> ✓*✓*#
+> * Included only if the prompt remains within the target length limit.
+> #Only information associated with uncovered changed functions.
+
+method, it identifies the base class in which the changed special method is defined and yields the required access information, while the hint information is obtained from the official Python documentation. 
+
+D. Initial Prompt Construction 
+
+We construct two different kinds of prompts: a prompt for the initial test generation round ( R0) and a coverage feedback prompt for subsequent coverage feedback rounds ( Rn, n > 0). Table II presents the information contained in the prompts, ordered according to its appearance within each prompt. In this section, we focus on the prompt for the initial test generation round ( R0). As described in §II-C, we obtain the diff and extract the changed function and corresponding access information. By providing the diff and explicitly instructing the model to “expose behavioral differences introduced by the diff”, we guide test generation toward change-related behaviors, helping address the first challenge described in §I. We categorize changed functions into test and non-test functions to focus on actual changes to the SUT, which are primarily reflected in non-test functions. Specifically, leveraging the naming conven-tions of Python test files (i.e., filenames prefixed with “test ” or suffixed with “ test”), we classify functions defined in non-test Python files as non-test functions, and those defined in test files as test functions. We also provide the changed test functions in the prompt, to show the models how to access the changed non-test functions. As shown in Table II, for R0, the required information items provide the project name, the diff, and the fully qualified names of the changed functions, while the bodies of non-test functions, access information, and the bodies of test functions are added when they fit within the target prompt length. 
+
+E. Inner Feedback Loops 
+
+After the model generates tests, DiffTestGen refines them through two inner feedback loops: static validity check and runtime error feedback. 1) Static Validity Check: To improve the executability and quality of the generated tests, DiffTestGen first performs a static validity check. For each generated test, DiffTestGen verifies that the code can be parsed into an AST using Python’s  
+
+> ast
+
+module and determines whether it invokes any private functions. If a test contains static validity errors, we send both the code and the corresponding error message back to the model for correction. A static validity error is considered resolved once the test becomes parsable and no longer calls private functions. We allow up to five attempts of static validity checking. After that, we retain only the tests that have been successfully corrected and discard any that still contain errors. 
+
+2) Runtime Error Feedback: To examine the tests, we iden-tify two commits associated with a PR: the commit before the PR is created ( cold ), and the commit where the PR is applied (cnew ). We then create an isolated execution environment for each commit, marked as env old and env new , respectively. For all tests passing the static validity check, we perform a runtime check by executing them in these environments and recording any runtime errors. If a test fails, we return the test code and the corresponding error message to the model for correction. As with the static validity checks, we allow up to five attempts to resolve each runtime error. A test is considered to have passed the runtime check if it executes successfully on at least one of the two commits. Unlike the static validity check step, we keep all executions, even those that still fail after five attempts, because failing test executions can still provide useful information about code behavior and coverage. 
+
+F. Outer Coverage Feedback Loop 
+
+After the inner feedback loops, DiffTestGen uses coverage information to decide whether to initiate another test gener-ation round. We compute a line-level coverage of changed Python code in the PR for each test execution, and define the union coverage of a single test as follows: 
+
+Definition 3 (Union Coverage): Given a PR, let Num old changed 
+
+and Num new changed denote the number of changed Python code lines in the pre-change and post-change program versions, respectively. For the executions, let Num old covered and Num new covered 
+
+denote the number of changed Python code lines covered in the pre-change and post-change versions, respectively. The union coverage of a single test is: 
+
+Cov test union = Num old covered + Num new covered 
+
+Num old changed + Num new changed 
+
+We consider a changed Python code line in the computation only if it is located in a non-test Python file and is executable (i.e., not comments or docstrings). To guide the model to generate tests that can cover more changed code lines, DiffTestGen selects a test from the prior round as a reference test for the current round. Intuitively, Diff-TestGen selects the prior test that already covered lines closest to the remaining uncovered changed lines, because that test is likely to need the smallest adjustment to reach the uncovered code. Figure 4 shows an example of a reference test and its coverage information. Motivated by the idea of using a natural                                                                    
+
+> Reference test:
+> import tensorflow as tf from keras.src.backend.tensorflow.numpy import eye N, M, k=5, 4, -1 x=eye(N, M=M, k=k, dtype=tf.float32) print("Example: eye( {} ,{} ,k= {} )".format(N, M, k)) print("shape:", x.shape) print(x.numpy())
+> The following are the old and the new versions of the uncovered affected functions: Old version: The following are the affected functions from file “keras/src/backend/tensorflow/numpy.py”:
+> def eye(N, M=None, k=0, dtype=None): dtype =dtype or config.floatx() if not M: #COVERED M=N#TO_COVER #Making sure N, Mand kare ‘int‘ N, M, k=int(N), int(M), int(k) #COVERED if k>= Mor -k >= N: #COVERED return zeros([N, M],dtype=dtype)# TO_COVER ...
+> New version: ...
+
+Fig. 4: A reference test and its coverage information. way for the model to understand coverage information, Diff-TestGen encodes the coverage information as comments (e.g.,   
+
+> #COVERED
+
+and # TO_COVER ) within the affected functions. After selecting a reference test and annotating the corre-sponding non-test functions with coverage information, Diff-TestGen constructs a coverage feedback prompt for the next round of test generation. As shown in Table II, each coverage feedback prompt ( Rn, n > 0) includes the project name, the diff, and the fully qualified names of the changed functions, as in the initial prompt ( R0). The coverage feedback prompt further restricts the access information and non-test function bodies to those associated with uncovered changed functions, while also applying the target prompt length constraint. III. E VALUATION 
+
+A. Research Questions 
+
+In our evaluation, we investigate four research questions: RQ1 Effectiveness: How effectively does DiffTestGen ex-pose behavioral differences resulting from code changes, compared with baseline approaches? RQ2 Component Contributions: What is the contribution of each component of DiffTestGen to overall effectiveness? RQ3 Efficiency: How efficiently does DiffTestGen generate differentiating tests in terms of execution time, token consumption, and overall financial cost? RQ4 Usefulness: How useful is DiffTestGen in detecting regression bugs? 
+
+B. Experimental Setup 1) Baselines: We compare DiffTestGen against three base-lines: Testora [10], Testora++, and ChaCo [12]. Testora is an automated technique for detecting unintended behavioral TABLE III: Summary of datasets                          
+
+> Project Testora data ChaCo data PRs Avg. change size PRs Avg. change size keras 133 13.3 ––marshmallow 53 10.4 ––pandas 127 6.6 16 7.6 scipy 126 16.0 18 48.5 Total 439 11.8 34 29.3
+
+changes by leveraging natural language information associated with a code change as a test oracle. We select Testora as a baseline because its test generation phase targets identifying differences between code versions, which aligns with Diff-TestGen. By default, both Testora and DiffTestGen generate 20 tests in the initial round. However, DiffTestGen generates additional tests in its subsequent rounds, whereas Testora does not, resulting in more tests generated by DiffTestGen. To control for potential bias introduced by this difference, we introduce Testora++, which increases the number of generated tests in the initial round of Testora from 20 to 100. ChaCo is a pull request-based test augmentation technique that generates tests to increase the coverage of an existing test suite and integrate the generated tests into that suite. DiffTest-Gen has a different primary objective, as it focuses on exposing the behavioral differences introduced by code changes. For a fair comparison, we consider the coverage contributed by ChaCo-generated tests and measure whether these tests reveal differences in outputs between the old and new code versions. 
+
+2) Dataset: We evaluate DiffTestGen using two datasets from prior work Testora and ChaCo, which together cover four open-source Python projects. Table III summarizes the datasets, including the number of PRs and the average size of the PRs in terms of changed non-test Python code lines. The total number of PRs is 463, as the two datasets overlap by 10 PRs that appear in both. 
+
+a) Testora data: We use the dataset originally con-structed in Testora [10] for our evaluation. In addition to the filtering criteria of Testora, DiffTestGen further excludes PRs that involve only non-Python code changes, as it targets Python-related changes (see §II-A). This results in a final dataset of 439 PRs, with an average of 11.8 changed non-test Python code lines per PR. 
+
+b) ChaCo data: To keep consistency and focus on our target projects, we use the pandas and scipy PRs from the ChaCo dataset [12]. Specifically, we retain only the PRs for which ChaCo successfully integrated at least one generated test into the corresponding test files. The integrated tests are required to execute successfully without runtime errors or test failures, and to achieve a non-zero increase in code coverage. Furthermore, we exclude tests that invoke private functions. This yields a final evaluation dataset of 34 PRs, with an average of 29.3 changed non-test Python code lines per PR. 
+
+3) Evaluation Metrics: To evaluate DiffTestGen’s ability to expose the behavioral differences of the given PRs, we use the following two metrics: 
+
+a) Number of PRs with behavioral differences ( Num PR ): 
+
+First, we measure the number of PRs with exposed behavioral differences. A single PR may have multiple generated tests that expose behavioral differences, and multiple tests may reveal the same behavioral difference. To avoid redundant counting, we use Num PR as a primary metric. For selected analyses, we also report Num tests , representing the number of tests that expose behavioral differences, as a supplementary metric. 
+
+b) Union coverage ( Cov union ): Second, as introduced in §II-F, we report the overall union coverage across all PRs, where N is the total number of PRs in the dataset: 
+
+Cov union = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+Cov test i
+
+> union
+
+4) Ablation Study: To obtain a comprehensive understand-ing of how DiffTestGen exposes behavioral differences and how each component contributes to its effectiveness, we eval-uate several variants of DiffTestGen. We implement DiffTest-Gen on top of Testora [10], adding around 2,800 lines of code in its core components. Each variant incrementally extends Testora by introducing an additional feature, allowing us to isolate and assess the contribution of individual components. The variants are configured as follows:  
+
+> •
+
+Only Access Information. This variant extends Testora by incorporating access information (described in §II-C).  
+
+> •
+
+Only Coverage Feedback. This variant extends Testora by adding a coverage feedback loop with a reference test and its union coverage information (described in §II-F). 
+
+5) Large Language Models: We use gpt-5-mini as the default model in the experiments. The baselines originally use gpt-4o-mini . Testora [10] is directly comparable to Diff-TestGen, and we therefore re-run Testora using gpt-5-mini to ensure a fair comparison under the same model configuration. Because we were unable to re-run ChaCo [12], we additionally evaluate DiffTestGen with gpt-4o-mini to ensure consistency in this comparison. 
+
+C. RQ1: Effectiveness 1) Results on Testora Data: Figure 5 summarizes the results on Testora data across approaches. In this research question, we focus on Testora, Testora++, and DiffTestGen. Figure 5a shows that DiffTestGen identifies the largest number of PRs with behavioral differences, detecting 350 PRs. In comparison, Testora and Testora++ detect 251 and 277 PRs, respectively. The coverage results in Figure 5b further support this finding. DiffTestGen achieves the highest union coverage of 92.7%, compared with 77.1% for Testora and 80.7% for Testora++. In addition, Table IV shows that DiffTestGen gen-erates relatively high-quality tests, with 27.8% (4,189/15,055) of the generated tests exposing behavioral differences. This proportion is higher than both Testora (15.5%) and Testora++ (13.6%), further indicating the effectiveness of DiffTestGen in producing tests that reveal behavioral differences. Despite generating 4.45 × as many tests as DiffTestGen, Testora++ still achieves lower coverage and detects fewer PRs and tests related to behavioral differences. keras marshmallow pandas scipy Overall      
+
+> 0
+> 100
+> 200
+> 300
+> Number of PRs with
+> behavioral differences
+> 77
+> 30
+> 67 77
+> 251
+> 81
+> 31
+> 78 87
+> 277
+> 76
+> 28
+> 71 86
+> 261
+> 93
+> 36
+> 99 102
+> 330
+> 104
+> 37
+> 101 108
+> 350 Testora
+> Testora++
+> Only Coverage Feedback
+> Only Access Information
+> DiffTestGen
+
+(a) PRs with behavioral differences. keras marshmallow pandas scipy Overall 
+
+> 0
+> 50
+> 100
+> Union Coverage (%)
+> 64.3
+> 97.0
+> 81.6
+> 77.6
+> 77.1
+> 69.0
+> 95.9
+> 86.2
+> 81.3
+> 80.7
+> 69.0
+> 95.4
+> 89.3
+> 83.3
+> 82.2
+> 74.9
+> 98.3
+> 90.2
+> 87.6
+> 85.8
+> 87.7
+> 99.6
+> 93.7
+> 94.1
+> 92.7
+> Arithmetic Mean
+
+(b) Union coverage. 
+
+Fig. 5: Comparison of approaches in terms of PRs with behavioral differences and union coverage. 
+
+Fig. 6: A PR where only DiffTestGen finds different outputs. DiffTestGen identifies behavioral differences in 70 PRs that are not detected by either Testora or Testora++. Figure 6 shows one such PR, which introduces a single-line change in function transform_images . Despite this minimal change, both Testora and Testora++ fail to reach the changed line due to missing information on how to invoke the changed function, resulting in ModuleNotFoundError in all generated tests. In contrast, DiffTestGen leverages access information, including an import line and the signature and docstring of the base class, enabling correct invocation and successful coverage of the changed line. For the 69 PRs where all three approaches fail to expose behavioral differences, the changes can be grouped into several broad categories, which largely correspond to non-functional or low-impact modifications, including typing improvements, refactoring, compatibility adjustments, and dtype-related sta-bilization. This suggests that such changes are unlikely to be captured when targeting behavioral changes, which may explain the absence of observable output differences. As described in §III-B1, we introduce Testora++ to control for the difference in the number of generated tests. Table IV summarizes the number of tests generated by different ap-proaches in each round and the corresponding number of TABLE IV: Number of generated tests across rounds.                                           
+
+> Approach Generated tests Num test
+> R0R1R2R3R4Total Testora 14,129 000014,129 2,193 Testora++ 66,948 000066,948 9,107 Only Coverage Feedback 14,120 709 122 28 914,988 2,319 Only Access Information 14,120 000014,120 3,525 DiffTestGen 14,154 766 101 25 915,055 4,189
+
+tests that expose behavioral differences. The results show that DiffTestGen generates approximately 1,000 more tests than Testora overall, confirming our concern that the comparison could be biased by the larger number of generated tests. By increasing the number of generated tests, Testora++ produces 4.45 × as many tests as DiffTestGen, yet it still achieves lower coverage and detects fewer PRs and tests related to behavioral differences. 
+
+2) Results on ChaCo Data: Table V summarizes the results of comparing DiffTestGen with ChaCo [12]. As discussed in §III-B5, we also evaluate DiffTestGen using GPT-4o-mini for a fair comparison. With GPT-4o-mini, DiffTestGen identifies 21 PRs with behavioral differences, the same number as ChaCo. Nevertheless, DiffTestGen achieves a higher union coverage of 64.5%, outperforming ChaCo’s 52.0%. Using GPT-5-mini, DiffTestGen further improves its effectiveness, identifying 28 PRs and achieving a union coverage of 76.8%. These results indicate that DiffTestGen matches ChaCo in behavioral difference detection while achieving substantially higher code coverage, and that its effectiveness further improves when paired with a more capable LLM. TABLE V: Results on ChaCo data.                              
+
+> Project ChaCo DiffTestGen GPT-4o-mini GPT-4o-mini GPT-5-mini
+> Cov union Num PR Cov union Num PR Cov union Num PR
+> pandas 48.7% 10 64.3% 11 83.4% 15 scipy 54.9% 11 64.8% 10 70.9% 13 Total 52.0% 21 64.5% 21 76.8% 28
+
+TABLE VI: Per-PR cost in terms of tokens, money, and time.                     
+
+> Testora Testora++ DiffTestGen Tokens Input 1,565 1,575 12,584 Output 9,052 22,540 18,677 Total 10,617 24,115 31,260 Cost Dollars 0.018 0.045 0.041 Time Minutes 8.92 25.36 15.86
+
+D. RQ2: Component Contributions 
+
+In this research question, we focus on the results of Testora, Only Coverage Feedback, Only Access Information, and Diff-TestGen shown in Figure 5. These four approaches form an ablation study designed to investigate the contribution of each component of DiffTestGen to its overall effectiveness. The results show that each added component consistently improves performance, increasing both the number of PRs with behavioral differences and the union coverage. In par-ticular, Only Coverage Feedback identifies 261 PRs with behavioral differences and achieves 80.7% union coverage. Only Access Information identifies 330 PRs with behav-ioral differences and achieves 85.8% coverage, significantly outperforming Testora (251 PRs and 77.1% coverage). This improvement can be attributed to the inclusion of informative access information in the prompt, which enhances the quality of the generated tests. Only Coverage Feedback also yields improvements, yet less pronounced, since it relies on coverage feedback derived from the initial round tests, which are of relatively lower quality. The combination of both components in DiffTestGen shows the best results, identifying 350 PRs with behavioral differences and achieving 92.7% coverage. 
+
+E. RQ3: Efficiency 
+
+Table VI reports the average cost per PR in terms of token usage, monetary cost, and execution time. Comparing Testora, Testora++, and DiffTestGen, we observe that Testora is the least resource-intensive approach. This observation, together with the lower Num PR detected by Testora and the lower 
+
+Cov union it achieves (see §III-C), motivates the introduction of Testora++. Comparing Testora++ and DiffTestGen, we find that DiffTestGen incurs a lower monetary cost ($0.041 vs. $0.045). This is despite the slightly higher overall token usage (31,260 tokens per PR) than Testora++ (24,115 tokens per PR), because Testora++ uses many more output tokens, which are more expensive than input tokens. From a time perspective, Testora++ also requires more execution time than DiffTestGen, TABLE VII: The number of PRs, tests, and regressions.                        
+
+> Num PR Num test Num classify test Num regression PR
+> keras 24 193 86 4marshmallow 526 13 0pandas 19 120 55 1scipy 22 237 94 2Total 70 576 248 7
+
+with an average of 25.36 minutes per PR compared to 15.86 minutes for DiffTestGen. In other words, DiffTestGen achieves better effectiveness while being more efficient than Testora++ in terms of both monetary cost and execution time. 
+
+F. RQ4: Usefulness 
+
+To assess whether DiffTestGen can help identify regression bugs introduced by PRs, we analyze the 70 PRs for which only DiffTestGen identifies behavioral differences. While other PRs reported in §III-C may also be regression-related, we focus on these uniquely identified cases to evaluate DiffTestGen’s distinctive regression detection capability. We adopt the LLM-based classifier from Testora [10]: Given a test that exposes a behavioral difference and the PR’s description, the classifier determines whether the observed difference corresponds to an intended change or a potential regression. The first two columns of Table VII present the distribution of the 70 PRs across projects and the corresponding number of tests that expose behavioral differences ( Num test ). To make the analysis tractable, we randomly sampled up to five tests from each PR for classification. This sampling strategy is motivated by two considerations: (i) multiple tests associated with the same PR often expose the same behavioral difference, making exhaustive analysis redundant, and (ii) classifying all 576 tests and further manual inspection would require substantial effort and time. The number of sampled tests, denoted by Num classify test ,is also listed in Table VII. The final column in Table VII shows Num regression PR , i.e., the number of PRs that are classified as regression-related. Among the 70 analyzed PRs, the classifier determines seven to be a regression. Note that finding most behavioral differences to be intended changes is expected, as developers typically aim to introduce intended changes rather than regressions. We manually inspect these seven PRs and find that five correspond to actual regression bugs, while the other two are false positives. Out of the five regressions, two were detected and fixed independently by the developers, i.e., if applied at the right time, DiffTestGen could have helped prevent these regressions from being merged into the codebase. For the remaining three regressions, we are currently in the process of reporting them to the developers for further investigation. IV. T HREATS TO VALIDITY 
+
+One threat to internal validity is the non-determinism of LLM-based test generation, which may lead to slight variations in the generated tests and exposed behavioral differences, as observed for some individual cases, e.g., marshmallow in Figure 5. We mitigate this threat by evaluating on hundreds of PRs, where individual variations are largely averaged out, but repeated runs could still produce slightly different results. Another threat concerns our evaluation metrics: behavioral differences are based on observed outputs and runtime errors after filtering flaky tests, and coverage considers executable changed Python lines. These metrics are aligned with our goal, but may miss differences that do not manifest in outputs, ex-ceptions, or measured line coverage. Similarly, the regression-related results rely on an LLM-based classifier from Testora and manual inspection of sampled cases, which may introduce classification or sampling errors. A threat to external validity is that DiffTestGen currently focuses on Python code changes in projects with available structure and documentation. The results may not directly generalize to other programming languages, projects with sparse documentation, configuration changes, or changes in components implemented outside Python. Scalability is an-other limitation: as code changes grow in size and complexity, extracting informative context, finding useful access paths, and keeping prompts within practical limits become more challenging. Finally, our datasets are drawn from prior work and cover a limited set of projects, so effectiveness may vary for projects with different API conventions, testing practices, or dependency environments. V. R ELATED WORK 
+
+A. Automated Test Generation and Regression Testing 
+
+To exercise program behavior, prior work has explored various directions. Much work focuses on improving test coverage [2], [4], [5], [11], [13], [14]. For example, TELPA [4] improves coverage for hard-to-cover branches. While both TELPA and DiffTestGen leverage call graph analysis and prior tests, they differ in both design and objective. TELPA constructs call paths for all target methods and retrieves a subset of tests that invoke the entry method, greedily maxi-mizing target-method coverage through incremental coverage gains. Unlike this, DiffTestGen combines public API checking and call graph analysis, extracts call paths only for private functions that cannot be invoked directly, and selects a single reference test based on line-distance proximity. Furthermore, TELPA aims to improve coverage for hard-to-cover branches, whereas DiffTestGen focuses on exposing behavioral differ-ences introduced by Python code changes. Other approaches guide LLMs using richer program context, such as test intentions [3], backward-sliced information [6] and dynamic symbolic execution [15] for test generation, to improve the quality of tests. TestWeaver [6] introduces a “close test” notion that leverages control-flow structure to localize tests likely to influence a target line, defining closeness via execution of a control-dependent condition and prioritizing the nearest such condition by line distance. Unlike this design, DiffTestGen adopts a simpler and more general notion of closeness based purely on line distance, without relying on control-dependence or conditional structures. Related efforts also investigate task-specific test generation objectives, including API testing [16], bug detection [17], [18], and patch validation [19]. To support regression testing under limited time budgets, additional work improves scalability through test case prioritization [20], selection [21], [22], [23], and minimization [24], [25]. These approaches typically target specific code regions within a single program version (e.g., a function or branch), whereas DiffTestGen focuses on behavioral differences between two program versions. 
+
+B. Test Suite Evolution 
+
+Test suites co-evolve with software systems and require continuous maintenance to remain effective [26], [27]. Exist-ing work has investigated a range of maintenance activities, including test repair [28] and test suite augmentation [12], [29], [30], [31], [32]. These approaches primarily aim to improve coverage and exercise program behaviors by targeting previously uncovered code lines and integrating newly gener-ated or repaired tests. While these approaches focus on overall uncovered code and program behavior, DiffTestGen instead focuses specifically on changed code lines and their potential behavioral differences. 
+
+C. Differential Testing and Behavioral Analysis 
+
+Differential testing compares multiple implementations on the same inputs and flags behavioral inconsistencies as poten-tial bugs or semantic divergences, making it especially useful when test oracles are unavailable [33], [34]. It has been widely applied to compilers. Work by Yang et al. [34] shows that ran-domly generated programs executed across multiple C compil-ers reveal defects through divergent outputs, while Lidbury et al. [35] extend this to OpenCL compilers across heterogeneous architectures. Beyond compilers, differential testing has been used to validate programming language implementations and analysis tools [36], [37]. Unlike JEST [36], which compares multiple JavaScript engines and the ECMAScript specifica-tion, and Fan et al. [37], which compares alternative AST mapping implementations, DiffTestGen focuses on detecting behavioral differences in Python code across versions. Yang et al. [38] apply differential testing across different execution scenarios to detect bugs in deep learning libraries, addressing a different task setting than DiffTestGen. In security, differen-tial behavioral analysis detects vulnerabilities by comparing executions under varying inputs, including applications of differential fuzzing to deep learning systems [39] and side-channel analysis [40], highlighting subtle input-dependent behavior differences. VI. C ONCLUSION 
+
+In this work, we presented DiffTestGen, a change-directed LLM-based testing approach for exposing behavioral dif-ferences introduced by code changes in Python programs. DiffTestGen addresses two key challenges in test generation. First, it explicitly focuses on code changes, mitigating the risk of overlooking behavioral differences that are related to code modifications. Second, it leverages access information for different categories of changed functions and provides reference tests together with their coverage information to guide LLMs in generating tests, addressing the challenge that certain changed code regions are difficult to reach. We evaluate DiffTestGen on two datasets, and the results demonstrate its effectiveness in exposing behavioral differences. In particular, it identifies behavioral differences in 78.2% of PRs while achieving a union coverage of up to 90.7%. Furthermore, the identified behavioral differences can be used to detect regression bugs missed by the best existing approaches. REFERENCES [1] Y. Chen, Z. Hu, C. Zhi, J. Han, S. Deng, and J. Yin, “ChatUniTest: A Framework for LLM-Based Test Generation,” in Companion Proceedings of the 32nd ACM International Conference on the Foundations of Software Engineering , ser. FSE 2024. New York, NY, USA: Association for Computing Machinery, 2024, p. 572–576. [Online]. Available: https://doi.org/10.1145/3663529.3663801 [2] J. Altmayer Pizzorno and E. D. Berger, “CoverUp: Effective High Coverage Test Generation for Python,” Proc. ACM Softw. Eng. , vol. 2, no. FSE, Jun. 2025. [Online]. Available: https://doi.org/10.1145/3729398 [3] Z. Nan, Z. Guo, K. Liu, and X. Xia, “Test Intention Guided LLM-Based Unit Test Generation,” in 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) , 2025, pp. 1026–1038. [4] C. Yang, J. Chen, B. Lin, Z. Wang, and J. Zhou, “Advancing Code Coverage: Incorporating Program Analysis with Large Language Models,” ACM Trans. Softw. Eng. Methodol. , vol. 35, no. 5, Apr. 2026. [Online]. Available: https://doi.org/10.1145/3748505 [5] G. Ryan, S. Jain, M. Shang, S. Wang, X. Ma, M. K. Ramanathan, and B. Ray, “Code-Aware Prompting: A Study of Coverage-Guided Test Generation in Regression Setting using LLM,” Proc. ACM Softw. Eng. , vol. 1, no. FSE, Jul. 2024. [Online]. Available: https://doi.org/10.1145/3643769 [6] C. C. Le, C. D. Van, T. D. Vu, T. M. P. Vu, H. N. Phan, H. N. Phan, and T. N. Nguyen, “TestWeaver: Execution-aware, Feedback-driven Regression Testing Generation with Large Language Models,” 2026. [Online]. Available: https://arxiv.org/abs/2508.01255 [7] B. Danglot, M. Monperrus, W. Rudametkin, and B. Baudry, “An approach and benchmark to detect behavioral changes of commits in continuous integration,” Empirical Software Engineering , vol. 25, no. 4, pp. 2379–2415, 2020. [8] T.-O. Li, W. Zong, Y. Wang, H. Tian, Y. Wang, S.-C. Cheung, and J. Kramer, “Nuances Are the Key: Unlocking ChatGPT to Find Failure-Inducing Tests with Differential Prompting,” in Proceedings of the 38th IEEE/ACM International Conference on Automated Software Engineering , ser. ASE ’23. IEEE Press, 2024, p. 14–26. [Online]. Available: https://doi.org/10.1109/ASE56229.2023.00089 [9] I. Morita, Y. Kashiwa, M. Kondo, J. Sohn, S. McIntosh, Y. Kamei, and N. Ubayashi, “Tracejit: Evaluating the impact of behavioral code change on just-in-time defect prediction,” in 2024 IEEE International Con-ference on Software Analysis, Evolution and Reengineering (SANER) ,2024, pp. 580–591. [10] M. Pradel, “Testora: Using Natural Language Intent to Detect Behavioral Regressions,” 2025. [Online]. Available: https://arxiv.org/ abs/2503.18597 [11] B. Qi, Y. Lin, X. Weng, C. Liu, H. Sun, G. Fraser, and J. S. Dong, “Generalizing Test Cases for Comprehensive Test Scenario Coverage,” 
+
+Proc. ACM Softw. Eng. , vol. 3, no. FSE, Jun. 2026. [Online]. Available: https://doi.org/10.1145/3808216 [12] Z. Zhou, M. Paltenghi, M. Kim, and M. Pradel, “Change And Cover: Last-Mile, Pull Request-Based Regression Test Augmentation,” 2026. [Online]. Available: https://arxiv.org/abs/2601.10942 [13] C. Lemieux, J. P. Inala, S. K. Lahiri, and S. Sen, “CodaMosa: Escaping Coverage Plateaus in Test Generation with Pre-trained Large Language Models,” in 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) , 2023, pp. 919–931. [14] Z. Wang, K. Liu, G. Li, and Z. Jin, “HITS: High-coverage LLM-based Unit Test Generation via Method Slicing,” in Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering , ser. ASE ’24. New York, NY, USA: Association for Computing Machinery, 2024, p. 1258–1268. [Online]. Available: https://doi.org/10.1145/3691620.3695501 [15] K. Taneja, T. Xie, N. Tillmann, and J. de Halleux, “eXpress: guided path exploration for efficient regression test generation,” in 
+
+Proceedings of the 2011 International Symposium on Software Testing and Analysis , ser. ISSTA ’11. New York, NY, USA: Association for Computing Machinery, 2011, p. 1–11. [Online]. Available: https://doi.org/10.1145/2001420.2001422 [16] M. Kim, T. Stennett, S. Sinha, and A. Orso, “A Multi-Agent Approach for REST API Testing with Semantic Graphs and LLM-Driven Inputs,” in Proceedings of the IEEE/ACM 47th International Conference on Software Engineering , ser. ICSE ’25. IEEE Press, 2025, p. 1409–1421. [Online]. Available: https://doi.org/10.1109/ICSE55347.2025.00179 [17] H. Guan, G. Bai, and Y. Liu, “CrossProbe: LLM-Empowered Cross-Project Bug Detection for Deep Learning Frameworks,” Proc. ACM Softw. Eng. , vol. 2, no. ISSTA, Jun. 2025. [Online]. Available: https://doi.org/10.1145/3728984 [18] K. Liu, Z. Chen, Y. Liu, J. M. Zhang, M. Harman, Y. Han, Y. Ma, Y. Dong, G. Li, and G. Huang, “LLM-powered test case generation for detecting bugs in plausible programs,” in 
+
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , W. Che, J. Nabende, E. Shutova, and M. T. Pilehvar, Eds. Vienna, Austria: Association for Computational Linguistics, Jul. 2025, pp. 430–440. [Online]. Available: https://aclanthology.org/2025.acl-long.20/ [19] T. Ahmed, J. Ganhotra, R. Pan, A. Shinnar, S. Sinha, and M. Hirzel, “Otter: Generating Tests from Issues to Validate SWE Patches,” 2025. [Online]. Available: https://arxiv.org/abs/2502.05368 [20] J.-M. Kim and A. Porter, “A history-based test prioritization technique for regression testing in resource constrained environments,” in Proceedings of the 24th International Conference on Software Engineering , ser. ICSE ’02. New York, NY, USA: Association for Computing Machinery, 2002, p. 119–129. [Online]. Available: https://doi.org/10.1145/581339.581357 [21] L. Zhang, “Hybrid regression test selection,” in Proceedings of the 40th International Conference on Software Engineering , ser. ICSE ’18. New York, NY, USA: Association for Computing Machinery, 2018, p. 199–209. [Online]. Available: https://doi.org/10.1145/3180155.3180198 [22] J. Zhang, Y. Liu, M. Gligoric, O. Legunsen, and A. Shi, “Comparing and combining analysis-based and learning-based regression test selection,” in Proceedings of the 3rd ACM/IEEE International Conference on Automation of Software Test , ser. AST ’22. New York, NY, USA: Association for Computing Machinery, 2022, p. 17–28. [Online]. Available: https://doi.org/10.1145/3524481.3527230 [23] M. Gligoric, L. Eloussi, and D. Marinov, “Practical regression test selection with dynamic file dependencies,” in Proceedings of the 2015 International Symposium on Software Testing and Analysis , ser. ISSTA 2015. New York, NY, USA: Association for Computing Machinery, 2015, p. 211–222. [Online]. Available: https://doi.org/10.1145/2771783.2771784 [24] A. Vahabzadeh, A. Stocco, and A. Mesbah, “Fine-grained test minimization,” in Proceedings of the 40th International Conference on Software Engineering , ser. ICSE ’18. New York, NY, USA: Association for Computing Machinery, 2018, p. 210–221. [Online]. Available: https://doi.org/10.1145/3180155.3180203 [25] J.-W. Lin, R. Jabbarvand, J. Garcia, and S. Malek, “Nemo: multi-criteria test-suite minimization with integer nonlinear programming,” in Proceedings of the 40th International Conference on Software Engineering , ser. ICSE ’18. New York, NY, USA: Association for Computing Machinery, 2018, p. 1039–1049. [Online]. Available: https://doi.org/10.1145/3180155.3180174 [26] L. S. Pinto, S. Sinha, and A. Orso, “Understanding myths and realities of test-suite evolution,” in Proceedings of the ACM SIGSOFT 20th International Symposium on the Foundations of Software Engineering , ser. FSE ’12. New York, NY, USA: Association for Computing Machinery, 2012. [Online]. Available: https://doi.org/10.1145/2393596.2393634 [27] ——, “TestEvol: A tool for analyzing test-suite evolution,” in 2013 35th International Conference on Software Engineering (ICSE) , 2013, pp. 1303–1306. [28] A. Saboor Yaraghi, D. Holden, N. Kahani, and L. Briand, “Automated Test Case Repair Using Language Models,” IEEE Transactions on Software Engineering , vol. 51, no. 4, pp. 1104–1133, 2025. [29] S. Shimmi and M. Rahimi, “Patterns of Code-to-Test Co-evolution for Automated Test Suite Maintenance,” in 2022 IEEE Conference on Software Testing, Verification and Validation (ICST) . Los Alamitos, CA, USA: IEEE Computer Society, Apr. 2022, pp. 116– 127. [Online]. Available: https://doi.ieeecomputersociety.org/10.1109/ ICST53961.2022.00023 [30] N. Alshahwan, J. Chheda, A. Finogenova, B. Gokkaya, M. Harman, I. Harper, A. Marginean, S. Sengupta, and E. Wang, “Automated Unit Test Improvement using Large Language Models at Meta,” in 
+
+Companion Proceedings of the 32nd ACM International Conference on the Foundations of Software Engineering , ser. FSE 2024. New York, NY, USA: Association for Computing Machinery, 2024, p. 185–196. [Online]. Available: https://doi.org/10.1145/3663529.3663839 [31] Z. Lu, P. Zhang, Y. Nie, Y. Yang, Y. Tang, C. Y. Chong, and Y. Zhou, “Beyond Coverage: Automatic Test Suite Augmentation for Enhanced Effectiveness using Large Language Models,” Proc. ACM Program. Lang. , vol. 10, no. OOPSLA1, Apr. 2026. [Online]. Available: https://doi.org/10.1145/3798251 [32] K. Qiu, L. D. Grazia, L. Mariani, and M. Pezz` e, “E-Test: E’er-Improving Test Suites,” 2025. [Online]. Available: https://arxiv.org/abs/2510.19860 [33] W. M. McKeeman, “Differential testing for software,” Digital Technical Journal , vol. 10, no. 1, pp. 100–107, 1998. [34] X. Yang, Y. Chen, E. Eide, and J. Regehr, “Finding and understanding bugs in C compilers,” in Proceedings of the 32nd ACM SIGPLAN Conference on Programming Language Design and Implementation ,ser. PLDI ’11. New York, NY, USA: Association for Computing Machinery, 2011, p. 283–294. [Online]. Available: https://doi.org/10. 1145/1993498.1993532 [35] C. Lidbury, A. Lascu, N. Chong, and A. F. Donaldson, “Many-core compiler fuzzing,” in Proceedings of the 36th ACM SIGPLAN Conference on Programming Language Design and Implementation ,ser. PLDI ’15. New York, NY, USA: Association for Computing Machinery, 2015, p. 65–76. [Online]. Available: https://doi.org/10.1145/ 2737924.2737986 [36] J. Park, S. An, D. Youn, G. Kim, and S. Ryu, “JEST: N+1-Version Differential Testing of Both JavaScript Engines and Specification,” in 
+
+2021 IEEE/ACM 43rd International Conference on Software Engineer-ing (ICSE) , 2021, pp. 13–24. [37] Y. Fan, X. Xia, D. Lo, A. E. Hassan, Y. Wang, and S. Li, “A Differential Testing Approach for Evaluating Abstract Syntax Tree Mapping Algo-rithms,” in 2021 IEEE/ACM 43rd International Conference on Software Engineering (ICSE) , 2021, pp. 1174–1185. [38] C. Yang, Y. Deng, J. Yao, Y. Tu, H. Li, and L. Zhang, “Fuzzing Auto-matic Differentiation in Deep-Learning Libraries,” in 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) , 2023, pp. 1174–1186. [39] J. Guo, Y. Jiang, Y. Zhao, Q. Chen, and J. Sun, “DLFuzz: differential fuzzing testing of deep learning systems,” in Proceedings of the 2018 26th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering , ser. ESEC/FSE 2018. New York, NY, USA: Association for Computing Machinery, 2018, p. 739–743. [Online]. Available: https://doi.org/10.1145/3236024.3264835 [40] S. Nilizadeh, Y. Noller, and C. S. Pasareanu, “DifFuzz: Differential Fuzzing for Side-Channel Analysis,” in 2019 IEEE/ACM 41st Interna-tional Conference on Software Engineering (ICSE) , 2019, pp. 176–187.
