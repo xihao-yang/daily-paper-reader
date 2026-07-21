@@ -1,0 +1,762 @@
+Title: TRIM: Reducing AI-Generated CodeSlop via Agent Trajectory Minimization
+
+URL Source: https://arxiv.org/pdf/2607.18161v1
+
+Published Time: Tue, 21 Jul 2026 02:10:57 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# TRIM: Reducing AI-Generated C ODE SLOP via Agent Trajectory Minimization 
+
+Alex Mathai 
+
+Dept. of Computer Science Columbia University ,New York City, USA alexmathai@cs.columbia.edu Shobini Iyer 
+
+Dept. of Computer Science Columbia University ,New York City, USA si2449@columbia.edu Aleksandr Nogikh 
+
+Google Inc 
+
+M¨ unchen, Germany nogikh@google.com Petros Maniatis 
+
+Google DeepMind 
+
+Mountain View, CA, USA maniatis@google.com Franjo Ivanˇ ci´ c
+
+Google Inc 
+
+Princeton, NJ, USA ivancic@google.com Junfeng Yang 
+
+Dept. of Computer Science Columbia University ,New York City, USA junfeng@cs.columbia.edu Baishakhi Ray 
+
+Dept. of Computer Science Columbia University ,New York City, USA rayb@cs.columbia.edu 
+
+Abstract —Coding agents are increasingly used to accelerate code generation in many downstream tasks, such as fixing bugs, building applications, and prototyping. However, despite their value as coding assistants, agent-generated code tends to be larger and more verbose than the corresponding human-written implementation. In this work, we show that the cause lies in the agent’s own search process: while iterating toward a passing solution, an agent accumulates speculative edits, abandoned hypotheses, and temporary changes that persist into the final patch. This may seem harmless for a single patch, but the problem compounds as agents take responsibility for ever-larger portions of a codebase—a codebase that was once minimal and well-maintained slowly accumulates redundancy faster than it can be cleaned up, drifting to a state that is harder to maintain. Given the magnitude of this problem, we take a step towards alleviating this issue. First, we formally define this phenomenon as C ODE SLOP —the residual and functionally unnecessary edits commonly seen in AI-generated code. We then introduce our algorithm TRIM (Trajectory-guided Redundancy Identification and Minimization). Rather than minimizing C ODE SLOP directly, TRIM instead minimizes agent trajectories. As we show em-pirically, this indirect technique of minimizing C ODE SLOP is highly effective: TRIM cuts C ODE SLOP by 17.9%–32.9% across agentic scaffolds, with negligible performance regression. T RIM 
+
+is also highly efficient, requiring roughly half the validation cost of algorithmic baselines such as Delta Debugging. 
+
+Index Terms —AI Agents, Code Slop, Software Engineering, Reliable and Secure AI. 
+
+I. I NTRODUCTION 
+
+Modern coding agents are rapidly transforming software development [1–3]. They can navigate repositories, write code, run tests, and iteratively repair failures, increasingly producing working patches with little human intervention. As these sys-tems become more capable, the challenge is no longer simply generating correct code, but understanding and maintaining it afterward [4]. Yet most work on coding agents focuses on a single question: Does the patch pass the tests? However, test passing alone says little about the quality of the resulting patch—developers must still review, understand, and maintain the generated changes. This challenge is already emerging in practice. Although many agent-generated patches successfully pass their tests, developers increasingly report that many of the generated changes are unnecessary, requiring additional effort to review, simplify, and sometimes even reject such patches before they can be merged [5–7]. To understand how these unnecessary changes arise, we investigate program repair—one of the most mature applications of coding agents—where agents iteratively edit code and execute tests until a patch eventually succeeds by passing the required test suite. We refer to this sequence of edits and validation steps as the agent’s repair trajectory . The repair trajectory provides a natural lens for understanding how unnecessary changes accumulate during the agent’s exploration for a successful fix. When we examined these repair trajectories, one pattern stood out. Agents typically arrive at a correct repair only after several rounds of editing and testing—an expected aspect of agentic software engineering [8, 9]. What surprised us was that agents often retain, rather than discard, the exploratory changes that led to a successful repair. As a result, the final 1arXiv:2607.18161v1 [cs.SE] 20 Jul 2026 patch contains not only the needed edits that resolve the defect, but also remnants of the search process. Figure 1a illustrates this phenomenon. When resolving a Linux kernel vulnerability [10], SWE A GENT [11] produces 21 modified lines across three feedback cycles, yet only three 
+
+of those lines are required for the fix. The remaining changes are remnants of the search process—speculative edits, aban-doned hypotheses, and temporary modifications that persist simply because the agent has no reason to remove them once a passing solution is found. Interestingly, these three lines happen to coincide with the ground-truth human fix. We refer to these residual search artifacts that survive into the final patch as C ODE SLOP .CODE SLOP not only increases the size of agent-generated patches, but also buries the changes that actually resolve the defect beneath exploratory edits, making patches harder to re-view, understand, and maintain [6, 12]. More concerning, this is not an isolated phenomenon. Across our benchmarks, agent-generated patches routinely contain substantial amounts of CODE SLOP , consistent with recent reports that AI-generated code is increasingly verbose and accumulates redundancy faster than human-written code [13–16]. 
+
+Defining CODE SLOP . Once this phenomenon is recog-nized, the next task is to define it. Existing work characterizes slop through static properties of the resulting code artifact, such as verbosity, redundancy, or the accumulation of com-plexity over time [13, 14, 17]. Our key insight is that, for agent patches, what matters is not how the retained code looks, but whether it is actually necessary for the repair. A change may be readable, well structured, and free of duplication, yet still be removable without affecting the final solution. We therefore define C ODE SLOP as removable functional redun-dancy : changes introduced during the agent’s search process that can be removed while preserving the successful repair. To our knowledge, this is the first work to formalize C ODE SLOP 
+
+through a functional, rather than static, definition. 
+
+Identifying & Reducing C ODE SLOP : Challenges. Defin-ing C ODE SLOP is only the first step; identifying it is substan-tially harder. Once a patch passes its tests, both the essential changes and the residual search artifacts appear equally valid, making them difficult to distinguish from the final patch alone. Moreover, dependencies among changes mean that the necessity of one edit often depends on the presence of others, preventing edits from being evaluated independently. This challenge is difficult even for state-of-the-art coding agents. Although agents can generate successful repairs, they are not trained to identify the minimal set of changes required for a solution. We confirm this empirically by prompting agents to minimize their own patches: in 3.8% –44 .9% of cases, the resulting patch either fails to preserve the original behavior or is larger than the original patch. 
+
+Our Solution. Consequently, rather than searching for CODE SLOP over the final patch alone, we shift the search space to the agent’s repair trajectory, where the temporal ordering of edits provides a natural approximation of their dependencies. To this end, we formulate C ODE SLOP iden-tification as a hierarchical counterfactual search : at each level, T RIM (Trajectory-guided Redundancy Identification and Minimization) asks whether an entire group of changes can be removed while preserving the behavior of the successful repair. The search progressively refines from coarse trajectory groups to finer-grained changes, validating every candidate removal through execution. By eliminating large groups of exploratory edits first, T RIM rapidly shrinks the search space before reasoning about individual changes. Such agent trajectory guided exploration differs fundamen-tally from traditional program minimization techniques such as Delta Debugging [18] and git-bisect [19]. These tech-niques search across developer-authored versions or commits, whose histories are relatively clean and largely reflect inten-tional software evolution. In contrast, repair trajectories record an inherently exploratory process in which edits are proposed, validated, refined, reverted, and superseded before a successful repair is found. Rather than rediscovering these dependencies through exhaustive counterfactual testing, T RIM exploits the trajectory’s hierarchical structure directly, producing a minimal patch that preserves the successful repair while removing artifacts of the agent’s search process. 
+
+Results. We evaluate our approach across four agent scaf-folds (C RASH FIXER , SWE A GENT , M INI SWE A GENT , and OPEN HANDS ) on Live-kBench [20] and S WE -B ENCH [21]. Our approach reduces C ODE SLOP by 17 .8% –32 .9% , achiev-ing a 1.6×–3.1× improvement over agent-based minimization baselines while introducing negligible regressions in correct-ness. Minimization even brings some agent-generated patches into exact agreement with the developer-written patch. In summary, this paper makes the following contributions:  
+
+> •
+
+We introduce C ODE SLOP , a new formulation of remov-able functional redundancy in agent-generated patches.  
+
+> •
+
+We develop T RIM , a trajectory-aware algorithm for re-ducing C ODE SLOP . 
+
+> •
+
+We empirically show that substantial amounts of CODE SLOP can be removed from agent-generated patches across multiple agents and benchmarks. II. M OTIVATING EXAMPLE 
+
+In this section, we use a real-world repair trajectory to illus-trate how C ODE SLOP emerges during agent-driven program repair. Figure 1a shows the repair trajectory and final patch generated by SWE A GENT [11] while fixing a Linux kernel memory leak vulnerability [10]. Now consider a developer reviewing the resulting patch (Figure 1a, right). Although the patch correctly fixes the vulnerability, it modifies a single file through 21 changed lines spanning five hunks. Every one of these changes demands attention: the developer must understand what it does, why it was introduced, and whether it interacts with the rest of the patch. Consequently, unnecessary edits significantly increase the cognitive effort required to review and maintain the repair. To understand where these unnecessary changes originate from, we examine the repair trajectory (Figure 1a, left). Rather than discovering the fix immediately, the agent progresses 2kernel/bpf/syscall.c +9 −12                                                                  
+
+> @@ -1361,7 +1361,6 @@
+> 1361 1361 return ret;
+> 1362 1362 free map tab:
+> 1363 −bpf map free record(map);
+> 1364 1363 return ret;
+> 1365 1364 }
+> @@ -1518,11 +1517,6 @@
+> 1521 −err = bpf obj name cpy(map->name, attr->map name,
+> 1522 −sizeof(attr->map name));
+> 1523 −if (err < 0)
+> 1524 −goto free map;
+> 1525 −
+> 1528 1522 ....
+> @@ -1532,6 +1526,11 @@
+> 1529 +err = bpf obj name cpy(map->name, attr->map name,
+> 1530 +sizeof(attr->map name));
+> 1531 +if (err < 0)
+> 1532 +goto free map;
+> @@ -1586,16 +1585,17 @@
+> 1586 1586 }else if (attr->excl prog hash size) {
+> 1587 −return -EINVAL;
+> 1586 +err = -EINVAL;
+> 1587 +goto free map;
+> 1591 1591 ....
+> 1592 −goto free map sec;
+> 1592 +goto free map;
+> 1595 1595 ....
+> 1596 −goto free map sec;
+> 1596 +goto free map;
+> @@ -1614,10 +1614,8 @@
+> 1614 −free map sec:
+> 1615 −security bpf map free(map);
+> 1616 1614 free map:
+> 1617 −bpf map free(map);
+> 1615 +bpf map put(map);
+> 1618 1616 put token:
+> e21
+> e11
+> e31
+> e32
+> e33
+> edit action (e11 )
+> Feedback 1 ✗
+> e21
+> Feedback 2 ✗
+> e31
+> e32
+> e33
+> Feedback 3 ✓
+> Repair Trajectory
+> E1
+> E2
+> E3
+
+(a) Linux vulnerability [10]; here the human patch is edit e31 .sympy/tensor/array/dense ndim array.py +2 −2                                       
+
+> @@ -149,7 +149,7 @@
+> ....
+> 152 −self. loop size = functools.reduce(lambda x,y: x*y, shape) if shape else 0
+> 152 +self. loop size = functools.reduce(lambda x,y: x*y, shape, 1)
+> ....
+> @@ -174,7 +174,7 @@
+> ....
+> 177 −self. loop size = functools.reduce(lambda x,y: x*y, shape) if shape else 0
+> 177 +self. loop size = functools.reduce(lambda x,y: x*y, shape, 1)
+> ....
+> sympy/tensor/array/sparse ndim array.py +2 −2
+> @@ -130,7 +130,7 @@
+> ....
+> 133 −loop size = functools.reduce(lambda x,y: x*y, shape) if shape else 0
+> 133 +loop size = functools.reduce(lambda x,y: x*y, shape, 1)
+> ....
+> @@ -167,7 +167,7 @@
+> ....
+> 170 −self. loop size = functools.reduce(lambda x,y: x*y, shape) if shape else 0
+> 170 +self. loop size = functools.reduce(lambda x,y: x*y, shape, 1)
+> ....
+> sympy/tensor/tensor.py +3 −0
+> @@ -1095,6 +1095,9 @@
+> ....
+> 1098 +# Check if any array data is None
+> 1099 +if any(arr is None for arr in ndarray list):
+> 1100 +return None
+> ....
+> e11
+> e12
+> e21 , e 31
+> e22 , e 51
+> e41
+> e11
+> e12
+> Feedback 1 ✗
+> e21
+> e22
+> Feedback 2 ✗
+> e31
+> Feedback 3 ✗
+> e41
+> Feedback 4 ✗
+> e51
+> Feedback 5 ✓
+> Repair Trajectory
+> E1
+> E2
+> E3
+> E4
+> E5
+
+(b) SWE-Bench sympy__sympy-15017 . The agent patch spans three files and five hunks, yet the true fix is a single line (e11 ); T RIM eliminates two files and prunes the patch down to that one edit, identical to the human fix. 
+
+Fig. 1: Two motivating examples of C ODE SLOP . TRIM recovers the human-equivalent fix hidden inside a larger agent patch. Each trajectory shows (i) sequence of edits ( E), (ii) atomic edit action ( eij ), and (iii) Feedbacks. Atomic edits in the trajectory map to regions of the final patch (bounded boxes). The starred region ( ⋆) is the human patch, while the purple-bordered regions are C ODE SLOP —residual edits ( eij ) from the agent’s search process that T RIM prunes away. 
+
+through three edit sequences ( E1–E3), each followed by test execution. The first two fail validation, while the third finally produces a passing repair. Figure 1a maps these edit sequences to the final cumulative patch, showing how changes introduced during earlier exploration persist in the final solution. At first glance, every modification appears equally impor-tant because all are present in the passing patch. A closer inspection, however, reveals that only the starred edit ( e31 ) is actually required to resolve the vulnerability and matches the developer-written fix. The remaining edits neither contribute to the repair nor affect correctness; they simply persist because the agent has no incentive to remove them once a passing solution is found. We refer to these residual search artifacts as CODE SLOP .
+
+Trajectory-Guided Search. The repair trajectory pro-vides the missing information needed to distinguish essential changes from C ODE SLOP . Rather than blindly searching over the 25 = 32 possible subsets of the five patch hunks, T RIM 
+
+shifts the search space to the repair trajectory and performs a hierarchical counterfactual search. It first reasons at the gran-ularity of edit sequences, asking whether each edit sequence is necessary to preserve the successful repair. In this example, it first removes E1 and validates that the repair still succeeds, then repeats the process for E2. Since neither sequence affects the outcome, both are discarded. The search then descends into the remaining edit sequence, E3, and repeats the same counterfactual reasoning over its edit actions, successively removing e33 and e32 until only the essential edit e31 remains. In reality, the ordering of the sequences determine how fast TRIM will converge. This search fundamentally differs from traditional tech-niques such as Delta Debugging [18]. Without access to the repair trajectory, Delta Debugging treats the final patch as an unstructured collection of hunks and must recover edit dependencies by exploring combinations of hunk subsets. Consequently, it operates over a substantially larger search space and converges more slowly, requiring many more coun-terfactual validations. In contrast, repair trajectories naturally group dependent edits according to the agent’s exploratory search process. By eliminating entire trajectory groups before refining to individual edits, T RIM prunes large portions of the search space and reaches the same minimal repair with substantially fewer validation calls. Figure 1b illustrates another instance of C ODE SLOP from SWE-Bench. III. P ROBLEM FORMULATION 
+
+This section formalizes the notion of C ODE SLOP and the corresponding optimization problem. 
+
+A. Minimal Behavior-Preserving Patch 
+
+As illustrated in Section II, agent-generated patches often contain modifications accumulated during the agent’s search process for a correct solution, many of which are ultimately unnecessary for satisfying the task. Our objective is therefore not merely to produce a passing patch, but to identify the 
+
+smallest patch that still correctly satisfies the task. A patch is a collection of source-code modifications (i.e., added and deleted lines) that transforms one program version into another. Let AP denote an agent-generated patch for a task T . We define len( P) as the length of a patch P,measured by the total number of modified lines (added and deleted). Throughout this paper, the behavior of a patch refers to its externally observable effects relevant to task T , such as producing the intended outputs and satisfying the required correctness conditions, while abstracting away incidental im-plementation details. 
+
+Definition 1 (Minimal Behavior-Preserving Patch) . Let 
+
+D(AP , T ) denote the set of all patches obtained by removing one or more modifications from AP while still correctly 
+
+3satisfying task T . The minimal behavior-preserving patch ,denoted by AP ∗, is defined as 
+
+AP ∗ = arg min  
+
+> MP∈D (AP ,T )
+
+len( MP ).
+
+That is, AP ∗ is the shortest patch derivable from AP that still correctly satisfies task T .
+
+Intuitively, AP ∗ represents the smallest correct realization of the agent-generated solution for the task T that contains only the modifications necessary for implementing the task, while removing functionally unnecessary modifications intro-duced during the agent’s exploration process 1. As such, AP ∗
+
+defines the theoretical minimum patch under our formulation and serves as the ideal target against which practical mini-mization algorithms are measured. The notion of “preserving the intended functionality” is an ideal specification independent of any particular imple-mentation or evaluation methodology. In practice, since the true functionality is unobservable, practical minimization algo-rithms approximate this ideal by validating candidate patches using the available execution environment and test suite (§IV). 
+
+B. CODE SLOP 
+
+Definition 2 (C ODE SLOP ). Given an agent-generated patch 
+
+AP and its corresponding minimal behavior-preserving patch 
+
+AP ∗, the amount of CODE SLOP in AP is 
+
+CODE SLOP (AP ) = len( AP ) − len( AP ∗) (1) 
+
+Equivalently, CODE SLOP (AP ) measures the amount of mod-ifications in AP that can be removed without changing the behavior of the original agent patch with respect to task T .
+
+Unlike traditional notions of code quality, which define slop using static properties of the final patch (e.g., verbosity, duplication, or structural complexity [22]), C ODE SLOP is de-fined behaviorally: modifications that can be removed without changing the behavior of the original agent-generated patch. 
+
+C. Problem Statement 
+
+The preceding definitions characterize the ideal notions of CODE SLOP and its corresponding minimal behavior-preserving patch AP ∗. Based on them, we now formulate the computational problem addressed in this paper. 
+
+Definition 3 (P ATCH MINIMIZATION ). Given an agent-generated patch AP , PATCH MINIMIZATION seeks to recover its corresponding minimal behavior-preserving patch AP ∗.
+
+Recovering AP ∗ requires identifying the smallest behavior-preserving patch among all candidate patches derivable from 
+
+AP . Each modification in AP may either be retained or removed, yielding an exponential search space of size 2n,    
+
+> 1This formulation deliberately restricts the search space to patches derived from the agent-generated patch. Rather than synthesizing a new solution from scratch, minimization asks which parts of the agent’s existing solution are unnecessary. This makes the optimization tractable: the algorithm searches over AP instead of the much larger space of all patches that could solve T.Agent
+> Patch
+> (AP)
+> Ideal
+> Patch (AP*)
+> Any
+> Minimized
+> Patch (MP )
+> Verbose
+> Minimal
+> Behavior-
+> Preserving
+> Patch
+> Increasing Patch Length
+> CodeSlop of MP
+> CodeSlop of AP
+> Objective: Move MP towards AP* (right to left)
+
+Fig. 2: The task of minimizing C ODE SLOP . The horizontal line measures patch length. On the left is the minimal behavior-preserving patch ( AP ∗) and on the right is the original verbose agent patch ( AP ). In the middle is the minimized patch ( MP ). To minimize C ODE SLOP and patch length, we move MP 
+
+closer to AP ∗ and further away from AP .where n is the number of modifiable units in the patch. Consequently, exhaustive search is intractable when n is large. Moreover, the ideal notion of behavior preservation cannot be established directly. Instead, coding agents validate candi-date patches by executing them in an execution environment (Env ) using a set of executable test files. Consequently, practical algorithms compute MP —an approximation of AP ∗
+
+by searching for a minimized patch satisfying: 1) MP exhibits the same observable behavior as AP under 
+
+Env when executing test cases; 2) len( MP ) ≤ len( AP ).Since the ideal optimum AP ∗ is generally unknown, prac-tical algorithms instead compute an approximation MP . The quality of an approximation is determined by its proximity to 
+
+AP ∗: the closer MP is to AP ∗, the more C ODE SLOP has been eliminated (see Figure 2). We therefore measure the amount of C ODE SLOP eliminated by a minimization procedure as ∆SLOP = len( AP )−len( MP )
+
+which corresponds to the reduction in patch length achieved by the minimization algorithm (see Figure 2). 
+
+Note. The repair trajectory is not part of the definition of CODE SLOP . The definition depends only on behavioral equiv-alence. The trajectory instead provides structural information that enables efficient identification of behaviorally redundant changes, as we will discuss next. IV. M ETHODOLOGY 
+
+This section presents T RIM , an approximation algorithm for Patch Minimization. We start with a high-level overview (§IV-A) of the algorithm. We then elaborate on each of its components in the rest of the section. 
+
+A. System Overview 
+
+As formulated in Section III, P ATCH MINIMIZATION seeks the minimal behavior-preserving patch AP ∗. We formu-late this as a counterfactual reasoning problem: determining whether a modification is necessary requires asking, what would happen if it had never been made? Each counterfactual corresponds to removing one or more modifications from 
+
+AP and validating whether the resulting patch preserves the desired behavior. The challenge is that these modifications are 4Agent                                    
+
+> Scaffolds A node is the group of edits the agent made
+> between two tests
+> Each pass drops unrelated edits, minimizing the patch
+> Agent Patch
+> A removal is accepted only if the test files pass and
+> the patch gets smaller
+> ★
+> Same fix,
+> far smaller patch
+> =✓
+> 1234
+> Human Equivalent Fix
+> A
+> Unrelated Edits
+> Removing Node
+> & File Edits
+> Removing Edits
+> One at a Time
+> Minimized Patch
+> Developer Patch
+> Oracle Evaluation Minimizing the Patch (Coarse to Fine)
+> B
+> ★
+> Minimized Patch
+> C
+> Intermediate Representation Solve task & Trajectory Pre-processing
+> Agents fix the bug and generate
+> a patch and a trajectory
+> Agent
+> Patch
+> Shobhi,
+> please add a
+> traj here
+> Agent
+> Scaffolds
+> An edit sequence (E) is a group of edits (e)
+> the agent makes between two tests.
+> Each pass drops unrelated edits, minimizing the patch
+> Agent Patch
+> A removal is accepted only if the test files pass and
+> the patch gets smaller
+> Evaluation on
+> Test Files
+> =✓
+> 0123
+> Human Equivalent Fix
+> A
+> Unrelated Edits
+> Remove Edit
+> Seq & File Edits
+> Removing Edits
+> One at a Time
+> Candidate Patch
+> Candidate
+> Evaluation
+> Minimizing the Patch (Coarse to Fine)
+> B
+> ★
+> Minimized Patch
+> C
+> Trajectory Pre-Processing Solve Task
+> Agents fix the bug and generate
+> a patch and a trajectory
+> Agent
+> Patch
+> Agent
+> Trajectory
+> ✗
+> ✓
+> Search
+> Inspect file
+> Edit code
+> Run tests
+> Edit code
+> Run tests
+> ✗✗✓
+> Only keep Edits +Tests :(
+> ✓/
+> ✗) mark the
+> agent asking the environment for feedback
+> Structures Representation: Traj R
+> e1✗e2✗e3e4e5✓
+> E1E2E3
+> ★
+> Same fix,
+> far smaller patch
+> =✓
+> 4
+> Minimized Patch
+> Developer Patch
+> Oracle Evaluation
+> Eval on Human
+> Fix &Oracles
+> 4
+> Minimized Patch
+> Oracle
+> Evaluation
+> =✓
+
+Fig. 3: Overview of T RIM . 0 A coding agent repairs a bug, producing a patch and an execution trajectory containing code edits, repository interactions, and feedback requests ( F R ). 1 We preprocess the trajectory, retaining only edits and feedback requests, and group edits between consecutive F R s into edit sequences (E1–E3), forming the trajectory-derived search space T raj R (shown for the motivating example in §II). 2 TRIM performs hierarchical counterfactual search, progressively removing edit sequences, files, and finally individual edits. 3 A removal is accepted only if the resulting patch passes validation while reducing patch size. The orange line denotes the essential fix; gray lines represent C ODE SLOP eliminated during minimization. 4 The minimized patch is evaluated against hidden oracle tests and, optionally, compared with the developer-written patch. 
+
+highly dependent—the effect of removing one modification often depends on the presence of others. Consequently, solving PATCH MINIMIZATION exactly requires searching an exponen-tial space of candidate patches ( 2n assuming n modifications), making exhaustive search computationally intractable. Our key insight is that the agent’s repair trajectory provides the structure needed to explore these dependent counterfactuals efficiently. Rather than searching arbitrary subsets of the final patch, TRIM (Trajectory-guided Redundancy Identification and Minimization) organizes modifications according to the trajectory’s natural hierarchy and progressively eliminates groups of related changes while preserving the original behav-ior. At a high level, T RIM consists of three stages (Figure 3): 1 Trajectory-guided search space construction. Starting from the repair trajectory, T RIM reconstructs the edits that con-tribute to the final patch and organizes them into a hierar-chical search space. 2 Hierarchical counterfactual search & validation. TRIM progressively minimizes the patch, reasoning from coarse groups of related modifications to individual edits. 3 Candidate counterfactual patches are validated through execution and accepted only if they preserve the original behavior while reducing patch size. The remainder of this section describes each stage in detail. 
+
+B. Trajectory-Guided Search Space Construction 
+
+The first stage of T RIM transforms the raw execution tra-jectory into a hierarchical search space for counterfactual rea-soning. An execution trajectory , T raj , records the sequence of interactions between a coding agent and its execution environment, including code edits, test executions, repository exploration, and command execution. However, many of these actions do not contribute to the final agent-generated patch, while the remaining edits must be organized to expose their dependencies. This stage therefore extracts the trajectory ac-tions that contribute to the final patch and organizes them into a hierarchical search space for Patch Minimization. 
+
+1) Trajectory Reconstruction: Not all actions in T raj are relevant for Patch Minimization. Therefore, T RIM first projects the execution trajectory onto a reduced trajectory, denoted by 
+
+T raj R (See Figure 1a), by retaining only 
+
+• E: sequences of code edits performed between consecu-tive feedback requests, and 
+
+• FR : feedback requests corresponding to executions of the task-related test suite. All remaining actions, including repository search, file in-spection, directory navigation, and other non-modifying oper-ations, are discarded because they do not affect the resulting patch. The reduced trajectory is represented as 
+
+T raj R = ⟨(E1, FR 1), (E2, FR 2), . . . , (Ek, FR k)⟩ ,
+
+where 
+
+Ei = ⟨ei1, e i2, . . . , e in ⟩
+
+denotes the ordered sequence of atomic edit actions (eij ) per-formed after FR i−1 and before FR i, where FR 0 = ∅. Each atomic edit action eij corresponds to a single editing operation issued by the agent (e.g., a search-and-replace operation or a code insertion/deletion). eij may modify multiple lines or multiple locations within one file using a standard search-and-replace operation. The corresponding FR i denotes the feedback request issued after completing the edit sequence Ei.For illustration, consider the reduced trajectory correspond-ing to the motivating example in Figure 1a. The reduced trajectory is T raj R = ⟨(E1, FR 1), (E2, FR 2), (E3, FR 3)⟩),where (E1 = ⟨e11 ⟩), (E2 = ⟨e21 ⟩), and (E3 = ⟨e31 , e 32 , e 33 ⟩).As described next, T RIM performs Patch Minimization by searching over this trajectory representation, progressively refining the search from edit sequences to individual files and, ultimately, individual edit actions. 
+
+Implementation Challenges. Coding agents expose hetero-geneous editing primitives, ranging from shell commands (e.g., sed ) to structured editing tools (e.g., replace ). To support a unified minimization algorithm across different agent scaffolds, T RIM normalizes every edit into a common representation consisting of the target file together with its before- and after-text. Execution trajectories also record the agent’s entire ex-ploratory process, including edits that are later reverted, over-written, or otherwise discarded. To recover the edits that actually contribute to the final patch, T RIM faithfully replays the trajectory in temporal order, applying both edit and undo 5operations. The resulting reduced trajectory T raj R contains only the edits that survive into the final patch while preserving their original ordering. 
+
+2) Trajectory-derived Search Space: The reduced trajectory 
+
+T raj R defines the search space explored by T RIM . Agents naturally organize repairs into successive edit–feedback re-quest iterations: before issuing a feedback request, the agent performs a sequence of edit actions corresponding to a single repair attempt. Accordingly, each pair (Ei, FR i) represents one repair attempt together with its validation. Rather than searching arbitrary subsets of edits, T RIM first reasons over these edit-sequence units before progressively refining the search to individual files and, ultimately, atomic edit actions. 
+
+C. Hierarchical Counterfactual Search 
+
+This section presents the design principles underlying T RIM .At a high level, T RIM formulates Patch Minimization as a con-strained optimization problem: remove as much C ODE SLOP as possible while preserving program behavior and keeping the minimization process computationally practical. 
+
+Optimization Objective: As established in Section III, the objective of T RIM is to approximate the minimal behavior-preserving patch of an agent-generated patch AP for a given task T . Rather than minimizing AP as an unstructured collec-tion of edits, T RIM performs trajectory-guided optimization ,exploiting the temporal organization and repair hypotheses encoded in the repair trajectory to identify functionally un-necessary edits. Thus, instead of synthesizing a new repair, TRIM seeks a one-minimal edit action subset of the original trajectory edits that still satisfies the task (§IV-C). 
+
+Correctness Constraint: Since behavior preservation cannot be established directly, every accepted counterfactual patch must continue to pass the task-specific test suite ( T F ), pre-serving the observable behavior of the original repair. 
+
+Efficiency Constraint: Each candidate counterfactual re-quires re-executing T F , making validation the dominant cost of minimization (e.g., ∼30 minutes per Linux kernel valida-tion [23]). Consequently, effectiveness depends not only on the amount of C ODE SLOP removed ( ∆Slop ), but also on the number of validation executions, motivating our hierarchical coarse-to-fine search. 
+
+Minimization Strategy: Algorithm 1 presents the overall hierarchical counterfactual search procedure. Figure 4 also pictorially describes how the algorithm works. Starting from the repair trajectory T raj R, T RIM progressively searches for functionally unnecessary edits by constructing and evaluating 
+
+counterfactual patches . Rather than reasoning over individual modifications from the outset, T RIM first searches over larger removal candidates (e.g., an edit sequence like E), allowing a single successful validation to eliminate many edit actions simultaneously. Only when no further removals are possible does the search refine to smaller candidate units, thereby reducing the number of expensive validation executions. The search consists of three successive phases correspond-ing to the hierarchy edit sequence → file → edit action (see the outer loop, Line 3). At the beginning of each phase, the 
+
+Algorithm 1 T RIM : hierarchical, coarse-to-fine patch mini-mization 
+
+Require: T raj R = ⟨(E1, FR 1), . . . , (En, FR n)⟩, a list of edit sequences with their feedback requests, where each 
+
+Ei = ⟨ei1, . . . , e ij ⟩;Flag oneM in (enforce 1-minimality guarantee); TRUE ⇒
+
+TRIM -G, FALSE ⇒ TRIM -NG 
+
+Ensure: minimized patch MP with len( MP ) ≤ len( AP ) 
+
+> 1:
+
+S ← T raj R ▷ working set of surviving ⟨E , FR⟩ pairs  
+
+> 2:
+
+TF ← {FR 1, . . . , FR n} ▷ validation oracle  
+
+> 3:
+
+for g ∈ ⟨ EDIT SEQ , FILE , EDIT ACTION ⟩ do  
+
+> 4:
+
+▷ coarse → fine  
+
+> 5:
+
+▷ EDIT SEQ : edits of one edit sequence Ei; FILE : edits of one file (pooled across sequences); EDIT ACTION : a single edit action eij  
+
+> 6:
+
+repeat  
+
+> 7:
+
+pool the surviving edits of S and group them into units ⟨u1, . . . , u m⟩ by g 
+
+> 8:
+
+changed ← FALSE 9: for j ← m downto 1 do  
+
+> 10:
+
+▷ reverse pass  
+
+> 11:
+
+if apply( S \ uj ) passes TF and len( S \ uj ) <
+
+len( S) then  
+
+> 12:
+
+S ← S \ uj ; 
+
+> 13:
+
+changed ← TRUE ; ▷ accept removal  
+
+> 14:
+
+end if  
+
+> 15:
+
+end for  
+
+> 16:
+
+until ¬ changed ∨ ¬ oneMin ▷ fixpoint or one pass  
+
+> 17:
+
+end for  
+
+> 18:
+
+MP ← apply( S) 
+
+> 19:
+
+return MP 
+
+surviving edits are regrouped (Line 7) according to the current search granularity ( edit sequence , file , or edit action ), thereby defining the “unit” of a candidate removal for that phase. During sequence-level search, each candidate consists of the edits introduced between two consecutive feedback requests (See row 1 of Figure 4). During file-level search, the surviving edits are repartitioned so that each candidate contains all edits affecting a particular file, irrespective of when they were intro-duced (See row 2 of Figure 4). Finally, edit action-level search treats every surviving edit action as an independent candidate, enabling fine-grained minimization (See row 3 of Figure 4). Thus, while the grouping of modifications changes across phases, the underlying search procedure remains identical. For each grouping, T RIM performs the same iterative elim-ination procedure. The algorithm traverses the candidate units in reverse trajectory order and temporarily removes one unit at a time, thereby constructing a counterfactual patch that represents the “hypothetical repair” had that candidate never been introduced. 
+
+Counterfactual Validation. The counterfactual is accepted only if (i) it continues to satisfy the task-specific test suite T F ,thereby preserving the execution invariant, and (ii) it produces a strictly smaller patch than the current solution (Line 11). 6Agent patch AP                                               
+
+> 7 edits e11 e21 e22 e31 e⋆
+> 41 e42 e⋆
+> 43
+> E1E2E3E4
+> e11 e21 e22 e31 e⋆
+> 41 e42 e⋆
+> 43
+> After Edit Seq removal
+> 5 edits e21 e42 e22 e⋆
+> 41 e⋆
+> 43
+> File f1File f2
+> e21 e42 e22 e⋆
+> 41 e⋆
+> 43
+> After File removal
+> 3 edits e22 e⋆
+> 41 e⋆
+> 43 e22 e⋆
+> 41 e⋆
+> 43
+> After edit action removal
+> (Minimal patch)
+> 2 edits = fix
+> e⋆
+> 41 e⋆
+> 43 e⋆
+> 41 e⋆
+> 43
+> Seq drop E1,E3
+> File drop f1(e21 , e 42 )
+> Edit drop e22
+> f ile 1f ile 2fix ( ⋆)dead
+
+Fig. 4: TRIM recovering the minimal patch from a 7-edit agent patch. Different rows represent the granularity T RIM reasons about at each level—edit sequence, then files, then individual edit actions. Node color denotes the edited file; starred edits ( e41 , e 43 ) are the true edit actions and all others are C ODE SLOP . The patch shrinks 7 → 5 →
+
+3 → 2.
+
+Otherwise, the candidate is rejected and the removed edits are restored. The elimination process repeats until no additional candidate units can be removed at the current granularity (Line 16), thereby reaching a local fixpoint. The last row of Figure 4) shows the final required edit actions following this algorithm. 
+
+One-Minimality Guarantee: The hierarchical search above efficiently removes unnecessary edits. However, a single pass does not necessarily recover a one-minimal edit subset, since an edit that is initially irremovable may become removable after other edits are eliminated. To guarantee one-minimality, TRIM optionally enables the oneMin flag. When enabled, each search phase repeats until no additional candidate can be removed (Line 16). Because every accepted removal strictly reduces the patch while preserving the execution invariant, termination guarantees that no remaining edit can be removed while still satisfying the task-specific test suite T F . When 
+
+oneMin is disabled (T RIM -NG), each granularity is explored only once, reducing validation cost at the expense of this guarantee. 
+
+Algorithmic Analysis: The dominant cost of patch min-imization is executing the task-specific test suite T F . We therefore measure the cost complexity C of T RIM as the num-ber of T F executions. Without the one-minimality guarantee (TRIM-NG), each search phase performs a single pass over its candidate units, yielding CTRIM-NG = O(|EditSeq | + |F ile | +
+
+|EditAction |) = O(|EditAction |), since |EditAction | ≫ |EditSeq | > |F ile |.With the one-minimality guarantee enabled (TRIM-G), each phase repeats until reaching a local fixpoint. In the worst case, each candidate may be revisited once for every remaining candidate, giving CTRIM-G = O(|EditSeq |2 +
+
+|F ile |2 + |EditAction |2) = O(|EditAction |2).
+
+Thus, enabling one-minimality increases the worst-case cost complexity from linear to quadratic in the number of edits. As shown in Section V, however, the practical overhead is much smaller, making TRIM-G empirically close to linear while providing the stronger guarantee. The same analysis and results apply to runtime complexity for both TRIM-G and TRIM-NG. V. E XPERIMENTAL DESIGN 
+
+A. Study Subjects 
+
+We evaluate T RIM across two benchmarks and four agentic scaffolds to assess its effectiveness, efficiency, and generality. 
+
+Live-kBench [20] contains 534 recent Linux kernel vul-nerabilities for evaluating security-critical repair in a large C codebase. We use it as our primary benchmark since Patch Minimization is particularly important for security fixes, where smaller, more focused patches simplify review and reduce unnecessary attack surface. As a post-processing technique, TRIM applies only to successful repairs. Across scaffolds, this yields 433 repaired bugs, of which 140 are trivially one-minimal (single edit action), leaving 293 bugs for evaluation. 
+
+SWE-Bench-Verified [21] contains 500 manually verified GitHub issues from popular Python repositories. We evaluate TRIM-G (edit-action level) on 333 SWE A GENT (using Claude-Sonnet-4) repair trajectories downloaded from the SWE-Bench leaderboard, all verified to pass the hidden oracle. We evaluate four state-of-the-art repair agents: C RASH -FIXER [24], SWE A GENT , MINI SWE A GENT [11], and OPEN HANDS [25]. Across all benchmark–scaffold combina-tions, T RIM is evaluated on 4,544 repair trajectories generated using models including Gemini-3-Pro and Claude-Opus-4.5. 
+
+B. Evaluation Metrics 
+
+(i) C ODE SLOP Reduction ( ∆Slop ). For each benchmark– scaffold combination, we quantify the amount of C ODE SLOP 
+
+removed by a minimization method (T RIM or a baseline) as the average normalized reduction in the patch length: 
+
+∆Slop (%) = avg (len( AP ) − len( MP )) avg(len( AP )) × 100 (2) Here, AP denotes the original agent-generated patch and 
+
+MP the minimized patch. Higher ∆Slop values indicate that more C ODE SLOP has been removed. During minimization, T RIM uses only the repair agent’s test suite T F as its correctness signal. For Live-kBench, T F is the crash-reproducing script; for SWE-Bench-Verified, it consists of the tests generated and executed by the agent during repair. Unless otherwise stated, all ∆Slop results use only T F for validation. The hidden oracle tests described below are used solely for evaluation. 
+
+(ii) Oracle Tests. Oracle tests are used only for evaluation and are never available to T RIM during minimization. For Live-kBench, the oracle combines the crash-reproducing script with an LLM judge that determines semantic equivalence to the developer patch. Following Huang et al. [20], we use Gemini-3-Flash with nine independent judgments and majority voting. For SWE-Bench-Verified, the oracle is the benchmark’s hidden fail-to-pass test suite, which directly validates func-tional correctness. 7(iii) Cost of Minimization. As discussed in Section IV-C, we measure cost as the number of T F executions, treating each execution as one unit regardless of the number of test cases it contains. Unlike wall-clock time, this machine-independent metric reflects the algorithm’s intrinsic efficiency and enables fair comparison across execution environments. Within a benchmark, it is directly proportional to both execu-tion time and hardware cost. 
+
+C. Baselines 
+
+We compare T RIM against two classes of baselines: agentic 
+
+minimization and deterministic patch minimization. 
+
+Agentic Minimization. Our first baseline evaluates whether agents can minimize their own patches without an explicit minimization algorithm. We use M INI SWE A GENT primarily with Gemini-3-Flash as the minimization agent, with a smaller focused evaluation using Sonnet 4.6. The agent is given the same execution environment as T RIM , including access to the task-specific test suite T F for validating candidates. Each minimization run is allocated a budget of 6 hours and $5.6 (following [20]). We evaluate three prompting configurations: (a) Only Diff , where the agent receives the final patch; (b) 
+
+Only Traj , where it receives the repair trajectory; and (c) Both ,where it receives both the final patch and repair trajectory. 
+
+Deterministic Minimization. Our second baseline is adeterministic adaptation of Delta Debugging (DD-Hunk) [26]. Since traditional Delta Debugging operates over program inputs rather than agent-generated patches, we modify it to per-form patch minimization over patch hunks. Like T RIM , DD-Hunk validates candidates patch using the task-specific test suite T F , enabling a direct comparison between trajectory-guided and direct patch-based minimization strategies. 
+
+TRIM Variants. We evaluate two variants of T RIM . TRIM-NG performs a single pass at each granularity, whereas TRIM-G repeats until no further reductions are possible, guar-anteeing a one-minimal solution. We also report results after 
+
+Sequence (edit-sequence minimization), Edit (full search), and 
+
+Hybrid , which uses Sequence when it yields a single edit sequence and otherwise uses Edit .VI. R ESULTS 
+
+RQ1: How effectively does TRIM reduce CODE SLOP for security program repair? 
+
+Approach. We evaluate both TRIM-G and TRIM-NG on the Live-kBench study subjects described in Section V-A. We ad-ditionally report the intermediate results after each stage of the hierarchical search ( Sequence , Hybrid , and Edit ) to quantify the contribution of each search granularity. We measure effec-tiveness using ∆Slop , oracle correctness (See Section V-B), and efficiency ( i.e., cost of minimization) using the number of test-suite executions ( T F ). 
+
+Results. CODE SLOP Reduction ( ∆Slop %). Table I shows that the full edit-level version of TRIM-G consistently achieves the largest reduction in C ODE SLOP , removing 17 .9–32 .9% of the agent-generated patch across all four repair agents. The results also TABLE I: Live-kBench % ∆Slop using (i) TRIM-G with different minimization granularity & (ii) Agentic Minimization (+ Filters) with different minimization settings. Claude Sonnet 
+
+4.6 run for one scaffold due to resource constraints.                                                      
+
+> Crash-SWE Open-Mini-SWE Fixer Agent Hands Agent TRIM-G Minimization ∆Slop %Sequence 16.4% 5.6% 13.3% 17.4%
+> Hybrid 24.7% 8.9% 19% 18% Full 32.9 %17.9% 26.6% 26%
+> ×Ratio ↑3.1x 1.6x 1.9x 2.0x Agentic Minimization ∆Slop % (Gemini 3 Flash)
+> Only Diff 5.5% 2.1% 3.4% 2.4% Only Traj 10.5% 11.3% 13.4% 12.6%
+> Both 2.8% 2.4% 2.4% 6.4%
+> Agentic Minimization ∆Slop % (Claude Sonnet 4.6)
+> Only Diff 8.9% ---Only Traj 9.9% ---Both 9.6% ---
+
+validate the hierarchical design: sequence-level minimization removes the least C ODE SLOP , edit-level the most, with the hybrid variant consistently lying between the two. 
+
+Oracle Performance. Despite its aggressive minimization, TRIM-G preserves oracle correctness (Table II). It even improves C RASH FIXER by 1.0–2.6% , producing patches that more closely resemble the developer solution. For the remain-ing agents, oracle performance remains essentially unchanged, with at most a ∼1% drop for O PEN HANDS under edit-level minimization. Since our evaluation additionally requires every minimized patch to satisfy the hidden oracle, these results represent a conservative lower bound on T RIM ’s effectiveness. TABLE II: Live-kBench Oracle Performance for TRIM-G: % of patches equivalent to human fix & that resolve the crash                                  
+
+> Equivalent Patch & Crash Resolved Rate Strategy/ Crash SWE Open MiniSWE Phase Fixer Agent Hands Agent
+> AP 22.47% 23.03% 21.54% 20.04% Sequence 24.91% 23.41% 21.72% 20.22% (+2.44) (+0.38) (+0.18) (+0.18)
+> Hybrid 25.09% 23.41% 21.72% 20.41% (+2.62) (+0.38) (+0.18) (+0.37) Full 23.41% 22.85% 20.41% 19.66% (+0.94) (-0.18) (-1.13) (-0.38)
+
+TRIM-G vs. TRIM-NG. Figure 5 shows that relaxing the one-minimality guarantee has little practical impact. TRIM-NG achieves nearly identical ∆Slop (32 .0% vs. 32 .9% ), av-erage edits per patch ( 1.35 for both), and oracle correctness, producing identical minimized patches for 96 .4% of repair trajectories while reducing validation cost by ∼8% (2.4kvs. 2.6k kernel jobs). Thus, TRIM-NG offers a favorable cost– quality trade-off, whereas TRIM-G remains preferable when a one-minimal guarantee is required. Figure 5 also illustrates the broader cost–quality trade-off. Sequence-level minimization provides the lowest cost (∼0.9k jobs) with 11 .3% ∆ Slop , while edit-level minimization achieves the largest ∆Slop (32 .9% ) at ∼2.5k jobs, allowing users to select appropriately for their validation budget. 8RQ1 Summary 
+
+TRIM effectively and efficiently removes C ODE SLOP . TRIM 
+
+removes up to 32.9% of unnecessary edits with negligible oracle loss. TRIM-NG ≈ TRIM-G in minimization quality while reducing validation cost and giving a linear time guarantee. 
+
+RQ2: How does TRIM compare against agentic minimization in reducing CODE SLOP ?
+
+TABLE III: % of Agentic Minimized Patches (Gemini-3-Flash) in Live-kBench filtered out due to failing criteria. Crash (C RASH FIXER ), Mini (M INI SWE AGENT ), SWE (SWE AGENT ), and OH (O PEN HANDS ) are the four scaffolds & total number of trajectories is 4.5k.                                                                 
+
+> % of Invalid Minimizations in each Category Agentic Setting Scaffold Anomaly File Mismatch Bug Triggered Patch Length ↑Total
+> Only Diff Crash 2.1% 0.5% 2.5% 0.5% 5.6% SWE 1.0% 1.3% 3.8% 0.7% 6.8%
+> Mini 1.0% 0.5% 1.3% 1.0% 3.8% OH 1.8% 0.2% 3.0% 1.2% 6.2% Only Traj Crash 2.1% 8.0% 11.1% 11.9% 33.1% SWE 3.2% 14.6% 14.6% 12.5% 44.9%
+> Mini 1.8% 4.8% 8.3% 10.6% 25.5% OH 3.0% 5.5% 12.2% 16.5% 37.2% Both Crash 3.0% 4.8% 4.1% 2.3% 14.2% SWE 1.6% 6.2% 6.1% 3.6% 17.5%
+> Mini 1.5% 3.0% 3.8% 3.8% 12.1% OH 1.2% 3.1% 5.2% 2.1% 11.6%
+
+Approach. We compare T RIM against the three agentic mini-mization baselines described in Section V-C. All methods are evaluated using the same validation environment and execution budget, and are compared using ∆Slop .
+
+Results. Table I shows that T RIM substantially outperforms agentic minimization across all four scaffolds. The edit-level version of TRIM-G achieves ∆Slop of 17 .9–32 .9% ,corresponding to a 1.6×–3.1× improvement over the best-performing agentic baseline. While prompting an LLM with the final patch ( Only Diff ), the repair trajectory ( Only Traj ), or both occasionally removes some C ODE SLOP , none consis-tently approaches the minimization achieved by T RIM .Unlike T RIM , which deterministically returns a valid mini-mized patch, agentic minimization fails in 3.8–44 .9% of cases (Table III), including patch inflation, file mismatches, and bug reintroduction. We conservatively count these failures as no minimization when computing Table I; even under this favorable fallback, the agentic baselines are substantially worse. These results suggest that Patch Minimization is funda-mentally a search problem rather than a generation problem: trajectory-guided counterfactual search is both more effective and reliable than prompting an LLM to rewrite its own patch. 
+
+RQ2 Summary 
+
+TRIM outperforms agentic minimization. It removes 1.6×–
+
+3.1× more C ODE SLOP while producing more reliable patches, showing that structured counterfactual search is more effective and reliable than agentic patch revision. 
+
+RQ3: How does TRIM compare against deterministic patch minimization algorithms? 
+
+Approach. We compare T RIM against the deterministic DD-Hunk baseline introduced in Section V-C. We evaluate mini-mization quality ( ∆Slop ) and computational cost ( T F execu-tions) to understand the benefits of trajectory-guided search.         
+
+> 1k 2k 3k 4k 5k
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> Sequence
+> Hybrid
+> Edit
+> 0.9k 11.3%
+> 1.4k 24.3%
+> 2.4k 32%
+> 1.2k 16.4%
+> 1.5k 24.7%
+> 2.6k 32.9%
+> DD-Hunk
+> 5.2k
+> 31.5%
+> ≈2×COST
+> Cost (# kernel jobs, T F )
+> ∆Slop  (%)
+> TRIM-NG
+> TRIM-G
+> DD-Hunk
+
+Fig. 5: Left. ∆Slop % vs Cost for T RIM ’s variants and DD-Hunk on C RASH FIXER trajectories (Live-kBench). T RIM variants reach comparable ∆Slop at half the cost of DD-Hunk. Right. TRIM vs. DD-Hunks. T RIM removes similar slop ( ∆=+0.24 lines, 95% CI [-0.4,+0.9]) at 1.9× lower cost. The shaded green region indicates the better setting: more slop removed at cheaper cost. 
+
+Results. Figure 5 (left) shows that TRIM-G (edit level) achieves essentially the same minimization quality as DD-Hunk, removing 32 .9% versus 31 .5% of C ODE SLOP (5.63 vs. 
+
+5.39 lines per bug; p = 0 .50 ). However, T RIM requires only 
+
+∼2.6k kernel validations, compared to DD-Hunk’s ∼5.2k— a 1.9× reduction in validation cost. Figure 5 (right) further shows that T RIM is substantially more predictable. DD-Hunk requires up to 43 validations per bug, whereas T RIM never exceeds 16 . Since each kernel validation takes ∼30 min-utes, bounding the number of validations significantly reduces worst-case execution time and compute cost. These results demonstrate the benefit of trajectory-guided hierarchical search: by eliminating large groups of related edits before refining individual edits, T RIM matches exhaustive hunk-level minimization with nearly half the validation budget. 
+
+RQ3 Summary 
+
+TRIM ’s hierarchical search matches delta-debugging-based hunk minimization at much lower cost. Compared to DD-Hunk, TRIM achieves statistically equivalent CODE SLOP re-duction while requiring 1.9 × fewer validation executions and substantially lower worst-case cost. 
+
+RQ4: Does TRIM generalize to general-purpose program repair benchmarks and other “static” CODE SLOP metrics? 
+
+Approach. We evaluate TRIM-G (edit-action level) on 333 
+
+SWE A GENT repair trajectories (on Claude-Sonnet-4) from SWE-Bench-Verified. Unlike Live-kBench, these trajectories contain heterogeneous feedback requests and evolving tests. We adapt only trajectory preprocessing to construct the vali-dation signal ( T F ), leaving the core minimization algorithm unchanged. We then measure ∆Slop using T F and verify correctness against the hidden oracle. Additionally, we also check if other “static” definitions of C ODE SLOP like verbosity 
+
+[22] reduce when running T RIM .9Results. Table IVa reports ∆Slop after removing changes introduced by the SWE-Bench evaluation infrastructure. The conservative measure, restricted to pre-existing repository files, yields a 20 .0% ∆ Slop (23 .6% of edit actions and 17 .8% 
+
+of hunks removed), comparable to the 17 .8% achieved on Live-kBench for the same SWE A GENT scaffold (Table I). Including all modified files gives an upper bound of 63 .5% .Importantly, T RIM preserves oracle correctness for 327 /330 
+
+(99 .1% ) successful repairs, with only three regressions, and transforms 18 patches into the developer-written solution. These results demonstrate that T RIM generalizes from Linux kernel security repair to repository-level program repair with-out modifying its core hierarchical minimization algorithm. Additionally, T RIM -generated minimized patches also sub-stantially reduce other static measures of C ODE SLOP , like verbosity [13], as shown in Table IVd.          
+
+> RQ4 Summary
+> TRIM generalizes across domains, achieving comparable CODE SLOP reduction on SWE-Bench-Verified while preserving oracle correctness on 99.1% successful repairs. T RIM also re-duces other static definitions of C ODE SLOP , like verbosity.
+
+VII. R ELATED WORK 
+
+AI Slop. In NLP, the term “slop” characterizes low-quality, verbose, or stylistically degraded AI-generated text [27]. More relevant to us, a growing line of SE work studies the quality degradation of agent-generated code — redundant construc-tions, duplication, and the concentration of complexity in already-complex functions — and shows that these properties worsen as agents extend their own code over long hori-zons [13, 14, 17]. That work terms slop as a static quality property of the code an agent retains: verbose or over-complex code that nonetheless still performs work, and that is measured directly on the surviving source. Our notion is orthogonal. CODE SLOP is functional redundancy — edits that can be removed in their entirety while the patch still passes its tests — and it is a structural artifact of the agent’s search trajectory 
+
+rather than a stylistic property of any one line. The two genuinely differ: a removable edit may be perfectly clean code (so static quality metrics wouldn’t flag it), while an eroded but irreducible function is not removable at all. To our knowledge, we are the first to (i) formalize slop as removable functional redundancy within an agent patch, and (ii) propose algorithms that remove it while preserving test-defined correctness. 
+
+Minimization. Reducing an artifact to a minimal form, such that it still satisfies a property, has been explored in re-search like Delta Debugging [18]—which isolates a 1-minimal failure-inducing input, and its hierarchical variant HDD [26], which exploits syntactic structure for efficiency. These works caused a flurry of program-reducing research, like test-case reducers such as C-Reduce [28] and Perses [29], program-debloating works like Chisel [30], and other related debloating works minimizing at the container [31], bytecode [32], or load-time [33] granularity. A recent thread [34] minimizes the input context to a coding agent: extracting a minimal yet sufficient context that allows a model to synthesize a correct patch. In contrast, T RIM targets a different objective. Rather than minimizing source code or LLM context, T RIM minimizes the patch an agent generates, removing redundant edits that agents accumulate while resolving an issue. 
+
+Agents. Agents that condense all the relevant context into a single prompt tend to perform poorly on repository-level benchmarks [21, 23]. This limitation motivated a shift toward autonomous SE agents: SWE A GENT [11] established the paradigm by granting LLMs access to computer-use tools, and its bash-only variant (M INI SWE A GENT ) now serves as a standard scaffold for evaluating LLMs on SWE-bench [11, 21, 35]. A wave of subsequent agentic frameworks followed, among them O PEN HANDS [25], TRAE [36], Live-SWE-agent [37], CodeResearcher [38], and CRASH FIXER 
+
+[24]. In this work, we analyze and minimize trajectories for four of the above coding agents and show that T RIM can significantly reduce C ODE SLOP in their submitted patches. VIII. T HREATS TO VALIDITY 
+
+A. Discussion 
+
+Our results suggest that Patch Minimization is fundamen-tally a search problem rather than a generation problem. Trajectory-guided counterfactual search consistently outper-forms prompting an LLM to rewrite its own patch, while avoiding the reliability issues of agentic minimization. Unlike Delta Debugging, which treats patches as largely independent hunks, T RIM exploits the dependencies naturally encoded in repair trajectories, matching exhaustive hunk-level minimiza-tion at roughly half the validation cost. Moreover, because TRIM progressively refines the search from coarse to fine granularity while maintaining a valid patch throughout, it exposes a practical cost–quality trade-off, allowing users to stop at any stage depending on their available validation budget. 
+
+1) Internal Validity: Edit granularity. TRIM ’s smallest removable unit is an atomic edit action. Thus, redundancy within a single edit action cannot be eliminated, making the reported ∆Slop a conservative lower bound. 
+
+Oracle imperfection. TRIM relies on the task-specific test suite ( T F ) as a proxy for program correctness, so untested regressions may go undetected. Empirically, oracle regressions are rare (3/330 SWE-Bench patches and at most ∼1% on Live-kBench). In addition, Live-kBench semantic equivalence is evaluated using an LLM judge, whose inherent bias may slightly affect the reported absolute gains. 
+
+2) Construct Validity: Conditioning and evaluation. TRIM 
+
+operates only on successful repairs, and our evaluation addi-tionally requires every minimized patch to satisfy a hidden oracle, although deployment relies only on T F . Both choices make the reported effectiveness a conservative lower bound. 
+
+3) External Validity: Benchmark generality. Our evalua-tion spans both security-critical kernel repair and repository-level repair. While only trajectory preprocessing is benchmark-specific, other domains may exhibit different trajectory struc-tures or testing workflows that affect ∆Slop performance. 10 TABLE IV: Effect of T RIM on SWE-Bench-Verified ( 327 oracle-preserved patches). 
+
+(a) Overall minimization.         
+
+> Metric Edits Hunks Lines (Total) Lines (Mod. files)
+> ∆Slop %23.6% 17.8% 63.5% 20.0%
+
+(d) % of AP -introduced verbosity [22] re-moved, across the 90 minimized instances.              
+
+> File type Intro. Verb Rem. Verb %Removed
+> Scratch repro 1006 1006 100% Source 650 122 19% Tests 238 121 51%
+> Total 1894 1249 66%
+
+(b) Breakdown by file type.              
+
+> File type ∆Slop %Share of removed lines
+> Scratch repro scripts 100% 49.6% Build / config 100% 35.8% Documentation 100% 0.2% Source 20.4% 11.5% Tests 18.6% 2.9%
+
+(c) Structural changes.                   
+
+> Outcome # Cases # Files
+> Unchanged ( MP =AP )237 —Minimized 90 Single file, trimmed 54 —Multi-file, same count 12 —Multi-file, fewer files 24 62 Scratch 32 Source 14 Tests 7Build/config 6Docs 3
+> Total 327 62
+
+IX. C ONCLUSION 
+
+In this work, we formally define the term C ODE SLOP ,and equate the task of minimizing C ODE SLOP to P ATCH 
+
+MINIMIZATION . We highlight that redundant edits in agent tra-jectories are one of the main root causes of the C ODE SLOP ob-served in agent patches. We then present T RIM —a trajectory-aware minimization algorithm that minimizes edit-actions in agent trajectories. Empirically, we show that T RIM uses this indirect technique to efficiently minimize up to 32 .9% of CODE SLOP for half the cost of Delta Debugging. REFERENCES 
+
+[1] Anthropic, PBC. (2026) Claude Code by Anthropic — AI Coding Agent, Terminal, IDE. [Online]. Available: https://claude.com/product/claude-code [2] GitHub, Inc. (2026) Claude Code by Anthropic —AI Coding Agent, Terminal, IDE. [Online]. Available: https://github.com/features/copilot [3] Anysphere, Inc. (2026) Cursor: The best coding agent. [Online]. Available: https://cursor.com [4] A. Roychoudhury, C. P˘ as˘ areanu, M. Pradel, and B. Ray, “Agentic ai software engineers: Programming with trust,” 
+
+Communications of the ACM , vol. 69, no. 5, pp. 56–58, 2026. [5] I. Ceka, S. Pujar, S. Ramji, L. Buratti, G. Kaiser, and B. Ray, “Understanding software engineering agents through the lens of traceability: An empirical study,” 2026. [6] S. Nakashima, Y. Ishimoto, M. Kondo, S. Mclntosh, and Y. Kamei, “Why agentic-prs get rejected: Acomparative study of coding agents,” arXiv preprint arXiv:2602.04226 , 2026. [7] S. A. Asdaque, I. Haider, M. U. Malik, M. A. Ghafoor, and A. A. Bangash, “Novice developers produce larger review overhead for project maintainers while vibe cod-ing,” arXiv preprint arXiv:2602.23905 , 2026. [8] M. Kim, D. Wang, S. Cui, F. Farmahinifarahani, S. Garg, B. Ray, T. Y. Zhuo, R. Mukherjee, and V. Kumar, “Traje-val: Decomposing code agent trajectories for fine-grained diagnosis,” arXiv preprint arXiv:2603.24631 , 2026. [9] Y.-A. Xiao, P. Gao, C. Peng, and Y. Xiong, “Improving the efficiency of llm agent systems through trajectory reduction,” arXiv preprint arXiv:2509.23586 , 2025. [10] Syzkaller, “Memory leak in map create,” 2025. [Online]. Available: https://syzkaller.appspot.com/bug? extid=cf08c551fecea9fd1320 [11] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. Narasimhan, and O. Press, “SWE-agent: Agent-computer interfaces enable automated software engi-neering,” Advances in Neural Information Processing Systems , vol. 37, pp. 50 528–50 652, 2024. [12] K. Watanabe, T. Shirai, Y. Kashiwa, and H. Iida, “What to cut? predicting unnecessary methods in agentic code generation,” arXiv preprint arXiv:2602.17091 , 2026. [13] G. Orlanski, D. Roy, A. Yun, C. Shin, A. Gu, A. Ge, D. Adila, N. Roberts, F. Sala, and A. Albarghouthi, “Slopcodebench: Benchmarking how coding agents de-grade over long-horizon iterative tasks,” arXiv preprint arXiv:2603.24755 , 2026. [14] S. Dou, H. Jia, S. Wu, H. Zheng, M. Wu, Y. Tao, M. Zhang, M. Chai, J. Fan, Z. Xi et al. , “What is wrong with your code generated by large language models? an extensive study,” Science China Information Sciences ,vol. 69, no. 1, p. 112107, 2026. [15] H. He, C. Miller, S. Agarwal, C. K¨ astner, and B. Vasilescu, “Speed at the cost of quality: How cursor ai increases short-term velocity and long-term complex-ity in open-source projects,” 23rd International Mining Software Repositories Conference (MSR)) , 2026. [16] R. Ehsani, S. Rawal, Y. Cai, and P. Chatterjee, “Faster code, deeper debt? a multivocal literature review on technical debt and its early signs in llm-assisted software development,” ACM Transactions on Software Engineer-ing and Methodology , 2026. [17] A. A. Abbassi, L. Da Silva, A. Nikanjam, and F. Khomh, “A taxonomy of inefficiencies in llm-generated python code,” in 2025 IEEE International Conference on Soft-ware Maintenance and Evolution (ICSME) . IEEE, 2025, pp. 393–404. [18] A. Zeller, “Yesterday, my program worked. today, it does not. why?” SIGSOFT Softw. Eng. Notes , vol. 24, no. 6, p. 253–267, Oct. 1999. [Online]. Available: https://doi.org/10.1145/318774.318946 [19] Git, “Git bisect,” 2026. [Online]. Available: https: //git-scm.com/docs/git-bisect [20] C. Huang, A. Mathai, F. Yu, A. Nogikh, P. Maniatis, 11 F. Ivanˇ ci´ c, E. Wu, K. Kaffes, J. Yang, and B. Ray, “Outrunning llm cutoffs: A live kernel crash resolution benchmark for all,” 2026. [Online]. Available: https: //arxiv.org/abs/2602.02690 [21] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. Narasimhan, “SWE-bench: Can lan-guage models resolve real-world github issues?” arXiv preprint arXiv:2310.06770 , 2023. [22] G. Orlanski, D. Roy, A. Yun, C. Shin, A. Gu, A. Ge, D. Adila, F. Sala, and A. Albarghouthi, “Slopcodebench: Benchmarking how coding agents degrade over long-horizon iterative tasks,” 2026. [Online]. Available: https://arxiv.org/abs/2603.24755 [23] A. Mathai, C. Huang, P. Maniatis, A. Nogikh, F. Ivanˇ ci´ c, J. Yang, and B. Ray, “Kgym: A platform and dataset to benchmark large language models on linux kernel crash resolution,” Advances in Neural Information Processing Systems , vol. 37, pp. 78 053–78 078, 2024. [24] A. Mathai, C. Huang, S. Ma, J. Kim, H. Mitchell, A. Nogikh, P. Maniatis, F. Ivanˇ ci´ c, J. Yang, and B. Ray, “CrashFixer: A crash resolution agent for the Linux kernel,” arXiv preprint arXiv:2504.20412 , 2025. [25] X. Wang, B. Li, Y. Song, F. F. Xu, X. Tang, M. Zhuge, J. Pan, Y. Song, B. Li, J. Singh et al. , “Openhands: An open platform for ai software developers as generalist agents,” arXiv preprint arXiv:2407.16741 , 2024. [26] G. Misherghi and Z. Su, “Hdd: hierarchical delta debugging,” in Proceedings of the 28th International Conference on Software Engineering , ser. ICSE ’06. New York, NY, USA: Association for Computing Machinery, 2006, p. 142–151. [Online]. Available: https://doi.org/10.1145/1134285.1134307 [27] C. Shaib, T. Chakrabarty, D. Garcia-Olano, and B. C. Wallace, “Measuring ai ”slop” in text,” 2026. [Online]. Available: https://arxiv.org/abs/2509.19163 [28] J. Regehr, Y. Chen, P. Cuoq, E. Eide, C. Ellison, and X. Yang, “Test-case reduction for c compiler bugs,” SIGPLAN Not. , vol. 47, no. 6, p. 335–346, Jun. 2012. [Online]. Available: https://doi.org/10.1145/ 2345156.2254104 [29] C. Sun, Y. Li, Q. Zhang, T. Gu, and Z. Su, “Perses: syntax-guided program reduction,” in Proceedings of the 40th International Conference on Software Engineering ,ser. ICSE ’18. New York, NY, USA: Association for Computing Machinery, 2018, p. 361–371. [Online]. Available: https://doi.org/10.1145/3180155.3180236 [30] K. Heo, W. Lee, P. Pashakhanloo, and M. Naik, “Effective program debloating via reinforcement learning,” in Proceedings of the 2018 ACM SIGSAC Conference on Computer and Communications Security ,ser. CCS ’18. New York, NY, USA: Association for Computing Machinery, 2018, p. 380–394. [Online]. Available: https://doi.org/10.1145/3243734.3243838 [31] V. Rastogi, D. Davidson, L. De Carli, S. Jha, and P. McDaniel, “Cimplifier: automatically debloating containers,” in Proceedings of the 2017 11th Joint Meeting on Foundations of Software Engineering , ser. ESEC/FSE 2017. New York, NY, USA: Association for Computing Machinery, 2017, p. 476–486. [Online]. Available: https://doi.org/10.1145/3106237.3106271 [32] Y. Jiang, D. Wu, and P. Liu, “Jred: Program customiza-tion and bloatware mitigation based on static analysis,” 06 2016, pp. 12–21. [33] A. Quach, A. Prakash, and L. Yan, “Debloating software through Piece-Wise compilation and loading,” in 27th USENIX Security Symposium (USENIX Security 18) .Baltimore, MD: USENIX Association, Aug. 2018, pp. 869–886. [Online]. Available: https://www.usenix.org/ conference/usenixsecurity18/presentation/quach [34] H. Jia, E. T. Barr, and S. Mechtaev, “Compressing code context for llm-based issue resolution,” 2026. [Online]. Available: https://arxiv.org/abs/2603.28119 [35] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. Narasimhan, “SWE-bench leader-boards,” https://www.swebench.com/, 2025. [36] Trae Research Team, P. Gao, Z. Tian, X. Meng, X. Wang, R. Hu, Y. Xiao, Y. Liu, Z. Zhang, J. Chen, C. Gao, Y. Lin, Y. Xiong, C. Peng, and X. Liu, “Trae agent: An LLM-based agent for software engineering with test-time scaling,” 2025. [Online]. Available: https://arxiv.org/abs/2507.23370 [37] C. S. Xia, Z. Wang, Y. Yang, Y. Wei, and L. Zhang, “Live-SWE-agent: Can software engineering agents self-evolve on the fly?” arXiv preprint arXiv:2511.13646 ,2025. [38] R. Singh, S. Joel, A. Mehrotra, N. Wadhwa, R. B. Bairi, A. Kanade, and N. Natarajan, “Code Researcher: Deep research agent for large systems code and commit history,” arXiv preprint arXiv:2506.11060 , 2025. 12
