@@ -1,0 +1,758 @@
+Title: CodeRescue: Budget-Calibrated Recovery Routing for Coding Agents
+
+URL Source: https://arxiv.org/pdf/2607.19338v1
+
+Published Time: Wed, 22 Jul 2026 01:23:37 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+Preprint. Under review. 
+
+# CodeRescue: Budget-Calibrated Recovery Routing for Coding Agents 
+
+Qijia He 1,3 Jiayi Cheng 2,3† Chenqian Le 2,3† Rui Wang 1† Xunmei Liu 1† Yixian Chen 4† 
+
+Jie Mei 3 Zhihao Wang 3 Xupeng Chen 3 Yuhuan Chen 3 Tao Wang 31University of Washington 2New York University 3ByteDance 4Amazon 
+
+Abstract 
+
+Coding agents increasingly operate in executable environments where a failed attempt produces actionable feedback rather than merely an incorrect answer. Existing cost-aware systems typically treat such failures as cascade decisions: try a cheap model first, then escalate hard cases to a stronger and more expensive model. In coding, however, execution feedback can also make further cheap-model recovery worthwhile, raising a budgeted de-ployment question: when should an agent spend more cheap compute, and when should it escalate? We formulate this post-failure decision as recovery routing over heterogeneous actions and train a supervised router from exe-cution rollouts. To make the same router usable under changing budgets, we add a Conformal Risk Control (CRC) layer that selects a deployment-time cost penalty without retraining and provides marginal expected-cost control under exchangeability. Across held-out failures from five coding benchmarks, cheap recovery and escalation exhibit complementary success patterns. The calibrated frontier improves over fixed actions, prompt-only routers, and a binary cascade baseline; in the main GPT-5.4-NANO /GPT-5.4 setting, one CRC-calibrated frontier point exceeds always-escalate 
+
+solve rate while using 35% of its mean recovery cost. Code is available at 
+
+https://github.com/Qijia-He/agent-budget-control .
+
+1 Introduction 4)  Budget-Controlled Recovery Router                                                             
+
+> Routing
+> Pass Fail
+> 5) Recovery Actions 1) Input
+> Problem q— Building an Amusement Park
+> 2) Cheap Initial Attempt
+> solution.py
+> def feasible(r, pts, k):
+> events =[]
+> for x, yin pts:
+> d=hypot(x, y)
+> if d>2*r: continue
+> a=atan2(y, x)
+> delta =acos(d /(2*r))
+> events += [(a-delta, 1),
+> (a+delta, -1)]
+> ... #bug: no ±π wrap-around
+> 3) Executor & Observe Failure
+> $pytest
+> >test_angle_wraparound()
+> Expected: True
+> Got: False
+> FAILED at the ±π boundary
+> Reflect
+> Replan
+> Escalate
+> 6) Execute Recovered Solution
+> $pytest
+> >test_angle_wraparound()
+> PASSED
+> wrap-around case fixed
+> Repair using feedback
+> low high
+> Cost
+> discard and solve again
+> low high
+> Cost
+> send to strong model
+> low high
+> Cost Output
+> All hidden
+> tests passed
+> √PASSED
+> Action-selection rule
+> CRC Budget Calibration
+> User Budget Cost penalty
+> Recovery
+> unsuccessful
+> ：problem
+> ：verdict
+> ：stderr
+> Trained router
+> Find the minimum radius of a circle
+> that touches the orgin and covers at
+> least k points.
+> Budgeted operating points
+> Solve Rate
+> Mean Recovery Cost
+> 0%
+> 25%
+> 50%
+> 75%
+> 100%
+> $$$ $$$
+> B = $
+> (tight
+> budget)
+> B = $$
+> (pareto:
+> best
+> balance)
+> B = $$$
+> (looser
+> budget)
+
+Figure 1: Budget-controlled recovery routing. After a cheap coding attempt fails, the router uses the problem, verdict, and stderr to score recovery actions. CRC maps a user budget B
+
+to a cost penalty bλ(B), producing different budgeted operating points from the same trained router before re-execution. 
+
+†Equal contribution. 
+
+1arXiv:2607.19338v1 [cs.AI] 21 Jul 2026 Preprint. Under review. Recent work has moved code generation beyond isolated programming problems toward software-engineering agents that inspect repositories, edit files, execute commands, run tests, and iterate on failures (Jimenez et al., 2024; Yang et al., 2024; Jain et al., 2024; Wang et al., 2025; Pan et al., 2025; Ye et al., 2026). This shift is also visible in frontier-model reports, where coding capability is increasingly evaluated through repository-level patch generation, terminal use, sandboxed execution, and long-horizon agentic workflows (OpenAI, 2025b;a; Anthropic, 2025a; Google DeepMind, 2025). As coding agents become interactive systems rather than one-shot generators, inference is no longer a single model call. Each failed attempt creates a new decision point: should the agent repair the existing solution using execution feedback, start over with a different plan, or invoke a stronger model? Consider a developer asking an agent to implement a parser. A cheap model may produce code that fails a hidden boundary-case test. One reasonable response is to patch the existing logic using the error feedback; another is to discard the brittle strategy and generate a fresh implementation; a third is to call a stronger model if the failure suggests a deeper algorithmic issue. These responses have different costs, and the cheapest useful next step depends on the instance. Cost-aware LLM inference has therefore been studied through routing and cascading. Routers assign each query to a weak or strong model before generation, while cascades try a cheap model first and defer uncertain cases to a stronger model (Chen et al., 2024a; Ding et al., 2024; Ong et al., 2025; Dekoninck et al., 2025; Valkanas et al., 2025). These abstractions are powerful, but they often treat a weak model’s failure primarily as evidence that more capable model parameters are needed. This can leave useful cheap-model capacity on the table. Recent work on test-time scaling suggests a broader view: for many reasoning tasks, allocating more inference-time computation to the same model can be competitive with switching to a larger model (Snell et al., 2025). Coding agents make this distinction especially concrete because failed execution is itself informative. A compiler error, failed assertion, wrong output, timeout, or rejected patch can turn an underspecified programming problem into a diagnosed repair problem. In such cases, spending another cheap call with the right feedback may exploit the small model more effectively than immediately escalating. Thus the relevant decision is not only which model to call, but which recovery action to take. This motivates a recovery-action view of coding-agent inference. Production coding agents such as Claude Code and Codex expose the broader interaction pattern: they read codebases, edit files, run commands or tests, and continue from tool feedback (Anthropic, 2025b; OpenAI, 2025a). We instantiate this idea with a three-action post-failure router. After a cheap model fails, the router observes the problem statement, execution verdict, and stderr trace, then chooses among reflect (revise using feedback), replan (solve again with the cheap model from a fresh plan), and escalate (defer to a stronger model). We choose these actions as a minimal first-order recovery set rather than an exhaustive taxonomy of agent interventions. They span three common post-failure hypotheses: the current trajectory may be locally repairable using execution feedback, the trajectory may be wrong but the cheap model may still succeed from a fresh plan, or the failure may reflect a capability gap requiring a stronger model. Prior work supports each axis: feedback-driven code repair and iterative reflection motivate reflect (Shinn et al., 2023; Chen et al., 2024b; Zhong et al., 2024; Li et al., 2025); test-time compute scaling and repeated sampling motivate replan (Snell et al., 2025; Brown et al., 2024); and cost-aware routing and cascading motivate escalate (Chen et al., 2024a; Ding et al., 2024; Ong et al., 2025; Valkanas et al., 2025). Our successful-action analysis suggests that these actions are not strictly ordered: reflect and replan are much cheaper than escalate , but they are not uniformly worse; some examples are solved by cheap recovery actions, some require escalation, and some are not solved by any available action. We train the router from execution rollouts by labeling each example with the cheapest successful recovery action, and evaluate decisions by solve rate rather than plain classification accuracy because multiple actions may solve the same task. Beyond choosing the right recovery action, deployment adds another challenge: the desired cost-quality trade-off may change across users, workloads, and operating budgets. Some budget-aware routing methods optimize policies with a budget or cost target built into the training objective or constrained optimization problem (Zhang et al., 2026). Separately, con-formal cascade methods show that calibration can provide deployment-time guarantees, but 2Preprint. Under review. they typically calibrate scalar thresholds for accept/defer or stop/escalate decisions (Jung et al., 2025; Valkanas et al., 2025). Our setting requires budget control over heterogeneous recovery actions whose success patterns are non-monotone. We address this by placing a Conformal Risk Control (CRC) layer on top of a single trained router (Angelopoulos et al., 2024). CRC calibrates a deployment-time cost penalty that shifts the router from uncon-strained argmax toward cheaper actions, yielding marginal expected-cost control under exchangeability without retraining the router for each budget. Importantly, the guarantee concerns cost rather than solve rate, so the recovery actions can have non-monotone success patterns. The result is a discrete, budget-controllable frontier: tighter budgets select cheaper recovery behavior, while looser budgets permit more aggressive use of escalation. This paper makes three key technical contributions: • Post-failure recovery routing. We formulate coding-agent recovery as routing over 
+
+reflect , replan , and escalate actions after execution feedback is observed. • Budget-controllable deployment. We add a CRC-calibrated cost knob that pro-duces multiple budgeted operating points from one trained router with marginal expected-cost control, without retraining for each budget. • Empirical recovery trade-offs. We provide empirical evidence on held-out coding-agent failures that cheap recovery and model escalation can be complementary, yielding a discrete cost–quality frontier. 
+
+2 Related Work 
+
+Cost-aware routing, cascading, and orchestration. Cost-aware LLM inference studies how to spend expensive model calls only when they are useful. Early and recent systems approach this either by routing inputs before generation or by cascading through models at inference time. FrugalGPT (Chen et al., 2024a) learns cascades over multiple LLM APIs, while HybridLLM (Ding et al., 2024) and RouteLLM (Ong et al., 2025) train pre-inference routers that choose between weaker and stronger models from the input query. AutoMix (Aggarwal et al., 2024) routes to larger models after an initial small-model answer using approximate self-verification, and Cascade Routing (Dekoninck et al., 2025) unifies routing and cascading. C3PO (Valkanas et al., 2025) adds explicit cost constraints to model cascades, while RACER (Zhang et al., 2026) optimizes a robust budget-aware router between reasoning and non-reasoning judges. These methods establish the importance of adaptive compute allocation, but their decisions are typically about which model, judge, or tool to invoke. Moreover, in budget-aware optimization approaches such as RACER, the budget enters the policy-learning objective; changing the deployment budget generally requires rerunning the optimization. In our setting, the recovery router is trained once; after one calibration pass, changing budgets only requires re-scanning a stored cost-penalty table. 
+
+Coding agents, execution feedback, and iterative recovery. Recent coding-agent work shifts code generation from single-shot prediction to executable software-engineering en-vironments. SWE-bench (Jimenez et al., 2024) evaluates agents on real repository issues with test-based validation, and SWE-agent (Yang et al., 2024) shows that an agent-computer interface can let language models inspect files, edit code, and run commands. R2E (Jain et al., 2024), OpenHands (Wang et al., 2025), SWE-Gym (Pan et al., 2025), and Agents’ Last Exam (Sun et al., 2026) broaden this direction through executable environments, open agent platforms, training data, and long-horizon coding-tool tasks. Across these systems, execution feedback becomes a first-class signal: compiler errors, failed tests, wrong outputs, and timeouts can turn a failed attempt into a repair problem rather than merely a failed answer. Feedback-driven code repair methods such as Self-Debugging (Chen et al., 2024b) and LDB (Zhong et al., 2024) show how execution information can support local debugging, while iterative-improvement methods such as Self-Refine (Madaan et al., 2023) and Reflexion (Shinn et al., 2023) demonstrate the broader value of revision from feedback. A separate inference-scaling line shows that the same model can gain coverage from additional attempts: test-time compute scaling (Snell et al., 2025) and repeated sampling (Brown et al., 3Preprint. Under review. 2024) motivate fresh cheap-model replanning as an alternative to immediate escalation. These works motivate spending more computation after failure, but they do not decide which recovery mode is worth its cost. We study this budgeted choice directly: when to spend cheap compute on feedback-driven repair or replanning, and when to escalate to a stronger model. 
+
+Conformal and selective deployment guarantees. Conformal methods provide a way to turn a held-out calibration set into deployment-time statistical guarantees. Conformal Risk Control (CRC) (Angelopoulos et al., 2024) extends conformal calibration beyond prediction-set coverage to bounded risks, making it a natural tool for controlling quantities such as error, abstention, or cost. In LLM systems, Trust or Escalate (Jung et al., 2025) uses conformal calibration to decide when a weaker judge can be trusted and when to escalate, while C3PO (Valkanas et al., 2025) is closest to our calibration goal in applying conformal tools to cost-constrained LLM cascades. The distinction is in the calibrated decision space: these methods largely operate along an ordered trust/escalate or stop/escalate path, whereas we calibrate a cost-regularized policy over heterogeneous post-failure recovery actions. Our guarantee is therefore a mean-cost guarantee for the recovery router, not a claim that the actions form a monotone cascade or that solve rate is conformally controlled. 
+
+3 Method 
+
+3.1 Problem Setup 
+
+We study post-failure recovery routing for code generation. A cheap base model first attempts a programming task, and the generated code is executed by the evaluation environ-ment. We condition on cases where this initial attempt fails; all expectations in this section are over this conditional distribution of failed initial attempts. For each failed instance, the router observes a recovery context 
+
+x = ( q, v0, e0),where q is the problem statement, v0 ∈ V is the execution verdict (e.g., wrong answer, timeout, or compile error), and e0 is the stderr trace. The router then chooses one recovery action from 
+
+A = {reflect , replan , escalate }.The actions differ in their instruction and model: reflect asks the cheap model to use the execution feedback for a local repair; replan asks the cheap model to generate a fresh solution from a different plan; and escalate sends the problem and execution feedback to a stronger model. The verdict and stderr trace provide the router with a compact post-failure signal without requiring the failed code itself as input. These actions are interventions rather than mutually exclusive failure labels. The router is not asked to diagnose the true cause of failure; it chooses which additional computation to spend under a budget. Each action a ∈ A has an associated deployment cost estimate c(a, x) > 0 available to the router and calibrator, priced from the tokens consumed or expected for that action under model-specific input and output rates. Let S(x) ⊆ A denote the set of actions that solve instance x. A deployment policy π : X → A succeeds on x if π(x) ∈ S(x) and incurs cost 
+
+c(π(x), x). The ideal budgeted recovery problem is max  
+
+> π
+
+E [1{π(X) ∈ S(X)}] s.t. E[c(π(X), X)] ≤ B,where B is a user-specified mean recovery budget. Unlike a standard model cascade, the action set is not assumed to form an ordered ladder of increasing capability: S(x) need not be monotone with action cost, and some failures may remain unsolved by any available action. Section 5 analyzes this structure empirically and reports realized API costs on held-out rollouts. 4Preprint. Under review. 
+
+3.2 Supervised Recovery Router 
+
+We collect offline recovery rollouts and let S(x) ⊆ A be the set of actions that pass the evaluator on instance x. The oracle label is the cheapest successful action, 
+
+a†(x) ∈ arg min  
+
+> a∈S(x)
+
+c(a, x),with ties broken deterministically. Examples with S(x) = ∅ are excluded from router training. This supervision differs from ordinary multiclass classification: multiple actions can solve the same instance, so predicting an action different from a†(x) is not a deployment error if that action also lies in S(x). We therefore evaluate the router primarily by solve rate 
+
+E[1{π(X) ∈ S(X)}], together with mean recovery cost. The cheapest-successful label is a practical proxy for training a single-action router; it should not be interpreted as a calibrated estimate of the probability that each action succeeds. The router is a supervised fine-tuned language model. Given recovery context x, it scores each action by the average log-probability of its label tokens under the model, then normal-izes via softmax over A. Let sθ (a | x) ∈ (0, 1 ) denote this normalized probability for action 
+
+a. The unconstrained router chooses π0(x) = arg max a sθ (a | x), which provides a single operating point on the cost–quality frontier. 
+
+3.3 Cost-Regularized Policy 
+
+To expose multiple operating points from the same router without retraining, we introduce a scalar cost penalty λ ≥ 0 and define 
+
+πλ(x) = arg max  
+
+> a∈A
+
+{sθ (a | x) − λc(a, x)} .When λ = 0 this recovers the unconstrained argmax router; as λ increases, the policy shifts toward cheaper recovery actions. For fixed x, the selected action switches between actions a and b (with c(a, x) > c(b, x)) at the breakpoint 
+
+λab (x) = sθ (a | x) − sθ (b | x)
+
+c(a, x) − c(b, x) ;see Appendix A for derivation. Taking the union of all pairwise breakpoints over every xi
+
+in the calibration set yields a finite sorted grid ΛK = {λ1 < · · · < λK }, where K denotes the total number of distinct breakpoints. Within each interval (λk, λk+1) the selected action is constant, so the cost–quality frontier is piecewise constant in λ.Let Cλ(x) = c(πλ(x), x) be the selected recovery cost. By the argument in Lemma 1, Cλ(x) is non-increasing in λ. The solve indicator 1{πλ(x) ∈ S(x)} need not be monotone. However, at intermediate budgets the policy may over-route to cheap actions, sending instances to 
+
+reflect or replan even when escalate is the only element of S(x). This non-monotonicity is why cost–quality curves need not be concave or even monotone, and why operating points should be selected empirically; Section 5 reports the aggregate frontier, while Appendix D shows non-monotone per-benchmark cases. 
+
+3.4 Conformal Budget Calibration 
+
+Following Angelopoulos et al. (2024), we select λ ∈ ΛK to control the mean recovery cost at a user-specified budget B. Let x1, . . . , xn be an exchangeable calibration set of router invocations—each xi = ( qi, v0, i, e0, i ) is a held-out failed instance on which the router was not trained. For each λk ∈ ΛK, the empirical mean recovery cost is 
+
+bCn(λk) = 1
+
+n
+
+> n
+
+# ∑
+
+> i=1
+
+c πλk (xi), xi
+
+ .5Preprint. Under review. 
+
+Algorithm 1 Budget-Controllable Recovery Routing 
+
+Require: Training rollouts Dtrain , calibration split Dcal = {xi}ni=1, test instances Dtest , per-instance costs {c(a, xi)}, budget B 
+
+> 1:
+
+For each x ∈ D train with S(x)̸ = ∅, assign a†(x) ← arg min a∈S(x) c(a, x) 
+
+> 2:
+
+Fine-tune router θ on {(x, a†(x)) } via cross-entropy  
+
+> 3:
+
+Compute breakpoint grid: 
+
+ΛK ← { 0} ∪ 
+
+
+
+∪i∈{ 1,.., N}
+
+ sθ (a | xi) − sθ (b | xi)
+
+c(a, xi) − c(b, xi) xi ∈ D cal , a̸ = b, c(a, xi) > c(b, xi)
+
+  
+
+> 4:
+
+Sort ΛK ascending; for each λk ∈ ΛK compute 
+
+bCn(λk) ← 1
+
+n
+
+> n
+
+# ∑
+
+> i=1
+
+c
+
+
+
+arg max  
+
+> a
+
+{sθ (a | xi) − λkc(a, xi)}, xi
+
+ 
+
+> 5:
+
+bλ ← min 
+
+(
+
+λk ∈ ΛK : n bCn(λk) + cmax 
+
+n + 1 ≤ B
+
+) 
+
+> 6:
+
+Deploy : for each x ∈ D test , predict a∗ = arg max a∈A {sθ (a | x) − bλ c(a, x)}
+
+Let cmax = sup a,x c(a, x) < ∞ be a known cost cap. We select the least restrictive penalty that satisfies a finite-sample budget constraint: 
+
+bλ = min 
+
+(
+
+λk ∈ ΛK : n bCn(λk) + cmax 
+
+n + 1 ≤ B
+
+)
+
+.The additive cmax in the numerator is a leave-one-out conformal correction: replacing the 
+
+(n + 1)-th point with its worst-case cost cmax and averaging over all n + 1 points yields the left-hand side, which bounds the expected cost of a future test point. Under exchangeability and cost monotonicity (Lemma 1), this selection guarantees E[c(πbλ(xn+1), xn+1)] ≤ B;Section 4 states and proves the result. The full procedure appears in Algorithm 1. The grid ΛK and cost table { bCn(λk)}Kk=1 are computed once from the calibration split; adapting to a new budget B′ requires only re-scanning the stored table (step 5) with no retraining of θ.
+
+4 Conformal Budget Control 
+
+This section states the mean-cost guarantee used by our cost-constrained routing mode. Full proofs are deferred to Appendix A. We analyze the post-failure router-invocation distribution. For a fixed router, action set A,and finite candidate grid ΛK, the deployed policy is 
+
+aλ(x) = arg max  
+
+> a∈A
+
+{s(a | x) − λc(a, x)},where s(a | x) ∈ (0, 1 ) is the normalized router probability for action a (as defined in Section 3.2) and c(a, x) > 0 is the deployment cost of action a on instance x. We write 
+
+Cλ(x) = c(aλ(x), x) for the selected recovery cost and let cmax be an upper bound on c(a, x)
+
+over all a and x.We first record the only monotonicity property required by the calibration argument. 
+
+Lemma 1 (Cost monotonicity of the selected action) . For every fixed router input x , if 0 ≤
+
+λ1 < λ2, then Cλ2 (x) ≤ Cλ1 (x).Lemma 1 is only a statement about selected cost: increasing the penalty cannot make the router choose a more expensive action for the same input. It does not imply that solve rate is 6Preprint. Under review. monotone in λ. The budget constraint is therefore stated directly in terms of mean selected recovery cost, E[Cλ(X)] ≤ B. In special cases where the action costs separate into a cheap recovery tier and a more expensive escalation tier, this can also be interpreted as a bound on the rate of choosing high-cost actions; the guarantee below does not require that special cost structure. Given n calibration examples, define 
+
+bCn(λ) = 1
+
+n
+
+> n
+
+# ∑
+
+> i=1
+
+Cλ(Xi).CRC selects the smallest feasible penalty 
+
+bλCRC = min 
+
+(
+
+λ ∈ ΛK : n bCn(λ) + cmax 
+
+n + 1 ≤ B
+
+)
+
+.The additional cmax term accounts for a worst-case future point in the conformal leave-one-out argument. Now we state the formal result for budget control. Let N = n + 1, where Xn+1 is the test sample. Let X−j = {X1, ..., Xj−1, Xj+1, ..., XN } be the leave-one-out samples. Define the map from X−j to the grids as G: 
+
+> Λ−j
+
+= G(X−j)
+
+> G
+
+(X−j) := {0} ∪ 
+
+> 
+
+∪i∈{ 1,.., N,i̸ =j}  
+
+> sθ
+
+(a | xi ) − sθ (b | xi )
+
+> c
+
+(a, xi ) − c(b, xi ) a̸ = b, c(a, xi ) > c(b, xi )
+
+> 
+> .
+
+Theorem 2 (CRC mean-cost guarantee) . Let X1, . . . , Xn, Xn+1 be exchangeable router invoca-tions. Assume C λ(X) ∈ [0, cmax ] for all λ, and assume the sets 
+
+(
+
+λ ∈ Λ−i : ∑j̸ =i Cλ(Xj) + cmax 
+
+n + 1 ≤ B
+
+)
+
+are nonempty almost surely. Then the selected policy satisfies 
+
+EX1,..., Xn,Xn+1
+
+h
+
+CbλCRC (Xn+1)
+
+i
+
+≤ B.The expectation in Theorem 2 is marginal over both the calibration sample and the future router invocation. It should therefore not be read as a high-probability statement that every realized calibration split yields a population-cost-valid policy. This distinction is important in our experiments: CRC certifies the calibrate-then-deploy procedure’s expected cost, while solve rate and realized test cost are empirical properties measured on the held-out test split. Any solve-rate gains from changing λ are empirical properties of the learned router, not conformal guarantees. 
+
+5 Experiments 
+
+5.1 Experimental Setup Data and rollouts. We collect recovery rollouts from five code-generation benchmarks— APPS (Hendrycks et al., 2021), TACO (Li et al., 2023), BigCodeBench (Zhuo et al., 2025), LiveCodeBench (Jain et al., 2025), and CodeContests (Li et al., 2022)—spanning interview-level through competitive-programming difficulty. For each problem, the cheap model first produces an initial solution; if that solution fails the automated judge, we run recovery actions and record the successful-action set S(x). Each training example is labeled with the cheapest successful action, 
+
+a†(x) ∈ arg min  
+
+> a∈S(x)
+
+c(a, x),with ties broken deterministically; examples with S(x) = ∅ are excluded from three-class router training. We attempt approximately 27,300 problems with GPT-5.4-NANO as the 7Preprint. Under review.                           
+
+> Strategy Solve Cost (m$) Always-reflect 0.275 1.24 Always-replan 0.453 1.59 Always-escalate 0.686 7.22 Random 0.397 3.34
+> Ours (Qwen3.5-4B FT) 0.817 5.51 Router Solve Total cost (m$) Claude Sonnet 4.6 0.453 6.67 (4.67 + 2.0) Gemini 3.1 Pro 0.367 5.58 (3.88 + 1.7) GPT-5.4-nano 0.331 1.53 (1.43 + 0.1) GPT-5.4 0.328 3.87 (2.17 + 1.7)
+> Ours (Qwen3.5-4B FT) 0.817 5.51 (local)
+
+Table 1: Routing baselines on the GPT-5.4-nano holdout test split ( n=360). Left: fixed-action policies. Right: prompt-only models used as zero-shot routers. Costs are in millidollars; in the right table, parenthesized terms split the cost of the selected recovery action and the prompt-only router call. cheap model. This collection is filtered into a recovery dataset: roughly half of the problems are solved on the initial attempt and require no recovery, while about 30% of all attempted problems fail initially and are not solved by any of the three recovery actions. On failed problems, GPT-5.4-NANO provides the cheap reflect and replan rollouts, while GPT-5.4 provides the strong-model escalate rollout. After reserving a disjoint holdout of 360 calibration and 360 test problems for CRC calibration and final evaluation, the supervised training split contains 4,656 examples. All splits are stratified by source and share no problem IDs across training, calibration, and test. 
+
+Router training. We instantiate the recovery router with Q WEN 3.5-4B (Qwen Team, 2026) and fine-tune it as a three-way action scorer. Each router input consists of a compact metadata header—source, difficulty, and algorithm tag—followed by the problem statement, the execution verdict, and the stderr trace. The metadata supplies coarse distributional cues that are often absent from execution feedback alone, especially for wrong-output failures. The model is trained with full-parameter supervised fine-tuning; in our runs, we train for two epochs with learning rate 10 −5, cosine decay, and 10% warmup. At inference time, we score the labels by their average token log-probabilities and normalize the three scores with a softmax. Section 5.2.3 ablates the data recipes and backbone choices that led to this configuration. 
+
+Evaluation protocol. Our primary metric is solve rate : the fraction of test examples for which the router’s chosen action lies in S(x). Unlike classification accuracy, solve rate credits any successful action, reflecting the fact that multiple actions may solve the same instance. Cost is measured as the mean per-example USD billed by the API for the chosen recovery action and reported in millidollars (m$); Appendix B.2 gives the action-cost details. For each target budget B, we select the CRC penalty bλ on the 360-example calibration split using the procedure in Section 3.4. We then freeze bλ and report solve rate and realized mean cost on the disjoint 360-example test split. The calibration split is used only to choose the operating point; all reported solve rates and costs are measured on held-out test problems. 
+
+5.2 Results 
+
+5.2.1 Router Quality and Recovery Heterogeneity 
+
+Before adding budget control, we ask whether a trained recovery router is needed at all. Table 1 makes two comparisons: the left table tests whether any single fixed action is sufficient, and the right table tests whether a general-purpose LLM can act as a zero-shot router without supervised fine-tuning. The fixed-action comparison in the left half of Table 1 shows why instance-dependent routing is needed. Always-escalate is costly and still solves only 68.6% of failures, while the unconstrained learned router solves 81.7% at lower mean cost. Among cheap fixed policies, always-replan is strongest but remains far below the learned router. 8Preprint. Under review. 0% 25% 50% 75% 100%                              
+
+> TACO (medium)
+> TACO (med-hard)
+> TACO (hard)
+> TACO (very hard)
+> APPS (interview)
+> APPS (functional)
+> LiveCodeBench
+> BigCodeBench
+> 21% 28% 51% n=81
+> 22% 20% 59% n=97
+> 25% 28% 46% n=110
+> 53% 13% 35% n=55
+> 12% 37% 52% n=161
+> 14% 41% 45% n=92
+> 36% 8% 56% n=50
+> 78% 22% n=59
+> S(x)distribution
+> TACO
+> (med)
+> TACO
+> (med-h)
+> TACO
+> (hard)
+> TACO
+> (v.hard)
+> APPS
+> (intv.)
+> APPS
+> (func.)
+> LCB BCB
+> 0
+> 2
+> 4
+> 6
+> 8
+> 10
+> 12
+> Mean cost (m$)
+> 3.7
+> 4.3
+> 5.0 5.3
+> 3.2
+> 1.8
+> 3.7
+> 0.7
+> 6.4 6.6
+> 9.2
+> 12.2
+> 6.4
+> 3.5
+> 6.2
+> 7.6
+> Oracle vs. always-escalate cost
+> Oracle routing
+> Always-escalate
+> Cheap only (28%) Both (27%) Esc only (45%)
+
+Figure 2: Successful-action structure on the pooled GPT-5.4-NANO calibration and test holdout ( n=720). Left: benchmark-level distribution of S(x), grouped by cheap-only, overlapping cheap/escalation, and escalation-only recoveries. Right: mean oracle recovery cost compared with always-escalate , in millidollars per example. The left panel of Figure 2 explains this gap: recoverable failures do not follow a universal 
+
+reflect , replan , escalate ladder. Instead, all three regimes appear: 28% of failures are cheap-only, 45% are escalation-only, and 27% can be solved by both cheap recovery and escalation. These patterns also vary by benchmark, with BigCodeBench dominated by cheap-only recoveries and TACO (med-hard) more escalation-heavy. The right panel shows the cost implication: oracle routing yields large savings when cheap-only recoveries are common, but smaller savings when escalation is frequently unavoidable. For example, the BigCodeBench mean cost drops from 7.6 to 0.7 m$ under oracle routing. Thus the oracle cheapest successful action is both instance- and domain-dependent. The prompt-only comparison in the right half of Table 1 shows why the routing rule itself must be learned from rollouts. These models see the same action choices at inference time, but the best prompt-only router only matches always-replan ’s solve rate while costing substantially more. This suggests that the useful routing signal is not simply encoded in the action descriptions: the model must learn from rollouts which verdict, source, and failure patterns predict cheap recovery versus escalation. Together, Table 1 and Figure 2 show that supervised recovery rollouts provide the signal needed for the frontier analysis below. 
+
+5.2.2 Main Result: Budget-Controllable Frontier 
+
+We next compare CRC-calibrated recovery routing against the baselines above and a binary cascade baseline. The binary cascade represents the standard two-way defer setting in our post-failure context: a scalar threshold decides whether to use cheap recovery or 
+
+escalate . This instantiates the binary cheap/strong cascade structure used by systems such as FrugalGPT (Chen et al., 2024a) and the cost-controlled cascade setting of C3PO (Valkanas et al., 2025). Figure 3 shows that one trained router can be turned into a family of budgeted operating points. As the budget is relaxed, CRC moves the same router from cheap recovery be-havior toward more frequent escalation, tracing a discrete cost–solve-rate frontier without retraining. The frontier starts at 0.486 solve rate and 1.43 m$ per example, already above always-replan (0.453 at 1.59 m$), and reaches 0.817 at the unconstrained argmax point (5.51 m$). The most cost-effective gains occur at low and medium budgets. Around 2.56 m$, the three-action router reaches 0.717 solve rate, exceeding both the binary cascade at comparable cost (0.636) and always-escalate (0.686) while using only 35% of the always-escalate cost. Beyond this region, additional spending yields smaller marginal improvements: increasing mean cost from 2.56 to 5.51 m$ raises solve rate from 0.717 to 0.817, and the binary cascade becomes competitive near its high-cost peak. Thus CRC provides a practical budget knob for selecting points on the cost–quality frontier rather than a single fixed operating point. 9Preprint. Under review. 1 2 3 4 5 6 7 8  
+
+> Mean recovery cost per example (m$)
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> Solve rate
+> CRC frontier (ours)
+> Argmax ( = 0 )
+> Binary cascade
+> Prompt-only router Fixed-action baseline
+
+Figure 3: Cost–solve-rate frontier on the GPT-5.4-nano holdout test split. Blue circles: CRC operating points at different budget levels B; star marks the unconstrained argmax ( λ=0). Gray dashed: binary cascade baseline. Amber diamonds: prompt-only LLM routers (zero-shot, no SFT). Crosses: fixed-action baselines. 
+
+Metadata prefix Label type ✗ ✓
+
+Hard (cheapest action) 0.656 0.697 
+
+Soft (weighted copies †) 0.661 0.653 Fine-tuning method Backbone LoRA Full FT Qwen3-4B 0.594 0.644 Qwen3-8B 0.639 0.672 Qwen3.5-4B 0.697 0.700 
+
+> †
+
+Soft labels use weighted rollout copies (one example per unique action outcome per problem); 26,413 entries cover the same 4,656 problems as the hard-label set. Left table: backbone fixed to Qwen3.5-4B LoRA. Right table: data fixed to hard labels + metadata prefix. 
+
+Table 2: Router ablation on the GPT holdout test split ( n=360). Left : data-recipe ablation. 
+
+Right : backbone/method ablation. 
+
+5.2.3 Router Ablations and Cross-Model Check 
+
+The quality of the learned router determines the attainable frontier, so we also ablate the training recipe in Table 2. The most important data choice is the metadata prefix: with hard cheapest-action labels, adding metadata improves solve rate from 0.656 to 0.697. Soft labels via weighted rollout copies do not improve the final router in this setting. On the model side, Qwen3.5-4B is the strongest backbone we tried; full fine-tuning is slightly better than LoRA on Qwen3.5-4B and more clearly beneficial on Qwen3-4B. We therefore use the Qwen3.5-4B full fine-tune with hard labels and metadata as the primary router. To check that the result is not specific to the GPT model pair, we also repeat the recovery-routing pipeline with a G EMINI -2.5-F LASH /G EMINI -2.5-P RO pair; the setup and results are reported in Appendix C. 
+
+6 Conclusion 
+
+We studied budget-controllable recovery routing for coding agents. Instead of treating a failed cheap-model attempt as a binary defer decision, we formulate recovery as a choice among heterogeneous actions. This formulation matches a central property of executable coding environments: failures provide diagnostic feedback, and the cheapest useful next step is not always the strongest model. Our results provide evidence that cheap recovery and model escalation can be comple-mentary on held-out coding failures, and that a learned recovery router can outperform 10 Preprint. Under review. fixed-action and prompt-only routing baselines. Adding a CRC calibration layer turns the same trained router into a family of budgeted operating points with marginal expected-cost control, allowing deployment budgets to change without retraining the router. The study also has clear limitations. We model recovery as a single post-failure decision, while deployed coding agents often recover over multiple rounds. The cheapest-successful training label is a useful proxy rather than a calibrated estimate of each action’s success probability. CRC controls expected recovery cost rather than solve rate, so quality improve-ments remain empirical. Future work should extend recovery routing to multi-step agent trajectories and richer deployment constraints. 
+
+Acknowledgements 
+
+We thank Zixian Ma and Jaehun Jung for helpful discussion and feedback. 
+
+References 
+
+Pranjal Aggarwal, Aman Madaan, Ankit Anand, Srividya Pranavi Potharaju, Swaroop Mishra, Pei Zhou, Aditya Gupta, Dheeraj Rajagopal, Karthik Kappaganthu, Yiming Yang, Shyam Upadhyay, Manaal Faruqui, and Mausam. AutoMix: Automatically mixing language models. In Advances in Neural Information Processing Systems , 2024. URL https: //arxiv.org/abs/2310.12963 .Anastasios N. Angelopoulos, Stephen Bates, Adam Fisch, Lihua Lei, and Tal Schuster. Conformal risk control. In International Conference on Learning Representations , 2024. URL 
+
+https://arxiv.org/abs/2208.02814 .Anthropic. Introducing Claude 4, 2025a. URL https://www.anthropic.com/news/claude-4 .Anthropic. Claude 3.7 Sonnet and Claude Code, February 2025b. URL https://www. anthropic.com/news/claude-3-7-sonnet .Bradley Brown, Jordan Juravsky, Ryan Ehrlich, Ronald Clark, Quoc V. Le, Christopher R ´e, and Azalia Mirhoseini. Large language monkeys: Scaling inference compute with repeated sampling. arXiv preprint arXiv:2407.21787 , 2024. URL https://arxiv.org/abs/ 2407.21787 .Lingjiao Chen, Matei Zaharia, and James Zou. FrugalGPT: How to use large language models while reducing cost and improving performance. Transactions on Machine Learning Research , 2024a. URL https://mlanthology.org/tmlr/2024/chen2024tmlr-frugalgpt/ .Xinyun Chen, Maxwell Lin, Nathanael Sch¨ arli, and Denny Zhou. Teaching large language models to self-debug. In International Conference on Learning Representations , 2024b. URL 
+
+https://arxiv.org/abs/2304.05128 .Jasper Dekoninck, Maximilian Baader, and Martin Vechev. A unified approach to routing and cascading for LLMs. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research , pp. 12987–13010, 2025. URL https://proceedings.mlr.press/v267/dekoninck25a.html .Dujian Ding, Ankur Mallick, Chi Wang, Robert Sim, Subhabrata Mukherjee, Victor R ¨uhle, Laks V. S. Lakshmanan, and Ahmed Hassan Awadallah. Hybrid LLM: Cost-efficient and quality-aware query routing. In International Conference on Learning Representations , 2024. URL https://openreview.net/forum?id=02f3mUtqnM .Google DeepMind. Gemini 2.5: Our most intelligent AI model, 2025. URL 
+
+https://blog.google/innovation-and-ai/models-and-research/google-deepmind/ gemini-model-thinking-updates-march-2025/ .11 Preprint. Under review. Dan Hendrycks, Steven Basart, Saurav Kadavath, Mantas Mazeika, Akul Arora, Ethan Guo, Collin Burns, Samir Puranik, Horace He, Dawn Song, and Jacob Steinhardt. Measuring coding challenge competence with APPS. In Advances in Neural Information Processing Systems Datasets and Benchmarks Track , 2021. URL https://arxiv.org/abs/2105.09938 .Naman Jain, Manish Shetty, Tianjun Zhang, King Han, Koushik Sen, and Ion Stoica. R2E: Turning any GitHub repository into a programming agent environment. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pp. 21196–21224, 2024. URL https://proceedings.mlr.press/v235/ jain24c.html .Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. LiveCodeBench: Holistic and con-tamination free evaluation of large language models for code. In International Conference on Learning Representations , 2025. URL https://arxiv.org/abs/2403.07974 .Carlos E. Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik R. Narasimhan. SWE-bench: Can language models resolve real-world GitHub issues? In International Conference on Learning Representations , 2024. URL https:// openreview.net/forum?id=VTF8yNQM66 .Jaehun Jung, Faeze Brahman, and Yejin Choi. Trust or escalate: LLM judges with provable guarantees for human agreement. In International Conference on Learning Representations ,2025. URL https://arxiv.org/abs/2407.18370 .Rongao Li, Jie Fu, Bo-Wen Zhang, Tao Huang, Zhihong Sun, Chen Lyu, Guang Liu, Zhi Jin, and Ge Li. TACO: Topics in algorithmic COde generation dataset. arXiv preprint arXiv:2312.14852 , 2023. URL https://arxiv.org/abs/2312.14852 .Yujia Li, David Choi, Junyoung Chung, Nate Kushman, Julian Schrittwieser, R ´emi Leblond, Tom Eccles, James Keeling, Felix Gimeno, Agustin Dal Lago, Thomas Hubert, Peter Choy, Cyprien de Masson d’Autume, Igor Babuschkin, Xinyun Chen, Po-Sen Huang, Johannes Welbl, Sven Gowal, Alexey Cherepanov, James Molloy, Daniel J. Mankowitz, Esme Sutherland Robson, Pushmeet Kohli, Nando de Freitas, Koray Kavukcuoglu, and Oriol Vinyals. Competition-level code generation with AlphaCode. Science , 378(6624): 1092–1097, 2022. doi: 10.1126/science.abq1158. URL https://www.science.org/doi/10. 1126/science.abq1158 .Ziang Li, Manasi Ganti, Zixian Ma, Helena Vasconcelos, Qijia He, and Ranjay Krishna. Rethinking human preference evaluation of LLM rationales. In Proceedings of the XLLM-Reason-Plan Workshop, Conference on Language Modeling , 2025. URL https://arxiv.org/ abs/2509.11026 .Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon, Nouha Dziri, Shrimai Prabhumoye, Yiming Yang, Shashank Gupta, Bodhisattwa Prasad Majumder, Katherine Hermann, Sean Welleck, Amir Yazdanbakhsh, and Peter Clark. Self-Refine: Iterative refinement with self-feedback. In Advances in Neural Information Processing Systems , vol-ume 36, 2023. URL https://proceedings.neurips.cc/paper files/paper/2023/hash/ 91edff07232fb1b55a505a9e9f6c0ff3-Abstract-Conference.html .Isaac Ong, Amjad Almahairi, Vincent Wu, Wei-Lin Chiang, Tianhao Wu, Joseph E. Gonzalez, M. Waleed Kadous, and Ion Stoica. RouteLLM: Learning to route LLMs from preference data. In International Conference on Learning Represen-tations , 2025. URL https://proceedings.iclr.cc/paper files/paper/2025/hash/ 5503a7c69d48a2f86fc00b3dc09de686-Abstract-Conference.html .OpenAI. Introducing Codex, 2025a. URL https://openai.com/index/introducing-codex/ .OpenAI. OpenAI o3 and o4-mini system card, 2025b. URL https://cdn.openai.com/pdf/ 2221c875-02dc-4789-800b-e7758f3722c1/o3-and-o4-mini-system-card.pdf .12 Preprint. Under review. Jiayi Pan, Xingyao Wang, Graham Neubig, Navdeep Jaitly, Heng Ji, Alane Suhr, and Yizhe Zhang. Training software engineering agents and verifiers with SWE-Gym. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research , pp. 47717–47737, 2025. URL https://proceedings.mlr.press/ v267/pan25g.html .Qwen Team. Qwen3.5-4B. Hugging Face model card, 2026. URL https://huggingface.co/ Qwen/Qwen3.5-4B .Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao. Reflexion: Language agents with verbal reinforcement learning. In Advances in Neural Information Processing Systems , 2023. URL https://arxiv.org/abs/2303.11366 .Charlie Snell, Jaehoon Lee, Kelvin Xu, and Aviral Kumar. Scaling LLM test-time compute op-timally can be more effective than scaling parameters for reasoning. In International Confer-ence on Learning Representations , 2025. URL https://proceedings.iclr.cc/paper files/ paper/2025/hash/1b623663fd9b874366f3ce019fdfdd44-Abstract-Conference.html .Yiyou Sun, Xinyang Han, Weichen Zhang, Yuanbo Pang, et al. Agents’ Last Exam, 2026. URL https://arxiv.org/abs/2606.05405 .Antonios Valkanas, Soumyasundar Pal, Pavel Rumiantsev, Yingxue Zhang, and Mark Coates. C3PO: Optimized large language model cascades with probabilistic cost constraints for reasoning. In Advances in Neural Information Processing Systems , vol-ume 38, 2025. URL https://proceedings.neurips.cc/paper files/paper/2025/hash/ 79f03e5d0a6a4e34b38ddcc7dd204897-Abstract-Conference.html .Xingyao Wang, Boxuan Li, Yufan Song, Frank F. Xu, Xiangru Tang, Mingchen Zhuge, Jiayi Pan, Yueqi Song, Bowen Li, Jaskirat Singh, Hoang Tran, Fuqiang Li, Ren Ma, Mingzhang Zheng, Bill Qian, Daniel Shao, Niklas Muennighoff, Yizhe Zhang, Binyuan Hui, Junyang Lin, Robert Brennan, Hao Peng, Heng Ji, and Graham Neubig. OpenHands: An open platform for AI software developers as generalist agents. In International Conference on Learning Representations , 2025. URL https://proceedings.iclr.cc/paper files/paper/ 2025/hash/a4b6ad6b48850c0c331d1259fc66a69c-Abstract-Conference.html .John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik Narasimhan, and Ofir Press. SWE-agent: Agent-computer interfaces enable automated software engineering. In Advances in Neural Information Processing Systems , 2024. URL 
+
+https://arxiv.org/abs/2405.15793 .Junze Ye, Jiayi Cheng, Miao Lu, Michal Mankowski, Jose Blanchet, and Mohsen Bayati. A few teacher steps go a long way: Cost-efficient on-policy data augmentation for agent post-training, 2026. URL https://arxiv.org/abs/2607.04574 .Wenbo Zhang, Lijinghua Zhang, Liner Xiang, and Hengrui Cai. Reasoning is not free: Robust adaptive cost-efficient routing for LLM-as-a-Judge. arXiv preprint arXiv:2605.10805 , 2026. URL https://arxiv.org/abs/2605.10805 .Li Zhong, Zilong Wang, and Jingbo Shang. Debug like a human: A large language model debugger via verifying runtime execution step by step. In Findings of the Association for Computational Linguistics: ACL 2024 , pp. 851–870, 2024. URL https://aclanthology.org/ 2024.findings-acl.49/ .Terry Yue Zhuo, Minh Chien Vu, Jenny Chim, Han Hu, Wenhao Yu, Ratnadira Widyasari, Imam Nur Bani Yusuf, Haolan Zhan, Junda He, Indraneil Paul, Simon Brunner, Chen Gong, James Hoang, Armel Zebaze, Xiaoheng Hong, Wen-Ding Li, Jean Kaddour, Ming Xu, Zhihan Zhang, Prateek Yadav, Naman Jain, Alex Gu, Zhoujun Cheng, Jiawei Liu, Qian Liu, Zijian Wang, David Lo, Binyuan Hui, Niklas Muennighoff, Daniel Fried, Xiaoning Du, Harm de Vries, and Leandro von Werra. BigCodeBench: Benchmarking code genera-tion with diverse function calls and complex instructions. In International Conference on Learning Representations , 2025. URL https://proceedings.iclr.cc/paper files/paper/ 2025/hash/a6a90bcc2aa470c3871b2d39a67d26e8-Abstract-Conference.html .13 Preprint. Under review. 
+
+A Proofs 
+
+Proof of Lemma 1. Let a1 = aλ1 (x) and a2 = aλ2 (x). Since a1 maximizes the penalized score at λ1 and a2 maximizes it at λ2,
+
+s(a1 | x) − λ1c(a1, x) ≥ s(a2 | x) − λ1c(a2, x),and 
+
+s(a2 | x) − λ2c(a2, x) ≥ s(a1 | x) − λ2c(a1, x).Adding the inequalities and rearranging yields 
+
+(λ2 − λ1)c(a1, x) ≥ (λ2 − λ1)c(a2, x).Because λ2 > λ1, we have c(a1, x) ≥ c(a2, x), proving the claim. 
+
+Proof of Theorem 2. It’s clear that G(X−j) is permutation invariant. Define the full-sample threshold 
+
+λ◦ = min 
+
+(
+
+λ ∈ ∪ i∈{ 1,.., N}Λ−i : 1
+
+N
+
+> N
+
+# ∑
+
+> j=1
+
+Cλ(Xj) ≤ B
+
+)
+
+.Because Cλ(Xi) ≤ cmax , every leave-one-out threshold bλ−i is feasible for the full-sample criterion: 1
+
+N
+
+> N
+
+# ∑
+
+> j=1
+
+Cbλ−i (Xj) ≤ ∑j̸ =i Cbλ−i (Xj) + cmax 
+
+N ≤ B.Since Cλ(x) is non-increasing in λ, the full-sample feasible set is an upper set on the ordered grid. Thus 
+
+bλ−i ≥ λ◦.By monotonicity again, 
+
+Cbλ−i (Xi) ≤ Cλ◦ (Xi).Averaging over i gives 1
+
+N
+
+> N
+
+# ∑
+
+> i=1
+
+Cbλ−i (Xi) ≤ 1
+
+N
+
+> N
+
+# ∑
+
+> i=1
+
+Cλ◦ (Xi) ≤ B.Because the mapping from (X1, ..., XN ) to (Cbλ−1(X1), ..., Cbλ−N (XN )) is permutation-equivariant and (X1, ..., XN ) is exchangeable, we know Cbλ−i (Xi), i = 1, ..., N are exchange-able. By exchangeability, 
+
+E
+
+h
+
+Cbλ−N (XN )
+
+i
+
+= E
+
+"
+
+1
+
+N
+
+> N
+
+# ∑
+
+> i=1
+
+Cbλ−i (Xi)
+
+#
+
+≤ B.The threshold bλ−N is exactly the CRC threshold computed from the first n calibration points, while XN is the future test point. Hence 
+
+E
+
+h
+
+CbλCRC (Xn+1)
+
+i
+
+≤ B.If eλ ≥ bλCRC , then by cost monotonicity, 
+
+Ceλ(x) ≤ CbλCRC (x)
+
+for all x, and the same expectation bound follows. 14 Preprint. Under review. Table 3: Mean per-example recovery cost on the GPT test set. “Always-a” applies action a to every example regardless of the router’s prediction. 
+
+Action Mean cost (m$) 
+
+Always-reflect 1.24 Always-replan 1.59 Always-escalate 7.22 CRC frontier argmax 5.51 
+
+B Router Prompt Format and Action Costs 
+
+B.1 Router Input Format 
+
+The router receives two fields at both training and inference time. The system prompt 
+
+(instruction) is fixed across all examples:                   
+
+> You are acost-aware coding router. Asmall fast model just attempted the coding problem below and FAILED. Based on the problem and the failure trace, choose the cheapest recovery action that will solve it. Recovery actions (in increasing cost): reflect ---small model fixes its own code given the failure trace replan ---small model discards the attempt and re-plans from scratch escalate ---strong model solves from scratch. You will be given the problem and the weaker model’s failure trace (error message) for context | use it to avoid the same mistake, but do not assume its approach was on the right track. Reply with exactly one word: reflect, replan, or escalate. Do not explain.
+
+The user turn (input) concatenates the problem statement q, the execution verdict v0, and the stderr trace e0:   
+
+> Problem:
+> {problem statement q}
+> Initial attempt verdict: {fail
+
+| timeout | compile error } 
+
+> Initial attempt stderr:
+> {stderr / test-failure output e0}
+
+Note that the failed code y0 itself is not included in the router input; the router conditions only on the problem statement and the execution feedback. The label (output) is one of 
+
+reflect , replan , or escalate .
+
+B.2 Action Cost Table 
+
+Table 3 reports the mean per-example cost of each recovery action on the GPT holdout test set ( n = 360). Costs are measured in millidollars (m$); for reference, the GPT baseline costs listed in the instruction prompt are expressed in the same relative units ( reflect ≈1.2, 
+
+replan ≈1.5, escalate ≈12). 
+
+B.3 Rollout Construction 
+
+Training rollouts are built as follows. For each problem q in the training corpus, the cheap model produces an initial solution y0; if y0 passes the automated judge the example is discarded (no recovery needed). For each failed instance, we run all three recovery actions and execute their outputs against the judge, obtaining the successful-action set 
+
+S(x) ⊆ { reflect , replan , escalate }. The training label is the cheapest successful action (reflect < replan < escalate by cost); if S(x) = ∅ the example is discarded. The GPT training set contains 4,656 examples with label distribution: escalate 2,076 (44.6%), 
+
+reflect 1,300 (27.9%), replan 1,280 (27.5%). The holdout uses a fixed calib/test split of 15 Preprint. Under review. Table 4: Gemini recovery-routing results on the held-out test split ( n = 229). 
+
+Method Solve rate Mean cost (m$) 
+
+Fixed-action baselines 
+
+Always-reflect 0.760 25.9 Always-replan 0.651 37.2 Always-escalate 0.821 168.2 
+
+CRC frontier (certified, δ = 0.05 )
+
+λ = 2.37 0.760 25.4 
+
+λ = 0 (argmax) 0.795 34.9 360/360 examples drawn from the same five benchmarks as the training set but with no problem-level overlap. 
+
+C Cross-Model Generalization: Gemini 
+
+The main experiments use the GPT-5.4-NANO /GPT-5.4 model pair. To check whether the recovery-routing framework is tied to this particular family, we repeat the same pipeline with G EMINI -2.5-F LASH as the cheap model and G EMINI -2.5-P RO as the strong model (Google DeepMind, 2025). The action space is unchanged: reflect and replan reuse the cheap model with execution feedback, while escalate calls the strong model. 
+
+Setup. We use 683 Gemini recovery examples for router training, with a disjoint holdout of 227 calibration and 229 test examples. Each failed problem is labeled by the set of successful recovery actions, and the router target is again the cheapest successful action. We additionally complete missing escalation verdicts on the holdout split, so that test solve rates are measured from observed action outcomes rather than from a monotone-cascade assumption. The router architecture and training objective match the main experiment: QWEN 3.5-4B is fine-tuned as a three-way scorer, and CRC is applied post hoc on the calibration split to choose the cost penalty used at test time. 
+
+Results. Table 4 reports the held-out test performance. The Gemini experiment is smaller than the GPT experiment, so we treat it as a portability check rather than a primary bench-mark. Nevertheless, it shows the same basic behavior: a single trained router yields budget-dependent operating points, and the unconstrained router approaches always-
+
+escalate solve rate at substantially lower cost. The calibrated low-cost point behaves like a cheap-recovery policy, while the argmax point spends more selectively on escalation. 
+
+D Per-Benchmark CRC Frontiers: TACO Difficulty Ladder 
+
+Figure 4 shows the CRC cost–solve frontier across the four TACO difficulty tiers on the GPT holdout test set. The four panels span medium through very-hard competitive programming problems and reveal two qualitatively different frontier shapes. 
+
+Monotone frontiers (TACO-Med-Hard and TACO-Hard, panels b–c): spending more reliably improves solve rate. Escalating to the strong model on harder instances pays off, and the unconstrained router (star) achieves the best solve rate at the highest cost. 
+
+Non-monotone frontiers (TACO-Medium and TACO-Very-Hard, panels a and d, shown in red): the frontier slopes downward — lower-cost operating points achieve higher solve rates than the unconstrained argmax. This directly illustrates the limitation of the monotone-cascade assumption discussed in §3: for medium-difficulty problems the strong model is no more reliable than the cheap model on average, so routing toward escalation wastes cost without a solve-rate gain; for very-hard problems neither model succeeds reliably, and escalation is both expensive and ineffective. CRC naturally identifies these regimes: a 16 Preprint. Under review. 5.6 5.7 5.8 5.9 6.0 6.1 6.2 
+
+Mean cost per example (m$)  
+
+> 0.78
+> 0.80
+> 0.82
+> 0.84
+> 0.86
+> 0.88
+> 0.90
+> Solve rate
+> n= 37
+
+(a) 
+
+> non-monotone
+
+TACO-Medium      
+
+> 5.0 5.2 5.4 5.6 5.8 6.0
+
+Mean cost per example (m$)  
+
+> 0.77
+> 0.78
+> 0.79
+> 0.80
+> 0.81
+> 0.82
+> Solve rate
+> n= 56
+
+(b) TACO-Med-Hard        
+
+> 7.2 7.4 7.6 7.8 8.0 8.2 8.4 8.6
+
+Mean cost per example (m$)  
+
+> 0.70
+> 0.72
+> 0.74
+> 0.76
+> 0.78
+> 0.80
+> Solve rate
+> n= 52
+
+(c) TACO-Hard       
+
+> 7.5 8.0 8.5 9.0 9.5 10.0 10.5
+
+Mean cost per example (m$)  
+
+> 0.35
+> 0.40
+> 0.45
+> 0.50
+> 0.55
+> 0.60
+> 0.65
+> Solve rate
+> n= 30
+
+(d) 
+
+> non-monotone
+
+TACO-Very-Hard 
+
+Figure 4: CRC frontiers on the TACO difficulty ladder (GPT test set). Blue curves are monotone (escalation helps); red curves are non-monotone (escalation backfires on average for this sub-population). Stars mark the argmax ( λ=0) operating point; dots are certified feasible points at increasing λ.tighter budget constraint pushes λ upward, shifting the policy away from escalation and recovering the higher solve rate at lower cost. 17

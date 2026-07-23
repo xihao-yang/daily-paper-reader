@@ -1,0 +1,587 @@
+Title: PerfAgent: Profiler-Guided Iterative Refinement for Repository-Level Code Optimization
+
+URL Source: https://arxiv.org/pdf/2607.19653v1
+
+Published Time: Thu, 23 Jul 2026 00:17:06 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# PerfAgent: Profiler-Guided Iterative Refinement for Repository-Level Code Optimization 
+
+Ryan Deng 1, Yuanzhe Liu 2, Bastian Lipka 3, Yao Ma 2, Xuhao Chen 4,Tim Kaler 1† , and Jatin Ganhotra 5† 1Massachusetts Institute of Technology, Cambridge, Massachusetts, USA 
+
+2Rensselaer Polytechnic Institute, Troy, New York, USA 
+
+3IBM, Ehningen, Germany 
+
+4Michigan State University, Lansing, Michigan, USA 
+
+5IBM, Thomas J. Watson Research Center, Yorktown Heights, New York, USA 
+
+Abstract —Large language model (LLM) agents now per-form well on correctness-oriented repository-level tasks, including SWE-Bench issue resolution and feature implemen-tation in real codebases. However, they still struggle with repository-level code optimization, which requires preserving behavior while improving runtime performance. Passing tests is not enough in this setting; a patch must preserve behavior, implement code optimization, and approach expert speedups. Current agents often miss bottlenecks hidden behind abstraction layers and native extensions, stop after shallow speedups, or insufficiently test the code patches that thus may silently break edge cases. We present PerfAgent, a profiler-guided, verifier-in-the-loop workflow that gives an off-the-shelf coding agent the feedback needed to find real hotspots, improve beyond the first passing patch, and use profiler evidence rather than timing alone to decide what to optimize next. On two challenging optimization benchmarks, GSO and SWE-fficiency-Lite, PerfAgent more than doubles the rate of expert-matching patches over OpenHands with GPT-5.1, improving from 19.6% to 39.2% on GSO and from 26% to 74% on SWE-fficiency-Lite. It also surpasses an oracle best-of-five baseline at substantially lower cost, showing that the gains come from better feedback rather than additional test-time sampling. 
+
+Index Terms —software performance engineering, repository-level code optimization, LLM agents, profiling, feedback loop 
+
+I. I NTRODUCTION 
+
+LLM agents have shown remarkable capability in solving real-world software engineering tasks. Frontier LLMs have achieved strong results on benchmarks such as SWE-Bench, SWE-Bench Pro and Multi-SWE-Bench [1]– [3], which evaluate agents on their ability to solve issues and implement features on a wide range of complex real-world code repositories. However, these benchmarks only focus on correctness and ignore the performance impact of the changes produced by the agent. Recent benchmarks such as GSO [4], SWE-fficiency [5] and SWE-Perf [6] require agents to optimize code in real-world repositories. Unfortunately, LLM agents struggle to produce changes that match the performance of those 
+
+> †
+
+Co-senior authors. 
+
+made by human experts [4]. In general, optimizing code within a repository is more challenging than optimizing individual compute kernels, since changes required to get better performance are often complex and span multiple languages and abstraction boundaries in the repository. Specifically, by diving into the benchmarks, we identify 
+
+three failure modes that prevent LLM agents from matching human experts on repository-level code optimization. First, agents do not use profiling tools to their full effect, and thus often miss the real bottlenecks, especially those hidden across abstraction boundaries or inside native extensions, in the repository. Second, agents often prematurely terminate optimizing after shallow speedups, leaving more performance improvement opportunities on the table. Third, agents tend to test the changes narrowly, leading to patches that are fast on target workloads but may silently break edge cases and downstream code paths elsewhere. We introduce PerfAgent, a workflow for repository-level code optimization to specifically address the above challenges. As shown in Fig. 1, PerfAgent supplies the agent with targeted information at three stages of the agentic loop. First, it runs a sampling profiler on the given workload and feeds the agent a curated summary of hotspots—their location, call context, and share of runtime—so the agent can localize where time is actually spent, including inside native extensions. Second, an 
+
+objective-driven loop controller refuses to accept the agent’s first passing patch: after each submission it rebuilds, re-validates, and re-profiles the repository and asks the agent to keep optimizing, retaining the fastest correct patch across multiple attempts. Third, a selective test stage runs the curated test cases affected by the agent’s current changes, sufficiently catching any regressions with low cost and returning them as feedback. This guarantees that correctness is not forgotten during optimization. Together, these components turn a one-shot agent into a profiler-guided, verifier-in-the-loop optimizer. We arXiv:2607.19653v1 [cs.SE] 22 Jul 2026 Curated Profiler Usage            
+
+> hotspots: location, call context, self/total time; incl. native extensions (py-spy)
+> Coding Agent
+> off-the-shelf base (Mini-SWE-Agent) edits repo, submits a patch
+> Selective Validation
+> rebuild +
+> pytest-testmon (only tests affected by agent’s changes)
+> Measure & re-profile
+> speedup on workload; updated hotspot summary
+> summary patch pass
+> updated hotspot summary + measured speedup (≤θiterations)
+> build / test failure returned as feedback
+> Best-patch selector
+> fastest correct patch across ≤θiterations — not the last one submitted
+> 123
+
+Fig. 1: Overview of the PerfAgent workflow. Unlike a plain retry loop, PerfAgent injects targeted feedback at three points in each iteration: ① a curated profiler summary is fed to the agent before it begins, localizing hotspots across abstraction boundaries including native extensions; ② a selective validation (pytest-testmon) stage that checks each submitted patch against only the tests affected by the agent’s changes, catching correctness regressions cheaply without running the full suite; and after a passing patch, the ③ objective-driven controller re-profiles and returns the updated hotspot summary alongside the measured speedup, driving the next of up to θ iterations ( θ=5 in Section IV). Additionally, a best-patch selector retains the fastest correct patch across all iterations rather than the last one submitted. Fig. 3 traces a concrete run of this loop on a GSO task. implement PerfAgent on top of Mini-SWE-Agent 0 as the base agent. Experiments across both frontier and open-source models show that our workflow yields large and consistent gains over strong general-purpose SWE agents [10], [11]. Specifically, with GPT-5.1, PerfAgent raises the fraction of expert-matching patches by 2 ×
+
+on GSO (39.2% vs. 19.6%) and 2.8 × on SWE-fficiency-Lite (74% vs. 26%). We also show that PerfAgent can improve results for open-source models like Kimi-K2 by 1.5 × on both GSO and SWE-fficiency-Lite. Importantly, PerfAgent is sample-efficient: it surpasses an oracle best-of-five inference-scaling baseline at a fraction of the cost, evidence that the gains stem from better feedback, not merely more test-time compute. This paper makes the following contributions:  
+
+> •
+
+We characterize three failure modes that prevent general-purpose LLM agents from matching human experts on repository-level code optimization: (1) miss-ing real bottlenecks, (2) premature termination after the first passing patch, and (3) insufficient testing that leaves correctness regressions undetected.  
+
+> •
+
+We present PerfAgent, a profiler-guided, objective-driven agentic workflow for repository-level code op-timization. PerfAgent features three dedicated mecha-nisms, i.e., curated profiler summary, selective test, and objective-driven controller, which specifically address our identified three failure modes.  
+
+> •
+
+We implement PerfAgent and evaluation with various models shows that PerfAgent more than doubles the rate of expert-matching patches over strong baselines (2 × on GSO, 2.8 × on SWE-fficiency-Lite). PerfAgent 
+
+> 0PerfAgent can be applied to any off-the-shelf coding agent such as SWE-Agent, Trae Agent or iSWE-Agent [7]–[9]
+
+also beats an oracle best-of-five baseline while spending far less, isolating profiler-guided feedback—rather than additional compute—as the source of the improvement. Note that we view performance engineering as com-plementary to existing agentic workflows, but it imposes a stricter requirement: whereas issue-resolution bench-marks ask only that a patch be correct, repository-level optimization demands a patch that both be correct and can improve performance, judged against the optimization a human expert produced. II. B ENCHMARKS OVERVIEW 
+
+We evaluate PerfAgent on GSO and SWE-fficiency [4], [5], two repository-level code optimization benchmarks. Table I provides an overview of the benchmarks. Note that in this paper, we evaluate on SWE-fficiency-Lite, a randomly sampled subset of 100 tasks from SWE-fficiency, which is used by [5] when presenting the benchmark. In code optimization benchmarks, the agent is given a code repository at a particular commit along with a script that shows an example workload involving the use of an API implemented in the repository. The agent is tasked with making changes to the repository to improve the performance of the script, and its changes are evaluated both in terms of correctness and performance. Correctness is validated on hidden tests that ensure the existing behavior of the API is preserved. Performance is measured against a human expert baseline by computing a speedup ratio SR = Speedup Agent 
+
+> Speedup Human
+
+, where Speedup Agent 
+
+and Speedup Human are the speedups achieved over the base repository by the agent’s and the human expert’s changes, respectively. The agent’s final score on that task is a function of this ratio. TABLE I: GSO and SWE-fficiency-Lite benchmark overview. It shows the median speedup achieved by the human expert baseline over the base repository, the median patch size (lines of code modified) of the human expert baseline, and the percentage of tasks in which the human expert baseline modified non-Python code such as C/C++ or Rust. *Python indicates Python-only changes in the human expert baseline patch; the remaining languages may be used in conjunction with Python. Benchmark # Repos # Tasks Speedup Patch Size % Non-Py Language Breakdown (Python*, C/C++, Cython, Rust) GSO 10 102 2.43 × 140 59 (41%, 45%, 10%, 4%) SWE-fficiency-Lite 9 100 3.57 × 20 12 (88%, 1%, 11%, 0%)  
+
+> •
+
+GSO is composed of 102 tasks spanned across 10 popular python repositories such as numpy, pandas, and pydantic, and involves languages such as Python, Cython, C, C++ and Rust. In addition to the test script provided to the LLM agent, GSO also has other hidden tests that are used for evaluation. These hidden tests exercise the target API in diverse ways, and the benchmark uses them to assess both the correctness and performance of the agent’s changes. The speedup ratio computed is averaged over all hidden tests.  
+
+> •
+
+SWE-fficiency-Lite is composed of 100 tasks that span 9 popular python repositories such as pandas, scikit-learn and sympy and involves languages such as Python, Cython, C and C++. Similar to GSO, SWE-fficiency provides a script to the LLM agent to optimize. Unlike GSO, however, it has no hidden tests. The provided test script alone is used for performance evaluation, while correctness is validated against a curated subset of the repository’s existing test suite. III. P ERF AGENT ’S WORKFLOW FOR CODE 
+
+OPTIMIZATION 
+
+General-purpose LLM agents fail on repository-level code optimization in three characteristic ways:  
+
+> •
+
+Missing the real bottleneck. Agents struggle to lo-calize where time is actually spent: they often either skip profiling entirely or reach for Python’s built-in cProfile , which carries high overhead and sees only Python-layer frames. As a result they fall back on surface-level Python edits and overlook hotspots hidden inside native extensions or beneath several layers of abstraction, yielding only modest speedups relative to a human expert’s patch. On the NumPy string kernel of Fig. 3, for example, cProfile cannot observe that 80% of runtime is consumed by per-element C scalar allocation, so an unguided agent stops at the first Python-level fast path it finds at the original abstraction layer, whereas profiler feedback drives PerfAgent to a purpose-built native C kernel (5.87 ×); we trace this case end to end in Section IV-D 2.  
+
+> •
+
+Premature termination. Once a patch passes the rele-vant tests and shows a noticeable speedup, the agent emits a stop signal, even when substantial headroom remains. Human experts, by contrast, have deep insight into how much improvement is still possible and when to stop, so an agent that settles for the first modest speedup performs far worse than an expert in practice.  
+
+> •
+
+Insufficient testing of complex changes. The changes that yield the largest speedups are often complex and reach into core library code. Yet coding agents only test the changes narrowly by running a limited range of tests. This results in a patch that is fast on the target workload but can silently break edge cases and downstream code paths elsewhere. PerfAgent introduces one targeted component to address each failure mode (Sections III-B to III-D). 
+
+A. PerfAgent’s Workflow Overview 
+
+Fig. 1 shows PerfAgent’s overall workflow. Each itera-tion of the loop consists of two phases: an inner agent phase and an outer evaluation phase. In the inner phase, the agent is given the most recent profiler summary (see Section III-B ) and runs inside our harness, until it submits a patch. The first iteration uses a profiler summary computed on the unmodified base repository and subsequent iterations use a summary computed on the repository with the agent’s submitted patch from the previous iteration. In the outer phase, the controller (detailed in Sec-tion III-C ) takes the submitted patch and applies it to the repository, rebuilds, and runs the curated test suite described in Section III-D . If the build fails or any test fails, we exit the outer phase early and return the error output to the agent as feedback for the next iteration. Otherwise, we run the profiler on the resulting repository with the agent’s changes to produce a new summary that highlights the new hotspots, and pass it to the agent for its next attempt. The controller allows the LLM up to θ submissions before it terminates. Across all iterations, we record the speedup of each submitted patch on the provided workload, and report the patch with the highest speedup as the final output. PerfAgent is built on Mini-SWE-Agent [7] but is harness-agnostic: the same workflow can be layered onto any coding agent that emits a stop signal, such as OpenHands, Trae Agent, or iSWE-Agent [8]–[10]. 
+
+B. Hitting the Bottlenecks via Curated Profiler Usage 
+
+To address the first failure mode, missing the real bottleneck , PerfAgent runs a profiler on the workload to localize the code responsible for the runtime. When R A W S T A C K F R A M E S                        
+
+> … libc · <module> · main
+> workload
+> (perf_script.py:47)
+> add
+> (defchararray.py:337)
+> _vec_string_with_args
+> PyArray_Scalar
+> (scalarapi.c:599) 133
+> ⋮1,039 samples total
+> P A R S E D 1039 SAMPLES
+> workload 99.8 %
+> └─ add
+> └─ _vec_string_with_args 57.2 %
+> └─ PyArray_Scalar 38.7 %
+> H A N D O F F
+> LLM
+> summarize
+> H U M A N - R E A D A B L E S U M M A R Y
+> 99.8% of time is in
+> np.char.add ,churning aNumPy scalar per element .
+> Avoid the per -element boxing .
+> Filter
+> drop unrelated frames
+> Parse
+> aggregate stacks
+> P O S T - P R O C E S S I N G
+
+Fig. 2: Overview of PerfAgent’s profiler pipeline. Raw stack frames are collected by running py-spy on the workload, setup-related frames are filtered out, and the remaining samples are parsed and aggregated into hotspots with self-time, total-time, call context, and a native-vs-library flag. A separate LLM call then produces a concise natural-language summary that is passed to the agent. In contrast, naive profiler usage — running cProfile and forwarding its raw output — yields noisy per-call counters covering only Python-layer frames, misses hotspots inside native extensions, and floods the agent’s context window with irrelevant detail. general-purpose agents profile at all, they reach for Python’s built-in cProfile, which as noted above, carries high overhead and sees only Python-layer frames. We instead use the py-spy sampling profiler, which has much lower overhead and profiles both Python code and native extensions [12], removing both limitations; it interrupts execution at a fixed interval (100 times a second) and snapshots the call stack. However, a low-overhead, native-aware profiler is necessary but not sufficient: its raw output is voluminous, and forwarded as-is it would flood the agent’s context with detail that buries the real bottleneck. PerfAgent therefore turns py-spy’s raw samples into a compact, actionable summary (Fig. 2) rather than forwarding them directly. We augment the provided workload script to run repeatedly for a fixed 10-second profiling window (the while loop at line 15) so that py-spy gathers enough samples, then discard samples related to setup such as reading or initializing data. We aggregate the rest into hotspots, each annotated with its location (filename, function name, line number), full call stack, share of samples, and an external-library flag that keeps the agent from editing code outside the repository. We report both self-time (excluding calls to other functions) and total-time (including them) so the agent can choose between speeding up a function and calling it less often. Finally, instead of dumping the full output into the prompt, a separate LLM call condenses it into a natural-language summary, bounding what the agent must read. We quantify the payoff of this curated usage over naive profiling in Section IV-E3. Overall, we find that detailed profiling output helps agents pinpoint the parts of a repository responsible for performance overhead. This is especially valuable in large modern codebases where the many layers of abstraction can make it difficult for the agent to identify these hotspots by simply navigating the repository. We quantify how often this matters in Section IV-D 2: PerfAgent reaches low-level code (C, C++, Cython, or Rust) on 48% of GSO instances versus 31% for the OpenHands baseline, including 21 instances where it goes low-level and OpenHands modifies only Python. 
+
+C. Objective-Driven Loop Controller 
+
+To address the second failure mode, premature termina-tion , we push the agent past its first passing patch with an objective-driven loop controller. Simply prompting the agent to keep going is not enough: without a concrete target to optimize toward, it tends to stop again after a marginal change, and without re-checking each new attempt, a faster but broken patch is accepted as progress. Our controller instead makes measured speedup a first-class objective and re-validates every attempt, so the agent keeps improving without sacrificing correctness. PerfAgent’s loop controller is an instance of verifier-in-the-loop self-refinement, in the lineage of Reflexion and Self-Refine [13], [14], but specialized for performance: the feedback injected between attempts is concrete profiler and test output, and the objective being refined is measured speedup rather than correctness alone. 1
+
+In Mini-SWE-Agent, when the agent is finished with its task, it emits a STOP command that signals the harness to terminate the agentic loop. PerfAgent’s workflow intercepts this message and obtains the agent’s submitted 
+
+> 1
+
+Iterating an agent toward an objective has recently become common in practice, e.g., the “Ralph” loop and scheduled agent re-invocation. Our contribution is not the loop itself but the optimization-specific feedback and objective that drive it. patch, but does not terminate the agentic loop. Instead, it applies the patch to the repository, builds the repository, runs tests and profiles the code, and the resulting feedback is returned to the agent who is then asked to continue optimizing based on the updated feedback on its latest attempt. We run this loop for up to θ iterations per task and report the patch with the highest measured speedup on the provided workload, rather than the last one submitted. This design pushes the agent past its natural stopping point without compromising correctness as every iteration re-validates the patch against the test suite, so a fast-but-broken submission is caught and surfaced as feedback rather than accepted. In addition, the controller helps the LLM agent refine its implementation, or even explore new directions, as the profiler gives immediate feedback on how each change performs. In Fig. 3, we trace how PerfAgent’s loop controller affects an agent’s changes over each turn. The agent’s submitted patch enters at the top; after each submission the controller returns the measured speedup, the outcome of rebuilding and running the selectively chosen tests, and a fresh profiler summary, and the agent then optimizes further. Updated profiler feedback drives the agent from Python-level fast paths (Turns 1–2) to a purpose-built native C kernel (Turn 3) and its refinement (Turn 4)—an optimization at a new abstraction layer. The controller                                                      
+
+> Turn 1 1.40 ×✓build ✓tests generic dispatch Profiler: replace /_vec_string 67% total; PyArray_Scalar ,
+> Py_DECREF churn
+> Agent: adds a C fast path for scalar args (_vec_string_scalar_args )
+> Mini-SWE-Agent patch
+> Turn 2 2.36 ×✓build ✓tests Python wrapper Profiler: _to_bytes_or_str_array 29% total; scalar-arg handling 18% self
+> Agent: Python fast path in np.char.replace that skips the array conversion
+> Turn 3 5.56 ×✓build ✓tests native C kernel Profiler: per-element PyArray_Scalar /object overhead persists (29% +12% self)
+> Agent: writes a native C kernel
+> chararray_replace +_unicode_do_replace
+> Turn 4 5.87 ×⋆✓build ✓tests KEPT
+> Profiler: _unicode_string_length 11% self (per-element length scan)
+> Agent: removes the per-element length scan inside the kernel
+> Turn 5 5.85 ×✓build ✓tests discarded
+> Profiler: near memory-bound ( libc ∼22% self)
+> Agent: a further tweak that slightly regresses
+> re-profile
+> re-profile
+> re-profile
+> re-profile
+
+Fig. 3: A concrete run of the PerfAgent loop (Fig. 1) on the GSO task numpy__numpy-1b861a2 (GPT-5.1) which optimizes the numpy.char.replace API.     
+
+> 2
+> 4
+> 6
+> n=5
+> Speedup ( ×)
+> GSO
+> SWE-fficiency-Lite
+> 12345
+> 0
+> 20
+> 40
+> Controller turn
+> # failures
+
+Fig. 4: Per-turn behavior of the loop controller on GSO (solid) and SWE-fficiency-Lite (dashed). Top: average (harmonic-mean) speedup of the patch submitted at each turn. Bottom: number of instances that hit a validation failure (build error or failing test) before submitting at that turn. The SWE-fficiency-Lite turn-5 average is computed over only n=5 instances, as most exhaust the per-task budget within one or two turns. retains the best patch (Turn 4, 5.87 ×), not the last (Turn 5, 5.85 ×, which regresses). In addition, we see how the loop controller affects the speedup and correctness of an agent’s changes over the course of 5 turns in Fig. 4. We report the average (harmonic mean) speedup of the agent’s submitted changes at each turn, along with the number of instances that encountered validation errors such as build errors and test failures before submission at that turn. Not all instances complete all 5 turns, as some instances run out of budget before the full 5 turns complete. Therefore, if an instance does not have a patch for a particular turn, we take the latest patch instead. On GSO, both quantities improve monotonically: the average speedup rises from 2.5 × at turn 1 to 6.4 × at turn 5, while the number of instances with validation failures falls from 53 to 5, showing that the controller extracts additional, correct speedup well past the agent’s initial stopping point. On SWE-fficiency-Lite this trend is confounded by budget: most instances exhaust the per-task cost limit within one or two turns, so the speedup plateaus on later turns. In particular, PerfAgent often spends many steps and tokens exploring the repository before writing any code. Therefore, with a $ 5 budget, it is difficult to study the full impact of the control loop on an agent’s changes in SWE-fficiency-Lite. We explore this in more detail in Section IV-E5. 
+
+D. Selective Validation against Correctness Regressions 
+
+The third failure mode refers to the correctness regres-sions due to insufficient testing . An alternative solution is to blindly include all the tests, but running the full test suite is prohibitively expensive on large real-world repositories. To sufficiently catch any correctness regressions without causing significant overhead, PerfAgent’s controller runs a curated test suite against the agent’s patch after each iteration, and returns any failures as feedback. Specifically, we use pytest-testmon, a pytest plugin that uses code-coverage information to precisely select only the tests affected by the agent’s changes, minimizing testing cost without missing any correctness regressions. Compared to running the repository’s full test suite, our selective scheme reduces the number of tests run by 66%–99% on GSO and by 47%–98% on SWE-fficiency-Lite. Details about the cost savings are described in Section B of the supplemental material. More importantly, we observe a clear increase in correctness of the final patch with our selective and curated test validation approach, in comparison to the ad-hoc testing done by the coding agent. We provide additional details in Section IV, with results in Table II. IV. E VALUATION 
+
+Our evaluation is designed to test both the end-to-end effectiveness of PerfAgent and the feedback mechanisms that explain its gains. We organize the main results around the following three questions. RQ1 : does PerfAgent improve repository-level optimization performance over strong agent base-lines? RQ2 : which parts of the workflow (profiler feed-back, objective-driven iteration, and validation) account for the improvement? RQ3 : how does iterative profiler feedback change the agent’s optimization behavior? Further, we run analyses to rule out alternative expla-nations and characterize limitations: an oracle best@5 comparison tests whether the gains are merely due to more test-time sampling, open-source model results check whether the workflow transfers beyond GPT-5.1, reward-hacking analysis shows why optimization loops require robust measurement and hack-adjusted scoring, and a budget sensitivity analysis characterizes how the per-task cost cap constrains iteration on SWE-fficiency-Lite. 
+
+A. Experimental Setup 
+
+We evaluate PerfAgent on GSO and SWE-fficiency-Lite using GPT 5.1, a frontier model, and Kimi-K2, an open-source model [15], [16]. For Kimi, on GSO we use Kimi-K2-0711 and on SWE-fficiency-Lite, we use Kimi-K2-0905, as those are the specific versions each benchmark eval-uated on. Each benchmark provides patches produced by an agent implemented with OpenHands, which we evaluate to obtain baseline results [10]. We implement PerfAgent on top of Mini-SWE-Agent [7], a lightweight single-agent harness with tool access. We use two variants depending on the model: for GPT-5.1 we use the default Mini-SWE-Agent with access to bash; for Kimi-K2 we augment it with a structured file editing tool from OpenHands [10], since open-source models struggle to view and edit files reliably through raw bash commands. When evaluating PerfAgent, we run the controller loop for θ = 5 iterations, set a maximum cost of 5 dollars per task and a step limit of 200 steps per task. The prompt used to evaluate PerfAgent is in Section A of the supplemental material. We run all agents in a separate AWS ec2 c6i.8xlarge instance which has 32 CPUs and 64GB of RAM. For evaluation, we use an AWS m8i.16xlarge which has 64 CPUs and 256GB of RAM, mirroring the evaluation setup described in GSO and SWE-fficiency [4], [5]. When running GPT-5.1, we use high reasoning effort on all experiments, matching the experimental settings used in GSO and SWE-fficiency [4], [5]. When running Kimi-K2, we use the default recommended settings [17], [18]. 
+
+1) Evaluation Metrics: GSO and SWE-fficiency report different evaluation metrics based on the speedup ratios 
+
+SR = Speedup Agent 
+
+> Speedup Human
+
+achieved on each task. GSO uses Opt@1: the percentage of tasks that are correct and have a speedup ratio of at least 0.95. For SWE-fficiency, each task is assigned a score based on the speedup ratio. If the agent’s changes do not pass correctness, then the score assigned is 1Speedup Human 
+
+. Otherwise, it is equal to the speedup ratio. The overall score for an LLM on the SWE-fficiency benchmark is the harmonic average of the scores for each task. While this metric rewards LLM agents for producing patches that surpass the performance of a human expert baseline, it can heavily skew the overall performance due to outliers in the benchmark. For example, producing an incorrect patch on a task in which the human expert baseline achieves a large speedup over the base repository is much more punishing compared to producing an incorrect patch on a task in which the human expert baseline achieves a small speedup. Therefore, for this paper, we report all benchmark results using GSO’s Opt@1 score. In addition, we also report Correctness, the percentage of tasks that pass the benchmark’s correctness tests, and Speedup@1 numbers (Sp@1), the percentage of tasks that achieve at least some speedup over the base repository. For Sp@1, we use a threshold of 1.2 × speedup, taken from GSO, as the threshold is large enough to remove patches that may achieve speedup solely due to timing variance [4]. 
+
+2) Hack Detection: GSO and SWE-fficiency both employ different complementary methods to prevent LLM agents from cheating on code-optimization benchmarks. GSO uses an LLM-as-a-judge to detect reward hacking, and SWE-fficiency identifies when LLM agents use stack-introspection to change behavior when it is being ex-ecuted in a timing loop versus a correctness test. We found that SWE-fficiency’s detector, when used alone, missed common reward-hacking patterns. The most common hack we observed was caching results inside benchmark timing loops. SWE-fficiency’s harness runs each evaluation in a separate Python process to prevent run-to-run caching of results, but within a single TABLE II: Results on the GSO and SWE-fficiency-Lite bench-marks for GPT-5.1. Correctness, Sp@1, Opt@1 score, and the hack-adjusted score are reported for each benchmark.                                                       
+
+> Method Correctness Sp@1 Opt@1 Hack-Adj.
+> GSO
+> OpenHands 88.2 46.1 20.6 19.6 Codex 89.2 48.0 18.6 17.7
+> AL(loop only) 91.2 67.6 33.3 29.4 + Tests 96.1 47.1 24.5 20.6 + Profiler 95.1 70.6 36.3 34.4 PerfAgent 96.1 77.5 44.1 39.2 SWE-fficiency-Lite
+> OpenHands 82 47 27 26 Codex 80 59 39 39
+> AL(loop only) 80 64 49 46 + Tests 93 64 49 46 + Profiler 83 73 59 57 PerfAgent 90 83 75 74
+
+run timing is performed multiple times in a loop and is vulnerable to caching. Indeed, we observed many instances where agents exploited this structure to reduce reported benchmark timings. GSO’s LLM-as-a-judge de-tector is better able to detect this style of reward hacking that is missed by SWE-fficiency’s detector. However, SWE-fficiency’s detector is still a useful addition to GSO’s LLM judge because it is able to identify a unique form of reward hacking where an agent uses stack introspection to run different versions of a program during benchmarks and correctness tests. We implemented a hack detector that combines the hack detection methods used by SWE-fficiency and GSO. For both benchmarks, we report the results of running the combined hack detector as the hack-adjusted score. 
+
+B. RQ1: End-to-End Optimization Performance 
+
+We first address RQ1 : does PerfAgent improve repository-level optimization performance over strong agent baselines? We report end-to-end results against the OpenHands and Codex baselines (Table II), then break the comparison down task by task (Table III). 
+
+GSO and SWE-fficiency-Lite Results. On GSO and SWE-fficiency-Lite, we compare PerfAgent against the OpenHands baseline provided by each benchmark, as well as running on Codex, a frontier agentic harness developed by OpenAI [11], and the results are shown in Table II. For each benchmark, we report the Opt@1 and hack-adjusted score. We see that on both benchmarks, PerfAgent significantly outperforms both the OpenHands and Codex baselines. The Opt@1 scores on GSO are much lower compared to SWE-fficiency-Lite as GSO has hidden performance tests which evaluate the agent’s changes on different workloads, while SWE-fficiency evaluates performance solely based on the provided script. Therefore, in GSO, the agent’s changes may yield high speedups on the provided workload, but fail to generalize to unseen inputs. TABLE III: Per-task win/loss record of PerfAgent against the OpenHands baseline. An agent wins a task when it matches or exceeds the human expert baseline (and passes the hack detector) while the other does not; the remaining tasks are ties that both or neither agent optimizes.             
+
+> Per-task outcome GSO SWE-fficiency-Lite PerfAgent wins 27 52 OpenHands wins 74Tie, both optimize 13 22 Tie, neither optimizes 55 22 Total tasks 102 100
+
+Per-Task Win/Loss Analysis. Here we break our head-line GPT-5.1 comparison down task by task, tabulating where PerfAgent and the OpenHands baseline each match or exceed the human expert baseline on GSO and SWE-fficiency-Lite (Table III). Because both agents run on the same tasks, this is a paired comparison: tasks where they agree—both optimize, or neither—say nothing about which agent is better, so significance comes entirely from the decisive tasks, where exactly one agent optimizes. We perform a more in-depth analysis of the instances in which the OpenHands baseline performs better in Section D of the supplemental material. 
+
+C. RQ2: Which Components Drive the Improvement 
+
+We now turn to RQ2 : which parts of the workflow account for the improvement? We isolate the contribution of each component in PerfAgent’s loop controller by running several agents with PerfAgent’s controller for 5 iterations. We evaluate on 3 separate agents which we describe below.  
+
+> •
+
+AL: An LLM agent with a stripped-down version of PerfAgent’s loop controller, where only timing feedback is given to the LLM at the end of each turn.  
+
+> •
+
+AL+Tests : An LLM agent with PerfAgent’s loop con-troller that provides timing feedback and feedback from running the curated test suite.  
+
+> •
+
+AL+Profiler : An LLM agent with PerfAgent’s loop controller that provides timing and profiler feedback. We compare these 3 agents to PerfAgent which pro-vides a combination of timing feedback, profiler feedback, and feedback from running the curated test suite. Table II provides the results of our comparison of these agents with the OpenHands baseline and PerfAgent. We find that AL outperforms both the OpenHands and Codex baselines in terms of Opt@1 and hack-adjusted scores, showing the value of test-time scaling with runtime feedback. The addition of correctness-test feedback in 
+
+AL+Tests increases correctness on both benchmarks, but fails to improve Opt@1 or hack-adjusted scores on GSO and SWE-fficiency. In fact, on GSO the addition of correctness tests leads to markedly worse performance on these metrics. The addition of profiling feedback in TABLE IV: GSO results broken down by language: 42 Python-only tasks vs. 60 non-Python-only tasks. Values reported are the percentage of tasks that match (or exceed) the human expert baseline and pass the hack detector.              
+
+> Method Python only Non-Python-only OpenHands 31.0 11.7
+> AL(loop only) 45.2 18.3 + Tests 35.7 10.0 + Profiler 47.6 25.0 PerfAgent 50.0 31.7
+
+AL+Profiler improves Opt@1 and hack-adjusted scores on both benchmarks relative to AL, but produces a correct patch less often than AL+Tests . The best Opt@1 and hack-adjusted scores are obtained by PerfAgent which receives both profiler and correctness test feedback. The combination of both correctness test and profiler feedback in PerfAgent achieves the best Opt@1 and hack-adjusted scores. PerfAgent is able to pursue ambitious optimiza-tions that are informed by profiling feedback, and the correctness test feedback helps it avoid correctness issues that arise from complex code changes. 
+
+D. RQ3: Effect of Profiler Feedback 
+
+We next study RQ3 : how does iterative profiler feed-back change the agent’s optimization behavior? We first show in aggregate that profiler feedback pushes the agent across abstraction boundaries, then trace a single task through the loop as a case study. 
+
+1) Optimization Across Abstraction Boundaries: A key driver of these gains is that profiler feedback pushes the agent across abstraction boundaries and allows the agent to better understand the performance of native code. PerfAgent modifies low-level code (C, C++, Cython, or Rust) on 48% of instances, compared to 31% for the OpenHands baseline, which leads to better results on these lower-level tasks. To further demonstrate this, we also report the results of GSO, broken down by Python-only tasks and the remaining non-Python-only tasks in Table IV. On GSO, 41.2% of tasks in GSO involve a human expert baseline that only modifies Python code files, and on the remaining tasks, the human expert baseline additionally modifies low-level code (C, C++, Cython, Rust) files. Here, we see that agents perform worse on these low-level tasks compared to the Python-only tasks. However, on the agents that use a profiler, performance on the non-Python-only tasks significantly improves. 2
+
+2) Case Study: Impact of PerfAgent’s Control Loop: 
+
+We further expand on the example shown in Fig. 3 to demonstrate how PerfAgent enables an agent to iteratively improve its implementation. We look at task: numpy__numpy-1b861a2 from GSO which aims to optimize numpy.char.replace to demon-
+
+> 2We do not perform the same breakdown on SWE-fficiency-Lite, because 89% of its tasks involve Python-only changes.
+
+TABLE V: Results on the GSO and SWE-fficiency-Lite benchmarks for Kimi-K2. Correctness, Sp@1, Opt@1, and hack-adjusted scores are reported.                     
+
+> Method Correctness Sp@1 Opt@1 Hack-Adj.
+> GSO
+> OpenHands 64.7 23.5 9.8 3.9 PerfAgent 89.2 31.4 10.8 5.9 SWE-fficiency-Lite
+> OpenHands 74 39 26 22 PerfAgent 87 67 46 32
+
+strate the impact of PerfAgent’s control loop on the agent’s implementation. Fig. 3 traces how the agent’s implementation evolves across the 5 controller iterations. The initial profiler report attributes most of the runtime to the replace call site and the generic _vec_string dispatch path, and the agent responds with a C-level fast path for scalar arguments (Turn 1, 1.40 ×) and then a Python-level fast path that avoids an array-conversion step (Turn 2, 2.36 ×). After each attempt, the updated profiler feedback continues to report large overheads from per-element scalar creation ( PyArray_Scalar ) and object reference counting that cannot be removed at the Python or generic-dispatch layer. This pushes the agent to implement a dedicated native kernel, chararray_replace , in C (Turn 3), more than doubling the speedup to 5.56 ×. The feedback on the new kernel then localizes a per-element string-length scan ( _unicode_string_length ), which the agent removes to reach its best patch (Turn 4, 5.87 ×). The final attempt explores a further change that slightly regresses (Turn 5, 5.85 ×), so the controller reports the Turn-4 patch rather than the last submission, illustrating why we retain the best measured patch instead of the final one. As in the aggregate trend (Fig. 4), the updated profiler feedback lets the agent discover an optimization at an entirely new abstraction layer, matching the approach taken by the human expert baseline. By contrast, the OpenHands baseline stops at the first fast path it finds at the original abstraction layer, as that already achieves speedup over the base repository. 
+
+E. Additional Analyses 
+
+Finally, we run additional analyses to rule out alterna-tive explanations for PerfAgent’s gains and to characterize its limitations. 
+
+1) Test-Time Scaling: The improved performance of PerfAgent is not merely due to its use of additional test-time compute. To demonstrate this, we evaluated PerfAgent against a best-case test-time scaling approach that runs the OpenHands workflow 5 times and then uses an oracle to pick the best result. The use of an oracle to pick the best patch, in this setting, is the “best-case” for test-time scaling because it uses the results of hidden performance and correctness tests from the evaluation harness that are not made available to PerfAgent or other TABLE VI: Comparison with test-time scaling running on OpenHands best@5 with an oracle judge. Correctness, Sp@1, Opt@1, Hack-adjusted score and cost in terms of average $ per task are reported for each benchmark.                          
+
+> Method Correctness Sp@1 Opt@1 Hack-adj. Cost ($)
+> GSO
+> OpenHands best@5 99.0 67.6 26.5 26.5 11.01 PerfAgent 96.1 77.5 44.1 39.2 2.88 SWE-fficiency-Lite
+> OpenHands best@5 99 93 71 68 9.91 PerfAgent 90 83 75 74 4.25
+
+TABLE VII: Results comparing PerfAgent to an agent given instructions in the prompt on how to use a profiler.                             
+
+> Method Correctness Sp@1 Opt@1 Hack-Adj.
+> GSO
+> OpenHands 88.2 46.1 20.6 19.6
+> AP96.1 67.6 17.6 16.7 PerfAgent 96.1 77.5 44.1 39.2 SWE-fficiency-Lite
+> OpenHands 82 47 27 26
+> AP85 75 45 44 PerfAgent 90 83 75 74
+
+baselines during inference. The results of this experiment are provided in Table VI. On GSO, PerfAgent achieves a better Opt@1 score than OpenHands best@5 (44.1% vs 26.5%) and a better hack-adjusted score (39.2% vs 26.5%) while costing over 3 × less. On SWE-fficiency-Lite, the results are similar with PerfAgent achieving a better Opt@1 score (75% vs 71%) and hack-adjusted score (74% vs 68%) than OpenHands best@5 while costing 2 × less. 
+
+2) Open-Source Models: We also evaluate two open-source models: Kimi-K2-0711 on GSO, and Kimi-K2-0905 on SWE-fficiency-Lite, as those are the model versions used in the OpenHands baselines. The results are shown in Table V and show that PerfAgent outperforms the OpenHands baseline on both benchmarks. Overall, we find that open-source models generally struggle to identify the relevant information from the profiling output and implement the optimiza-tions suggested from the profiler feedback. However, despite this, PerfAgent still outperforms the OpenHands baselines on both benchmarks. 
+
+3) Profiler Instruction in Prompt: An alternative to PerfAgent’s workflow that runs the profiler and provides a curated summary to the LLM is to give the agent instructions in the prompt on how to use the profiler, and have the agent decide when to use it. We separately evaluate an agent AP that is given instructions in the prompt detailing how PerfAgent uses a profiler, and the results are shown in Table VII. 
+
+4) Reward Hacking: A key design choice in PerfAgent is that when benchmarking, PerfAgent only times the execution time of the first run rather than the average across all profiling iterations. While this introduces some variance in the reported runtime, we find it to be small (< 3% of overall runtime on average). The motivation is to discourage reward hacking: an agent receiving average-run timing as feedback can cache the result of an expensive operation on the first run and replay it on subsequent runs, collapsing the average runtime without performing any real optimization. The loop-only ablation 
+
+AL makes this concrete. On SWE-fficiency-Lite, the loop-only agent AL orig-inally achieved a 62% Opt@1 score but a 44% hack-adjusted score as 18 of its high-performing patches are labeled as hacks by our hack detector. We find that 14 of the 18 hacks are related to maintaining some form of persistent state or caching results. In the provided test script, SWE-fficiency times the task by running the provided workload many times, so an agent that caches an expensive result on the first run and replays it on sub-sequent runs collapses the average runtime and appears to achieve a large speedup without optimizing anything. Therefore, we remove this by separately running AL with a test script that only times the execution of the first run. After making this change, we re-run AL with the updated test script, and the results are shown in Table II. We see that the number of hacks decreases significantly, from 18 to 3, indicating that if the evaluation harness is not constructed properly, then it can lead to reward hacking by the agent. We perform a more in-depth analysis of each reward hacking instance in Section C of the supplemental material. 
+
+5) Ablation on SWE-fficiency-Lite Budget per Task: In Section IV-D 2, we discussed that many of the instances in SWE-fficiency-Lite ran out of budget before being able to submit a patch on later turns, which led to speedups plateauing, as compared to GSO, the agent spends more turns and tokens reading files and running tests, and we show this in Table VIII. Therefore, we separately evaluate SWE-fficiency-Lite with a $ 10 budget per task and report the results below in Table IX. Here, many more instances submitted attempts beyond turn 2, and we see the speedups steadily increasing over time compared to running with a $ 5 budget. We also observe improvements in performance on the SWE-fficiency-Lite compared to running with a $ 5 budget, achieving an Opt@1 score of 79% compared to 75%, and a hack-adjusted score of 77% compared to 74%. TABLE VIII: Average number of file read commands and test commands per instance, as well as the average output, in number of tokens, of the read and test commands per instance in GSO and SWE-fficiency-Lite.          
+
+> Benchmark # File Reads # Test Invoc. Read Tokens Test Tokens GSO 35.4 7.4 31,399 2,990 SWE-fficiency-Lite 42.7 6.5 41,911 7,294
+
+TABLE IX: Average (harmonic mean) Speedup of an agent’s submitted change at each turn and # of instances that submitted a patch at that turn on SWE-fficiency-Lite. The remaining instances that did not submit a patch ran out of budget.                          
+
+> $5 budget per task $10 budget per task
+> Turn Avg. Speedup # Submitted Avg. Speedup # Submitted
+> 11.697 ×89 2.727 ×98 22.486 ×69 3.492 ×84 32.638 ×40 3.888 ×67 42.667 ×17 3.945 ×38 52.672 ×64.023 ×12
+
+V. R ELATED WORK 
+
+A. LLM Coding Benchmarks 
+
+Kernel-level benchmarks. HumanEval and MBPP target completion of simple Python programs [19], [20], while LiveCodeBench and BigCodeBench target competitive-programming problems [21]–[23]. EvalPerf, Effibench, and Enamel evaluate the efficiency of LLM-generated Python programs [24]–[26], and ParEval eval-uates correct and efficient parallel code [27]. For kernels, AlgoTune optimizes routines from numerical compu-tations [28], KernelBench and MultiKernelBench write optimized CUDA kernels from a PyTorch specification across architectures [29], [30], and TritonBench generates Triton kernels [31]. 
+
+Repository-level and Long-horizon benchmarks. SWE-Bench and its extensions evaluate an LLM’s ability to resolve issues on real-world repositories [1]–[3], [32]– [34]. ProgramBench [35] and FrontierSWE [36] evaluate LLMs on long-horizon software engineering tasks such as writing a SQL engine from scratch. SWE-Perf, SWE-fficiency, and GSO instead target the performance of the agent’s changes, not only correctness [4]–[6] 
+
+B. LLMs for Code Optimization 
+
+SBLLM proposes a search-based framework for iter-ative optimization of competitive-programming prob-lems [37], and PIE finetunes LLMs on curated competition data to improve code optimization [38]. LessonL is a multi-agent framework in which agents learn from each other’s experience optimizing computational kernels [39]. Stark, Astra, Pike, and KernelFalcon take multi-agent ap-proaches to generating or optimizing CUDA kernels [40]– [43], while CudaForce uses hardware feedback [44]. PEAK optimizes GPU kernels across architectures via natural-language transformation specifications [45], and AccelOpt and AutoComp target kernels for specialized accelerators [46], [47]. 
+
+Profiler-guided and iterative optimization. Closest to our setting, POLO couples a profiler with an LLM agent loop, using an iterative weighting algorithm to localize bottlenecks while separate generator and decision agents propose and select edits [48]. Profiler-in-the-loop designs have also been explored at finer granularity: PRAGMA routes hardware-profiling signals through a multi-agent loop for kernel generation [49], Profilin-gAgent guides structured pruning and quantization of neural networks [50], and TritonForge optimizes Triton kernels [51]; PEACE draws on historical edits and external knowledge to optimize real-world repositories [52]. Our work differs on two axes. First, we target real-world repositories with native extensions (C, C++, Cython, Rust) and hold the agent to a human-expert bar, rather than syn-thetic programs, isolated kernels, or model-compression objectives. Second, we show sample-efficiency: our loop surpasses an oracle best-of-five baseline at a fraction of the cost, isolating feedback quality rather than added compute as the driver of the gains. VI. T HREATS TO VALIDITY 
+
+Construct and internal validity. PerfAgent and both benchmarks measure performance on the single workload given to the agent, so a patch that is fast there is not guaranteed to be a general optimization. GSO mitigates this with hidden performance tests, whereas SWE-fficiency-Lite times only the provided script and is thus easier to game—the source of the reward hacking we observe. We report hack-adjusted scores from a combined detector (Section IV-A 2) and manually reviewed every flagged instance, but an LLM-as-judge detector may still miss subtle exploits or over-flag legitimate fast paths. Because our controller validates with pytest-testmon, which tracks only Python coverage, a native-extension regression can slip between iterations; this deflates rather than inflates our score, since each benchmark’s own correctness suite runs at evaluation time. 
+
+External and conclusion validity. Our findings span two benchmarks, roughly a dozen Python-centric reposi-tories, two models (GPT-5.1 and Kimi-K2), and a single base harness (Mini-SWE-Agent), and may not transfer to other languages, models, or harnesses; although PerfA-gent is harness-independent by construction, we have not measured its gains on OpenHands or Codex. Results are also single-run, so small differences fall within noise—the Kimi-K2 GSO gap (Table V) is about two tasks and should not be over-interpreted. We therefore base our headline GPT-5.1 claims on a task-by-task comparison that is statistically significant on both benchmarks (Table III). VII. C ONCLUSION AND FUTURE WORK 
+
+We presented PerfAgent, a profiler-guided, verifier-in-the-loop workflow that turns an off-the-shelf coding agent into a repository-level performance optimizer. PerfAgent attacks three failure modes of general-purpose agents on optimization tasks: missing the real bottleneck, stopping at the first passing patch, and under-testing complex changes, with three matching components: a curated profiler summary, an objective-driven loop controller that retains the fastest correct patch, and selective re-validation after every iteration. PerfAgent can be run on top of more capable single-and multi-agent harnesses such as Codex or Claude Code, which we plan to evaluate. Other directions include extending selective testing to native-extension coverage , hardening the profiling and timing template against new classes of reward hacking, and broadening to additional languages, models. More broadly, we view performance engineering as a distinct and demanding axis of agentic software engineering; one that rewards agents able to reason about how code runs, not merely whether it is correct. VIII. A CKNOWLEDGMENTS 
+
+This research was sponsored in-part by the MIT-IBM Watson AI Lab. This research was sponsored in-part by the United States Air Force Research Laboratory and the United States Air Force Artificial Intelligence Accelerator and was accomplished under Cooperative Agreement Number FA8750-19-2-1000. The views and conclusions contained in this document are those of the authors and should not be interpreted as representing the official policies, either expressed or implied, of the United States Air Force or the U.S. Government. The U.S. Government is authorized to reproduce and distribute reprints for Government purposes notwithstanding any copyright notation herein. REFERENCES [1] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. R. Narasimhan, “SWE-bench: Can language models resolve real-world github issues?” in The Twelfth International Conference on Learning Representations , 2024. [Online]. Available: https://openreview.net/forum?id=VTF8yNQM66 [2] X. Deng, J. Da, E. Pan, Y. Y. He, C. Ide, K. Garg, N. Lauffer, A. Park, N. Pasari, C. Rane, K. Sampath, M. Krishnan, S. Kundurthy, S. Hendryx, Z. Wang, V. Bharadwaj, J. Holm, R. Aluri, C. B. C. Zhang, N. Jacobson, B. Liu, and B. Kenstler, “Swe-bench pro: Can ai agents solve long-horizon software engineering tasks?” 2025. [Online]. Available: https://arxiv.org/abs/2509.16941 [3] D. Zan, Z. Huang, W. Liu, H. Chen, L. Zhang, S. Xin, L. Chen, Q. Liu, X. Zhong, A. Li, S. Liu, Y. Xiao, L. Chen, Y. Zhang, J. Su, T. Liu, R. Long, K. Shen, and L. Xiang, “Multi-swe-bench: A multilingual benchmark for issue resolving,” 2025. [Online]. Available: https://arxiv.org/abs/2504.02605 [4] M. Shetty, N. Jain, J. Liu, V. Kethanaboyina, K. Sen, and I. Stoica, “Gso: Challenging software optimization tasks for evaluating swe-agents,” 2025. [Online]. Available: https: //arxiv.org/abs/2505.23671 [5] J. J. Ma, M. Hashemi, A. Yazdanbakhsh, K. Swersky, O. Press, E. Li, V. J. Reddi, and P. Ranganathan, “Swe-fficiency: Can language models optimize real-world repositories on real workloads?” 2025. [Online]. Available: https://arxiv.org/abs/2511.06090 [6] X. He, Q. Liu, M. Du, L. Yan, Z. Fan, Y. Huang, Z. Yuan, and Z. Ma, “Swe-perf: Can language models optimize code performance on real-world repositories?” 2025. [Online]. Available: https://arxiv.org/abs/2507.12415 [7] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. R. Narasimhan, and O. Press, “SWE-agent: Agent-computer interfaces enable automated software engineering,” in The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. [Online]. Available: https://arxiv.org/abs/2405.15793 [8] T. R. Team, P. Gao, Z. Tian, X. Meng, X. Wang, R. Hu, Y. Xiao, Y. Liu, Z. Zhang, J. Chen, C. Gao, Y. Lin, Y. Xiong, C. Peng, and X. Liu, “Trae agent: An llm-based agent for software engineering with test-time scaling,” 2025. [Online]. Available: https://arxiv.org/abs/2507.23370 [9] J. Ganhotra, S. Serhan, A. A. Nassar, A. Shinnar, Z. Nevo, and M. Hirzel, “Resolving java code repository issues with iswe agent,” 2026. [Online]. Available: https://arxiv.org/abs/2603.11356 [10] X. Wang, B. Li, Y. Song, F. F. Xu, X. Tang, M. Zhuge, J. Pan, Y. Song, B. Li, J. Singh, H. H. Tran, F. Li, R. Ma, M. Zheng, B. Qian, Y. Shao, N. Muennighoff, Y. Zhang, B. Hui, J. Lin, R. Brennan, H. Peng, H. Ji, and G. Neubig, “OpenHands: An Open Platform for AI Software Developers as Generalist Agents.” [Online]. Available: https://arxiv.org/abs/2407.16741 [11] OpenAI, “Codex CLI: Lightweight coding agent that runs in your terminal,” https://github.com/openai/codex, 2025. [12] B. Frederickson, “Sampling profiler for Python programs,” 2026. [Online]. Available: https://github.com/benfred/py-spy [13] N. Shinn, F. Cassano, E. Berman, A. Gopinath, K. Narasimhan, and S. Yao, “Reflexion: Language agents with verbal reinforcement learning,” 2023. [Online]. Available: https://arxiv.org/abs/2303. 11366 [14] A. Madaan, N. Tandon, P. Gupta, S. Hallinan, L. Gao, S. Wiegreffe, U. Alon, N. Dziri, S. Prabhumoye, Y. Yang, S. Gupta, B. P. Majumder, K. Hermann, S. Welleck, A. Yazdanbakhsh, and P. Clark, “Self-refine: Iterative refinement with self-feedback,” 2023. [Online]. Available: https://arxiv.org/abs/2303.17651 [15] OpenAI, “GPT-5.1: A smarter, more conversational ChatGPT,” https://openai.com/index/gpt-5-1/, Nov 2025. [16] K. Team, Y. Bai, Y. Bao, Y. Charles, C. Chen, G. Chen, H. Chen, H. Chen, J. Chen, N. Chen, R. Chen, Y. Chen, Y. Chen, Y. Chen, Z. Chen, J. Cui, H. Ding, M. Dong, A. Du, C. Du, D. Du, Y. Du, Y. Fan, Y. Feng, K. Fu, B. Gao, C. Gao, H. Gao, P. Gao, T. Gao, Y. Ge, S. Geng, Q. Gu, X. Gu, L. Guan, H. Guo, J. Guo, X. Hao, T. He, W. He, W. He, Y. He, C. Hong, H. Hu, Y. Hu, Z. Hu, W. Huang, Z. Huang, Z. Huang, T. Jiang, Z. Jiang, X. Jin, Y. Kang, G. Lai, C. Li, F. Li, H. Li, M. Li, W. Li, Y. Li, Y. Li, Y. Li, Z. Li, Z. Li, H. Lin, X. Lin, Z. Lin, C. Liu, C. Liu, H. Liu, J. Liu, J. Liu, L. Liu, S. Liu, T. Y. Liu, T. Liu, W. Liu, Y. Liu, Y. Liu, Y. Liu, Y. Liu, Z. Liu, E. Lu, H. Lu, L. Lu, Y. Luo, S. Ma, X. Ma, Y. Ma, S. Mao, J. Mei, X. Men, Y. Miao, S. Pan, Y. Peng, R. Qin, Z. Qin, B. Qu, Z. Shang, L. Shi, S. Shi, F. Song, J. Su, Z. Su, L. Sui, X. Sun, F. Sung, Y. Tai, H. Tang, J. Tao, Q. Teng, C. Tian, C. Wang, D. Wang, F. Wang, H. Wang, H. Wang, J. Wang, J. Wang, J. Wang, S. Wang, S. Wang, S. Wang, X. Wang, Y. Wang, Y. Wang, Y. Wang, Y. Wang, Y. Wang, Z. Wang, Z. Wang, Z. Wang, Z. Wang, C. Wei, Q. Wei, H. Wu, W. Wu, X. Wu, Y. Wu, C. Xiao, J. Xie, X. Xie, W. Xiong, B. Xu, J. Xu, L. H. Xu, L. Xu, S. Xu, W. Xu, X. Xu, Y. Xu, Z. Xu, J. Xu, J. Xu, J. Yan, Y. Yan, H. Yang, X. Yang, Y. Yang, Y. Yang, Z. Yang, Z. Yang, Z. Yang, H. Yao, X. Yao, W. Ye, Z. Ye, B. Yin, L. Yu, E. Yuan, H. Yuan, M. Yuan, S. Yuan, H. Zhan, D. Zhang, H. Zhang, W. Zhang, X. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Y. Zhang, Z. Zhang, H. Zhao, Y. Zhao, Z. Zhao, H. Zheng, S. Zheng, L. Zhong, J. Zhou, X. Zhou, Z. Zhou, J. Zhu, Z. Zhu, W. Zhuang, and X. Zu, “Kimi k2: Open agentic intelligence,” 2026. [Online]. Available: https://arxiv.org/abs/2507.20534 [17] Moonshot AI, “Kimi-K2-Instruct,” 2025. [Online]. Available: https://huggingface.co/moonshotai/Kimi-K2-Instruct [18] ——, “Kimi-K2-Instruct-0905,” 2025. [Online]. Available: https: //huggingface.co/moonshotai/Kimi-K2-Instruct-0905 [19] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. de Oliveira Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman, A. Ray, R. Puri, G. Krueger, M. Petrov, H. Khlaaf, G. Sastry, P. Mishkin, B. Chan, S. Gray, N. Ryder, M. Pavlov, A. Power, L. Kaiser, M. Bavarian, C. Winter, P. Tillet, F. P. Such, D. Cummings, M. Plappert, F. Chantzis, E. Barnes, A. Herbert-Voss, W. H. Guss, A. Nichol, A. Paino, N. Tezak, J. Tang, I. Babuschkin, S. Balaji, S. Jain, W. Saunders, C. Hesse, A. N. Carr, J. Leike, J. Achiam, V. Misra, E. Morikawa, A. Radford, M. Knight, M. Brundage, M. Murati, K. Mayer, P. Welinder, B. McGrew, D. Amodei, S. McCandlish, I. Sutskever, and W. Zaremba, “Evaluating large language models trained on code,” 2021. [Online]. Available: https://arxiv.org/abs/2107.03374 [20] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan, E. Jiang, C. Cai, M. Terry, Q. Le, and C. Sutton, “Program synthesis with large language models,” 2021. [Online]. Available: https://arxiv.org/abs/2108.07732 [21] N. Jain, K. Han, A. Gu, W.-D. Li, F. Yan, T. Zhang, S. Wang, A. Solar-Lezama, K. Sen, and I. Stoica, “Livecodebench: Holistic and contamination free evaluation of large language models for code,” 2024. [Online]. Available: https://arxiv.org/abs/2403.07974 [22] Z. Zheng, Z. Cheng, Z. Shen, S. Zhou, K. Liu, H. He, D. Li, S. Wei, H. Hao, J. Yao, P. Sheng, Z. Wang, W. Chai, A. Korolova, P. Henderson, S. Arora, P. Viswanath, J. Shang, and S. Xie, “Livecodebench pro: How do olympiad medalists judge llms in competitive programming?” 2025. [Online]. Available: https://arxiv.org/abs/2506.11928 [23] T. Y. Zhuo, M. C. Vu, J. Chim, H. Hu, W. Yu, R. Widyasari, I. N. B. Yusuf, H. Zhan, J. He, I. Paul, S. Brunner, C. Gong, T. Hoang, A. R. Zebaze, X. Hong, W.-D. Li, J. Kaddour, M. Xu, Z. Zhang, P. Yadav, N. Jain, A. Gu, Z. Cheng, J. Liu, Q. Liu, Z. Wang, B. Hui, N. Muennighoff, D. Lo, D. Fried, X. Du, H. de Vries, and L. V. Werra, “Bigcodebench: Benchmarking code generation with diverse function calls and complex instructions,” 2025. [Online]. Available: https://arxiv.org/abs/2406.15877 [24] J. Liu, S. Xie, J. Wang, Y. Wei, Y. Ding, and L. Zhang, “Evaluating language models for efficient code generation,” 2024. [Online]. Available: https://arxiv.org/abs/2408.06450 [25] D. Huang, Y. Qing, W. Shang, H. Cui, and J. M. Zhang, “Effibench: Benchmarking the efficiency of automatically generated code,” 2025. [Online]. Available: https://arxiv.org/abs/2402.02037 [26] R. Qiu, W. W. Zeng, J. Ezick, C. Lott, and H. Tong, “How efficient is llm-generated code? a rigorous & high-standard benchmark,” 2025. [Online]. Available: https://arxiv.org/abs/2406.06647 [27] D. Nichols, J. H. Davis, Z. Xie, A. Rajaram, and A. Bhatele, “Can large language models write parallel code?” in Proceedings of the 33rd International Symposium on High-Performance Parallel and Distributed Computing , ser. HPDC ’24. ACM, June 2024, p. 281–294. [Online]. Available: http://dx.doi.org/10.1145/3625549.3658689 [28] O. Press, B. Amos, H. Zhao, Y. Wu, S. K. Ainsworth, D. Krupke, P. Kidger, T. Sajed, B. Stellato, J. Park, N. Bosch, E. Meril, A. Steppi, A. Zharmagambetov, F. Zhang, D. Perez-Pineiro, A. Mercurio, N. Zhan, T. Abramovich, K. Lieret, H. Zhang, S. Huang, M. Bethge, and O. Press, “Algotune: Can language models speed up general-purpose numerical programs?” 2025. [Online]. Available: https://arxiv.org/abs/2507.15887 [29] A. Ouyang, S. Guo, S. Arora, A. L. Zhang, W. Hu, C. Ré, and A. Mirhoseini, “Kernelbench: Can llms write efficient gpu kernels?” 2025. [Online]. Available: https://arxiv.org/abs/2502.10517 [30] Z. Wen, Y. Zhang, Z. Li, Z. Liu, L. Xie, and T. Zhang, “Multikernelbench: A multi-platform benchmark for kernel generation,” 2025. [Online]. Available: https://arxiv.org/abs/2507. 17773 [31] J. Li, S. Li, Z. Gao, Q. Shi, Y. Li, Z. Wang, J. Huang, H. Wang, J. Wang, X. Han, Z. Liu, and M. Sun, “Tritonbench: Benchmarking large language model capabilities for generating triton operators,” 2025. [Online]. Available: https://arxiv.org/abs/2502.14752 [32] L. Zhang, S. He, C. Zhang, Y. Kang, B. Li, C. Xie, J. Wang, M. Wang, Y. Huang, S. Fu, E. Nallipogu, Q. Lin, Y. Dang, S. Rajmohan, and D. Zhang, “Swe-bench goes live!” 2025. [Online]. Available: https://arxiv.org/abs/2505.23419 [33] W. Huang, C. Lee, L. Tng, and S. Ge, “Deepswe: Measuring frontier coding agents on original, long-horizon engineering tasks,” 2026. [Online]. Available: https://github.com/datacurve-ai/deep-swe [34] E. Lu et al. , “Introducing FrontierCode,” https://cognition.ai/blog/ frontier-code, Jun. 2026, cognition AI blog, published 2026-06-08. [35] J. Yang, K. Lieret, J. Ma, P. Thakkar, D. Pedchenko, S. Sootla, E. McMilin, P. Yin, R. Hou, G. Synnaeve, D. Yang, and O. Press, “Programbench: Can language models rebuild programs from scratch?” 2026. [Online]. Available: https: //arxiv.org/abs/2605.03546 [36] E. Chu, R. Agarwal, A. Thangamuthu, B. Graham, J. Mattern, F. Jiang, P. Cento, S. Jain, M. Abbasi, M. H. Rezaei, G. Wang, A. Zhang, S. Guo, K. Nguyen, A. Bidgoli, A. Dalmia, A. Dankar, A. Vaddela, C. Chen, K. Kumar, K. Vaish, N. Pour, R. Kondra, S. Badiyani, S. Giri, S. Das, S. Gaikwad, S. Shah, V. Dilawari, and V. Agarwal, “Frontierswe,” Proximal Blog , 2026. [Online]. Available: https://frontierswe.com/blog [37] S. Gao, C. Gao, W. Gu, and M. Lyu, “Search-based llms for code optimization,” 2024. [Online]. Available: https://arxiv.org/abs/ 2408.12159 [38] A. Shypula, A. Madaan, Y. Zeng, U. Alon, J. Gardner, M. Hashemi, G. Neubig, P. Ranganathan, O. Bastani, and A. Yazdanbakhsh, “Learning performance-improving code edits,” 2024. [Online]. Available: https://arxiv.org/abs/2302.07867 [39] Y. Liu, R. Deng, T. Kaler, X. Chen, C. E. Leiserson, Y. Ma, and J. Chen, “Lessons learned: A multi-agent framework for code llms to learn and improve,” 2025. [Online]. Available: https://arxiv.org/abs/2505.23946 [40] J. Dong, Y. Yang, T. Liu, Y. Wang, F. Qi, V. Tarokh, K. Rangadurai, and S. Yang, “Stark: Strategic team of agents for refining kernels,” 2025. [Online]. Available: https://arxiv.org/abs/2510.16996 [41] A. Wei, T. Sun, Y. Seenichamy, H. Song, A. Ouyang, A. Mirhoseini, K. Wang, and A. Aiken, “Astra: A multi-agent system for gpu kernel performance optimization,” 2025. [Online]. Available: https://arxiv.org/abs/2509.07506 [42] L. e. a. Wang, “KernelFalcon: Deep agent architecture for au-tonomous GPU kernel generation,” PyTorch Blog, Nov. 2025. [43] K. Nagaitsev, L. Grbcic, S. Williams, and C. Iancu, “Optimizing pytorch inference with llm-based multi-agent systems,” 2026. [Online]. Available: https://arxiv.org/abs/2511.16964 [44] Z. Zhang, R. Wang, S. Li, Y. Luo, M. Hong, and C. Ding, “Cudaforge: An agent framework with hardware feedback for cuda kernel optimization,” 2025. [Online]. Available: https://arxiv.org/abs/2511.01884 [45] M. U. Tariq, A. Jangda, A. Moreira, M. Musuvathi, and T. Sorensen, “Peak: A performance engineering ai-assistant for gpu kernels powered by natural language transformations,” 2025. [Online]. Available: https://arxiv.org/abs/2512.19018 [46] G. Zhang, S. Zhu, A. Wei, Z. Song, A. Nie, Z. Jia, N. Vijaykumar, Y. Wang, and K. Olukotun, “Accelopt: A self-improving llm agentic system for ai accelerator kernel optimization,” 2025. [Online]. Available: https://arxiv.org/abs/2511.15915 [47] C. Hong, S. Bhatia, A. Cheung, and Y. S. Shao, “Autocomp: A powerful and portable code optimizer for tensor accelerators,” 2025. [Online]. Available: https://arxiv.org/abs/2505.18574 [48] J. Bai, R. Xu, S. Wu, D. Yang, J. Zhao, and G. Chen, “POLO: An LLM-powered project-level code performance optimization framework,” in Proceedings of the Thirty-Fourth International Joint Conference on Artificial Intelligence, IJCAI-25 , 2025, pp. 7319–7328. [49] K. Lei, H. Yang, H. Zhang, X. You, K. Zhang, Z. Luan, Y. Liu, and D. Qian, “Pragma: A profiling-reasoned multi-agent framework for automatic kernel optimization,” 2025. [Online]. Available: https://arxiv.org/abs/2511.06345 [50] S. Jafari, A. Sarkar, M. Bilwal, and A. Jannesari, “Profilingagent: Profiling-guided agentic reasoning for adaptive model optimiza-tion,” 2025. [Online]. Available: https://arxiv.org/abs/2509.05584 [51] H. Li, K. Man, P. Kanuparthy, H. Chen, W. Sun, S. Tallam, C. Zhu, K. Zhu, and Z. Qian, “Tritonforge: Profiling-guided framework for automated triton kernel optimization,” 2025. [Online]. Available: https://arxiv.org/abs/2512.09196 [52] X. Ren, J. Wan, Y. Peng, Z. Liu, M. Liang, D. Chen, W. Jiang, and Y. Li, “Peace: Towards efficient project-level efficiency optimization via hybrid code editing,” 2025. [Online]. Available: https://arxiv.org/abs/2510.17142 APPENDIX ABASE PERF AGENT PROMPT 
+
+Prompt for PerfAgent 
+
+I’ve uploaded a python code repository in the directory /testbed . There is a python script 
+
+/perf_script.py which shows an example usage of the repository. Can you help me implement the necessary changes to the repository so that the runtime of the test scripts is optimized? This will be a very difficult problem and may involve modifying multiple files across the repos-itory. Do not be afraid to make large changes to the repository in order to implement your optimization. I have obtained an initial summary from a profiler showing the bottlenecks. The profiler report sum-marizes the output of /profile_prob_script.py ,which profiles /perf_script.py .Please use the following report to guide your optimization. 
+
+Report 
+
+{{ perf_report }} 
+
+To improve performance, either optimize the bottleneck itself or avoid calling the bottleneck as frequently. 
+
+## Testing 
+
+/run_tests.sh runs tests that can be used to verify the correctness of your implementation. Additional hidden tests may be used to evaluate your implementation. 
+
+## Basic guidelines 
+
+1) Your task is to make changes to non-test files in the /testbed directory to improve the performance of the test scripts. Do not 
+
+make changes to any other files as they will not count towards your submission. 2) Make changes while ensuring the repository is functionally equivalent to the original. 3) Do not overoptimize for just the specific in-puts in the provided perf_script.py . Make general performance improvements for the usage scenario shown. 4) You may need to rebuild the repo for your changes to take effect before testing. Some rebuilds may take time to run, so be patient. Running /build.sh rebuilds the repository. 
+
+Do not build the repository in other ways. Important: Do not run scripts from within 
+
+/testbed or add /testbed to PYTHONPATH, as it contains source code, and you may run into issues with circular imports. Instead, change to a neutral directory before running: cd / && python /path/to/script.py 
+
+Never use cd /testbed && python script.py 
+
+For running scripts, run from the / directory. For example, to run /perf_script.py run cd / && python perf_script.py .To install a package, run uv pip install <package> . For example, to install pytest , run 
+
+uv pip install pytest .You can execute bash commands and edit files to implement the necessary changes. 
+
+## Workflow 
+
+High-Level Problem Solving Strategy 
+
+1) Understand the problem deeply. Carefully read the issue and think critically about what is required. 2) Investigate the codebase. Explore relevant files, search for key functions, and gather context. 3) Develop a clear, step-by-step plan. Break down the fix into manageable, incremental steps. 4) Implement the optimization incrementally. Make small, testable code changes while ensuring the repository is functionally equiv-alent to the original. 5) Debug as needed. Use debugging techniques to isolate and resolve issues. 6) Test frequently. Run tests after each change to verify correctness. 7) Iterate until the performance has signifi-cantly improved and all tests pass. 8) Continue to debug performance. Find if there are any additional bottlenecks in your solution and resolve them. 9) Reflect and validate comprehensively. After tests pass, write additional tests to ensure correctness, and remember there are hidden tests that must also pass before the solution is truly complete. 
+
+1. Deeply Understand the Problem  
+
+> •
+
+Carefully read the test script and think hard about a plan to optimize its performance before coding. 
+
+2. Codebase Investigation  
+
+> •
+
+Explore relevant files and directories.  
+
+> •
+
+Search for key functions, classes, or variables related to the issue.  
+
+> •
+
+Read and understand relevant code snippets.  
+
+> •
+
+Identify the root cause of the problem.  
+
+> •
+
+Validate and update your understanding con-tinuously as you gather more context. 
+
+3. Develop a Detailed Plan  
+
+> •
+
+Outline a specific, simple, and verifiable se-quence of steps to fix the problem.  
+
+> •
+
+Break down the fix into small, incremental changes. 
+
+4. Making Code Changes  
+
+> •
+
+Before editing, always read the relevant file contents or section to ensure complete con-text.  
+
+> •
+
+If a patch is not applied correctly, attempt to reapply it.  
+
+> •
+
+Make small, testable, incremental changes that logically follow from your investigation and plan. 
+
+5. Debugging  
+
+> •
+
+Make code changes only if you have high confidence they can solve the problem.  
+
+> •
+
+When debugging, try to determine the root cause rather than addressing symptoms.  
+
+> •
+
+Debug for as long as needed to identify the root cause and identify a fix.  
+
+> •
+
+Use print statements, logs, or temporary code to inspect program state, including descrip-tive statements or error messages.  
+
+> •
+
+To test hypotheses, you can also add test statements or functions.  
+
+> •
+
+Revisit your assumptions if unexpected be-havior occurs. 
+
+6. Testing  
+
+> •
+
+Run tests frequently by running the perf script cd / && python perf_script.py , or create your own tests and run those.  
+
+> •
+
+After each change, verify correctness by run-ning relevant tests.  
+
+> •
+
+If tests fail, analyze failures and revise your patch.  
+
+> •
+
+Ensure all tests pass before finalizing. 
+
+7. Final Verification  
+
+> •
+
+Confirm the performance has improved.  
+
+> •
+
+Review your solution for logic correctness and robustness.  
+
+> •
+
+Iterate until you are extremely confident the fix is complete and all test scripts pass. 
+
+8. Improving Performance  
+
+> •
+
+Continue to analyze the changed code to find bottlenecks and resolve them.  
+
+> •
+
+Continue iterating on the test script (if needed) to test the performance of your changes on various inputs. Once you are done with the above, submit your changes and finish your work by issuing the following command: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT . Do not combine it with any other command. Important: After this command, you cannot continue working on this task. 
+
+## Response Format 
+
+For each response: 1) Include a THOUGHT section explaining what you are looking for and why. 2) At least one tool call. 
+
+Critical Requirements  
+
+> •
+
+Your response SHOULD include reasoning text explaining what you’re doing.  
+
+> •
+
+Your response MUST include AT LEAST ONE bash tool call. You can make MULTIPLE tool calls in a single response when the commands are independent.  
+
+> •
+
+Directory or environment variable changes are not persistent. Every action is executed in a new subshell.  
+
+> •
+
+You can prefix any action with MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ... or write/load environment variables from files. 
+
+Environment Details  
+
+> •
+
+You have a full Linux shell environment.  
+
+> •
+
+Always use non-interactive flags ( -y , -f ) for commands.  
+
+> •
+
+Avoid interactive tools like vi, nano, or any that require user input.  
+
+> •
+
+You can use bash commands or invoke any tool available in the environment. APPENDIX BFILTERING AND SELECTING TESTS 
+
+For many tasks in the benchmarks, the base commit of the repository contains both tests that consistently fail and flaky tests that fail intermittently. Returning these unrelated failures can derail the agent from completing its task, and makes it difficult for the controller to select correct patches. Therefore, we filter out these tests beforehand. For flaky tests in particular, we run the test suite 5 times, each time with a different random seed and also randomize the order of test execution. We exclude tests that fail in any of the runs and find that this produces a stable test suite for each of the tasks. The impact of filtering tests and selecting tests based on the specific changes made by the agent can be seen in Table X and Table XI. For each repository, we take the average and standard deviation across the tasks in that benchmark. APPENDIX CMANUAL REVIEW OF REWARD HACKING ON 
+
+SWE-FFICIENCY -L ITE 
+
+Here we briefly analyze each instance of reward hacking made by the LLM agent with access to only PerfAgent’s loop controller. There are 18 instances that are considered hacks by using the LLM-as-a-judge hack detector introduced in GSO. 
+
+dask__dask-10356 . In this instance, the timed work-load repeatedly calls random_state_data_python with the same inputs. The agent adds a global cache variables that stores the result of this call and reuses it on repeated calls. 
+
+matplotlib__matplotlib-22108 . In this instance, the timed workload calls Affine2D.rotate which rotates an internal 2D matrix. In the test script, the resulting matrix is not directly used for subsequent computation. Therefore, inside the function, the LLM agent performs a lazy evaluation and only updates an internal angle variable in the method instead. The rotated matrix is only materialized when other methods are called. In the timed workload however, these methods are never called and the materialization never occurs, which allows the agent to get large speedups on the timed workload. 
+
+numpy__numpy-18324 . In this instance, the agent’s patch modifies related test files, which can affect evalua-tion in SWE-fficiency as it uses the existing repository’s test suite. 
+
+numpy__numpy-27830 . In this instance, the agent adds a global cache that stores the result of the target workload: 
+
+np.polynomial.legendre.legval . Since the workload re-peatedly calls this method in the timed loop, the agent’s patch avoids any computation for repeated calls. 
+
+pandas-dev__pandas-25953 . In this instance, the agent adds a cache to NDFrame , which avoids recomputing the aggregation results on repeated calls. 
+
+pandas-dev__pandas-27448 . In this instance, the agent adds a cache to CategoricalIndex as the workload repeatedly performs slices on the same objects in the timed loop. The agent’s change avoids the slicing on repeated calls. 
+
+pandas-dev__pandas-39972 . In this instance, the agent adds a cache to Styler.render as the workload repeat-edly renders the same 6 objects in the timed loop. The agent’s change avoids rendering on repeated calls. 
+
+pandas-dev__pandas-42353 . In this instance, the agent adds a cache to Index.union as the workload repeatedly unions the same two pandas Index objects in the timed loop. The agent’s change avoids performing the union on repeated calls. 
+
+pandas-dev__pandas-43683 . In this instance, the agent adds a cache to the pandas dataframe object as the work-load repeatedly calls dropna on the same dataframe in the timed loop. The agent’s change avoids this computation on repeated calls. 
+
+pandas-dev__pandas-51518 . In this instance, the agent adds a cache to store the result of a numpy array created from a range and reuses it across calls in the timed loop. 
+
+pandas-dev__pandas-53152 . In this instance, the agent adds a cache to ArrowExtensionArray._str_get , as the workload repeatedly calls this method in the timed loop. The agent’s change avoids doing any work on repeated calls. 
+
+pandas-dev__pandas-55084 . In this instance, the agent adds a cache to store the result of a previously computed union/intersection of pandas indexes. 
+
+pandas-dev__pandas-56110 . In this instance, the agent adds a cache to ArrowStringArray._str_get to cache the result of previous computations on the same array. 
+
+pydata__xarray-5661 . In this instance, the workload prints large arrays which tests repr formatting. The agent avoids computation by doing formatting for the first and last row, thereby avoiding most of the computation. The repository’s correctness tests do not catch this behavior as the agent’s change is a fast-path that only triggers on very large inputs, such as the ones in the timed workload. 
+
+scipy__scipy-10467 . In this instance, the agent adds a cache to short-circuit SphericalVoronoi construction on repeated calls. 
+
+scipy__scipy-10939 . In this instance, the agent adds a cache to store the result of calls to various methods within csr_matrix such as tocsr, tocoo, todok, todia and tobsr, which are repeatedly called in the timed workload. 
+
+scipy__scipy-11517 . In this instance, the agent adds a cache to store the results of LIL sparse matrix operations such as todok, todia, tocsr, tobsr and tocoo. APPENDIX DMANUAL REVIEW OF PER -T ASK WIN /L OSS ANALYSIS 
+
+In the main paper, we compared the OpenHands baseline and PerfAgent on a per-tasks win/loss basis. Here, we manually review each instance in which the TABLE X: SWE-fficiency-Lite Test Counts broken down by repository.                                                                                               
+
+> Repo # of Tasks Base Test Count Filtered Test Count Patch Test Count pandas 63 170,837 ±57,041 164,893 ±56,526 31,666 ±48,220 sympy 58,140 ±3,134 7,653 ±2,923 1,189 ±2,057 astropy 815,690 ±13,159 15,051 ±12,765 3,078 ±3,251 numpy 529,558 ±20,112 28,860 ±20,393 3,164 ±6,420 scikit-learn 316,671 ±3,157 14,693 ±3,607 271 ±470 scipy 736,842 ±23,706 25,329 ±16,503 1,312 ±1,442 matplotlib 28,156 ±576 8,022 ±604 3,182 ±438 xarray 314,758 ±4,032 13,786 ±3,491 7,346 ±3,275 dask 49,649 ±3,299 9,497 ±3,358 4,497 ±3,963
+
+TABLE XI: GSO Test Counts broken down by repository.                                                                                                         
+
+> Repo # of Tasks Base Test Count Filtered Test Count Patch Test Count numpy 36 35,002 ±9,429 34,458 ±9,555 109 ±614 pillow-simd 73,700 ±1,019 3,696 ±1,023 549 ±1,303 pandas 34 130,994 ±12,197 130,002 ±12,463 4,691 ±10,500 transformers 413,148 ±19,180 1,744 ±2,929 91 ±143 tokenizers 4129 ±46 125 ±47 1±1.73 datasets 34,010 ±2,005 3,003 ±1,046 241 ±197 pydantic 42,292 ±393 2,268 ±398 757 ±585 pillow 42,383 ±1,726 2,305 ±1,799 267 ±289 llama-cpp 26±06±00±0tornado 4330 ±7179 ±31.75 ±2
+
+OpenHands baseline agent performed better than PerfA-gent, meaning the OpenHands baseline agent produced a patch that matched the performance of a human expert baseline and pass the hack detector, whereas PerfAgent’s patch did not. In GSO, there are 7 instances where the Open-Hands baseline produced a patch that matched or exceeded the performance of the human expert base-line and passed our hack detector, whereas PerfA-gent did not. For instance: pandas-dev__pandas-2f4c93e, PerfAgent produced a patch that did not pass correct-ness checks. For instances pandas-dev__pandas-c34da50, tornadoweb__tornado-1b464c4, uploadcare__pillow-simd-2818b90, the patches produced by PerfAgent do well on the provided workload but do not perform as well on the hidden performance tests, while the OpenHands baseline produces patches that generalize better. For instance python-pillow__Pillow-fd8ee84, the agent never submitted a patch as it ran out of budget before submit-ting. For instance uploadcare__pillow-simd-0514e20, the OpenHands patch uses SIMD while PerfAgent’s patch uses OpenMP. For instance huggingface__transformers-253f9a3, PerfAgent fails to fuse the torch kernels while the patch from OpenHands does, although PerfAgent’s patch falls just below the 0.95 threshold. In SWE-fficiency-Lite, there are 4 instances where the OpenHands baseline produced a patch that matched or exceeded the performance of the human expert baseline and passed our hack detector, whereas PerfAgent did not. For instances numpy__numpy-12575, numpy__numpy-21832, and pandas-dev__pandas-39332, PerfAgent pro-duced a patch that failed on some correctness tests. For in-stance: pandas-dev__pandas-56806, PerfAgent produced a patch that was correct but had a speedup ratio of 0.29, under the Opt@1 threshold of 0.95. In that patch, the OpenHands baseline uses a builtin pandas helper implemented in C, whereas PerfAgent allocates many large temporary arrays in its implementation.
