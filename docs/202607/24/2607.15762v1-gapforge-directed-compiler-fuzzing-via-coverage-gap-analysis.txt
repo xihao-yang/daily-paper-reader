@@ -1,0 +1,594 @@
+Title: GapForge: Directed Compiler Fuzzing via Coverage-Gap Analysis
+
+URL Source: https://arxiv.org/pdf/2607.15762v1
+
+Published Time: Mon, 20 Jul 2026 00:40:10 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# GapForge: Directed Compiler Fuzzing via Coverage-Gap Analysis 
+
+1st Mingxuan Zhu 
+
+Key Lab of High Confidence Software Technologies (Peking University), Ministry of Education Peking University 
+
+Beijing, China zhumingxuan@stu.pku.edu.cn 
+
+2nd Qingyuan Liang 
+
+Key Lab of High Confidence Software Technologies (Peking University), Ministry of Education Peking University 
+
+Beijing, China liangqy@pku.edu.cn 
+
+3rd Junjie Chen 
+
+College of Intelligence and Computing Tianjin University 
+
+Tianjin, China junjiechen@tju.edu.cn 
+
+4th Zhihong Xue 
+
+Center Research Institute ZTE Corporation 
+
+Shenzhen, China 13730826131@139.com 
+
+5th Dan Hao 
+
+Key Lab of High Confidence Software Technologies (Peking University), Ministry of Education Peking University 
+
+Beijing, China haodan@pku.edu.cn 
+
+Abstract —Due to the scale and complexity of modern compiler codebases (e.g., GCC and LLVM), achieving comprehensive coverage across diverse code regions remains highly challenging. Most existing test generation techniques fail to exploit charac-teristics of the target code, producing test inputs (a.k.a. test programs) that exercise only a limited subset of all code. As a result, substantial regions of the compiler remain insufficiently tested, leading to persistent long-tail coverage gaps that are difficult to eliminate even across multiple releases. Although some white-box techniques have been proposed, they still achieve limited coverage when applied to large-scale compiler codebases. To further improve compiler test coverage, particularly for exercising hard-to-reach edge regions, we present GapForge, a targeted LLM-based test generation technique that reasons about coverage gaps. Unlike program-driven techniques that generate diverse inputs without modeling which compiler regions they exercise, and unlike whole-file summarization that yields only coarse guidance, GapForge treats coverage gaps as explicit region-level targets in three steps. First, it prioritizes promising files through coverage-driven scoring that favors large, under-covered files. Second, rather than summarizing a file as a whole, it pairs each uncovered line span with its enclosing covered con-text and performs path-difference analysis to infer fine-grained triggering requirements—both the program structures and the compilation options needed to reach the uncovered region. Third, it synthesizes prompts from these requirements together with prompts that previously failed on the same file, and uses the resulting coverage feedback to guide next-round selection. To evaluate the performance of the proposed approach GapForge, we conducted extensive experiments on GCC 14.3.0 and LLVM 19.1.0. The results show that GapForge significantly outperforms eight state-of-the-art techniques, demonstrating its effectiveness and generality for large-scale compiler testing. Within 72 hours, GapForge achieves 68.13% and 69.11% coverage on core com-piler modules in GCC and LLVM, surpassing the state-of-the-art white-box technique WhiteFox by covering an additional 24,736 and 19,798 lines, respectively. Moreover, GapForge discovers 12 real-world compiler failures (5 in GCC and 7 in LLVM), including 8 crashes and 4 miscompilations, and each component of GapForge contributes to its performance. 
+
+Dan Hao is the corresponding author. 
+
+Index Terms —White-box Testing, Large Language Models, Coverage Analysis 
+
+I. I NTRODUCTION 
+
+Compilers are foundational system software that translate high-level languages into machine code. However, compiler defects can affect any program compiled, potentially leading to severe consequences such as crashes, silent miscompilations, and memory-safety violations [1], making compiler correct-ness critical for software reliability. Consequently, many researchers have proposed techniques to generate effective test programs that expose latent de-fects [2], [3], [4], [5], [6], [8], [9], [10]. 1 Existing approaches fall into three categories: grammar-aided techniques [2], [3], [4], [5] generate syntactically valid programs via language grammars; mutation-based techniques [6], [8], [9], [10], [15] modify existing programs through semantics-preserving or semantics-altering transformations; and LLM-based tech-niques [12], [13], [14] synthesize test programs using carefully designed prompts. These techniques have collectively uncov-ered numerous real-world compiler bugs. However, despite their effectiveness in bug finding, existing techniques remain largely program-driven and lack compiler-wide, coverage-aware guidance. They mainly aim to generate diverse or bug-triggering inputs, but do not explicitly identify uncovered compiler files or code regions. Consequently, gener-ated tests repeatedly exercise frequently triggered compilation paths (i.e., hotspot regions), while rarely executed code re-mains insufficiently tested and accumulates latent issues across multiple versions, making such defects increasingly difficult to identify and fix [3], [39], [38]. More recently, the white-box technique WhiteFox [13] leverages LLMs to summarize compiler optimization code 
+
+> 1
+
+In this context, “test programs” refer to compiler inputs. arXiv:2607.15762v1 [cs.SE] 17 Jul 2026 1.  Coverage-Driven Target Selection      
+
+> Selected
+> Target File
+> Program Generator
+> Compiler
+> Source Code Coverage
+> Programs
+> 2. Targeted Summarization
+> Targeted Summarizer
+> Prompt Base
+> If coverage require ments
+> not satisfied
+> Full Prompt
+> 3. Prompt Synthesis
+> Selection Rule
+> All Programs
+> (Output)
+> Test Target
+> (Input)
+> Coverage Feedback
+> Covered Context
+> Uncovered Region Coverage Goal
+> Program Structure Compilation Options
+> Target Requirements
+> Failed Prompt
+> General Constraints Fig. 1. Workflow of GapForge.
+
+and generate optimization-triggering tests. However, WhiteFox summarizes each source file as a whole and is primarily de-signed for optimization-related code, rather than systematically improving coverage across the entire compiler. As a result, it provides limited guidance for the large number of under-tested files and hard-to-reach code regions that lie outside optimization passes. These limitations stem from two key challenges in compiler test generation: modern compilers contain a large number of source files with highly uneven coverage potential, making it essential to prioritize promising targets rather than test indis-criminately; moreover, reaching a specific uncovered region often requires not only the right program structure but also the right compilation configuration, which is difficult to infer from coarse, file-level analysis. To address these limitations, we present GapForge, a tar-geted compiler testing technique that reasons about coverage gaps to guide test generation for large-scale compilers. Given a compiler codebase and its coverage information, GapForge outputs a set of test programs that systematically improve source-code coverage. The key idea is to treat coverage gaps as explicit targets and reason about how to reach them, through three steps: GapForge first selects a promising target file 
+
+based on coverage feedback (i.e., assigns each source file a selection probability based on coverage ratio and code size), then infers fine-grained triggering requirements for the uncovered regions within each file, including the target file functionality and the required compilation options, and finally 
+
+synthesizes prompts by integrating these requirements and prompts that previously failed to improve coverage on the same target file to generate effective test programs. By iterating this process, GapForge progressively exercises hard-to-reach code regions that existing techniques leave untested. To evaluate GapForge, we conduct experiments on GCC 14.3.0 [18] and LLVM 19.1.0 [19]. We compare GapForge against eight representative baselines, including Csmith [2], DST [11], Creal [8], Fuzz4All [12], Lego-Fuzz [14], and the state-of-the-art white-box technique White-Fox [13]. Within 72 hours, GapForge achieves coverage of 68.13% and 69.11% in the core GCC and LLVM modules, and further improves the compilers own official test suites by 3,452 and 531 newly covered lines, outperforming all baselines. In contrast, the state-of-the-art white-box technique WhiteFox reaches only 64.62%/65.02% coverage, covering 24,736/19,798 fewer lines than GapForge and fails to improve the official test suite on GCC while adding only 55 lines on LLVM. The strongest baseline overall, LegoFuzz, reaches only 64.99%/66.59% coverage and improves the official test suites by merely 705/143 newly covered lines. For the ablation analysis, we construct nine variants of GapForge by varying its components, and GapForge achieves better coverage results than all variants, demonstrating the impact of each component. The contributions of this paper are summarized below.  
+
+> •
+
+An LLM-based compiler test generation technique, GapForge , that targets coverage gaps by selecting promising coverage targets and inferring coverage-triggering requirements through combining execution coverage feedback with fine-grained analysis of uncov-ered code regions.  
+
+> •
+
+An extensive experiment on the latest version of GCC and LLVM, which demonstrates the performance of Gap-Forge as well as its components.  
+
+> •
+
+A reproducible package , available in a public reposi-tory [40]. II. A PPROACH 
+
+Figure 1 presents an overview of GapForge, a compiler testing technique to systematically improve the coverage of the source-code of large-scale compilers. The input to GapForge is a target compiler under test, given as its source codebase together with the line-coverage information of an initial run (i.e., from the compiler’s existing test suite). The output is a set of test programs that, when compiled, exercise previously uncovered code regions and thereby improve overall coverage. In particular, GapForge operates over the whole codebase but processes it iteratively, selecting a single target file in each iteration and generating test programs aimed at the uncovered regions of that file. Each iteration comprises three components: 
+
+(1) coverage-driven target selection , which selects a promis-ing source file and its uncovered code regions as the coverage target for each iteration; (2) targeted summarization , which analyzes the uncovered regions together with their covered context to infer fine-grained coverage-triggering requirements; and (3) prompt synthesis , which assembles a structured prompt from the inferred requirements and previously failed prompts to guide test-program generation. We use the term 
+
+targeted to indicate that GapForge explicitly reasons about and steers generation toward specific uncovered code regions, in contrast to general-purpose fuzzers that generate diverse inputs without explicitly modeling which compiler paths they intend to exercise. 
+
+A. Coverage-Driven Target Selection 
+
+At the start of each iteration, coverage-driven target se-lection chooses a single source file f from the codebase, along with its uncovered code regions, as the coverage target. This step is necessary because source files differ greatly in their coverage potential. Without principled selection, test generation may waste iterations on already well-covered files or on files whose uncovered paths are intrinsically hard to trigger, yielding little overall gain within a fixed time budget. 
+
+Exploration score. GapForge assigns to each file f in the codebase an exploration score Sf that reflects its potential for coverage improvement: 
+
+Sf = Lf × (1 − Cf )2 (1) where Lf is the number of lines of code in file f and Cf ∈
+
+[0 , 1] is the current line coverage ratio of file f . Both quantities are measured per file. The quadratic term (1 − Cf )2 applies a non-linear transformation that amplifies differences among low-coverage files: a file at 10% coverage receives a score roughly 81 × higher than one at 90% coverage with the same size. 
+
+Selection weight and probability. To compare files against one another, GapForge normalizes each file’s score across all files in the codebase into a selection weight: 
+
+Wf = Sf
+
+Pnj=1 Sj
+
+(2) where n is the total number of source files in the codebase. While Wf encodes relative importance, sampling directly from 
+
+Wf at each iteration causes files with the highest scores to dominate selection across iterations, leaving other potentially improvable files unvisited. To prevent this over-concentration, GapForge applies a non-linear transformation to obtain the selection probability Pf :
+
+Pf = 1 − (1 − Wf )k (3) 
+
+Pf can be interpreted as the probability that file f would be selected at least once if k independent draws were made using Wf .2 Crucially, this transformation compresses the gap between high- and low-weight files: each additional draw yields diminishing returns for a high-weight file, while low-weight files receive a proportionally larger boost. GapForge normalizes {Pf } into a final sampling distribution and draws one file per iteration. We set k = 10 , for example, a file with 
+
+Wf = 0 .08 achieves Pf = 56 .56% .After selecting file f , GapForge retrieves its uncovered code regions and partitions them into basic blocks, which serve as fine-grained coverage targets in the next step. To make this concrete, consider the GCC source file 
+
+c-ada-spec.cc shown in Figure 2 (a), which emits Ada specifications from C declarations. Among all files in the codebase, it receives a high exploration score: moderately sized yet low in coverage, so GapForge samples it as the target file and locates an uncovered region: the function 
+
+handle_escape_character (lines 138–167), which re-mains unexercised by the existing test suite. We follow this example through the remaining components. 
+
+B. Targeted Summarization 
+
+Given the selected file and its uncovered regions, targeted summarization uses an LLM to infer Target Requirements :a structured specification comprising a high-level coverage goal, recommended compilation options, and per-basic-block program-structure constraints needed to exercise the uncov-ered code. This component addresses two key challenges in improving compiler coverage: (1) compiler files are large and redundant, making whole-file summarization too coarse-grained to pinpoint specific uncovered regions; and (2) many regions are reachable only under specific compilation options and triggering program structures, which are difficult to iden-tify without targeted analysis. To address these challenges, GapForge derives fine-grained coverage-oriented requirements that align with the target region and its compilation conditions. 
+
+Covered context selection. Rather than processing the entire file, GapForge provides the LLM with each uncovered region together with its covered context. We work at the granularity of uncovered line spans: a coverage target is a contiguous run of uncovered lines, which may be only a few lines within an otherwise well-covered function (e.g., a single untaken branch). The covered context is obtained by scanning upward and downward from the uncovered span until a covered line is reached in each direction and taking the covered code that immediately encloses the span. This locally-adjacent code is the most relevant context, as it encodes the preconditions: variable states, branch conditions, and control-flow structure that execution must satisfy to reach the uncovered region. In the prompt, the two are presented as separate code blocks, one labeled as the uncovered target and one as the   
+
+> 2Here kis not the number of files selected per iteration-GapForge still draws exactly one-but a tunable parameter controlling how sharply the selection favors high-weight files.
+
+Uncovered target code           
+
+> 138 handle_escape_character
+> (unsigned char *buffer, char c)
+> 139 {
+> 140 switch (c) {
+> 142 case '"':
+> 143 *buffer++='"'; *buffer++='"';
+> 145 break;
+> /* ... */ (lines omitted)
+> 157 case 't':
+> 158 strcpy((char*)buffer,
+> "\" & ASCII.HT & \"");
+> 162 default: return NULL;
+> 164 }
+> 166 return buffer;
+> 167 }
+
+Already covered context code                    
+
+> 120 static unsigned char *
+> 121 dump_number(unsigned char *number,...)
+> 122 {
+> 123 while (*number != ' \0'
+> 124 && *number != (float_p?'F':'U'))
+> ......
+> 130 return buffer;
+> 131 }
+> /*...*/ (Uncovered target code)
+> 172 static int
+> 173 count_ada_macro(cpp_reader *pfile ...)
+> 175 if(cpp_user_macro_p(node)...)!='_')
+> ......
+> 182 return 1;
+> 183 }
+> [Role]
+> You are an expert Compiler Developer and Fuzzing
+> Specialist. Your goal is to analyze compiler source
+> code to generate test cases that achieve high code
+> coverage.
+> [Input Data]
+> 1. Target File Path: {file_path}
+> 2. Uncovered Code and Line Number: {uncovered
+> code}
+> 3. Covered Code and Line Number: {covered code}
+> [Instructions]
+> Step 1: Analyze the Target File Path and infer the
+> functional role.
+> Step 2: Compare Covered and Uncovered code
+> segments.
+> 2.1 Summarize Covered Code functionality.
+> 2.2 Analyze Uncovered code into Basic Blocks.
+> 2.3 Evaluate "Coverage Diversity".
+> 2.4 Derive the Coverage Goal.
+> Step 3: For each Uncovered Basic Block, deduce
+> required test input characteristics.
+> Step 4: Determine compilation options to trigger the
+> code path.
+> [Output]
+> [Coverage Goal] -[Overall coverage goal]...
+> [Compile Options] -[e.g., -O2 -ftree -vectorize]...
+> [Basic Block 1] -[Program structure required to cover
+> it]...
+> [Coverage Goal]
+> Trigger the internal driver logic that builds and manages piped
+> subcommands, specifically the path where the driver constructs
+> command sequences such as cc1 and updates internal command buffers.
+> [Compile Options]
+> -c-fdump -ada -spec
+> [Basic Block 1]
+> Trigger case '"' (lines 142 -145). Define a macro with an escaped quote.
+> Required: #define QUOTE_MACRO "This is a \"quote \""
+> [Basic Block 2]
+> Trigger case 'n' (lines 147 -150). Macro with newline escape. Required:
+> #define NEWLINE_MACRO "Line One \nLine Two"
+> [Basic Block 3]
+> Trigger case 'r' (lines 152 -155). Macro with carriage return. Required:
+> #define CR_MACRO "Carriage \rReturn "
+> [Basic Block 4]
+> Trigger case 't' (lines 157 -160). Macro with tab. Required: #define
+> TAB_MACRO "Tabbed \tContent "
+> [Basic Block 5]
+> Trigger default NULL (lines 162 -163). Macro with unhandled escape ( \v
+> or \a). Required: #define UNSUPPORTED_ESCAPE "Alert \a"
+
+(a) Target region in c -ada -spec.cc  (b) Requirement -inference prompt  (c) Inferred target requirements Fig. 2. Targeted summarization for c-ada-spec.cc .
+
+covered context, each given with its original line numbers (as illustrated in Figure 2 (a)). This lets the LLM perform path-difference analysis: reasoning about what input characteristics would steer control flow into the uncovered region rather than along the surrounding covered path. 
+
+Requirement inference. GapForge prompts the LLM to perform a structured four-step analysis (shown in Figure 2 (b)): (i) infer the functional role of the target file in the compiler pipeline (e.g., front-end parsing, sanitizer instrumen-tation, or debug-info emission), providing global semantic grounding for subsequent reasoning; 3(ii) perform contrastive analysis between covered and uncovered paths to identify structural differences in control flow and data dependencies; (iii) derive per-basic-block input requirements (e.g., specific data types, literal patterns, or control-flow constructs) needed to exercise each uncovered block; and (iv) identify com-pilation options required to activate the target paths (e.g., 
+
+-fsanitize=address for sanitizer-gated code), combin-ing target-code semantics with path-difference analysis to derive option constraints. Finally, GapForge produces the Target Requirements t
+
+(shown in Figure 2 (c)): a structured specification including a whole-file coverage goal, block-specific program-structure requirements, and recommended compilation options, which guide subsequent prompt synthesis. Returning to c-ada-spec.cc , Figure 2 illustrates this step. The uncovered target handle_escape_character 
+
+(lines 138–167) handles different escape characters through a switch(c) statement. GapForge selects the covered code 
+
+3This is the only step resembling prior whole-file summarization [13], yet it serves a different purpose: GapForge uses the functional role merely as coarse semantic context to ground the subsequent region-level analysis rather than as the end product driving generation. 
+
+in dump_number (lines 120–131) and count_ada_macro 
+
+(lines 172–184) as covered context. Through path-difference analysis, the LLM infers that each uncovered branch is reached by a macro with a specific escape sequence (e.g., ’\n’ ,
+
+’\t’ ), and that the option -fdump-ada-spec must be enabled. 
+
+C. Requirement-Guided Prompt Synthesis with Failure Reflec-tion 
+
+Based on the Target Requirements t derived in Section II-B, GapForge assembles a structured prompt from three elements: 
+
+general program constraints r, the Target Requirements t, and 
+
+previously failed prompts c.
+
+General constraints. GapForge explicitly defines an expert role in the prompt to align the LLM’s reasoning with compiler testing, encouraging coverage-oriented and compiler-specific outputs. The general constraints r enforce that all generated programs include a main function, multiple helper functions, and non-trivial control flow (e.g., nested conditionals and loops). Program length is bounded within a moderate range to control the token budget while ensuring sufficient struc-tural complexity to trigger deep compiler paths, according to findings that bug-triggering programs tend to be short yet structurally complex [2]. All programs must be deterministic and free of external I/O dependencies to ensure reproducible coverage measurement. 
+
+Target requirements. The Target Requirements t guide the prompt to focus on uncovered regions of the selected file, providing both high-level coverage objectives and fine-grained details including compilation options and basic-block-level triggering structures. 
+
+Failure reflection. Targeted generation does not always ex-ercise the intended uncovered regions. To mitigate this, Gap-[Role]                                    
+
+> You are an expert C/C++ fuzzer and compiler test generator with deep understanding of compiler
+> mechanisms. Generate test programs that satisfy requirements and explore compiler paths beyond those
+> explicitly described.
+> [Failures Case] -[INPUT]
+> Previous programs did not meet the coverage goal for this file.
+> {Prompt from Prompt Base}
+> Compilation status: {e.g., error: second argument to 'va_arg'...}
+> Coverage improvements in other files: …
+> Coverage improved in other parts of this file: …
+> This suggests (1) requirements mismatch or (2) failed to trigger compilation options.
+> [General Requirements]
+> ISO C99 compliant; self -contained; main + multiple helpers; non -trivial control flow; 80 -120 LoC;
+> deterministic; no external I/O.
+> [Target Requirements]
+> Target file: {e.g., gcc/c -family/c -ada -spec.cc}
+> Coverage goal: {e.g., trigger internal driver logic for piped subcommands...}
+> Compilation options: {e.g., -fdump -ada -spec}
+> Basic blocks: {e.g., [BB1] -case '"' branch (lines 142 -145)...}
+> [Instruction]
+> 1. Generate test programs matching targeted requirements. 2. Avoid structurally similar failures. 3. Meet
+> general requirements. 4. Output complete, compilable C/C++ program.
+> [Output]
+> A complete C/C++ program.
+> 1#include < stdint.h >
+> 2/* BB1 -BB5: escape handling */
+> 3#define QUOTE_MACRO "Escaped \" Quote"
+> 4#define NEWLINE_MACRO "Line \nBreak "
+> 5#define CR_MACRO "Carriage \rReturn "
+> 6#define TAB_MACRO "Horizontal \tTab "
+> 7#define UNSUPPORTED_ESC "Unsupported \aAlert "
+> 9#define CONST_UINT 4294967295U
+> 10 #define CONST_FLOAT 3.14159f
+> 11 volatile uint32_t g_checksum = 0;
+> 12 static uint32_t fold(uint32_t x) {
+> for(int i=0;i<2;i++)
+> x=(x<<5)^(x>>3)^0x9e3779b9U;
+> return x; }
+> /* ... */ (lines omitted)
+> 18 int main(void) {
+> 20 const char *s1 = QUOTE_MACRO;
+> ... /* s2=NEWLINE, s3=CR, s4=TAB */
+> 24 const char *s5 = UNSUPPORTED_ESC;
+> 26 g_checksum ^= fold(...);
+> 29 return (int)(g_checksum & 0xFF);
+> 30 }
+
+(a) Synthesized generation prompt  (b) Generated program Fig. 3. Prompt synthesis and program generation for c-ada-spec.cc .
+
+Forge maintains a per-file failure log that records the prompts from earlier iterations of the current campaign that targeted the same file but failed to improve its coverage. A prompt is recorded as a failure when the generated program either (a) fails to compile, or (b) compiles and executes without cov-ering any new target basic blocks. For each failure, GapForge records the prompt, the compilation error message (if any), and which regions were incidentally covered (if any). Retrieval operates at file-level granularity rather than a finer region-level one, since failures on the same file typically reflect a shared misunderstanding of its structure or required options that remains informative even as the target region shifts. When a file is re-selected, GapForge retrieves one failure case at random among those not yet used for this file and incorporates it with an instruction to avoid structurally similar programs. This keeps the prompt concise while progressively exposing the LLM to different ineffective strategies, forming an iterative refinement loop that steers generation away from unproductive program structures. Based on the integrated general constraints, target require-ments, and failure cases, GapForge assembles the final prompt (shown in Figure 3 (a)) using a fixed instruction template, directing the LLM to generate complete and compilable C/C++ programs that match the target requirements and avoid previ-ously failed structures. GapForge then compiles the generated programs with the specified options and collects coverage information to guide the next iteration. For c-ada-spec.cc , Figure 3 shows the synthesized prompt and the generated program. In the current iteration, the failed prompt is appended to the new prompt with an in-struction to avoid the same omission, leading the LLM to addi-tionally define NEWLINE_MACRO , CR_MACRO , TAB_MACRO ,and UNSUPPORTED_ESC , which together cover the remain-ing branches identified in the previous step. III. E XPERIMENTAL SETUP 
+
+To evaluate the performance of GapForge, this experiment is designed to answer the following research questions: 
+
+• RQ1 : How effective is GapForge in improving compiler coverage? 
+
+• RQ2 : How do different components affect the effective-ness of GapForge? 
+
+• RQ3 : How effective is GapForge in identifying compiler failures? 
+
+• RQ4 : How does the choice of LLM affect GapForge’s effectiveness? 
+
+A. Target Compiler 
+
+Following prior work, we use the most widely used C compilers (i.e., GCC 14.3.0 and LLVM 19.1.0) as our testing targets. Modern compilers include many architecture-/platform-specific and auxiliary components that are not instrumented or produce no coverage information under our build con-figuration, making whole-compiler coverage noisy and less informative. 4 We therefore exclude such components and retain the core front-end, middle-end, and back-end modules along the main compilation pipeline, whose coverage can be reliably influenced by generated tests. The retained modules are summarized in Table I. For GCC, they span the front end, middle end, and back end: gcc/c/ and gcc/cp/ implement the C/C++ front end, 
+
+gcc/c-family/ provides shared infrastructure for C-like languages, gcc/ covers IR construction, optimizations, and code generation, and gcc/common/ handles shared utilities. For LLVM, they cover the core middle-end and back-end com-ponents: IR (IR definitions and utilities), Analysis (control-flow, dominance, aliasing, and loop analysis), Transforms 
+
+> 4
+
+Excluded parts include target-specific back-end code for non-x86 architec-tures, build scripts, and auxiliary tooling outside the main compilation pipeline that cannot be reliably exercised by generated C/C++ programs. (scalar/loop/ vectorization passes), and CodeGen (lowering IR to target machine code). 
+
+B. Implementation 
+
+We implement GapForge in Python and collect test coverage using Gcov-13 [20]. For the compared techniques, we directly use their publicly available implementations whenever possible (i.e., Csmith, DST, Creal, GrayC, Fuzz4All, LegoFuzz and Optimuzz); otherwise, we re-implement the technique strictly following its paper description (i.e., WhiteFox). 5
+
+Our approach is general and thus agnostic to the choice of LLMs. In our implementation, we use GPT-4o for target summarization and StarCoder for test program generation following prior work [12], [13], [14]. Importantly, this LLM configuration is consistent with that of the LLM-based base-lines, enabling a fair comparison: Fuzz4All and WhiteFox use GPT-4o for prompt construction and StarCoder for test gen-eration, while LegoFuzz uses GPT-4o to summarize mutation strategies. Thus, all of the compared LLM-based techniques are evaluated with the same underlying models for their corresponding LLM-driven components. The experiment is performed on a workstation with an Intel Xeon Gold 6430 CPU (16 vCPUs), one NVIDIA RTX 4090 GPU with 24 GB of video memory, 120 GB of system memory, and Ubuntu 22.04.3 LTS operating system. 
+
+C. Compared Techniques 
+
+For RQ1 and RQ3, we compare GapForge with eight representative baselines: (1) Csmith [2], a grammar-based random program generator; (2) DST [11], a Csmith-based approach that adaptively adjusts configuration probabilities based on file-level coverage; (3) GrayC [9], a coverage-directed greybox fuzzer that mutates C programs under gram-mar and semantic constraints; (4) Creal [8], a real-code-driven seed-augmentation generator that preserves semantics; (5) Fuzz4All [12], an LLM-guided multi-objective fuzzing framework; (6) WhiteFox [13], a white-box LLM-guided generator that synthesizes optimization trigger tests; (7) Lego-Fuzz [14], which uses LLM to construct and compose seman-tic components; and (8) Optimuzz [15], a directed greybox fuzzing framework that generates LLVM IRs to target specific compiler optimizations via translation validation. 6 For a fair comparison, we assign a fixed time budget of 72 hours to all techniques for test generation. Moreover, to fairly compare with the white-box technique WhiteFox (both directly leverage compiler source code), we integrate our coverage-driven file-level target selection into WhiteFox’s pipeline and construct a variant, denoted as  
+
+> 5WhiteFox originally targets optimization-related compiler files and does not define target selection for compiler components. So that, we add a neutral target-provision step: at each iteration, we uniformly sample one source file from the evaluation files and feed the corresponding code to WhiteFox, while keeping its subsequent steps unchanged.
+> 6Since Optimuzz generates LLVM IR rather than C/C++ source programs, it is only applicable to LLVM and is therefore excluded from the GCC comparison. TABLE I TARGET FOLDERS OF THE TESTED COMPILERS .
+> Compiler Target file
+> GCC gcc/*.c (533,176 LOC), gcc/cp/*.c (119,331 LOC), gcc/c/*.c (30,310 LOC), gcc/c-family/*.c (21,907 LOC), gcc/common/*.c (12 LOC) LLVM IR/*.c (57,869 LOC), Analysis/*.c (67,745 LOC), Transforms/*.c (250,007 LOC), CodeGen/*.c (108,431 LOC)
+
+WhiteFox Selection . This adaptation ensures a fair compar-ison by aligning the file-selection strategy across the two approaches. For RQ2, we compare GapForge with ablated variants to investigate the contribution of each key component. Specif-ically, we conduct ablation studies by selectively removing each independent module and re-running the experiments for 24 hours. The variants are as follows:  
+
+> •
+
+Coverage-Driven target selection. These variants ex-amine how different target selection strategies affect the effectiveness of GapForge. 
+
+– GapForge N F S : Randomly selects coverage target. 
+
+– GapForge LS : Linear scoring Sf = Lf × (1 − Cf ) for target selection. 
+
+– GapForge W S : Sampling directly from Wf without converting to Pf .
+
+– GapForge 5: Selection-probability transformation with 
+
+k = 5 .
+
+– GapForge 15 : Selection-probability transformation with 
+
+k = 15 . 
+
+> •
+
+Target-context summarization. These variants evaluate whether targeted summarization help GapForge generate more effective prompts. 
+
+– GapForge N S : No targeted summarization. 
+
+– GapForge N CC : Summarization without covered con-text. 
+
+– GapForge N O : No compilation option recommenda-tion.  
+
+> •
+
+Feedback-guided prompt refinement. These variants study the impact of feedback information used to refine subsequent prompts. 
+
+– GapForge N F C : No previously failed prompt reflec-tion. For RQ4, we evaluate the generalization of GapForge across different LLMs. As described in Section III-B, our default configuration uses GPT-4o for targeted summarization and StarCoder for test program generation. To assess sensitivity to the summarization model, we replace GPT-4o with DeepSeek-v3.2 and Qwen3-max, yielding two variants: GapForge ds and 
+
+GapForge qwen . To assess sensitivity to the generation model, we replace StarCoder with Qwen2.5-Coder-14B and Qwen2.5-Coder-32B, yielding two additional variants: GapForge qwen 14 
+
+and GapForge qwen 32 . All variants are re-run under a 24-hour time budget. D. Measurement 
+
+Following prior work [12], [14], we evaluate the coverage capability of compiler testing techniques using line coverage. Specifically, we use gcov to collect line coverage for all target source files (i.e., *.cc and *.cpp ) within the target directories. In addition, we assess bug-finding capability by monitoring compiler crashes and performing differential testing under different optimization levels (i.e., -O0 , -O1 , -O2 , and -O3 ). Any inconsistency in program output across optimization settings is treated as a potential compiler bug. IV. R ESULTS 
+
+A. Overall Effectiveness (RQ1) 
+
+To answer RQ1, we compare the coverage achieved by different techniques under three time budgets (24, 48, and 72 hours) from two perspectives: coverage from scratch (#Pro-grams — the number of generated test programs, Cov lines 
+
+— covered lines, Cov (%) — coverage ratio) and incremental improvement over the original compiler test suites ( ∆Cov lines 
+
+— covered-line improvement, ∆Cov (%) — coverage-ratio improvement). Both perspectives are computed from the same set of generated test programs: coverage from scratch measures what these programs cover alone, while incremental improve-ment measures the additional lines they cover on top of the original test suite. The two differ only in the baseline, not in the programs evaluated. For LLM-based techniques, we additionally report token consumption (Tokens) to characterize computational cost. 7 We further analyze hourly coverage evo-lution during the first 24 hours to characterize coverage growth over time. We also perform an in-depth comparison with WhiteFox, and conduct case studies to explain why GapForge covers regions missed by other techniques. Table II summarizes the results on GCC and LLVM. For each budget, the best result is highlighted in bold. Under the 72-hour budget, GapForge achieves 68.13% (480,136 lines) and 69.11% (334,528 lines) coverage on GCC and LLVM, im-proving beyond the original test suites by 3,452 lines (+2.89%) and 531 lines (+1.16%), respectively. Moreover, GapForge consistently increases the coverage of both compilers as the time budget increases from 24 to 72 hours. 
+
+1) Coverage from scratch Analysis: As shown in Table II, GapForge consistently achieves the best coverage despite generating the fewest test programs. Under the 72-hour budget, it covers 22,129/12,341 more lines than the strongest baseline LegoFuzz, and 120,157/48,163 more than the weakest baseline Csmith, on GCC/LLVM. Figure 4 further shows that GapForge steadily widens this gap over time, indicating a superior coverage efficiency rather than a single advantage. 
+
+2) Incremental Improvement Analysis: Compilers already ship with massive test suites (e.g., GCC 14.3.0 includes 399,007 tests) that yield high baseline coverage (82.93% on GCC and 90.55% on LLVM core code), leaving little room for further improvement. We therefore measure the lines newly 
+
+> 7Non-LLM-based techniques (e.g., Csmith, GrayC) do not invoke LLM APIs and thus incur no token cost, denoted as “-” in the Tokens column.
+
+covered beyond these original suites. As shown in Table II, GapForge still adds 3,452 and 531 new lines on GCC and LLVM under the 72-hour budget, whereas Csmith, DST, Creal, and Fuzz4All add none, and the best baseline LegoFuzz adds only 705 and 143. This shows that GapForge effectively reaches hard-to-cover long-tail regions that other techniques cannot. To examine these long-tail regions directly, we identify 
+
+hard-to-cover files: those whose average coverage across all techniques remains below 30% , representing systematic blind spots. This yields Ngcc = 152 and Nllvm = 123 such files in GCC and LLVM, respectively. 8 On these files, Csmith reaches only 8.38%/10.55% and even the strongest base-line WhiteFox only 27.43%/29.65% on GCC/LLVM, while GapForge reaches 36.29%/39.75%, confirming that explicit coverage-gap reasoning allows GapForge to exercise regions that resist all existing techniques. Beyond coverage, GapForge is also token-efficient. Lego-Fuzz and Fuzz4All call the LLM only once upfront —incurring a heavy 3.63M one-time cost for LegoFuzz versus a lightweight 186K for Fuzz4All — while WhiteFox and GapForge query the LLM throughout. Owing to its concise input context, GapForge uses 976K tokens on GCC under 72 hours, less than half of WhiteFox’s 2.30M, while achieving substantially higher coverage. In short, GapForge delivers stronger results at lower cost. 
+
+3) Comparison with WhiteFox: WhiteFox is the closest white-box technique to GapForge as both leverage compiler source code. We first ask whether GapForge’s coverage-driven target selection can benefit WhiteFox itself by integrating it into WhiteFox’s pipeline, yielding WhiteFox Selection . While the original WhiteFox fails to improve over the existing test suites on either compiler, WhiteFox Selection gains 979 and 178 lines on GCC and LLVM, showing that target selection generalizes beyond GapForge. Yet it still trails GapForge (63.84%/66.02% vs. 67.37%/68.09%), indicating that Gap-Forge’s region-level summarization and failure-aware prompt synthesis contribute substantially as well. Since WhiteFox specifically targets compiler optimizations, we further compare on optimization code under a per-target setup: unlike the evaluation above, which measures overall coverage over the full file set under a fixed time budget, we randomly select 50 LLVM optimization-specific files and generate a fixed 100 test programs per file for each technique, counting how many targets are exercised. Even on WhiteFox’s home ground, GapForge covers 19 of the 50 targets versus WhiteFox’s 11, confirming its stronger ability to reach hard-to-cover optimization regions. 
+
+4) Case Study: To understand why GapForge covers re-gions missed by others, we inspect representative tests target-ing GCC’s dwarf2out.cc . This file implements DWARF debug-information emission, a core component invoked whenever programs are compiled with debugging enabled; with over          
+
+> 8Examples include c-ada-spec.cc and module.cc in GCC;
+> SelectionDAGPrinter.cpp and RegionPrinter.cpp in LLVM.
+
+TABLE II COVERAGE RESULTS OF THE COMPARED TECHNIQUES .
+
+Coverage from scratch : #Programs (generated test programs), Cov lines (covered lines), Cov (%) (coverage ratio). 
+
+Incremental improvement over the original test suite: ∆Cov lines (newly covered lines), ∆Cov (%) (ratio improvement). 
+
+Tokens : LLM token consumption, “-” for non-LLM-based techniques. 
+
+24 hours 48 hours 72 hours #Programs Cov lines Cov (%) ∆Cov lines ∆Cov (%) Tokens #Programs Cov lines Cov (%) ∆Cov lines ∆Cov (%) Tokens #Programs Cov lines Cov (%) ∆Cov lines ∆Cov (%) Tokens 
+
+GCC 
+
+Csmith 31,106 359,979 51.08% +0 +0 - 60,673 359,979 51.08% +0 +0 - 92,535 359,979 51.08% +0 +0 -DST 28,934 360,049 51.09% +0 +0 - 57,015 360,049 51.09% +0 +0 - 84,690 360,049 51.09% +0 +0 -Creal 22,874 360,472 51.15% +0 +0 - 45,488 360,754 51.19% +0 +0 - 66,073 361,036 51.23% +0 +0 -GrayC 21,965 386,124 54.79% +0 +0 - 43,765 390,493 55.41% +93 +0.08% - 64,498 399,020 56.62% +164 +0.13% -Fuzz4All 18,243 427,281 60.63% +0 +0 186,392 35,791 438,416 62.21% +0 +0 186,392 55,161 442,010 62.72% +0 +0 186,392 
+
+WhiteFox 16,184 437,359 62.06% +0 +0 799,436 32,335 448,141 63.59% +0 +0 1,547,296 48,617 455,400 64.62% +0 +0 2,304,896 LegoFuzz 20,286 450,819 63.97% +705 +0.59% 3,628,548 41,694 452,581 64.22% +705 +0.59% 3,628,548 61,374 458,007 64.99% +705 +0.59% 3,628,548 Optimuzz - - - - - - - - - - - - - - - - - -GapForge 14,571 474,780 67.37% +2,043 +1.71% 337,149 27,535 476,753 67.65% +2,556 +2.14% 644,368 42,288 480,136 68.13% +3,452 +2.89% 976,364 
+
+LLVM 
+
+Csmith 31,106 286,365 59.16% +0 +0 - 59,673 286,365 59.16% +0 +0 - 92,535 286,365 59.16% +0 +0 -DST 27,159 289,120 59.73% +0 +0 - 54,491 289,120 59.73% +0 +0 - 81,124 289,120 59.73% +0 +0 -Creal 22,874 291,738 60.27% +0 +0 - 45,488 292,803 60.49% +0 +0 - 66,073 292,803 60.49% +0 +0 -GrayC 20,775 292,028 60.33% +83 +0.18% - 42,710 294,641 60.87% +102 +0.22% - 63,287 295,464 61.04% +102 +0.22% -Fuzz4All 19,088 300,741 62.13% +0 +0 164,269 38,629 300,741 62.13% +0 +0 164,269 56,194 304,275 62.86% +0 +0 164,269 
+
+WhiteFox 17,289 311,051 64.26% +0 +0 379,513 35,258 313,230 64.71% +0 +0 761,138 52,594 314,730 65.02% +55 +0.12% 1,070,226 LegoFuzz 20,286 318,215 65.74% +96 +0.21% 3,628,548 41,694 320,345 66.18% +96 +0.21% 3,628,548 61,374 322,187 66.59% +143 +0.32% 3,628,548 Optimuzz 21,239 317,440 65.58% +173 +0.39% - 43,259 324,217 66.98% +209 +0.47% - 63,615 325,330 67.21% +285 +0.62% -GapForge 14,186 329,591 68.09% +389 +0.85% 326,417 28,235 332,011 68.59% +466 +1.02% 638,075 41,255 334,528 69.11% +531 +1.16% 944,817 4 8 12 16 20 24 
+
+Time (Hours) 
+
+360,000 
+
+380,000 
+
+400,000 
+
+420,000 
+
+440,000 
+
+460,000 
+
+480,000 
+
+> Covered lines
+
+Coverage Effectiveness on GCC 
+
+CSmith 
+
+DST 
+
+Creal 
+
+GrayC 
+
+Fuzz4All 
+
+WhiteFox 
+
+LegoFuzz 
+
+GapSmith 
+
+(a) GCC results 4 8 12 16 20 24 
+
+Time (Hours) 
+
+280,000 
+
+290,000 
+
+300,000 
+
+310,000 
+
+320,000 
+
+330,000 
+
+> Covered lines
+
+Coverage Effectiveness on LLVM 
+
+CSmith 
+
+DST 
+
+Creal 
+
+GrayC 
+
+Fuzz4All 
+
+WhiteFox 
+
+LegoFuzz 
+
+Optimuzz 
+
+GapSmith (b) LLVM results 
+
+Fig. 4. Coverage results on LLVM and GCC in 24 hours. 
+
+14,000 lines, it is one of the largest and most complex files in GCC, making it a representative rather than contrived target. GapForge infers that the input should include bit-level builtins such as builtin clz (the target code constructs DWARF location expressions for CLZ-related values), and recommends 
+
+-g and -gdwarf-4 to force DWARF generation, as well as -fvar-tracking and -fvar-tracking-assignments to enhance variable tracking and trigger richer location expressions. In contrast, WhiteFox only provides coarse file-level sum-maries and fails to derive these concrete triggering conditions, yielding little coverage improvement on the same file. 
+
+B. Ablation Study (RQ2) 
+
+To answer RQ2, we construct 9 variants by removing each component individually, evaluate them on GCC under a 24-hour budget, and report both coverage results and token consumption. Table III summarizes the results, with the best highlighted in bold. 
+
+1) Impact of Target File Selection: We study the tar-get selection component through five variants: random se-lection ( GapForge N F S ), linear scoring ( GapForge LS ), di-rect weight sampling without probability transformation (GapForge W S ), and two parameter settings k = 5
+
+(GapForge 5) and k = 15 (GapForge 15 ). As shown in Table III, GapForge N F S degrades the most (25,580 fewer covered lines and 1,733 fewer newly covered lines), as random selection repeatedly wastes iterations on hard-to-cover targets (e.g., tree-vect-stmts.cc ) that yield no improvement. The other variants also fall short of GapForge: linear scor-ing ( GapForge LS )) fails to differentiate low-coverage files, direct weight sampling ( GapForge W S ) lets high-scoring files dominate, k = 5 over-concentrates on few files, and k = 15 over-disperses effort. The default k = 10 thus best balances exploration and exploitation. 
+
+2) Impact of Targeted Summarization: To investigate the contribution of targeted summarization, we construct three variants: GapForge N S , which directly uses uncovered code with its covered context as the Target Requirements ,
+
+GapForge N CC , which summarizes only the uncovered re-gions without their covered context, and GapForge N O , which removes both option recommendations during targeted sum-marization and the corresponding structural requirements in prompt synthesis. Although GapForge N S saves tokens and generates more programs, coverage drops by 16,730 lines, since summariza-tion provides critical guidance on program structure, functional context, and compilation options. In particular, GapForge N CC reduces the coverage by 8,540 lines. The covered context supplies concrete control-flow and data-flow cues (e.g., branch conditions and variable usage) around uncovered blocks, which the model needs to infer program structures that trigger the target regions. 
+
+GapForge N O suffers the largest drop among all variants (19,480 fewer covered lines), confirming that compilation options are critical for reaching option-gated paths: without the recommended -fsanitize flag, for instance, the target block in asan.cc stays unreachable regardless of program structure. 
+
+3) Impact of Failure Case Reflection: To investigate the contribution of failure case reflection, we construct 
+
+GapForge N F C , which removes previously failed prompts from prompt synthesis. Its drop is modest (2,780 fewer lines) because target selection seldom revisits the same file within 24 hours, limiting how often failure cases accumulate: only 6 informative cases arise in 24 hours, but 22 in 72 hours. This suggests that failure reflection grows more beneficial under longer budgets or when generation focuses intensively on specific files. 
+
+C. Failure Study (RQ3) 
+
+To investigate the failure-finding effectiveness of different techniques, we perform differential testing on the target com-pilers using the test programs generated within a 24-hour budget, by compiling each program with different optimization levels (i.e., -O0, -O1, -O2, and -O3) and checking for inconsis-tent behaviors. We first calculate the total number of failures found by each technique as well as the number of unique failures. We then analyze the types of failures discovered by GapForge. Finally, we conduct a case study on representative failure-triggering programs generated by GapForge. Table IV summarizes the number of failures reported by all compared techniques. Overall, on GCC 14.3.0 and LLVM 19.1.0, GapForge reports 5 and 7 failures, respectively. Compared with other LLM-based techniques (e.g., Fuzz4All and WhiteFox), GapForge reports more failures. Although LegoFuzz reports more failures, it relies on expensive offline database construction and iterative synthesis. In contrast, Gap-                                                                    
+
+> TABLE III IMPACT OF EACH COMPONENT OF GAP FORGE .
+> Technique #Programs Cov lines Cov (%) ∆Cov lines ∆Cov (%) Token GCC
+> GapForge N F S 15,006 449,200 63.72% 310 +0.26% 346,894
+> GapForge LS 14,285 471,398 66.89% 1,266 +1.06% 316,285
+> GapForge W S 14,559 464,703 65.94% 1,207 +1.01% 325,693
+> GapForge 514,631 472,314 67.02% 1,613 +1.35% 336,794
+> GapForge 15 14,172 473,935 67.25% 1,816 +1.52% 308,112
+> GapForge N S 17,268 458,050 64.99% 1,266 +1.06% 0
+> GapForge N CC 15,038 466,240 66.27% 1,827 +1.53% 278,924
+> GapForge N O 14,791 455,300 64.56% 919 +0.77% 331,098
+> GapForge N F C 15,134 472,000 67.11% 1,825 +1.53% 357,063 GapForge 14,571 474,780 67.37% 2,043 +1.71% 337,149
+
+Forge achieves a comparable failure-finding performance with much lower resource cost. We categorize the reported failures into two types: (1) 
+
+Crash , where the compiler fails due to assertion/runtime errors, and (2) Miscompilation , where the compiler silently generates incorrect code, which is particularly critical [1]. GapForge discovers 8 crash failures (4 in GCC and 4 in LLVM) and 4 miscompilation failures (1 in GCC and 3 in LLVM), indicating that its generated programs can trigger subtle and hard-to-detect compiler defects. Overall, these results show that although GapForge is designed for coverage improvement, it can also effectively expose real-world compiler defects. To illustrate what kinds of defects GapForge can expose, we present two representative cases it discovered. Both programs are reduced from the originals for readability. 
+
+Crash in GCC. While targeting reload.cc , GapForge gen-erated a program combining mutually exclusive specifiers (_Thread_local , _Noreturn , and register ) in a sin-gle declaration, triggering an internal compiler error. 
+
+Miscompilation in LLVM. While targeting ConstraintE-limination.cpp , GapForge generated a program with tightly coupled integer constraints across nested branches (e.g., chain-ing (x < c1) && (x > c2) with bit-masking and condi-tional updates such as x = (x & m) + k ), which exercises LLVM’s constraint-propagation logic and leads to a miscom-pilation. 
+
+D. Effect of Different LLMs (RQ4) 
+
+To answer RQ4, we instantiate GapForge with different LLMs under a 24-hour budget on GCC. To assess sensi-tivity to the summarization model, we replace GPT-4o with DeepSeek-v3.2 and Qwen3-max, yielding GapForge ds and 
+
+GapForge qwen . To assess sensitivity to the generation model, we replace StarCoder with Qwen2.5-Coder-14B and Qwen2.5-Coder-32B, yielding GapForge qwen 14 and GapForge qwen 32 .We select these as representative strong models from different families; evaluating more LLMs is limited by API cost and runtime overhead. Table V presents the results. For the summarization model, although GapForge ds generates more test programs, it covers 9,385 fewer lines and achieves 931 fewer newly covered lines than GapForge suggesting that the quality of summarization has a notable impact on coverage effectiveness. For the gener-ation model, GapForge qwen 32 achieves competitive coverage TABLE IV DETECTED FAILURES .                                                                      
+
+> Technique GCC LLVM All
+> Csmith 000DST 000Creal 246GrayC 123Fuzz4All 112WhiteFox 134LegoFuzz 6915 Optimuzz -66GapForge 5712 TABLE V IMPACT OF THE BASE LLM OF GAP FORGE .
+> Technique #Programs Cov lines Cov (%) ∆Cov lines ∆Cov (%) Token
+> GapForge 14,571 474,780 67.37% 2,043 +1.71% 337,149
+> GapForge DS 16,014 465,394 66.08% 1,112 +0.93% 379,028
+> GapForge Qwen 15,848 466,816 66.24% 1,541 +1.29% 364,667
+> GapForge qwen 14 14,328 475,978 67.54% 2,138 +1.79% 336,279
+> GapForge qwen 32 14,267 478,868 67.95% 2,425 +2.03% 328,541
+
+compared with GapForge, demonstrating that a stronger code generation model can partially compensate for the difference in generation capability. Nevertheless, all variants consistently outperform the baseline techniques, demonstrating that Gap-Forge’s effectiveness is not overly sensitive to the choice of LLM. V. T HREATS TO VALIDITY 
+
+The internal threat arises mainly from the implementa-tion of compiler test generation approaches. To reduce this threat, we utilize the reproducible packages of the compared approaches and strictly re-implement WhiteFox based on its corresponding publication. 
+
+The external threat comes mainly from the target compil-ers and platforms. To reduce this threat, we use two popular compilers (i.e., GCC and LLVM), and most commonly the x86 platform, as in previous work [12], [13], [2], [8], [36], [37]. 
+
+The construct threat mainly comes from the evalua-tion metrics and measurement procedures. Following prior work [12], [13], [14], we use line coverage as the primary coverage metric and collect coverage using gcov . Since our approach is LLM-guided, we also report token consumption as a cost metric, although token usage may vary across APIs and implementations. For bug-finding evaluation, we monitor com-piler crashes and perform differential testing under different optimization levels [12], [13], [14]. Additionally, we acknowl-edge a potential hardware bias: traditional fuzzers such as Csmith, GrayC are optimized for CPUs, whereas LLM-based techniques rely on GPU acceleration. Since all experiments share the same hardware configuration, this difference may affect the number of test programs generated per unit time. VI. R ELATED WORK 
+
+Compiler testing is a fundamental problem in software testing, and extensive research has been conducted on test oracle construction and test generation. This paper focuses on compiler test generation. In this section, we first review ex-isting compiler test generation techniques. Since our approach leverages LLMs, we further discuss representative LLM-based test generation methods for other software targets. 
+
+A. Compiler Test Generation 
+
+Compiler test generation techniques can be broadly cate-gorized into grammar-aided, mutation-based, and LLM-based approaches [14]. Grammar-aided techniques [2], [3], [11], [4] generate syn-tactically valid programs by following language production rules and enforcing semantic constraints. Representative tools include Csmith [2], which constructs semantically complete C programs by assigning probabilities to different syntactic structures, and YARPGen [4], which uses generation policies to target scalar and loop optimizations. Mutation-based techniques [7], [6], [8], [9], [15] are also effective for discovering compiler bugs. EMI [6] mutates seed programs while preserving input-output behaviors, ex-posing bugs in GCC and LLVM. Creal [8] injects real-world functions into seed programs in a semantics-preserving man-ner. GrayC [9] incorporates coverage feedback and mutates programs under grammar and semantic constraints, enabling deeper exploration of new execution paths. Optimuzz [15] adopts directed greybox fuzzing to generate LLVM IRs tar-geting specific optimization passes via translation validation. With the rapid progress of LLMs, many researchers have explored LLM-based compiler testing. Fuzz4All [12] incorpo-rates LLM-generated prompts into the fuzzing loop to improve test diversity. WhiteFox [13] targets compiler optimizations via a multi-agent design leveraging compiler documentation and code examples. LegoFuzz [14] builds programs by composing reusable semantic components. Unlike these techniques, Gap-Forge further leverages coverage feedback to perform iterative, coverage-driven target selection and prompt refinement, focus-ing test generation on hard-to-cover compiler code regions. 
+
+B. LLM-based Test Generation 
+
+Beyond compiler testing, LLMs have been widely applied to unit test generation [31], [32], [33], [34] and search-based software testing (SBST) [28], [29]. For example, TeCo [21] fine-tunes CodeT5 [22] to assist developers in completing unit tests, TestPilot [23] explores adaptive zero-shot test generation for JavaScript, MuTAP [25] employs zero-shot and few-shot prompting and evaluates generated tests via mutation testing, and ChatUniTest [26] investigates conversation-driven test generation with ChatGPT [27]. CodaMosa [28] generates tests for uncovered methods to guide SBST, ChatGPT-SBST [29] systematically studies the applicability of ChatGPT in this setting, and CoverUp [30] integrates coverage analysis, code context, and iterative feedback to progressively improve state-ment and branch coverage. However, applying LLM-guided test generation to com-piler testing is more challenging due to complex compilation pipelines and persistent long-tail coverage gaps. To address this, our technique leverages LLM reasoning to analyze un-covered compiler regions and infer triggering requirements (e.g., program patterns and compilation options), guiding test generation toward hard-to-cover code. VII. C ONCLUSION 
+
+To reduce human effort in compiler testing, many test-generation techniques have been proposed; however, they often rely on coarse-grained coverage guidance and fail to effectively explore long-tail code regions. In this paper, we propose GapForge, an LLM-based compiler test generation technique that targets coverage gaps. GapForge iteratively selects promising target files via coverage feedback, infers coverage-triggering requirements for uncovered regions, and synthesizes prompts to generate targeted test programs. Ex-periments on GCC and LLVM show that GapForge consis-tently achieves higher source-code coverage than state-of-the-art baselines under the same time budget. Ablation studies further demonstrate the effectiveness of each component of GapForge. VIII. D ATA AVAILABILITY 
+
+We make the source code and data of GapForge available on website [40]. REFERENCES [1] J. Chen, J. Patra, M. Pradel, Y. Xiong, H. Zhang, D. Hao, and L. Zhang, “A Survey of Compiler Testing,” ACM Computing Surveys , vol. 53, no. 1, pp. 4:1–4:36, 2021. [2] X. Yang, Y. Chen, E. Eide, and J. Regehr, “Finding and understanding bugs in C compilers,” in Proceedings of the 32nd ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI) , 2011, pp. 283–294. [3] K. Even-Mendoza, C. Cadar, and A. F. Donaldson, “CsmithEdge: more effective compiler testing by handling undefined behaviour less conservatively,” Empirical Software Engineering , vol. 27, no. 6, p. 129, 2022. [4] V. Livinskii, D. Babokin, and J. Regehr, “Random testing for C and C++ compilers with YARPGen,” Proc. ACM Program. Lang. , vol. 4, no. OOPSLA, pp. 196:1–196:25, 2020. [5] C. Holler, K. Herzig, and A. Zeller, “Fuzzing with code fragments,” in 21st USENIX Security Symposium (USENIX Security 12) , 2012, pp. 445–458. [6] V. Le, M. Afshari, and Z. Su, “Compiler validation via equivalence modulo inputs,” in Proceedings of the 35th ACM SIGPLAN Conference on Programming Language Design and Implementation (PLDI) , 2014, pp. 216–226. [7] V. Le, C. Sun, and Z. Su, “Finding deep compiler bugs via guided stochastic program mutation,” in Proceedings of the 2015 ACM SIG-PLAN International Conference on Object-Oriented Programming, Sys-tems, Languages, and Applications (OOPSLA) , 2015, pp. 386–399. [8] S. Li, T. Theodoridis, and Z. Su, “Boosting Compiler Testing by Injecting Real-World Code,” Proc. ACM Program. Lang. , vol. 8, no. PLDI, pp. 223–245, 2024. [9] K. Even-Mendoza, A. Sharma, A. F. Donaldson, and C. Cadar, “GrayC: Greybox Fuzzing of Compilers and Analysers for C,” in Proceedings of the 32nd ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) , 2023, pp. 1219–1231. [10] J. Liu, Y. Wei, S. Yang, Y. Deng, and L. Zhang, “Coverage-guided tensor compiler fuzzing with joint IR-pass mutation,” Proc. ACM Program. Lang. , vol. 6, no. OOPSLA1, pp. 1–26, 2022. [11] M. A. Alipour, A. Groce, R. Gopinath, and A. Christi, “Generating focused random tests using directed swarm testing,” in Proceedings of the 25th International Symposium on Software Testing and Analysis (ISSTA) , 2016, pp. 70–81. [12] C. S. Xia, M. Paltenghi, J. L. Tian, M. Pradel, and L. Zhang, “Fuzz4All: Universal Fuzzing with Large Language Models,” in Proceedings of the 46th IEEE/ACM International Conference on Software Engineering (ICSE) , 2024, pp. 126:1–126:13. [13] C. Yang, Y. Deng, R. Lu, J. Yao, J. Liu, R. Jabbarvand, and L. Zhang, “WhiteFox: White-Box Compiler Fuzzing Empowered by Large Language Models,” Proc. ACM Program. Lang. , vol. 8, no. OOPSLA2, pp. 709–735, 2024. [14] Y. Ni, “LegoFuzz: Interleaving Large Language Models for Compiler Testing,” in Companion Proceedings of the 2025 ACM SIGPLAN International Conference on Systems, Programming, Languages, and Applications: Software for Humanity (SPLASH) , 2025, pp. 37–39. [15] J. Kwon, B. Jang, J. Lee, and K. Heo, “Optimization-Directed Compiler Fuzzing for Continuous Translation Validation,” Proc. ACM Program. Lang. , vol. 9, no. PLDI, pp. 627–650, 2025. [16] D. Menendez and N. P. Lopes, “Alive: Provably Correct InstCombine Optimizations,” LLVM Developer Meeting, 2014. [17] J. C. King, “Symbolic execution and program testing,” Communications of the ACM , vol. 19, no. 7, pp. 385–394, 1976. [18] GCC, “GNU Compiler Collection,” https://gcc.gnu.org, 2026. [19] LLVM, “The LLVM Compiler Infrastructure,” https://llvm.org, 2026. [20] GNU Project, “gcov—a Test Coverage Program,” https://gcc.gnu.org/onlinedocs/gcc/Gcov.html, accessed 2026. [21] P. Nie, R. Banerjee, J. J. Li, R. J. Mooney, and M. Gligoric, “Learning Deep Semantics for Test Completion,” in 45th IEEE/ACM International Conference on Software Engineering (ICSE) , 2023, pp. 2111–2123. [22] Y. Wang, W. Wang, S. R. Joty, and S. C. H. Hoi, “CodeT5: Identifier-aware Unified Pre-trained Encoder-Decoder Models for Code Under-standing and Generation,” in Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing (EMNLP) , 2021, pp. 8696–8708. [23] GitHub Next, “TestPilot,” https://github.com/githubnext/testpilot, ac-cessed 2026. [24] OpenAI, “Introducing Codex,” https://openai.com/index/introducing-codex/, 2021. [25] A. M. Dakhel, A. Nikanjam, V. Majdinasab, F. Khomh, and M. C. Desmarais, “Effective test generation using pre-trained Large Language Models and mutation testing,” Information and Software Technology ,vol. 171, p. 107468, 2024. [26] Y. Chen, Z. Hu, C. Zhi, J. Han, S. Deng, and J. Yin, “ChatUniTest: A Framework for LLM-Based Test Generation,” in Companion Proceed-ings of the 32nd ACM International Conference on the Foundations of Software Engineering (FSE) , 2024, pp. 572–576. [27] OpenAI, “ChatGPT,” https://openai.com/chatgpt, 2022. [28] C. Lemieux, J. P. Inala, S. K. Lahiri, and S. Sen, “CodaMosa: Escaping Coverage Plateaus in Test Generation with Pre-trained Large Language Models,” in 45th IEEE/ACM International Conference on Software Engineering (ICSE) , 2023, pp. 919–931. [29] Y. Tang, Z. Liu, Z. Zhou, and X. Luo, “ChatGPT vs SBST: A Compar-ative Assessment of Unit Test Suite Generation,” IEEE Transactions on Software Engineering , vol. 50, no. 6, pp. 1340–1359, 2024. [30] J. A. Pizzorno and E. D. Berger, “CoverUp: Effective High Coverage Test Generation for Python,” Proc. ACM Softw. Eng. , vol. 2, no. FSE, pp. 2897–2919, 2025. [31] Y. Deng, C. S. Xia, H. Peng, C. Yang, and L. Zhang, “Large Language Models Are Zero-Shot Fuzzers: Fuzzing Deep-Learning Libraries via Large Language Models,” in Proceedings of the 32nd ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) ,2023, pp. 423–435. [32] Y. Deng, C. S. Xia, C. Yang, S. D. Zhang, S. Yang, and L. Zhang, “Large Language Models are Edge-Case Fuzzers: Testing Deep Learning Libraries via FuzzGPT,” CoRR , abs/2304.02014, 2023. [33] M. Sun, Y. Yang, Y. Wang, M. Wen, H. Jia, and Y. Zhou, “SMT Solver Validation Empowered by Large Pre-Trained Language Models,” in 38th IEEE/ACM International Conference on Automated Software Engineering (ASE) , 2023, pp. 1288–1300. [34] Z. Jiang, M. Wen, J. Cao, X. Shi, and H. Jin, “Towards understanding the effectiveness of large language models on directed test input generation,” in Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering (ASE) , 2024, pp. 1408–1420. [35] M. Zhu and D. Hao, “Compiler Auto-Tuning via Critical Flag Selec-tion,” in 2023 38th IEEE/ACM International Conference on Automated Software Engineering (ASE) , 2023, pp. 1000–1011. [36] M. Zhu, D. Hao, and J. Chen, “Compiler Autotuning through Multiple-phase Learning,” ACM Transactions on Software Engineering and Methodology , vol. 33, no. 4, pp. 1–38, 2024. [37] M. Zhu, Z. Sun, and D. Hao, “PDCAT: Preference-Driven Compiler Auto-tuning,” Proc. ACM Softw. Eng. , vol. 2, no. FSE, pp. 847–867, 2025. [38] J. Regehr, “The Saturation Effect in Fuzzing,” https://blog.regehr.org/archives/1796, 2016. [39] M. B¨ ohme, V. J. M. Man` es, and S. K. Cha, “Boosting Fuzzer Efficiency: An Information Theoretic Perspective,” in Proceedings of the 28th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE) ,2020, pp. 678–689. [40] “GapSmith Repository,”https://doi.org/10.5281/zenodo.21103572, 2026.

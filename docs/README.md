@@ -6,74 +6,65 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-23
-- 运行时间：2026-07-23 20:20:10 UTC
+- 最新运行日期：2026-07-24
+- 运行时间：2026-07-24 20:21:36 UTC
 - 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
+- 本次总论文数：14
+- 精读区：3
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
-- 精读：《Beyond Fail-to-Pass: Iterative Hardening of Co-Generated Bug Reproduction Tests and Fixes》（9.5/10）, 《Verify, Repair, Repeat, or Stop? Robust Stopping for Noisy Verify-Repair Loops in LLM Agents》（9.0/10）
-- 速读：《EvoDRC: A Self-Evolving Agentic Framework for Automated DRC Violation Repair》（7.5/10）, 《Beyond Resolved Rate: A Non-Functional Quality Study》（7.0/10）, 《LM2Alloy: Investigating LLM-Generated Formal Specifications for Automated Test Derivation in Production Software》（7.0/10）
+- 今日共生成 14 篇推荐（精读 3 篇，速读 11 篇）
+- 精读：《PhoenixRepair: Rethinking Repair Strategy Exploration in Software Agents》（10.0/10）, 《Beyond Fail-to-Pass: Iterative Hardening of Co-Generated Bug Reproduction Tests and Fixes》（10.0/10）
+- 速读：《AgentDebugX: An Open-Source Toolkit for Failure Observability, Attribution, and Recovery in LLM Agents》（7.0/10）, 《Context Matters: Improving the Practical Reliability of LLM-Based Unit Test Generation》（7.0/10）, 《Workflow-Localized Mechanism Learning: Attribution-Guided Repair and Knowledge Reuse for Structured Agent Skills》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202607/23/README](/202607/23/README)
+- 详情：[/202607/24/README](/202607/24/README)
 
 ### 精读区论文标签
-1. [Beyond Fail-to-Pass: Iterative Hardening of Co-Generated Bug Reproduction Tests and Fixes](/202607/23/2607.19843v1-beyond-fail-to-pass-iterative-hardening-of-co-generated-bug-reproduction-tests-and-fixes)  
-   标签：评分：9.5/10、query:apr-oracle
-   evidence：用于补丁验证和正确性的缺陷复现测试
-2. [Verify, Repair, Repeat, or Stop? Robust Stopping for Noisy Verify-Repair Loops in LLM Agents](/202607/23/2607.17641v1-verify-repair-repeat-or-stop-robust-stopping-for-noisy-verify-repair-loops-in-llm-agents)  
+1. [PhoenixRepair: Rethinking Repair Strategy Exploration in Software Agents](/202607/24/2607.18859v1-phoenixrepair-rethinking-repair-strategy-exploration-in-software-agents)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：用于自动问题解决和补丁生成的多代理框架
+2. [Beyond Fail-to-Pass: Iterative Hardening of Co-Generated Bug Reproduction Tests and Fixes](/202607/24/2607.19843v1-beyond-fail-to-pass-iterative-hardening-of-co-generated-bug-reproduction-tests-and-fixes)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：用于验证候选补丁的错误重现测试
+3. [Code Monitor Red Teaming for Public-Test-Passing Code](/202607/24/2607.20852v1-code-monitor-red-teaming-for-public-test-passing-code)  
    标签：评分：9.0/10、query:apr-oracle
-   evidence：针对噪声验证-修复循环的鲁棒停止机制，防止损坏正确的方案
-3. [Semantic Drift in Bug Resolution: How Behavioral Signals Propagate from Reports to Tests and Patches](/202607/23/2607.18550v1-semantic-drift-in-bug-resolution-how-behavioral-signals-propagate-from-reports-to-tests-and-patches)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：衡量错误报告、测试和补丁之间的语义一致性
-4. [LLM-Based Invariant Testing for Software Functional Bugs](/202607/23/2607.18711v1-llm-based-invariant-testing-for-software-functional-bugs)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：基于LLM的软件功能缺陷不变性测试与测试预言
-5. [PhoenixRepair: Rethinking Repair Strategy Exploration in Software Agents](/202607/23/2607.18859v1-phoenixrepair-rethinking-repair-strategy-exploration-in-software-agents)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：用于探索修复策略和补丁生成的多代理框架
-6. [Safe Remediation as Risk-Constrained Intervention Decision in Microservice Systems](/202607/23/2607.20005v1-safe-remediation-as-risk-constrained-intervention-decision-in-microservice-systems)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：风险约束的干预决策以避免错误的自动化修复
+   evidence：识别通过公开测试后的残留隐藏漏洞
 
 ### 速读区论文标签
-1. [EvoDRC: A Self-Evolving Agentic Framework for Automated DRC Violation Repair](/202607/23/2607.20019v1-evodrc-a-self-evolving-agentic-framework-for-automated-drc-violation-repair)  
-   标签：评分：7.5/10、query:apr-oracle
-   evidence：用于物理设计中自动DRC违规修复的智能体框架
-2. [Beyond Resolved Rate: A Non-Functional Quality Study](/202607/23/2607.18462v1-beyond-resolved-rate-a-non-functional-quality-study)  
+1. [AgentDebugX: An Open-Source Toolkit for Failure Observability, Attribution, and Recovery in LLM Agents](/202607/24/2607.18754v1-agentdebugx-an-open-source-toolkit-for-failure-observability-attribution-and-recovery-in-llm-agents)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：评估仓库级修复中生成补丁的非功能性质量
-3. [LM2Alloy: Investigating LLM-Generated Formal Specifications for Automated Test Derivation in Production Software](/202607/23/2607.18555v1-lm2alloy-investigating-llm-generated-formal-specifications-for-automated-test-derivation-in-production-software)  
+   evidence：LLM代理轨迹中的根本原因诊断和故障归因
+2. [Context Matters: Improving the Practical Reliability of LLM-Based Unit Test Generation](/202607/24/2607.19682v1-context-matters-improving-the-practical-reliability-of-llm-based-unit-test-generation)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：从LLM生成的正式规范中导出可执行测试用例
-4. [Spaghetti Architect: A Contamination-Resistant, By-Construction-Labelled, Multi-Language Code Dataset Generator](/202607/23/2607.18642v1-spaghetti-architect-a-contamination-resistant-by-construction-labelled-multi-language-code-dataset-generator)  
+   evidence：提高基于LLM的单元测试生成的可靠性
+3. [Workflow-Localized Mechanism Learning: Attribution-Guided Repair and Knowledge Reuse for Structured Agent Skills](/202607/24/2607.20999v1-workflow-localized-mechanism-learning-attribution-guided-repair-and-knowledge-reuse-for-structured-agent-skills)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：根据参考预言检查生成程序的正确性
-5. [CodeRescue: Budget-Calibrated Recovery Routing for Coding Agents](/202607/23/2607.19338v1-coderescue-budget-calibrated-recovery-routing-for-coding-agents)  
+   evidence：基于机制学习的代理技能归因引导修复
+4. [Case study: solving P-99 with LPTP and an LLM](/202607/24/2607.21196v1-case-study-solving-p-99-with-lptp-and-an-llm)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：基于执行反馈的编码代理恢复路由
-6. [PerfAgent: Profiler-Guided Iterative Refinement for Repository-Level Code Optimization](/202607/23/2607.19653v1-perfagent-profiler-guided-iterative-refinement-for-repository-level-code-optimization)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：用于补丁行为保持的验证器在环工作流
-7. [AEVAL: From Anecdotal to Deterministic Testing for Agentic Skill Workflows](/202607/23/2607.16345v1-aeval-from-anecdotal-to-deterministic-testing-for-agentic-skill-workflows)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：用于评估智能体代码技能的确定性测试流水线
-8. [AEVAL: From Anecdotal to Deterministic Testing for Agentic Skill Workflows](/202607/23/2607.16345v2-aeval-from-anecdotal-to-deterministic-testing-for-agentic-skill-workflows)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：用于评估智能体代码技能的确定性测试流水线
-9. [Decode-Time Grammars: Constrained LLM Generation over a Refinement Order of Grammar Fragments](/202607/23/2607.18357v1-decode-time-grammars-constrained-llm-generation-over-a-refinement-order-of-grammar-fragments)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：通过解码时语法约束确保生成代码的有效性
-10. [(Over)Reliance on Test Agents in AI-Assisted Software Testing](/202607/23/2607.17927v1-overreliance-on-test-agents-in-ai-assisted-software-testing)  
+   evidence：正式证明LLM生成代码的功能正确性
+5. [MM-IssueLoc: A Controlled Benchmark for Evaluating Visual Evidence in Multimodal Repository-Level Issue Localization](/202607/24/2607.15205v1-mm-issueloc-a-controlled-benchmark-for-evaluating-visual-evidence-in-multimodal-repository-level-issue-localization)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：评估基于AI的测试代理输出是否有效且可靠
-11. [Operational Proto-Introspection in Looped Language Models: Process-Quality Taps, Executable Branching, and the Readout-Control Boundary](/202607/23/2607.18553v1-operational-proto-introspection-in-looped-language-models-process-quality-taps-executable-branching-and-the-readout-control-boundary)  
+   evidence：多模态仓库级问题定位
+6. [GapForge: Directed Compiler Fuzzing via Coverage-Gap Analysis](/202607/24/2607.15762v1-gapforge-directed-compiler-fuzzing-via-coverage-gap-analysis)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：预测正在进行的计算的成功和质量
+   evidence：基于LLM的编译器覆盖率缺口分析测试生成
+7. [Fantastic Adaptive Taxonomies and How to Use Them](/202607/24/2607.16387v1-fantastic-adaptive-taxonomies-and-how-to-use-them)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：代理系统中用于反馈的故障模式显式表示
+8. [CLOSER-Bench: Evaluating Budgeted Cross-Stage Design Closure for Hardware Agents](/202607/24/2607.16632v1-closer-bench-evaluating-budgeted-cross-stage-design-closure-for-hardware-agents)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：使用不同的预言机对仓库修复和验证进行基准测试
+9. [Vector-Bench: Can Models Surgically Edit SVG Code?](/202607/24/2607.19056v1-vector-bench-can-models-surgically-edit-svg-code)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：带有二进制规范奖励的SVG修复任务
+10. [Towards Reliable C-to-Rust Translation with Rule-Guided Reasoning and Reinforcement Learning](/202607/24/2607.19966v1-towards-reliable-c-to-rust-translation-with-rule-guided-reasoning-and-reinforcement-learning)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：用于可靠迁移的自动代码翻译和语义捕获
+11. [Multi-Source and Cross-Scenario Strategy-Guided Code Optimization](/202607/24/2607.20353v1-multi-source-and-cross-scenario-strategy-guided-code-optimization)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：大模型生成优化补丁和策略引导的重构
 
 
 <div class="dpr-home-promo-card">
