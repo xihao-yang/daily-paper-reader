@@ -1,0 +1,546 @@
+Title: From Evaluation to Optimisation: Hierarchy-Aware Training Signals for CWE Prediction in Python
+
+URL Source: https://arxiv.org/pdf/2607.21069v1
+
+Published Time: Fri, 24 Jul 2026 00:41:14 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+> Received: Revised: Accepted: Published:
+> Copyright: © 2026 by the authors. Licensee MDPI, Basel, Switzerland. This article is an open access article distributed under the terms and conditions of the Creative Commons Attribution (CC BY) license.
+
+Article 
+
+# From Evaluation to Optimisation: Hierarchy-Aware Training Signals for CWE Prediction in Python 
+
+Muntasir Adnan 1, * Manile Srun 1 and Carlos C. N. Kuhn 1  
+
+> 1Open Source Institute, Faculty of Science and Technology, University of Canberra, Canberra, Australia.
+> *Correspondence: Adnan.adnan@canberra.edu.au
+
+Abstract 
+
+The original ALPHA benchmark [ 1] introduced a taxonomy-aware penalty for evaluating CWE-level vulnerability prediction in Python and proposed that the penalty could theo-retically also serve as a training signal. This paper provides that validation. We compare three delivery mechanisms — supervised fine-tuning, a dual-head classification loss, and reinforcement learning with a dense reward derived from the normalised penalty. We find that supervised approaches consistently regress below the zero-shot baseline under distribution shift, while GRPO succeeds. Our best policy reduces the cumulative ALPHA penalty of Qwen2.5-Coder-7B on Security Hardening and Adversarial Testing (SVEN) dataset by 27.9% under greedy decoding, and by 25.5% under sampled decoding( p = 0.005, Welch’s t-test), reaching statistical parity with its 4.5 × larger zero-shot teacher. We conclude that the value of a hierarchical penalty as a training signal depends less on the penalty itself than on the directness of its delivery. 
+
+Keywords: vulnerability detection; CWE; large language models; reinforcement learning; GRPO; hierarchical evaluation; supervised fine-tuning; software security 
+
+## 1. Introduction 
+
+Large language models(LLM) are now widely used to generate code [ 2 –4 ], and a grow-ing body of evidence indicates that the code they produce frequently contains exploitable vulnerabilities [ 5, 6]. The prior ALPHA work [ 1] argued that binary vulnerability detection – labelling a function as vulnerable or not – provides insufficient specificity for the iterative repair pipelines increasingly used to improve generated code [ 2 ,4 ], since effective repair requires specific feedback [ 7]. ALPHA [ 1] therefore evaluates predictions at the level of the Common Weakness Enumeration (CWE) and introduces a taxonomy-aware penalty under which a prediction that falls near the true CWE in the MITRE hierarchy is penalised less than one that falls in an unrelated region of the taxonomy. Because this penalty is continuous and direction-aware, it is a natural candidate for a training objective rather than only an evaluation metric. Furthermore, the penalty’s direction-aware asymmetry explicitly encodes downstream utility by penalising the loss of diagnostic information (over-generalisation) more heavily than unwarranted specificity (over-specification). While the original ALPHA paper theorised this penalty could function as a loss function, the empirical viability of this approach was unexplored. Crucially, an effective evaluation metric does not automatically translate into an effective loss function. Even if a signal accurately measures a target, the optimisation mechanism can distort or discard that information before it reaches the model parameters. Therefore, realising the theoretical promise of this penalty depends substantially on how it is architecturally delivered during       
+
+> Journal Not Specified 2026 ,1, 0 https://doi.org/10.3390/1010000 arXiv:2607.21069v1 [cs.LG] 23 Jul 2026 Journal Not Specified 2026 ,1, 0 2 of 18
+
+training. We explore three delivery mechanisms, which differ in whether the penalty enters the training loss and in whether the output vocabulary is restricted to classes observed during training — • Supervised fine-tuning (SFT) : The penalty does not enter the loss; the model imitates the reasoning and CWE labels produced by a stronger teacher model, and the penalty is used only to score the result. • A dual-head supervised loss : This is the architecture proposed in the original ALPHA paper. A classification head is trained with a differentiable expected-penalty term, 
+
+LALPHA , added to cross-entropy (CE). The penalty enters the loss, but the head is restricted to the CWE vocabulary observed in training. • Reinforcement learning (RL) : The LALPHA penalty defines the reward which is one minus the normalised penalty; and the output vocabulary is unrestricted. To evaluate these delivery mechanisms, we train on the hierarchically diverse Securi-tyEval [ 8] and CVEfixes [ 9 ] dataset, and evaluate on Security Hardening and Adversarial Testing (SVEN) [ 10 ] dataset (Section 4). On a matched in-distribution split (SecurityE-val 70/30% train-test split), the classification head is highly effective when trained with CE and mean pooling. However, under the distribution shift to SVEN, both supervised mechanisms degrade significantly, regressing below the base model’s (Qwen2.5-Coder-7B) zero-shot performance. In contrast, Group Relative Policy Optimisation (GRPO) is the only mechanism that demonstrates robustness under shift. Across every base-backbone configu-ration, GRPO successfully reduces the cumulative ALPHA penalty relative to the baseline. Notably, the optimal configuration achieves a 27.9% reduction in the penalty under greedy decoding (25.5% under sampled decoding; p = 0.005, Welch’s t-test), reaching parity with a model 4.5 × its size. We make two contributions — • Evidence that the ALPHA penalty is an effective training signal, and that delivery determines whether its benefit is realised. Optimising the penalty improves CWE prediction under distribution shift; supplying the same penalty through supervised mechanisms does not. • A reinforcement-learning configuration that improves CWE prediction under distri-bution shift – a base-backbone GRPO policy with a dense, penalty-derived reward that reduces the SVEN ALPHA penalty of Qwen2.5-Coder-7B by 27.9% and outper-forms its 4.5 × larger variant, together with the data and hyperparameter analysis that characterise it. 
+
+## 2. Background 
+
+LLMs now assist a substantial share of everyday software development, yet a recur-ring body of evidence shows that the code they produce is frequently insecure [ 5 –7]. This has prompted two broad responses: steering models towards secure code, and detecting vulnerabilities after generation so that they can be repaired. SVEN [ 10 ] and SafeCoder [ 11 ]exemplifly the former, which raises the proportion of secure completions from 59.1% to 92.3% without degrading functional correctness. For detection, comparative studies report that LLMs and static application security testing (SAST) tools occupy complemen-tary regimes: SAST tools achieve low detection rates but relatively few false positives, whereas LLMs detect far more vulnerabilities at the cost of higher false-positive rates [ 1, 12 ]. Prompting-augmented frameworks such as DLAP [ 13 ] attempt to combine these strengths in a feedback loop setting. Most SAST-versus-LLM comparisons reduce the task to binary classification [ 12 ,14 ], which is too coarse to drive targeted repair [ 7]. Our prior work, ALPHA [ 1], addressed this limitation by introducing the first function-level Python benchmark that scores predictions    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 3 of 18
+
+at CWE-level granularity for both LLMs and SAST tools. Rather than treating every misprediction as equally wrong, ALPHA exploits the hierarchical structure of the MITRE CWE taxonomy [ 15 ]. This taxonomy-aware perspective aligns with a broader line of hierarchy-aware learning, in which penalising errors by their semantic distance within a class hierarchy yields “better mistakes" than a flat loss [16]. RL has become the standard mechanism for aligning LLMs with objectives that are not directly differentiable. Building on preference-based RL [ 17 ] and the RL-from-human-feedback pipeline popularised by InstructGPT [ 18 ], most implementations optimise a reward using proximal policy optimisation [ 19 ]. GRPO [ 20 ] simplifies this recipe by discarding the learned value network and instead estimating the baseline from the relative scores of a group of sampled outputs, thereby reducing the computational overhead. Applying RL to code generation is now well established – CodeRL [ 21 ], PPOCoder [ 22 ], RLTF [ 23 ], and StepCoder [ 24 ] all treat execution, unit-test, or compiler feedback as a reward to improve functional correctness. Reward-driven approaches aimed specifically at security, however, remain scarce. The closest examples train models to repair vulnerabilities using PPO with syntactic and semantic similarity rewards [ 25 , 26 ], arguing that ordinary cross-entropy under-weights the few security-critical lines relative to the bulk of functional code. Concurrent work has begun to pair online RL with a vulnerability reward model [ 27 ]. To our knowledge, none of these approaches uses a hierarchy-aware CWE penalty as an RL reward. This is the gap the present work addresses: we take the original ALPHA penalty and optimise it directly as a GRPO reward, yielding a principled, taxonomy-aware training signal for CWE-specific vulnerability detection. 
+
+## 3. Methodology 
+
+3.1. The Training-Corpus Problem and Label Withholding 
+
+Function-level, human-annotated Python-CWE datasets are small – SecurityEval [ 8]contains 121 samples across 69 CWE classes, and the Python subset of SVEN [ 10 ] contains 342 samples across four base classes. Larger CWE-labelled corpora exist [ 9], but trade reliability for scale [ 28 ]. Their labels are typically derived from static-analysis tools, whose coverage and precision are known to be poor [ 1, 28 , 29 ], making them unsuitable as a source of trustworthy supervision. This scarcity of reliable data creates two distinct problems for training. First, training on a classification objective alone with no LM signal at all risks eroding the pretrained backbone’s generative competence, collapsing it into a narrow classifier. Second, independently of data quantity, raw Python code itself provides a weak LM signal since short Python functions contain very little that a code-pretrained backbone has not already seen. The natural remedy is to supplement the LM and classification head with reasoning and explanations generated by a teacher model that has access to the true label. This, however, introduces label leakage into the classification head – if the explanation names the CWE, the language head reads the answer directly from its input. Our protocol resolves this through label withholding. The teacher (Qwen2.5-Coder-32B) receives the code and the true CWE label, and generates a mechanistic explanation under an explicit constraint to omit any CWE identifier. This yields two corpora: an SFT corpus , in which the teacher’s output retains the CWE identifier; and a classifier corpus , in which the identifier is withheld so that the classification head predicts under genuine uncertainty. Both corpora share the same schema; the gold label is used only in loss computation. 
+
+3.2. Dual-Head Architecture and Supervised Objective 
+
+We adopt Qwen2.5-Coder-7B as a shared backbone – a decoder-only, open-weight model with a native causal LM head and a published zero-shot ALPHA baseline, enabling    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 4 of 18
+
+direct comparison. The backbone is adapted with LoRA [ 30 ] adapters (Appendix C), with the base transformer weights frozen throughout. Two heads read from this backbone: a causal LM head that generates a mechanistic vulnerability explanation, and a classifica-tion head that predicts a CWE from pooled hidden states. The heads are trained in two sequential stages, each optimising a single objective. We employ two-stage training. In Stage 1, the LM head is trained with next-token CE on the teacher-explanation tokens only, yielding the SFT backbone; its role is to regularise the shared representation. In Stage 2, we load the SFT adapter, apply a second LoRA adapter, and attach the classification head to the pooled last-layer hidden states. Only Stage 2’s LoRA adapter and the head are updated, under the classification loss. The head is a multi-layer perceptron (MLP) mapping the pooled representation to the n=69 CWE classes observed in the training corpus, with three hidden layers of width 2056, 1024 and 512 before the output projection. The LoRA-adapted backbone supplies the features; this deeper head captures non-linear structure in the pooled embeddings. We evaluate mean and last-token pooling [ 31 ] to form the pooled representation. The Stage 2 objective combines a standard classification loss with the hierarchy-aware LALPHA term – 
+
+Ltotal = LCE + λ · L ALPH A , LALPH A (θ) = ∑
+
+> v∈Vobs
+
+pθ (v | x) ˆP(v, ctrue ) (1) where ˆP(v, ctrue ) = P(v, ctrue )/Pmax is the ALPHA graph penalty [ 1 ] normalised to [0, 1 ].Both terms are differentiable and read the same class distribution; LALPHA is an expected penalty weighting each candidate misclassification by its probability and its taxonomic severity. For n = 69, LCE ∈ [0, ln n] ≈ [0, 4.23 ] while normalised LALPHA ∈ [0, 1 ]. Therefore, CE would dominate by 3–4 × at λ=1, so we set λ=3 to place the terms on a commensurate scale. A property left unanalysed in the original ALPHA proposal is that LALPHA is insuf-ficient to train the classifier on its own in the supervised regime. The two logit gradients (derived in Appendix A) expose why: 
+
+∂LALPH A 
+
+∂zk
+
+= pθ (k)[ ˆP(k) − L ALPHA ], ∂LCE 
+
+∂zk
+
+= pθ (k) − 1[k = ctrue ]. (2) CE is corrective through the indicator 1[k=ctrue ]. It applies an upward push of magni-tude 1 − pθ (ctrue ) on the true class, strongest exactly when the model is most wrong and unconditional on the training phase. LALPHA on the other hand is confirmatory. Since ˆP(ctrue ) = 0, its push on the true class is pθ (ctrue ) · L ALPH A , which vanishes if pθ (ctrue ) → 0. It goes silent precisely when correction is most needed and favours the true class only while that class already leads (Appendix B). It can extend a lead but not create one. A confidently-wrong prediction becomes a practical trap under a finite training budget and therefore LCE is load-bearing. This pathology is specific to the supervised expected-penalty setting. Under GRPO 
+
+LALPHA penalty enters through sampled rollouts and normalised advantages rather than a belief-weighted expected-penalty gradient, so it retains a corrective signal even when the model is confidently wrong; this is why the ALPHA penalty can drive learning on its own under RL but must be paired with CE under SFT. The head places probability only over the 
+
+n = 69 observed classes, so LALPHA can only redistribute mass within that fixed simplex – when the deployment distribution is dominated by a class seen only a handful of times in training, hierarchical shaping cannot compensate for a dimension the model has barely learned. This analysis makes three predictions for SFT: First, when the shared representation is weak, and the model’s distribution is already committed, LALPHA can only rescale existing    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 5 of 18
+
+mass. So, toggling it on or off should leave the score unchanged. Second, when the representation is strong, its effect should be small and refining rather than decisive. Third, whichever class leads at initialisation should be reinforced, so a biased starting point should collapse toward that class rather than away from it. 
+
+3.3. Reinforcement Learning with an ALPHA Reward 
+
+SFT optimises against labelled targets, encouraging adaptation to the training distribu-tion at the expense of the base model’s broader capabilities [ 32 ], with sufficient adaptation potentially leading to overspecialisation [ 33 ] and catastrophic forgetting [ 34 ]. RL removes these constraints. The model generates a free-form analysis, the predicted CWE is extracted from the text, and the reward is computed from the penalty. We view this as a contextual bandit [ 35 ] setting in which the entire response is treated as a single action with a terminal reward, thereby avoiding token-level credit assignment. The state s is the prompt, the action a is the complete response, the policy πθ (a|s) is the language model, factorised autoregressively. The objective is – 
+
+J(θ) = Ex∼D, a∼πθ (·| x)[R(a, ctrue )] (3) For a response a whose extracted CWE is ˆ c –
+
+R(a, ctrue ) = 1 − P( ˆc, ctrue )
+
+Pmax 
+
+∈ [0, 1 ] (4) We optimise J(θ) with GRPO [ 20 ], chosen for three reasons: it is suited to a single-GPU budget; it requires no separate value network, estimating the advantage baseline from a group of completions for the same prompt; and a Kullback-Leibler (KL) divergence [ 36 ](DKL ) anchor to a frozen reference policy to keep training stable. For each prompt, we sample G completions ( G ∈ { 8, 16 }), score each and form group-relative advantages A
+
+skipping any group whose reward standard deviation falls below 10 −6 –
+
+Ai,t = Ri − mean (R1, ..., RG )
+
+std (R1, ..., RG ) (5) Although the optimisation problem is formulated as maximising J(θ) in (3) , the implementation minimises its negation (Equation (6) ), consistent with gradient-descent optimisers such as AdamW [37] – 
+
+Li = −(Ai · log πθ (yi|x) − β · DKL (πθ || πref )) (6) The contrast with the supervised penalty is structural. The dual-head gradient scales with 
+
+pθ (k), attenuating updates to low-probability classes. The GRPO policy gradient scales with ∇θ log πθ (yi|x) = ∇θ πθ /πθ – the inverse dependence. A correct action sampled at low probability yields a large update rather than a vanishing one. This is a statement strictly about gradient scaling rather than a guarantee that reinforcement learning is uncon-ditionally superior at escaping local optima. Additionally, the KL anchor independently constrains policy movement (Section 6.1), and improvement still requires the sampled group to contain a better action. Beyond constraining the policy and stabilising training, this KL penalty prevents degenerate solutions – such as the model defaulting to the most frequent class regardless of input (e.g., CWE-89, which alone accounts for 54% of SVEN samples).    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 6 of 18
+
+3.4. Use of AI Tools in Manuscript Preparation 
+
+Generative AI tools (Claude Sonnet 4.5 and Claude Sonnet 5, Anthropic) were used during manuscript preparation for two purposes: First, to assist in drafting and refining explanatory text, including identifying inconsistencies between reported claims and their supporting data. Second, to assist with debugging during implementation. All AI-assisted output was reviewed and verified by the authors, who take full responsibility for the accuracy and integrity of the analysis and content. 
+
+## 4. Experimental Setup 
+
+Dataset: SecurityEval [8 ] (121 Python functions, 69 CWEs) is the supervised training source; an 85/36 train/test split (seed 42) was carved out before any corpus generation, so the teacher never saw the held-out samples. SVEN [10 ] (342 samples; CWE-022, CWE-078, CWE-079, CWE-089) is the out-of-distribution benchmark – its four classes are likely common enough in the base model’s pretraining corpora but barely overlap the training corpus used in this study. CVEfixes [9] (964 Python samples) augments the RL pool; its distribution is dominated by CWE-918, CWE-352 and CWE-444. Three RL corpus strategies are compared: SecurityEval only (121); combined (CVEfixes filtered to CWEs shared with SecurityEval, capped at 31 per CWE; 499); and the same without the cap (584; the 23 retained CWEs average ∼25 samples each). The combined corpus Dcombined retains only CVEfixes samples whose CWE also appears in SecurityEval – Dcombined = { x ∈ D CVE :cwe (x) ∈ DSVE } so that the added data deepens coverage of the target classes rather than introducing unrelated ones. 
+
+Policy and Training: The policy and backbone is Qwen2.5-Coder-7B [ 38 ]; the teacher that generates the explanation corpora is Qwen2.5-Coder-32B [ 38 ]. All fine-tuning is parameter-efficient (PEFT) [ 39 ] via LoRA [ 30 ]. Unless stated otherwise, all reported scores represent cumulative ALPHA values. In selected instances, mean per-sample scores are reported and are labelled accordingly. We report two complementary settings — • Out-of-distribution: Training on SecurityEval or the combined RL data and evaluate on SVEN – the deployment-realistic regime. • In-distribution: A 70 / 30 SecurityEval split, with both teacher corpora generated only from the training portion so that the held-out samples are unseen. The in-distribution setting is diagnostic, not a target in its own right – it isolates whether the dual-head loss behaves as the gradient analysis predicts. Deployment is where a trained model meets inputs unlike its training distribution, so distribution shift is this work’s actual concern. SFT and the dual-head loss are evaluated in both regimes because their in-distribution behaviour explains why they fail under shift (Section 5). GRPO is evaluated only under shift: it was adopted because SFT showed no distribution-shift gains despite adequate in-distribution performance, so an in-distribution GRPO run was not carried out. 
+
+GRPO: GRPO sweeps group size G ∈ {8, 16 }, KL regularisation coefficeint β ∈{0.02, 0.04 } and 2-6 epochs. Completions are sampled at temperature 0.8 (ollama de-fault) during training. Unless otherwise stated, GRPO checkpoints are evaluated under greedy decoding, matching typical deployment practice; Section 5.2 additionally reports a sampled-decoding evaluation of the best configuration for direct statistical comparison with the sampled-decoding baseline. Continued training runs reduce the learning rate from 5 × 10 −6 to 2 × 10 −6 and retain the original base model as the frozen KL reference so that the KL bound accumulates over epochs rather than relative to the most recent checkpoint. All experiments used a single NVIDIA A100(40 GB) GPU.    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 7 of 18
+
+## 5. Results 
+
+5.1. Supervised Results: In-Distribution and Under Shift 
+
+On the matched 70 / 30 SecurityEval split, mean pooling substantially outperforms last-token pooling, and the dual-head marginally outperforms the SFT generative baseline. Table 1 reports the held-out SecurityEval evaluation.  
+
+> Table 1. In-distribution evaluation on the held-out SecurityEval split. Lower is better.
+
+Condition Cumulative ALPHA ↓ Mean ALPHA (per sample) 
+
+Qwen2.5-Coder-7B-Instruct Baseline 230.7 6.41 
+
+LCE only (last-token pooling) 233.6 6.49 
+
+LCE only (mean pooling) 145.2 4.03 
+
+LCE + LALPHA (last-token pooling) 233.6 6.49 
+
+LCE + LALPHA (mean pooling) 141.6 3.93 
+
+Three observations follow: first, pooling is the dominant factor – mean pooling reduces the penalty by roughly 40% relative to last-token pooling. Second, CE fine-tuning alone adds value over parsing the model’s own free-form output when the distribution matches. The mean-pooled classification head trained with only LCE reaches 145.2, improving on the zero-shot baseline of 230.7. Third, adding LALPHA to the CE objective improves the mean-pooled score only marginally (145.2 → 141.6), a difference of 0.1 per sample over 36 samples, which we do not claim as significant and on which we rest no conclusion. This marginal improvement is the second prediction realised in Section 3.2 – once CE has fixed the ranking, the LALPHA term that only redistributes residual mass can do no more. Under last-token pooling, switching the penalty term LALPHA on or off changes nothing (233.6 in both cases), consistent with the gradient analysis. This is the first prediction of Section 3.2 realised – because the LALPHA gradient scales with pθ (k), it can only amplify the distribution that the representation already produces; under a weak (last-token) representation, that distribution is fixed, and the penalty term has no distribution to reshape, and the score is identical. Re-running the supervised mechanisms with evaluation on SVEN reverses the pic-ture (Table 2). Both SFT and the dual-head classifier exceed the 7B zero-shot baseline’s cumulative penalty of 753.2.   
+
+> Table 2. Out-of-distribution evaluation (SecurityEval
+
+→ SVEN). Cumulative ALPHA, lower is better. 
+
+Condition Cumulative ALPHA ↓
+
+Qwen2.5-Coder-7B-Instruct Baseline 753.2 
+
+LCE only (last-token pooling) 2123.5 
+
+LCE only (mean pooling) 3063.1 
+
+LCE + LALPHA (last-token pooling) 2312.7 
+
+LCE + LALPHA (mean pooling) 2799.2 Two points are notable: first, the ordering of the pooling strategies inverts relative to Table 1 – mean pooling, the strongest in-distribution, is the weakest under shift, because a representation tuned to the training distribution does not transfer when the test distribution is concentrated elsewhere. Second, under mean pooling, the effect of LALPHA is also larger under shift than in-distribution – an 8.6% reduction (3063.1 → 2799.2) – though this does not reverse the classifier’s overall degradation and the effect is not consistent across pooling strategies ( LALPHA increases the penalty by 8.9% under last-token pooling). The classifier conditions are the weakest overall – it can predict only one of its 69 training classes,    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 8 of 18
+
+and SVEN’s dominant class (CWE-89, 54% of the test set) appeared twice in training. This is the third prediction in Section 3.2 realised – with only two training instances of the dominant class, pθ (CWE-89 ) begins negligible, so the penalty gradient towards it is negligible and shrinks further as the model commits elsewhere. The loss cannot lift a class the representation has not surfaced. 
+
+5.2. GRPO under distribution shift 
+
+Across all GRPO-initialised base-backbone configurations (6 independent, including configurations that overfit at later epochs) in Table 3, every configuration improves on baseline; under a null hypothesis of no directional effect this outcome has probability 
+
+(0.5 )6 = 0.0156. The exceptions, which do not improve, are policies initialised from the SFT checkpoint and policies trained on unfiltered out-of-domain CVEfixes data; both are explained in Section 6. The configuration that minimises the SVEN score most (base backbone; combined curated data; G = 16, β = 0.02; epoch 3) scores 543.1 under greedy decoding, a 27.9% reduction relative to the 7B zero-shot baseline of 753.2, or 5.32 baseline standard deviations below the baseline mean. Crucially, the conclusion that GRPO improves under shift does not depend on this selection – at the default configuration with only SecurityEval training data, the improvement is already 8.3% or 1.6 baseline standard deviations below the baseline mean, which establishes the direction of the effect on its own. Hyperparameter selection affects only the magnitude of the improvement, not whether it occurs. Since the published baseline was evaluated under sampled decoding, we additionally evaluated this configuration under matched-sampled decoding (temperature 0.8) across six independent runs (526.0, 541.5, 548.2, 577.8, 586.4, 587.8; mean 561.3, SD 26.1), a 25.5% reduction relative to baseline. A Welch’s two-sample t-test comparing this sampled distribution against the baseline’s three published runs (mean 753.2, SD 39.5) gives t =
+
+−7.62 ( d f = 2.9, Welch–Satterthwaite), p = 0.005 (two-tailed); even the weakest of the six sampled runs (587.8) clears the baseline mean by 4.2 baseline standard deviations. We report 543.1 (greedy) as the deployment-realistic operating point and 561.3 (sampled, protocol-matched) as the figure supporting the statistical comparison. Both values lie within the 4.5 × larger 32B model’s reported performance (574.7 ± 42.4), so the GRPO-trained 7B model reaches parity with a model more than four times its size that it did not match before training.       
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 9 of 18
+> Table 3. All GRPO configurations on SVEN, reporting cumulative ALPHA. “Cont.” marks continued training from the preceding checkpoint with the original frozen reference. *signifies the no-cap training corpus.
+
+Backbone G β Epochs Training Data SVEN ↓ ∆ (%) 7B Baseline - - - - 753.2 0% SFT 8 0.04 2 SecurityEval 1450.5 −92.58% SFT 8 0.04 2 Combined 1377.8 −82.93% Base 8 0.04 2 CVEfixes 1763.0 −134.07% Base 8 0.04 2 SecurityEval 690.6 8.31% Base 8 0.04 4 (cont.) SecurityEval 671.6 10.83% Base 8 0.04 6 (cont.) SecurityEval 658.7 12.55% Base 8 0.04 2 Combined * 659.7 12.41% Base 8 0.04 2 Combined 614.1 18.47% Base 8 0.04 4 (cont.) Combined 609.7 19.05% Base 8 0.04 6 (cont.) Combined 624.1 17.14% Base 8 0.02 2 Combined 584.3 22.42% Base 8 0.02 4 (cont.) Combined 571.4 24.14% Base 16 0.04 2 Combined 570.1 24.31% Base 16 0.04 4 (cont.) Combined 708.2 5.97% Base 16 0.02 2 Combined 546.2 27.48% Base 16 0.02 3 (cont.) Combined 543.1 27 .89 %Base 16 0.02 4 (cont.) Combined 642.1 14.75% 
+
+## 6. Ablations 
+
+The GRPO study comprises many configurations; three factors determine the out-come: the reference policy, the composition of the training data, and the optimisation hyperparameters together with the number of epochs. 
+
+6.1. Reference policy: base versus SFT backbone 
+
+The largest single effect is the choice of reference policy. Initialising GRPO from the SFT backbone ( LCE ) records 1450.5 ALPHA penalty on SVEN; initialising from the base Qwen2.5-Coder-7B records 690.6 on the same SecurityEval training data – better by more than a factor of two. The cause is the KL anchor. The SFT checkpoint is already biased towards CWE-89 (Section 3.3), and the KL term keeps the policy near that biased reference, so RL cannot escape the bias even with a correct reward. On the other hand, the base reference is not so biased and represents SVEN’s four classes well from pretraining (based on baseline performance), so the KL term anchors the policy to a balanced starting point. 
+
+6.2. Training data composition 
+
+SecurityEval provides only 121 training samples, so we tested whether enriching the RL training set with additional real-world Python vulnerabilities from CVEfixes improves the policy, and whether the composition of that enrichment matters. Training with unfil-tered CVEfixes does not help (1763.0, worse than SecurityEval alone) – its dominant classes are absent from SVEN, so RL teaches the wrong distribution. Restricting the enrichment to CVEfixes samples whose CWE also appears in SecurityEval (Section 4) improves the score. This effect concerns the composition of the training data. It is distinct from the role of the KL term – the KL anchor prevents the policy from collapsing onto a single high-frequency class to exploit the reward. Still, it does not, and is not intended to, counteract a genuine change in which classes the training examples reward. Enrichment and the KL term, therefore, act at different levels – what the data emphasises, versus how far the policy may drift from the reference.    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 10 of 18
+
+6.3. Group size and KL coefficient 
+
+Increasing the group size G from 8 to 16 sharpens the advantage estimate, yielding more usable gradient updates per epoch. Lowering β from 0.04 to 0.02 increases the reward’s influence relative to the KL anchor. The two effects are approximately additive (Table 4).   
+
+> Table 4. Hyperparameter ablation (combined data, 2 epochs, base backbone). The final column reports the change in cumulative ALPHA relative to the default GRPO configuration ( G=8, β=0.04, first row); negative values indicate a lower penalty and hence better performance.
+
+G β SVEN ↓ vs G=8, β=0.04 8 0.04 614.1 08 0.02 584.3 −29.8 16 0.04 570.1 −44.0 16 0.02 546.2 −67.9 Every configuration improves for several epochs and then degrades, as the policy starts to overfit. We did not reserve a validation set for the reinforcement-learning runs: the peak epoch, like the other hyperparameters, was identified by its score on SVEN, which is the test benchmark. A validation set disjoint from the test data would allow principled early stopping without selecting on the test set; we identify this in Section 9. 
+
+## 7. Discussion 
+
+The organising result of this study is the contrast between Table 1 and Table 2. The dual-head penalty loss is not incorrect – it’s the supervised mechanisms that lack robustness of delivery. SFT imitates a teacher whose labels and vocabulary carry their own biases; the dual-head loss delivers the penalty into a classifier whose vocabulary is fixed at training time. Both deliveries are mediated, and each mediator is a point of failure under shift. GRPO is the only mechanism that improves under shift, and its advantage is consistent with two of its properties. Anchoring to a base reference allows the policy to reinforce knowledge already present from pretraining. And unlike a binary or exact-match reward, which is uninformative when the model’s prediction is wrong, the graded reward provides a useful gradient even for incorrect predictions, scaled by how taxonomically close the prediction is to the true label. We have not isolated the contribution of the penalty’s hierarchical structure within reinforcement learning, because we did not run a binary-reward GRPO baseline; it remains possible that part of the improvement is attributable to reinforcement learning with a free output vocabulary rather than to the graded penalty specifically. We therefore frame the contribution as a demonstration that the penalty can serve as an effective training signal when delivered directly, and that the delivery mechanism is the decisive variable, while leaving the marginal value of the penalty’s hierarchical structure within RL as an open question and future work (Section 9). 
+
+## 8. Threats to Validity 
+
+The best-observed GRPO value (543.1, greedy decoding) was selected using the test results across the data recipe, group size, KL coefficient, and epoch, and is therefore an optimistic estimate. We mitigate this with a configuration-robust value that uses no test-informed choices (690.6, ∆ = 8.3%), the direction-independent sign test across six independent configurations ( p = 0.0156), and a decoding-matched statistical comparison against the baseline’s own protocol ( p = 0.005, Welch’s t-test; Section 5.2). Additionally, because these figures rely on a single training run, their stability across different training    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 11 of 18
+
+seeds has not been tested. This is distinct from the decoding variance we already reported and is left for future work (Section 9). The in-distribution comparison of LALPHA and CE rests on 36 samples and a 0.1-per-sample difference; accordingly, we treat the two losses as comparable in-distribution and draw no conclusion about the difference. Additionally, the classifier cannot predict unobserved classes and no nearest-ancestor fallback is implemented other than applying max penalty. 
+
+## 9. Limitations and Future Work 
+
+The most acute limitation is data sparsity: 121 training samples spread across 69 distinct CWEs (a mean of fewer than two samples per class, with a long tail of singletons), and as few as two samples for SVEN’s most common class. This is the binding constraint on all three mechanisms and the principal motivation for future work – larger labelled corpora, augmentation to balance CWE coverage, or an inference-time nearest-ancestor fallback for classes the classifier has not observed. Furthermore, the evaluation is function-level Python on two datasets (SecurityEval, 121 samples; SVEN, 342 samples). The findings may not transfer to other languages or to repository or commit-level granularity. The auxiliary CVEfixes labels are inherited from CVE records and are noisier than the human-annotated evaluation labels. Three further extensions follow directly from the analysis above: a binary-reward GRPO baseline to isolate the contribution of the graded penalty (Sections 7); a validation set disjoint from the test benchmark for principled early stopping, which would make the best-observed value selection-free (Section 6.3); and reporting RL results across multiple seeds would establish the stability of the headline result (Section 8). Beyond these, the longer-term direction is to deploy the trained policy within an iterative repair pipeline and to measure remediation success directly, which is the application that motivates CWE-level prediction in the first place. 
+
+## 10. Conclusion 
+
+This paper validated the proposal that the ALPHA penalty could serve as a training signal, and the validation succeeded in an unexpected way. The proposed supervised mechanism fails: the expected-penalty loss leaves predictions essentially unchanged in-distribution, and the full supervised pipeline regresses below zero-shot under distribution shift for three diagnosable reasons: teacher-induced mode collapse, teacher gold label noise, and a fixed vocabulary that converts class sparsity into worst-case penalties, none of which implicates the penalty itself. Reinforcement learning with the penalty as a direct, dense reward eliminates all three mechanisms by construction and delivers an 8.3% improvement under the default configuration, which used no test-informed choices and by 27.9% under the best-observed configuration, bringing the 7B model to parity with one 4.5 × its size. The ablations localise the gains: reference-policy choice dominates decisively, data curation comes second, group size and KL strength contribute near-additively, and early stopping is mandatory because training reward misleads. The design principle for hierarchy-aware training that follows is therefore not that the penalty matters little, but that a useful penalty is squandered unless it is delivered directly to the model’s parameters; for CWE prediction under realistic distribution shift, reinforcement learning provides that directness.     
+
+> Author Contributions: Conceptualization, M.A. and C.C.N.K.; methodology, M.A. and C.C.N.K.; software, M.A. and M.S.; validation, M.A. and M.S. and C.C.N.K.; formal analysis, M.A. and M.S.; investigation, M.A.; writing M.A and M.S. and C.C.N.K.; supervision, C.C.N.K. All authors have read and agreed to the published version of the manuscript.
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 12 of 18
+
+Funding: This work is funded under the agreement with the ACT Government, Future Jobs Fund – Open Source Institute (OpenSI) – R01553; and NetApp Technology Alliance Agreement with OpenSI – R01657. This research was supported by the Australian Government through the Department of Education’s National Industry PhD Program (project 36337). The views expressed herein are those of the authors and are not necessarily those of the Australian Government or the Department of Education. 
+
+Data Availability Statement: Our code will be made available upon publication. 
+
+Acknowledgments: During the preparation of this manuscript, the authors used Claude Sonnet 4.5 and 5 for debugging and refining the draft text. The authors have reviewed and edited all AI-assisted output and take full responsibility for the content of this publication. 
+
+Conflicts of Interest: The authors declare no conflicts of interest. 
+
+## Appendix A. Gradient Derivations for the Supervised Objective 
+
+This appendix derives the gradient of each loss term in Section 3.2 with respect to the logit zk of class k. These gradients govern how the classification head and the shared backbone are updated during training. 
+
+Notation 
+
+• zk ∈ R: the raw logit for class k, produced by the linear classification head. • S = ∑nj=1 ezj : the softmax normalisation constant. • pθ (k) = ezk
+
+S : the model’s predicted probability for class k after softmax. • ctrue : the ground-truth CWE class. • ˆP(v, ctrue ) ∈ [0, 1 ]: the normalised ALPHA penalty for predicting class v when the true class is ctrue ; a constant with respect to model parameters. • 1[·]: the indicator function, equal to 1 if the condition holds and 0 otherwise. 
+
+Appendix A.1. Softmax Derivative 
+
+Both derivations rely on the derivative of the softmax output pθ (v) with respect to logit zk. We derive this first using the quotient rule. Case 1: v = k.
+
+∂pθ (k)
+
+∂zk
+
+= ∂∂zk
+
+ezk
+
+S
+
+= ezk · S − ezk · ezk
+
+S2 (quotient rule) 
+
+= ezk
+
+S − ezk
+
+S · ezk
+
+S
+
+= pθ (k) − pθ (k)2
+
+= pθ (k) 1 − pθ (k). (A1) The numerator step uses ∂∂zk ezk = ezk and ∂S 
+
+> ∂zk
+
+= ezk (since only the k-th term in S
+
+depends on zk).    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 13 of 18
+
+Case 2: v̸ = k.
+
+∂pθ (v)
+
+∂zk
+
+= ∂∂zk
+
+ezv
+
+S
+
+= 0 · S − ezv · ezk
+
+S2 (quotient rule; ∂∂zk ezv = 0) 
+
+= − ezv
+
+S · ezk
+
+S
+
+= −pθ (v) · pθ (k). (A2) 
+
+Appendix A.2. Gradient of LCE 
+
+LCE = − log pθ (ctrue ) = − log ezctrue 
+
+S = −zctrue + log S
+
+Derivative of log S with respect to zk.
+
+∂ log S
+
+∂zk
+
+= ∂ log S
+
+∂S · ∂S
+
+∂zk
+
+(chain rule) 
+
+= 1
+
+S · ∂S
+
+∂zk
+
+= ezk
+
+S (only the k-th term survives) 
+
+= pθ (k) or so f tmax (k).Case 1: k̸ = ctrue .The term −zctrue does not depend on zk, so: 
+
+∂LCE 
+
+∂zk
+
+= ∂∂zk
+
+(−zctrue ) + ∂ log S
+
+∂zk
+
+= 0 + pθ (k)= pθ (k).Since pθ (k) > 0, the gradient is positive and the logit is pushed down .Case 2: k = ctrue .Now −zctrue does depend on zk, contributing −1: 
+
+∂LCE 
+
+∂zk
+
+= ∂∂zk
+
+(−zctrue ) + ∂ log S
+
+∂zk
+
+= −1 + pθ (k)= pθ (k) − 1. Since pθ (k) ∈ (0, 1 ), the gradient is negative and the logit is pushed up .   
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 14 of 18
+
+Unified form. Both cases combine into: 
+
+∂LCE 
+
+∂zk
+
+= pθ (k) − 1[k = ctrue ]. (A3) This gradient is always well-defined and is strongest early in training when pθ (ctrue )
+
+is small, providing the largest upward push to the correct logit precisely when the model is most uncertain. 
+
+Appendix A.3. Gradient of LALPHA 
+
+LALPHA (θ) = ∑
+
+> v∈Vobs
+
+pθ (v | x) ˆP(v, ctrue ).The penalties ˆP(v, ctrue ) are constants with respect to θ; only pθ (v) carries dependence on zk.
+
+∂LALPHA 
+
+∂zk
+
+= ∑
+
+> v
+
+ˆP(v, ctrue ) · ∂pθ (v)
+
+∂zk
+
+.Split the sum into the v = k term and all v̸ = k terms, then substitute the softmax derivatives from (A1) and (A2): 
+
+∂LALPHA 
+
+∂zk
+
+= ˆP(k, ctrue ) · pθ (k) 1 − pθ (k) + ∑ 
+
+> v̸=k
+
+ˆP(v, ctrue ) ·  −pθ (v) pθ (k).Factor out pθ (k):
+
+= pθ (k)
+
+"
+
+ˆP(k, ctrue ) 1 − pθ (k) − ∑ 
+
+> v̸=k
+
+ˆP(v, ctrue ) pθ (v)
+
+#
+
+.Expand ˆ P(k, ctrue )( 1 − pθ (k)) :
+
+= pθ (k)
+
+"
+
+ˆP(k, ctrue ) − { ˆP(k, ctrue ) pθ (k) + ∑ 
+
+> v̸=k
+
+ˆP(v, ctrue ) pθ (v)}
+
+#
+
+.Observe that: ˆP(k, ctrue ) pθ (k) + ∑ 
+
+> v̸=k
+
+ˆP(v, ctrue ) pθ (v) = ∑
+
+> v
+
+ˆP(v, ctrue ) pθ (v) = LALPHA 
+
+∴ ∂LALPHA 
+
+∂zk
+
+= pθ (k) ˆP(k, ctrue ) − L ALPHA 
+
+. (A4) 
+
+## Appendix B. Gradient Analysis of the Classification Objective 
+
+We take the LCE and LALPHA gradients from (A3) and (A4) . LALPHA is a state-dependent penalty. zk is pushed up in (A4) if class k’s penalty in [ ˆP(k, ctrue ) − L ALPHA ] lies    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 15 of 18
+
+below the current expected penalty LALPHA . Additionally, the prefactor pθ (k) scales this by the model’s current belief in class k. For the true class, ˆ P(ctrue ) = 0 gives 
+
+∂LALPH A 
+
+∂zctrue 
+
+= − pθ (ctrue ) LALPH A 
+
+an upward push of magnitude pθ (ctrue )LALPHA that shrinks to zero if pθ (ctrue ) → 0 which depends heavily on the training phase. 
+
+Appendix B.1. When does ALPHA favour the true class? 
+
+Let k⋆ be a close-but-wrong neighbour. The true class receives the stronger upward push when its gradient is more negative than the neighbour’s. So ideally: 
+
+−pθ (ctrue )LALPHA < pθ (k∗) ˆP(k∗) − L ALPHA 
+
+
+
+Multiplying both sides by −1 to get the magnitude flips the inequality and reverses the subtraction: 
+
+pθ (ctrue )LALPHA > pθ (k∗)LALPHA − ˆP(k∗)
+
+Dividing by LALPHA :
+
+pθ (ctrue ) > pθ (k∗)
+
+
+
+1 − ˆP(k∗)
+
+LALPHA 
+
+
+
+Since k∗ is a close neighbour, ˆ P(k∗) will be close to 0 and ˆP(k∗ ) 
+
+> LALPHA
+
+≈ 0, so: 
+
+pθ (ctrue ) > pθ (k∗)
+
+
+
+1 − ˆP(k∗)
+
+LALPHA 
+
+
+
+≈ pθ (k∗) (A5) The contrast with CE is the entire point. CE’s upward push on the true class is positive for every state due to the 1[·] function; it is unconditional. ALPHA’s push favours the true class only conditionally, when the state-dependent inequality (A5) holds – that is, only while the true class already leads its nearest wrong neighbour. A loss whose corrective effect is contingent on the model already being right cannot, by itself, make an incorrect model right; it can widen an existing margin but cannot open one. 
+
+## Appendix C. Implementation. 
+
+All phases train LoRA adapters via peft [ 39 ] on a bfloat16 [ 40 ] Qwen2.5-Coder-7B backbone transformer from the HuggingFace transformer library, with gradient check-pointing and manual device placement. The ALPHA penalty graph is taken from [ 1]; the teacher corpus is generated offline from Qwen2.5-Coder-32B via the ollama client. SFT and GRPO (Section 3.3) is implemented directly on torch . SFT and GRPO hyperparameters are described in Table A2 and Table A1 respectively. 
+
+## References 
+
+1. Adnan, M.; Kuhn, C.C.N. Adaptive Hierarchical Evaluation of LLMs and SAST tools for CWE Prediction in Python. In Proceedings of the 2026 International Conference on Advances in Artificial Intelligence and Machine Learning (AAIML), 2026, pp. 193–200. https://doi.org/10.1 109/AAIML67890.2026.11498216. 2. Islam, M.A.; Ali, M.E.; Parvez, M.R. MapCoder: Multi-Agent Code Generation for Competitive Problem Solving. In Proceedings of the Proceedings of the 62nd Annual Meeting of the    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 16 of 18
+
+Table A1. GRPO Hyperparameters 
+
+Value Generation temperature 0.8 Group size G {8, 16 }
+
+KL regularisation coefficient β {0.02, 0.04 }
+
+Epochs 2-6 top_p 0.9 
+
+Table A2. SFT Hyper Parameters 
+
+SFT Classifier Optimiser AdamW AdamW (trainable params only) Learning rate 2e −4 1e −4Epochs 3 5Batch size 2 2Max length 1024 1024 LoRA r/α/drop 16/32/0.05 16/32/0.05 LoRA Target Modules q_proj, k_proj, v_proj, o_proj q_proj, k_proj, v_proj, o_proj Pooling — mean | last 
+
+λ — 3.0 Seed 42 42 Precision bfloat16 bfloat16 
+
+Association for Computational Linguistics (Volume 1: Long Papers); Ku, L.W.; Martins, A.; Srikumar, V., Eds., Bangkok, Thailand, 2024; pp. 4912–4944. https://doi.org/10.18653/v1/2024. acl-long.269. 3. Adnan, M.; Kuhn, C.C. Measuring and mitigating debugging effectiveness decay in code language models. Scientific Reports 2025 , 15 , 44120. 4. Adnan, M.; Xu, Z.; Kuhn, C.C.N. Large Language Model Guided Self-Debugging Code Genera-tion, 2025, [arXiv:cs.SE/2502.02928]. 5. Pearce, H.; Ahmad, B.; Tan, B.; Dolan-Gavitt, B.; Karri, R. Asleep at the Keyboard? Assessing the Security of GitHub Copilot’s Code Contributions. Commun. ACM 2025 , 68 , 96–105. https: //doi.org/10.1145/3610721. 6. Tihanyi, N.; Bisztray, T.; Ferrag, M.A.; Jain, R.; Cordeiro, L.C. How secure is AI-generated code: A large-scale comparison of large language models. Empirical Software Engineering 2025 , 30 , 47. 7. Kamoi, R.; Zhang, Y.; Zhang, N.; Han, J.; Zhang, R. When Can LLMs Actually Correct Their Own Mistakes? A Critical Survey of Self-Correction of LLMs. Transactions of the Association for Computational Linguistics 2024 , 12 , 1417–1440. https://doi.org/10.1162/tacl_a_00713. 8. Siddiq, M.L.; Santos, J.C.S. SecurityEval Dataset: Mining Vulnerability Examples to Evaluate Machine Learning-Based Code Generation Techniques. In Proceedings of the Proceedings of the 1st International Workshop on Mining Software Repositories Applications for Privacy and Security, 2022. https://doi.org/10.1145/3549035.3561184. 9. Bhandari, G.; Naseer, A.; Moonen, L. CVEfixes: automated collection of vulnerabilities and their fixes from open-source software. In Proceedings of the Proceedings of the 17th International Conference on Predictive Models and Data Analytics in Software Engineering, 2021, pp. 30–39. 10. He, J.; Vechev, M. Large language models for code: Security hardening and adversarial testing. In Proceedings of the Proceedings of the 2023 ACM SIGSAC Conference on Computer and Communications Security, 2023, pp. 1865–1879. 11. He, J.; Vero, M.; Krasnopolska, G.; Vechev, M. Instruction tuning for secure code generation. In Proceedings of the Proceedings of the 41st International Conference on Machine Learning. JMLR.org, 2024, ICML’24. 12. Zhou, X.; Tran, D.M.; Le-Cong, T.; Zhang, T.; Irsan, I.C.; Sumarlin, J.; Le, B.; Lo, D. Comparison of static application security testing tools and large language models for repo-level vulnerability detection. arXiv preprint arXiv:2407.16235 2024 .   
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 17 of 18
+
+13. Yang, Y.; Zhou, X.; Mao, R.; Xu, J.; Yang, L.; Zhang, Y.; Shen, H.; Zhang, H. DLAP: A Deep Learning Augmented Large Language Model Prompting framework for software vulnerability detection. J. Syst. Softw. 2025 , 219 . https://doi.org/10.1016/j.jss.2024.112234. 14. Quan, H.; Wang, J.; Li, X.; Zhuo, T.Y.; Chen, X.; Du, X. An Empirical Study of Vulnerabilities in Python Packages and Their Detection. arXiv preprint arXiv:2509.04260 2025 .15. Martin, R.A.; Barnum, S. Common weakness enumeration (CWE) status update. Ada Lett. 2008 ,
+
+XXVIII , 88–91. https://doi.org/10.1145/1387830.1387835. 16. Bertinetto, L.; Mueller, R.; Tertikas, K.; Samangooei, S.; Lord, N.A. Making Better Mistakes: Leveraging Class Hierarchies With Deep Networks. In Proceedings of the 2020 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), 2020, pp. 12503–12512. https://doi.org/10.1109/CVPR42600.2020.01252. 17. Christiano, P.F.; Leike, J.; Brown, T.B.; Martic, M.; Legg, S.; Amodei, D. Deep reinforcement learning from human preferences. In Proceedings of the Proceedings of the 31st International Conference on Neural Information Processing Systems, Red Hook, NY, USA, 2017; NIPS’17, p. 4302–4310. 18. Ouyang, L.; Wu, J.; Jiang, X.; Almeida, D.; Wainwright, C.L.; Mishkin, P.; Zhang, C.; Agarwal, S.; Slama, K.; Ray, A.; et al. Training language models to follow instructions with human feedback. In Proceedings of the Proceedings of the 36th International Conference on Neural Information Processing Systems, Red Hook, NY, USA, 2022; NIPS ’22. 19. Schulman, J.; Wolski, F.; Dhariwal, P.; Radford, A.; Klimov, O. Proximal Policy Optimization Algorithms, 2017, [arXiv:cs.LG/1707.06347]. 20. Shao, Z.; Wang, P.; Zhu, Q.; Xu, R.; Song, J.; Bi, X.; Zhang, H.; Zhang, M.; Li, Y.; Wu, Y.; et al. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 2024 .21. Le, H.; Wang, Y.; Gotmare, A.D.; Savarese, S.; Hoi, S.C. CodeRL: mastering code generation through pretrained models and deep reinforcement learning. In Proceedings of the Proceedings of the 36th International Conference on Neural Information Processing Systems, Red Hook, NY, USA, 2022; NIPS ’22. 22. Shojaee, P.; Jain, A.; Tipirneni, S.; Reddy, C.K. Execution-based code generation using deep reinforcement learning. arXiv preprint arXiv:2301.13816 2023 .23. Liu, J.; Zhu, Y.; Xiao, K.; FU, Q.; Han, X.; Wei, Y.; Ye, D. RLTF: Reinforcement Learning from Unit Test Feedback. Transactions on Machine Learning Research 2023 .24. Dou, S.; Liu, Y.; Jia, H.; Zhou, E.; Xiong, L.; Shan, J.; Huang, C.; Wang, X.; Fan, X.; Xi, Z.; et al. Stepcoder: improving code generation with reinforcement learning from compiler feedback. In Proceedings of the Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), 2024, pp. 4571–4585. 25. Islam, N.T.; Khoury, J.; Seong, A.; Karkevandi, M.B.; Parra, G.D.L.T.; Bou-Harb, E.; Najafirad, P. Llm-powered code vulnerability repair with reinforcement learning and semantic reward. 
+
+arXiv preprint arXiv:2401.03374 2024 .26. Islam, N.T.; Karkevandi, M.B.; Najafirad, P. Code Security Vulnerability Repair Using Reinforce-ment Learning with Large Language Models, 2024, [arXiv:cs.CR/2401.07031]. 27. Wu, T.; Du, M.; Liu, Y.; Yang, C.; Zhuo, T.Y.; Zhang, J.; Ng, S.K. Secure Code Generation via On-line Reinforcement Learning with Vulnerability Reward Model, 2026, [arXiv:cs.CR/2602.07422]. 28. Yadav, A.S.; Wilson, J.N. R+ r: Security vulnerability dataset quality is critical. In Proceedings of the 2024 Annual Computer Security Applications Conference (ACSAC). IEEE, 2024, pp. 1047–1061. 29. Pujar, S.; Zheng, Y.; Buratti, L.; Lewis, B.; Chen, Y.; Laredo, J.; Morari, A.; Epstein, E.; Lin, T.; Yang, B.; et al. Analyzing source code vulnerabilities in the D2A dataset with ML ensembles and C-BERT. Empirical Softw. Engg. 2024 , 29 . https://doi.org/10.1007/s10664-023-10405-9. 30. Hu, E.J.; Shen, Y.; Wallis, P.; Allen-Zhu, Z.; Li, Y.; Wang, S.; Wang, L.; Chen, W.; et al. Lora: Low-rank adaptation of large language models. Iclr 2022 , 1, 3. 31. ENNADIR, S.; Zólyomi, L.; Smirnov, O.; Wang, T.; Pertoft, J.; Cornell, F.; Cao, L. Pool Me Wisely: On the Effect of Pooling in Transformer-Based Models. In Proceedings of the The Thirty-ninth Annual Conference on Neural Information Processing Systems, 2026.    
+
+> https://doi.org/10.3390/1010000 Journal Not Specified 2026 ,1, 0 18 of 18
+
+32. Adnan, M.; Gamage, B.; Xu, Z.; Herath, D.; Kuhn, C.C. Unleashing Artificial Cognition: Integrating Multiple AI Systems. Australasian Conference on Information Systems 2024 .33. Yan, H.; Vaidya, S.S.; Zhang, X.; Yao, Z. Guiding AI to Fix Its Own Flaws: An Empirical Study on LLM-Driven Secure Code Generation. arXiv preprint arXiv:2506.23034 2025 .34. Kirkpatrick, J.; Pascanu, R.; Rabinowitz, N.; Veness, J.; Desjardins, G.; Rusu, A.A.; Milan, K.; Quan, J.; Ramalho, T.; Grabska-Barwinska, A.; et al. Overcoming catastrophic forgetting in neural networks. Proceedings of the national academy of sciences 2017 , 114 , 3521–3526. 35. Sutton, R.S.; Barto, A.G. Reinforcement Learning: An Introduction , second ed.; MIT Press: Cam-bridge, MA, 2018. 36. Kullback, S.; Leibler, R.A. On Information and Sufficiency. Annals of Mathematical Statistics 1951 ,
+
+22 , 79–86. 37. Kingma, D.P.; Ba, J. Adam: A method for stochastic optimization. In Proceedings of the International Conference on Learning Representations, 2015. 38. Hui, B.; Yang, J.; Cui, Z.; Yang, J.; Liu, D.; Zhang, L.; Liu, T.; Zhang, J.; Yu, B.; Lu, K.; et al. Qwen2. 5-coder technical report. arXiv preprint arXiv:2409.12186 2024 .39. Ding, N.; Qin, Y.; Yang, G.; Wei, F.; Yang, Z.; Su, Y.; Hu, S.; Chen, Y.; Chan, C.M.; Chen, W.; et al. Parameter-efficient fine-tuning of large-scale pre-trained language models. Nat Mach Intell 5 
+
+2023 , pp. 220––235. https://doi.org/https://doi.org/10.1038/s42256-023-00626-4. 40. Kalamkar, D.; Mudigere, D.; Mellempudi, N.; Das, D.; Banerjee, K.; Avancha, S.; Vooturi, D.T.; Jammalamadaka, N.; Huang, J.; Yuen, H.; et al. A study of BFLOAT16 for deep learning training. 
+
+arXiv preprint arXiv:1905.12322 2019 .
