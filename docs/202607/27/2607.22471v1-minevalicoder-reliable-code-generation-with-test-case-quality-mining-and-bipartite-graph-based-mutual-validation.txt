@@ -1,0 +1,570 @@
+Title: MineValiCoder: Reliable Code Generation with Test Case Quality Mining and Bipartite Graph-Based Mutual Validation
+
+URL Source: https://arxiv.org/pdf/2607.22471v1
+
+Published Time: Mon, 27 Jul 2026 00:57:25 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# MineValiCoder: Reliable Code Generation with Test Case Quality Mining and Bipartite Graph-Based Mutual Validation 
+
+Zhen Zhao 1, Qihang Yang 2, Feifei Dai 1,* , Xiangfang Li 1, Bo Li 1 
+
+> 1
+
+Institute of Information Engineering, Chinese Academy of Sciences, Beijing, China 
+
+{zhaozhen, daifeifei, lixiangfang, libo}@iie.ac.cn  
+
+> 2
+
+University of Electronic Science and Technology of China, Chengdu, China 
+
+qihang.yang@std.uestc.edu.cn 
+
+Abstract —Large Language Model (LLM)-based Test-Driven Development (TDD) has advanced automated code genera-tion. However, existing approaches depend heavily on human-crafted test cases and cannot operate with only natural-language requirements. Although recent works enable automatic test generation, they overlook the inherent stochasticity of LLMs, leading to two key defects: faulty tests generate misleading feedback that distorts code optimization, while mixed-quality test cases generate conflicting evaluation signals that hinder optimal code selection. To tackle these challenges, we rethink conventional TDD paradigms and propose that automated mutual reinforcement between test-case quality and code quality is essential for reliable, fully automated TDD. This paper presents MineValiCoder, a collaborative closed-loop TDD framework with three dedicated modules. The Test Case Quality Mining (TCQM) module filters out faulty test cases through self-validation mining, providing more reliable optimization supervision. The Parallel TDD Refinement module iteratively optimizes code and gener-ates diverse high-quality code candidates based on valid test-case feedback. The Bipartite Graph-Based Code-Test Mutual Validation (BiCoTeV) module dynamically models code-test in-teractions and performs mutual validation scoring to achieve stable and reliable selection of the optimal code. Extensive evaluations on four LLMs across mainstream benchmarks show that MineValiCoder significantly outperforms state-of-the-art methods. Specifically, MineValiCoder achieves Pass@1 scores of 96.34% on HumanEval, 87.40% on MBPP, 64.00% on APPS, and 51.33% on LiveCodeBench. These results strongly validate the effectiveness of our method in mitigating LLM stochasticity and substantially boosting the overall performance of automated code generation. Our code is available at: https://anonymous. 4open.science/r/MVCoder-E3DD. 
+
+Index Terms —Large Language Models, Code Generation, Test-Driven Development 
+
+I. I NTRODUCTION 
+
+Large Language Models (LLMs) have achieved competitive performance across a broad range of code generation tasks, ranging from lightweight function completion to full program synthesis [1–4]. To improve the reliability of generated code, substantial research has developed LLM-based Test-Driven Development (TDD) methods, which exploit execution feed-back from test cases to iteratively refine LLM-generated code. 
+
+* Corresponding author: Feifei Dai, e-mail: daifeifei@iie.ac.cn. 
+
+For instance, Mathews and Nagappan [5] validate generated code using human-crafted test cases and utilize error logs to guide iterative code refinement. Adnan et al. [6] further present a self-debugging module that iteratively refines generated code using test execution results. Despite promising results, these methods are inherently limited by their dependence on human-crafted test cases from existing datasets. They fail to work in real-world scenarios where only natural-language requirements are available, leaving a critical problem to be addressed. To mitigate the reliance on human-crafted test cases and support TDD deployment with only natural-language re-quirements, recent studies turn to LLMs for automated test case generation. For example, Li and Yuan [7] propose a multi-agent framework combined with a Python interpreter to generate test inputs and corresponding outputs, enabling the autonomous construction of complete test cases. Abdullin et al. [8] show that LLMs can comprehend code semantics and generate test cases with strong fault-detection capabilities. Overall, these explorations lay a solid foundation for building fully automated TDD pipelines. Nevertheless, simply combining the above techniques still presents key challenges in practice. Due to their inherent probabilistic characteristics, LLMs tend to produce imperfect test suites containing both valid and faulty test cases. Such noisy test cases severely impair the entire TDD workflow in two critical aspects:  
+
+> •
+
+Faulty test cases lead to unreliable feedback that misleads code optimization. As shown in the bottom-left of Figure 1, when aiming to generate a square (x)
+
+function, the generated test cases include an incorrect test case Test (4) = 6. Execution feedback based on this flawed test case misdirects the optimization process, causing the model to produce invalid code ( i.e. , return x+2 ) that overfits to the erroneous test case, as observed in prior work [9, 10].  
+
+> •
+
+Mixed-quality test cases generate conflicting evalu-ation signals, hindering optimal code selection. As depicted in the bottom-right of Figure 1, the test cases include both valid cases (Test (0) = 0, Test (3) = 9,arXiv:2607.22471v1 [cs.SE] 24 Jul 2026 Que stion       
+
+> Write
+> square(x)
+> Init Code
+> return x
+> Optimized Code
+> return x **2
+> Ideal TDD Scenario with human-crafted Test Cases
+> Unreliable Feedback from
+> Erroneous Test Cases
+> Conflicting Evaluation Signals
+> Impeding Optimal Code Selection
+> Optimizing Code
+> Optimizing
+> Code
+> Test Cases
+> Test (2)= 4
+> Test (4)=6
+> Optimized Code
+> return x+2
+> Optimizing
+> Code
+> Optimized Code1
+> return x **2
+> Init Code
+> return x
+> Test Cases
+> Test (0)= 0
+> Test (2)=6
+> Test(3)=9
+> Test(4)=16
+> Fail Test
+> Test (2)= 4
+> Test (4)=6
+> Optimized Code2
+> return x *3
+> Fail Test
+> Test (2)= 6
+> Test(3)=9
+> Test(4)=16
+> Test Cases
+> Test (0)= 0
+> Test (1)=1
+> Test(2)=4
+> Test (3)=9
+> Fail Test
+> Test(2)=4
+> Test (3)=9
+> Init Code
+> return x
+
+Fig. 1: Key challenges in automated TDD with LLM-generated test cases. Top: The ideal scenario guided by accurate human-crafted test cases. Bottom Left: Erroneous test cases provide unreliable feedback, misleading code optimization. Bottom Right: mixed-quality candidates make it difficult to select the optimal code. Test (4) = 16 ) and an erroneous one (Test (2) = 6). The optimization process subsequently yields different candidates: the correct code return x**2 and the flawed code return x*3 . Since both candidates pass different subsets of test cases ( x**2 passes valid cases; 
+
+x*3 passes the erroneous case and some valid ones), distinguishing the truly reliable code becomes extremely difficult. To overcome the above two critical challenges, we re-examine the essence of automated TDD and propose a new design philosophy. Unlike conventional pipelines that treat test cases as fixed auxiliary inputs and focus only on optimizing code, we recognize that test-case quality and code quality are mutually reinforcing, and their intrinsic connections are key to resolving existing bottlenecks. First, high-quality test cases serve as trustworthy supervision signals throughout iteration. By proactively filtering out faulty test cases upfront, we can deliver accurate execution feedback to guide code refinement. This fundamentally mitigates the risk of being misled by erroneous test cases, directly tackling the first challenge. Second, well-optimized code can in turn further verify and consolidate the reliability of test cases, forming a virtuous cycle of quality improvement for both sides. Instead of judging code candidates merely by simple pass-or-fail results, we fully exploit the correlation between code and test cases for joint evaluation. This joint analysis can effectively reduce conflicting evaluation signals introduced by mixed-quality test cases, enabling us to accurately screen out high-reliability code from numerous candidates. This strategy directly addresses the second dilemma. To materialize the aforementioned bidirectional quality en-hancement and joint evaluation insights for resolving the two critical TDD bottlenecks, we propose a closed-loop automated TDD framework named MineValiCoder (Mining-Validation Enhanced Test-Driven Code Generation). MineValiCoder inte-grates automated test case quality mining and bipartite graph-based mutual validation to generate high-quality code. As illustrated in Figure 2, the framework comprises three core modules: (1) Test Case Quality Mining (TCQM) Module. To eliminate the dependency on human priors and prevent faulty test cases from yielding misleading feedback, this module first leverages LLMs to generate diverse batches of test cases from natural-language requirements, covering both common and edge-case scenarios. It further incorporates a self-validation mining mechanism to examine the input validity and logical rationality of each generated test case, filtering out faulty and low-quality test cases. In this way, only reliable test cases are retained to initialize the subsequent TDD workflow, mitigating the risk of misguided code refinement caused by flawed test cases. (2) Parallel TDD Refinement Module. Different from conventional TDD pipelines that produce only a single final code version, this module performs parallel iterative refine-ment driven by the trustworthy test cases obtained from TCQM. It enables the LLM to explore multiple feasible im-plementation paths simultaneously and continuously corrects logical defects according to valid test feedback. By iteratively optimizing code under reliable test supervision, this module effectively mitigates optimization deviation caused by faulty test cases and produces a diverse set of high-quality code candidates with distinct implementation logic. Such diverse candidate pools provide a solid and comprehensive basis for the subsequent mutual validation and optimal selection in the BiCoTeV module. (3) Bipartite Graph-Based Code-Test Mutual Validation (BiCoTeV) Module. To address the conflicting evaluation sig-nals caused by residual test noise and achieve accurate optimal code selection, this module models the relationship between code candidates and high-quality test cases as a bipartite graph and conducts dynamic mutual validation scoring. Code scores are updated based on the number of high-quality test cases they pass, while test case scores are adjusted by the consistency of code execution results (e.g., test cases passed by most valid code get higher scores). Ultimately, by ranking the candidates based on their scores, the algorithm identifies the optimal candidate code. By fully exploiting the inherent correlation between code and test cases, this module effectively alleviates the interference of noisy tests and enhances the stability of code selection. Our contributions are summarized as follows:  
+
+> •
+
+We propose MineValiCoder, a fully automated closed-loop TDD framework that eliminates human prior de-pendence and enhances code quality amidst the inherent stochasticity of LLMs. By combining test quality min-ing and graph-based mutual validation, our framework addresses the limitations of existing LLM-powered TDD pipelines.  
+
+> •
+
+We design three complementary modules to address the key challenges in automated TDD. The Test Case Quality Mining (TCQM) Module automatically generates and validates test cases to filter out faulty ones, thereby mitigating misleading feedback during code optimization. The Parallel TDD Refinement Module performs stable it-erative optimization across multiple independent branches to generate diverse code candidates. The Bipartite Graph-Based Code-Test Mutual Validation (BiCoTeV) Module models interactions between code candidates and test cases as a bipartite graph and adopts dynamic mutual validation scoring to reliably select the optimal code from multiple candidates.  
+
+> •
+
+We conduct extensive experiments on four LLMs with different scales, including GPT-4, Llama3.1-8B, Qwen2.5-Coder-7B and Qwen3-4B, over several widely adopted benchmarks: HumanEval [11], MBPP [12], APPS [13] and LiveCodeBench [14]. Experimental re-sults show that MineValiCoder achieves substantial im-provements in code generation performance, with Pass@1 scores of 96 .34% on HumanEval, 87 .40% on MBPP, 
+
+64 .00% on APPS, and 51 .33% on LiveCodeBench. II. R ELATED WORK 
+
+Our work builds upon and extends two main lines of research in LLM-based code generation: 1) Direct Code Gen-eration with LLMs, and 2) Iterative Code Refinement and Optimization with LLMs. This section reviews representative methods and highlights the specific gaps that our approach aims to address. 
+
+A. Direct Code Generation with LLMs 
+
+The impressive progress in code generation is largely driven by LLMs pre-trained on massive datasets of code and natural language [1, 3, 11, 15]. For example, CodeLlama [1] is further trained on code-centric corpora to strengthen its programming ability, while StarCoder [15] is trained on large-scale permis-sively licensed source code covering diverse programming lan-guages. Given a natural-language problem description, these models can directly produce plausible and syntactically correct code, supporting a wide range of tasks from code completion to program synthesis. However, due to the large and complex space of possible programs and the stochastic nature of LLM generation, the functional correctness of directly generated code is difficult to ensure. Generated code may contain sub-tle logical errors or fail to handle edge cases, limiting its reliability in complex scenarios. This fundamental limitation has motivated a shift towards iterative feedback-driven code refinement approaches. 
+
+B. Iterative Code Refinement and Optimization with LLMs 
+
+To overcome the limitations of direct code generation, recent studies have explored iterative refinement frameworks that use feedback, planning, or multi-agent collaboration to improve LLM-generated code. Instead of producing code in a single attempt, these methods repeatedly evaluate, revise, and opti-mize candidate solutions, aiming to improve both functional correctness and overall code quality. Existing approaches can be broadly characterized from two perspectives: the type of feedback used to guide refinement, and the way the refinement process is organized. 
+
+Feedback-Guided Refinement. As demonstrated by re-cent studies, the limitations of direct generation have driven the adoption of various forms of feedback to optimize the generated code. For instance, Self-Refine [16] establishes a feedback-refinement loop in which LLMs produce textual self-criticism to drive iterative refinement of generated code. How-ever, natural language feedback is often too coarse-grained to capture subtle boundary conditions and logical loopholes. To address this, Test-Driven Development (TDD) methods utilize unit test execution results as fine-grained feedback to optimize the code. For example, similar to PyCapsule [6] and the approach of Mathews and Nagappan [5], BlueprintCode [17] utilizes a multi-agent framework featuring a dedicated Debug-ging Agent that iteratively analyzes and repairs generated code based on execution feedback from dataset test cases. However, these TDD methods rely on human-crafted test cases, which are not always available. 
+
+Organization of the Refinement Process. To enhance the efficacy of iteration, recent works introduce more sophisticated mechanisms, primarily through advanced planning and multi-agent collaboration. One direction employs explicit planning and search, such as agent-guided tree search to systematically explore code candidate paths [18]. Another direction leverages multi-agent collaboration, designing frameworks where spe-cialized agents (e.g., for planning, coding, testing, debating) interact to decompose problems, generate diverse candidates, or reach consensus. For instance, Chen et al. [19] proposes a test-case-driven debate among LLM agents. Islam et al. [20] employs specialized agents for planning, coding, and debugging. Chen et al. [21] decomposes problems via a divide-and-conquer strategy with consensus voting. These multi-agent approaches aim to improve code accuracy by achieving com-plex reasoning through task division and agent collaboration. However, the main limitation of such methods is that the complex collaborative reasoning mechanisms force the LLM to perform a long, multi-step intermediate reasoning process. During this process, due to the probabilistic nature of LLMs, the outputs involve a certain degree of randomness. Therefore, the final result cannot consistently yield the optimal code. 
+
+Positioning of Our Work: Our proposed MineValiCoder 
+
+framework addresses the above limitations from two comple-mentary perspectives. First, it reduces the reliance on human-BiCoTeV Module TCQM Module  
+
+> Test Cases
+> 1
+
+Parallel TDD Module                                  
+
+> Sampling N Codes
+> Run Tests
+> Optimizing Code
+> Que stion
+> Sampling N Tests Qwen3-4B
+> Self-Validation
+> Raw
+> Test Cases 1
+> Raw
+> Test Cases 2
+> Raw
+> Test Cases N
+> Test Cases
+> 2
+> Test Cases
+> NCode 1Code 2Code N
+> Raw Code 1Raw Code 2Raw Code N
+> Best Code 2
+> Qwen3-4B
+> Test
+> Pass
+> Codes Test Cases
+> Scores Scores
+> Test
+> Fail
+> 0.20
+> Code 1
+> Code 2
+> Code N0.10
+> 0.10
+> 0.10
+> 0.10
+> 0.20
+> 0.20
+> Code 2
+> Code N
+> Code 10.01
+> 0.12
+> 0.26
+> 0.38
+> 0.45
+> 0.29
+> 0.02
+> Iter.
+> until
+> Cvg.
+
+Fig. 2: Overview of MineValiCoder. The framework first employs TCQM to generate validated test cases, followed by Parallel TDD for iterative code optimization. Finally, BiCoTeV leverages a bipartite graph to mutually validate code and test cases, mitigating LLM stochasticity to identify the optimal code candidate. crafted test cases by automatically generating and mining high-quality test cases from natural-language requirements. Second, it introduces a bipartite graph-based code-test mutual validation mechanism to improve code selection under residual test noise and stochastic LLM generation. By integrating automated test case quality mining, iterative TDD refinement, and robust candidate selection, MineValiCoder provides a closed-loop framework for test-driven code generation. This design enables more reliable code generation in settings where human-crafted test cases are unavailable or incomplete. III. M ETHODOLOGY 
+
+A. Notations and Problem Definition 
+
+In this paper, we focus on the task of code generation using Large Language Models (LLMs). Formally, given a natural language problem description Q, our objective is to utilize an LLM M to generate the optimal code c∗. This process involves generating intermediate test cases T to guide the optimization of code. Table I summarizes the necessary notations used throughout this paper. 
+
+B. Overview 
+
+To effectively address the aforementioned challenges, our framework MineValiCoder is designed around the core idea of optimizing and selecting code via test cases . MineVali-Coder comprises three modules, following a logical flow from test case generation to code optimization and final selection. (1) Test Case Quality Mining (TCQM) : Since test cases serve as the foundation for the entire framework, their quality is critical to the final results. Therefore, this mod-ule aims to automate the mining of high-quality test cases. We first guide the LLM to generate diverse test suites 
+
+through prompt engineering. Specifically, we sample the LLM N times to construct a set of N independent test suites, denoted as {T1, . . . , T N }. Subsequently, at the test-case level, we leverage the self-consistency capability of LLMs to filter out erroneous test cases within each suite. By designing a self-validation mining mechanism, we improve the accuracy of the retained test suites, thereby providing reliable optimization signals and high-quality test suites for subsequent steps. (2) Parallel TDD Refinement : To effectively use the mined test suites to optimize code, we design the Parallel TDD Refinement module. First, we extend existing TDD approaches by introducing monotonicity-constrained opti-mization. This makes the optimization process more stable and robust when handling LLM-generated test suites. Secondly, to increase the probability of obtaining an optimal code, this module utilizes the mined test suites TABLE I: Summary of Notations.                                   
+
+> Notation Description
+> Problem Definition
+> MThe Large Language Model (LLM)
+> QThe natural language problem description
+> c∗The final optimal code(Optimal Element)
+> Test Case and Test Suite
+> tThe test case is a pair of input ( I) and expected output ( O), where t= ( I, O )
+> TiThe i-th test suite generated in round i, where
+> Ti={t1
+> i, t 2
+> i, . . . , t |Ti|
+> i}TThe collection of test cases from Nparallel rounds, where T=NS
+> i=1
+> Ti
+> Code
+> CThe set of code candidates
+> ciThe i-th code candidate optimized specifically by suite Ti
+> Graph Validation
+> EThe set of edges representing that a code cpasses a test case t
+> GThe bipartite graph composed of C,Tunique , and EScore (·)The reliability score of code candidates and test cases
+
+{T1, . . . , T N } to drive N parallel TDD pipelines. Each pipeline independently optimizes the code based on feed-back from its corresponding test suite, yielding a diverse set of high-quality code candidates C = {c1, . . . , c N }.(3) Bipartite Graph-Based Code-Test Mutual Validation (BiCoTeV) : To address the conflicting evaluation signals caused by residual test noise and select the optimal code from generated code candidates, we design the BiCoTeV 
+
+module. In this module, we model the relationship be-tween the code candidates and the global test cases as a bipartite graph. The code candidates C and the global test cases T serve as the two disjoint sets of nodes, while the execution results (i.e., pass/fail status) constitute the edges connecting them. Based on this graph construction, we employ a dynamic score-propagation algorithm to perform global mutual validation. By fully exploiting the mutual-validation relationships between code candidates and global test cases, this module allows us to select the optimal code c∗ based on the final score. 
+
+C. Test Case Quality Mining (TCQM) 
+
+A test case t consists of an input I and an expected output 
+
+O. To validate code correctness, we run the candidate code on 
+
+I and compare its execution output with O. This comparison yields a boolean result (pass/fail) that reflects the code’s functional accuracy. A complete test suite T is a collection of multiple test cases. To fully examine code behavior, a qualified test suite must cover diverse input scenarios. Accordingly, the overall quality of a test suite depends not only on the correctness of individual test cases but also on its scenario diversity. Aiming to address the issue of faulty test cases generated by LLMs, and to mitigate misleading feedback in subsequent code optimization, the TCQM module refines raw test case outputs in two sequential stages: 
+
+Diversity Generation. To generate diverse test cases, we design a prompt Pdiverse that guides the LLM to cover a wide range of input scenarios automatically. Specifically, the generation prompt explicitly mandates the inclusion of 
+
+normal scenarios , boundary conditions , and problem-specific test cases . Aligned with the framework’s parallel architecture, we employ N rounds of independent sampling in this stage. The entire generation process can be formulated as: 
+
+ˆTi = M (Pdiverse (Q)) , for i = 1 , . . . , N, (1) where ˆTi denotes the raw test suite generated in the i-th pipeline based on the problem description Q and the prompt 
+
+Pdiverse .
+
+Self-Validation. Due to the inherent stochasticity of LLMs, raw LLM-generated test cases often contain logical errors and hallucinations. Inspired by Self-Consistency [22], which observes that valid reasoning tends to yield consistent results across multiple independent runs, we adopt this property to filter out defective test cases. We construct a validation prompt 
+
+Pvalidation to re-infer the expected output for each test case. Formally, for each generated test case t = ( I, O ) ∈ ˆTi, we mask the original output O and prompt the model to predict the output ˆO given input I and problem Q. The validated test suite Ti is constructed by retaining only test cases with consistent outputs: 
+
+Ti = (I, O ) ∈ ˆTi | ˆO = O, 
+
+where ˆO ← M (Pvalidation (Q, I )) . (2) This rigorous validation ensures that the entire TDD work-flow is driven by reliable test cases, substantially reducing the risk that code optimization is misled by flawed tests. 
+
+D. Parallel TDD Refinement 
+
+Building upon the high-quality test suites {T1, . . . , T N }
+
+constructed in the TCQM module, this module aims to gen-erate a diverse set of high-quality and robust code candidates 
+
+C. Different from prior TDD approaches that blindly optimize toward all failed test cases, this module combines parallel iterative optimization with monotonicity constraints. Running N fully independent optimization branches enables diverse exploration of the solution space, which reduces the risk of becoming trapped in local optima inherent in single-path repair and greatly enriches the heterogeneity of the final code candidate pool. To further guarantee the optimization quality of each parallel branch, we integrate monotonicity optimization into the parallel TDD pipeline to standardize every code repair iteration. Specifically, each newly optimized code is required to fix target failed test cases without invali-dating any previously passed valid test cases. This lightweight yet effective constraint substantially suppresses the negative interference of residual erroneous test cases, ensuring stable and sustainable quality improvement for all parallel optimiza-tion paths. Finally, these independent parallel TDD pipelines produce a high-quality and diverse code candidate pool, laying a solid foundation for the global mutual validation of the downstream BiCoTeV module. Algorithm 1 describes the core iterative TDD process, which is designed to ensure stable and effective code optimization. Each pipeline employs a specific test suite Ti to provide fine-grained feedback for iteratively refining the initial code through the following steps: (1) Initialization and Partitioning. To identify test cases for optimization, the process initializes the code candidate 
+
+ccurr and immediately executes it against the test suite Ti.This execution partitions the test cases into passed ( P) and failed ( F) sets, where F represents the cases needed to be optimized (lines 1–2). Additionally, a set U is initialized to track unfixable test cases (line 3). (2) Iterative Repair Loop. To repair as many failed test cases as possible, the main optimization loop (lines 4–21) persists as long as there exists a failing test case f ∈ F that has not yet been marked as unfixable. Inside this loop, the function attempts to repair the target f up to Rmax times (lines 6–17). (3) "Plan-then-Code" Generation. To improve code quality, lines 7–8 employ a "Plan-then-Code" mechanism. Instead of generating code directly—which often leads to short-sighted patches—the LLM first formulates an optimization plan based on the feedback of f , and then generates the updated code 
+
+cnew . This decomposition forces the LLM to reason about the root cause before implementation. (4) Monotonicity Optimization. To avoid code quality degra-dation caused by overfitting, lines 10–16 enforce a strict monotonicity constraint. Line 9 re-executes cnew on Ti to obtain Pnew and Fnew . cnew is accepted if and only if it fixes the target f without failing on any previously passed cases in 
+
+P. This guarantees that the optimization proceeds in a strictly ascending direction, preventing the "fix one, break two" issue. (5) Unfixable Handling. Finally, if f remains unfixed after the maximum number of retries Rmax , it is added to the U set (lines 18–20). This strategy prevents the model from entering infinite loops on erroneous test cases. After executing N parallel and independent TDD refinement processes, we collect all optimized outputs to form a diverse and high-quality code candidate set C = {c1, c 2, . . . , c N },which is fed into the subsequent BiCoTeV module for optimal code selection. 
+
+E. Bipartite Graph-based Code-Test Mutual Validation (Bi-CoTeV) 
+
+To identify the optimal code c∗ from the diverse code candidate set C, we design the BiCoTeV module. Despite the faulty-test filtering performed by TCQM, the inherent stochasticity of LLMs may still leave residual er-rors in the retained test cases. Such imperfect test cases can generate conflicting evaluation signals and introduce bias during candidate selection. To address this issue, we adopt 
+
+Algorithm 1: Iterative TDD Refinement 
+
+Input: Problem Q, Test Suite Ti, Max Retries Rmax 
+
+Output: Optimized Code Candidate ccurr  
+
+> 1
+
+ccurr ← M (Q); 
+
+> 2
+
+P, F ← Execute (ccurr , T i); 
+
+> 3
+
+U ← ∅ ; 
+
+> 4
+
+while ∃f ∈ F such that f / ∈ U do  
+
+> 5
+
+f ixed ← false ; 
+
+> 6
+
+for r ← 1 to Rmax do  
+
+> 7
+
+P lan ← M (Q, c curr , f ); 
+
+> 8
+
+cnew ← M (ccurr , P lan ); 
+
+> 9
+
+Pnew , Fnew ← Execute (cnew , T i); 
+
+> 10
+
+if f ∈ P new and P ⊆ P new then  
+
+> 11
+
+ccurr ← cnew ; 
+
+> 12
+
+P ← P new ; 
+
+> 13
+
+F ← F new ; 
+
+> 14
+
+f ixed ← true ; 
+
+> 15
+
+break ; 
+
+> 16
+
+end  
+
+> 17
+
+end  
+
+> 18
+
+if not f ixed then  
+
+> 19
+
+U ← U ∪ { f }; 
+
+> 20
+
+end  
+
+> 21
+
+end  
+
+> 22
+
+return ccurr ;a mutual validation strategy to simultaneously identify high-quality code and test cases. Our core insight is as follows: reliable test cases tend to be passed by most high-quality code candidates, and excellent code can consistently pass tests with high credibility. Specifically, to identify high-quality code candidates and test cases simultaneously, we model code candidates C and global test cases T as a bipartite graph. In this structure, 
+
+C and T serve as the two disjoint sets of nodes, while the execution results (i.e., pass/fail status) constitute the edges connecting them. To effectively evaluate the respective quality of C and T , we employ a dynamic score-propagation algorithm to perform mutual validation. Specifically, reliability scores propagate bidirectionally along the edges: a candidate’s score is aggregated from the scores of the tests it passes, while a test case’s score is dynamically calculated based on the candidates it validates. This process converges to identify the optimal code c∗. The implementation comprises three sequential steps: 
+
+Bipartite Graph Construction. We construct a bipartite graph G = ( C, Tunique , E ). In this graph, the edges represent the validation relationship: an edge (ci, t j ) ∈ E is established if and only if the code candidate ci ∈ C successfully passes the specific test case tj ∈ T .
+
+Dynamic Mutual Validation Scoring. To reasonably eval-uate the quality of code and test cases, we introduce a dynamic mutual validation scoring algorithm on the bipartite graph. Let 
+
+Score k(·) denote the score at the k-th iteration, and d be the damping factor. We synchronously update the scores of both node types using the following formulas: 
+
+Score k(ci) = (1 − d) · Score k−1(ci)+ d · X 
+
+> tj∈T unique
+
+Score k−1(tj ) · I(( ci, t j ) ∈ E),
+
+(3) 
+
+Score k(tj ) = (1 − d) · Score k−1(tj )+ d · X
+
+> ci∈C
+
+Score k−1(ci) · I(( ci, t j ) ∈ E), (4) where I(( ci, t j ) ∈ E) is the indicator function that equals 1 if the edge exists (i.e., ci passes tj ), and 0 otherwise. For numerical stability, scores are normalized such that P S = 1 
+
+after each iteration. This process iterates until convergence or the maximum number of iterations is reached. This mecha-nism effectively down-weights easy tests (passed by all) and penalizes codes that only pass unreliable tests. 
+
+Consistency-based Robust Filtering. While higher scores typically indicate superior code quality, they can also result from overfitting to a larger number of erroneous test cases. To address this, we design a consistency-based filtering mech-anism. For each code candidate ci, we analyze its set of passed test cases Tpass , and its set of failed test cases Tf ail .A candidate is identified as overfitting and filtered out if the maximum score among the failed cases exceeds the minimum score among the passed cases: 
+
+max 
+
+> t∈T f ail
+
+Score (t) > min 
+
+> t∈T pass
+
+Score (t). (5) This criterion reveals that the code performs well on less reliable test cases but fails on highly credible ones, which is a typical sign of overfitting. After filtering out problematic candidates, we select the one with the highest score from the remaining pool as the final optimal code c∗.IV. E XPERIMENTS 
+
+A. Experimental Setup 
+
+Datasets. We evaluate MineValiCoder on six widely adopted code generation benchmarks, which cover tasks spanning from basic function implementation to challenging competitive programming problems. The evaluation encompasses two main categories of datasets: Single-function algorithmic tasks in-clude HumanEval [11], MBPP [12], as well as their enhanced variants HumanEval-ET and MBPP-ET [27]. These bench-marks enable rigorous assessment of code generation quality; 
+
+Competition program generation tasks provide complex, competition-level programming. We adopt a balanced subset of 
+
+APPS [13] with 150 problems, where 50 samples are selected from each of the Introductory , Interview , and Competition dif-ficulty tiers. To eliminate data leakage risks for newly released models, we additionally use 150 randomly sampled problems from LiveCodeBench [14]. For all datasets, we adopt Pass@1 
+
+as the evaluation metric. A generated code solution is deemed correct if and only if it passes all corresponding test cases. 
+
+Baselines. To comprehensively evaluate the effectiveness of 
+
+MineValiCoder , we select two main categories of mainstream methods as baselines. The first category consists of gen-eral LLM reasoning-enhancement methods applicable across different tasks, while the second consists of code-specific optimization frameworks tailored to code-generation problems. 
+
+1. General LLM reasoning enhancement methods. These methods enhance code generation by modifying the input prompt or reasoning process.  
+
+> •
+
+Direct Prompting: The model generates code directly from the problem description without intermediate rea-soning.  
+
+> •
+
+Chain-of-Thought (CoT) [23]: The model produces step-by-step reasoning before generating the final code solution.  
+
+> •
+
+Self-Planning [24]: The task is decomposed into separate planning and implementation phases.  
+
+> •
+
+Reflexion [25]: The model iteratively optimizes code based on feedback from execution errors. 
+
+2. Code-Specific Optimization Frameworks. These ap-proaches explicitly leverage program execution, test genera-tion, or specialized architectures to iteratively produce or select correct code.  
+
+> •
+
+CodeT [26]: Multiple code candidates and corresponding test cases are generated, and majority voting over test-case execution results is used for final selection.  
+
+> •
+
+MapCoder [20]: A multi-agent system simulates the soft-ware development lifecycle through retrieval, planning, coding, and debugging agents.  
+
+> •
+
+MineValiCoder(Ours) : Our framework mines high-quality test cases and code candidates, and performs joint validation and ranking to determine the optimal solution. 
+
+Models. To make our evaluation comprehensive and rep-resentative, we adopt a set of widely used open-source and closed-source LLMs as the backbone models. We select 
+
+GPT-4 [3], Qwen2.5-Coder-7B [28], Llama3.1-8B [29] and 
+
+Qwen3-4B [30] for experiments. Notably, we use Qwen3-4B [30] as the dedicated backbone for test case generation in the TCQM module. This configuration verifies that our test case mining framework does not depend on the strong inherent capabilities of large models such as GPT-4 [3]. Instead, it leverages validation and consensus mechanisms to convert weak signals from lightweight models into reliable supervi-sion, delivering promising performance with high efficiency. 
+
+Implementation Details. We set the sampling size N = 8 
+
+to control the number of both mined test cases and code candidates for each problem. This hyperparameter was deter-mined through systematic experiments to achieve an optimal tradeoff between accuracy and cost. To suppress the generation of unreasonable low-probability content, we apply nucleus sampling with top_p =0.9 across all decoding processes. We adopt a relatively low temperature of 0.6 during code optimization to ensure logically stable refinements. For code generation, we employ varied temperatures of [0 .8, 1.2, 1.5] to encourage diversity and broader exploration of the code space. For the BiCoTeV module, iteration terminates when either the score difference between consecutive iterations falling below TABLE II: Performance comparison of code generation methods across multiple benchmarks. We report Pass@1 (%) for all tasks, where “-ET” denotes the enhanced variant of each dataset and “-” indicates unavailable results. Best results are highlighted in bold . For the APPS dataset, Intro , Inter , and Comp denote the Introductory , Interview , and Competition difficulty levels, respectively, with Avg representing the overall average. Note that MapCoder [20] is incompatible with Llama3.1-8B and Qwen3-4B in our experiments.                                                                                                                                                                                               
+
+> Model Method HumanEval HumanEval-ET MBPP MBPP-ET LiveCodeBench APPS Intro Inter Comp Avg
+> GPT-4 Direct 80.10 73.80 81.10 57.70 38.67 40.00 34.00 18.00 30.67 CoT[23] 89.00 61.60 82.40 56.20 42.67 52.00 52.00 26.00 43.33 Self-Planning[24] 85.40 62.20 75.80 50.40 48.00 58.00 56.00 40.00 51.33 Reflexion [25] 91.00 78.70 78.30 51.90 -----CodeT [26] 92.07 84.15 86.50 68.10 41.33 54.00 50.00 32.00 45.33 MapCoder[20] 93.90 82.90 83.10 57.70 48.00 62.00 50.00 28.00 46.67
+> MineValiCoder (Ours) 96.34 89.63 87.40 70.10 51.33 74.00 66.00 52.00 64.00
+> Qwen2.5-Coder-7B Direct 87.80 81.71 82.90 67.00 16.67 1.00 9.00 2.00 4.00 CoT[23] 87.80 80.49 79.90 64.40 15.33 8.00 12.00 4.00 8.00 CodeT [26] 90.85 84.76 87.40 69.50 19.33 16.00 12.00 2.00 10.00 MapCoder[20] 85.37 78.05 88.40 71.10 24.67 16.00 10.00 2.00 9.33
+> MineValiCoder (Ours) 93.29 86.59 88.90 70.60 26.67 34.00 18.00 6.00 19.33
+> Qwen3-4B Direct 76.22 71.34 73.80 58.70 21.33 18.00 16.00 8.00 14.00 CoT[23] 79.88 71.95 69.30 55.60 21.33 28.00 16.00 18.00 20.67 CodeT [26] 82.31 75.61 78.80 62.30 22.00 28.00 26.00 16.00 23.33
+> MineValiCoder (Ours) 92.07 86.59 82.90 64.90 28.67 38.00 24.00 20.00 27.33
+> Llama3.1-8B Direct 63.41 56.70 73.30 57.70 8.67 2.00 6.00 2.00 3.33 CoT[23] 60.97 54.27 61.30 48.90 14.00 10.00 4.00 0.00 4.67 CodeT [26] 74.39 66.46 74.80 59.20 10.67 6.00 4.00 2.00 4.00
+> MineValiCoder (Ours) 84.76 75.60 81.40 63.90 18.00 14.00 10.00 2.00 8.67
+
+10 −5, or the total iteration number reaches 30. All experiments were conducted on two NVIDIA A100 GPUs. 
+
+B. Results 
+
+As shown in Table II, MineValiCoder outperforms all baselines and achieves state-of-the-art results when built upon GPT-4. This remarkable performance demonstrates the effi-cacy of our overall framework. 
+
+Superior Performance on Closed-Source Model(GPT-4). 
+
+On single-function algorithmic benchmarks, MineValiCoder 
+
+achieves state-of-the-art performance across all datasets. Specifically, it attains a Pass@1 score of 96.34% on Hu-manEval, surpassing the previous best (MapCoder, 93.90%). On HumanEval-ET, it scores 89.63%, outperforming strong baselines like CodeT (84.15%). The performance lead extends to MBPP with a score of 87.40% (vs. CodeT’s 86.50%) and to MBPP-ET with 70.10% (vs. CodeT’s 68.10%). We further evaluate our approach on the challenging APPS benchmark, which requires sophisticated reasoning and al-gorithm design. MineValiCoder maintains the leading per-formance on all difficulty levels, with Pass@1 scores of 74.00%, 66.00% and 52.00% for Introductory, Interview and Competition tasks, respectively. This comprehensive advantage leads to a new state-of-the-art average score of 64.00%, which exceeds the previous best method (Self-Planning, 51.33%) by a significant margin of +12.67%. The results demonstrate that our design is particularly effective at mitigating stochastic errors in complex code generation. Due to potential data leakage issues associated with LLMs, we conduct additional experiments on LiveCodeBench to thoroughly examine the real problem-solving capability of MineValiCoder. This benchmark consists of continuously up-dated competitive programming problems, which can effec-tively prevent models from relying on training data memo-rization. On this uncontaminated benchmark, MineValiCoder 
+
+continues to achieve the highest performance with a Pass@1 score of 51.33%, outperforming the strongest baselines, Self-Planning and MapCoder (both at 48.00%). This consistent superiority strongly demonstrates that the performance gains of MineValiCoder stem directly from its inherent mechanism rather than dataset memorization. Consequently, this further validates its robustness and generalization ability in competi-tion program generation tasks. 
+
+Empowering Lightweight Open-Source Models. Our method brings substantial and consistent performance im-provements to lightweight open-source models, including Qwen3-4B, Qwen2.5-Coder-7B and Llama3.1-8B, across all benchmarks. MineValiCoder achieves state-of-the-art results in all settings. These consistent gains verify the general effectiveness and strong applicability of our framework. TABLE III: Performance comparison with PyCapsule. Py-Capsule utilizes ground-truth tests from dataset, serving as a performance upper bound for TDD-method code genera-tion. MineValiCoder achieves highly comparable results using solely LLM-generated tests.          
+
+> Method Test Source HumanEval (%) MBPP (%)
+> PyCapsule Ground-truth 96.50 88.20
+> MineValiCoder Self-generated 96.34 87.40
+
+Comparison with Human-Crafted-Test-Based TDD Frameworks. As shown in Table III, we further compare MineValiCoder with PyCapsule. By utilizing ground-truth tests, PyCapsule establishes a performance upper bound for TDD-method code generation. PyCapsule reports Pass@1 of 96.50% on HumanEval and 88.20% on MBPP, whereas MineValiCoder reaches 96.34% and 87.40%, respectively, using only LLM-generated tests. These remarkably close re-sults demonstrate that the accuracy of MineValiCoder closely approaches this reference upper bound, without relying on human-crafted test cases. In summary, experimental results demonstrate that 
+
+MineValiCoder achieves superior performance across all evaluated benchmarks and model scales. With GPT-4, it establishes new state-of-the-art results, notably achieving a 96.34% Pass@1 on HumanEval and a remarkable 64.00% average on the challenging APPS benchmark. The framework also democratizes high performance to open-source models (Qwen2.5-Coder-7B, Qwen3-4B, Llama3.1-8B), delivering consistent and substantial gains across all tasks. 
+
+C. Ablation Study a) Ablation study of modules: To assess the contri-bution of each component in MineValiCoder , we conduct ablation experiments on HumanEval using GPT-4 as the code-generation backbone. GPT-4 is adopted as a strong backbone among the evaluated models, making the ablation results less dependent on the limitations of weaker base mod-els. We choose HumanEval because it provides standardized execution-based evaluation for clean single-function algorith-mic tasks, which enables a clear and comparable analysis of individual modules. We do not use APPS or LiveCodeBench for this ablation because competetion-program tasks involve more diverse input-output formats, longer problem contexts, and larger difficulty variations, which may introduce additional confounding factors for module-level analysis. The broader effectiveness of our framework is further evaluated across all benchmarks in the main experiments. TABLE IV: Ablation study of different modules on the HumanEval benchmark, presenting the performance improve-ments when incorporating each component individually and in combination, where "–" indicates the module is not included, "✓" indicates the module is included, and " ∆" denotes the improvement relative to the baseline.                                  
+
+> Components Results TCQM Parallel TDD BiCoTeV Pass@1 (%) ∆
+> –––80.10 -–✓–87.80 +7.70 ––✓89.63 +9.53 –✓✓90.85 +10.75
+> ✓–✓93.90 +13.80
+> ✓✓–92.68 +12.58
+> ✓✓✓96.34 +16.24
+
+TABLE V: Effect of Self-Validation on generated test case quality. w/o SV and with SV denote the variants without and with Self-Validation, respectively. Avg. denotes the average number of generated test cases per test suite for each problem. 
+
+Val. (Validity) refers to the ratio of generated test cases that can pass the ground-truth code.                 
+
+> Benchmark w/o SV (Avg. / Val.) with SV (Avg. / Val.)
+> ∆
+> (Avg. / Val.)
+> HumanEval 5.91 / 80.65% 5.30 / 93.34% -0.61 / +12.69%
+> MBPP 5.02 / 82.61% 4.39 / 87.26% -0.63 / +4.65%
+> APPS 4.59 / 72.87% 4.02 / 84.11% -0.57 / +11.24%
+
+The ablation results are presented in Table IV. Using the base GPT-4 model with direct prompting (all components disabled) achieves a Pass@1 score of 80.10%, which serves as our baseline. Individually enabling the components reveals that BiCoTeV (+9.53%) provides substantial contribution. The result indicate that the dynamic mutual validation scoring is a highly effective mechanism for enhancing reliability. When evaluating two-module combinations, any pair of modules demonstrates a strong synergistic effect, with all combinations exceeding 90% accuracy. More importantly, combining the high-quality test cases mined by TCQM with the subsequent modules yields substantial performance gains. When TCQM is integrated with the iterative optimization process of Parallel TDD , the performance reaches 92.68% 
+
+(+ 12.58% ). Furthermore, pairing the test cases from TCQM 
+
+with the filtering process of BiCoTeV achieves the highest two-module accuracy at 93.90% (+ 13.80% ). These results clearly show that the high-quality test cases provided by 
+
+TCQM act as a critical foundation, generating substantial benefits when combined with either downstream optimization or filtering processes. The full MineValiCoder framework, integrating all three modules, achieves the highest performance at 96.34% , repre-senting a substantial +16.24% absolute improvement over the baseline. This result demonstrates that each module targets a unique part of the code generation pipeline. Specifically, 
+
+TCQM ensures test case quality and diversity, Parallel TDD 
+
+drives iterative code optimization, and BiCoTeV provides robust final selection. Their integration creates a mutually reinforcing system that significantly enhances code accuracy, even when applied to a strong backbone such as GPT-4. 
+
+b) Ablation study of the Self-Validation: To further in-vestigate the effectiveness of the self-validation mechanism in improving generated test case quality, we conduct an addi-tional ablation study across HumanEval, MBPP, and APPS. To ensure consistency with our main experiments—where Qwen3-4B is employed to generate test cases for the sub-sequent code optimization workflow—this ablation study also adopts Qwen3-4B as the backbone model. Notably, because LiveCodeBench lacks ground-truth code from dataset for its problems, it is excluded from this analysis. Each entry in Table V is composed of two metrics: average ( Avg. ) and validity ( Val. ). Test case validity quantifies whether generated TABLE VI: Ablation study of consistency-based robust filter-ing in BiCoTeV across different benchmarks.               
+
+> Dataset w/o Robust Filtering (%) with Robust Filtering (%) ∆
+> HumanEval 92.10 96.34 +4.24
+> MBPP 87.00 87.40 +0.40
+> APPS 59.33 64.00 +4.67
+> LiveCodeBench 47.33 51.33 +4.00
+
+test cases can provide reliable execution feedback. Across all three benchmarks, self-validation improves test case validity while reducing the average number of retained tests. On HumanEval, validity increases from 80.65% to 93.34% (+12.69%); on MBPP, it increases from 82.61% to 87.26% (+4.65%); and on APPS, it increases from 72.87% to 84.11% (+11.24%). These results show that self-validation improves the reliability of the test cases used by Parallel TDD and BiCoTeV by filtering erroneous tests. 
+
+c) Ablation study of the consistency-based robust filter-ing: We conduct a comprehensive ablation study on four benchmarks using GPT-4 to explore whether consistency-based robust filtering alleviates overfitting to simple test cases and improves the reliability of final code selection. As shown in Table VI, integrating robust filtering consis-tently yields performance gains across all datasets. Specifi-cally, it improves the Pass@1 accuracy by +4.24% on Hu-manEval, +0.40% on MBPP, +4.67% on APPS and +4.00% on LiveCodeBench. These consistent improvements across di-verse benchmarks confirm that our method effectively removes overfitted code candidates, reduces the randomness of LLM outputs, and enables trustworthy and robust code selection. 
+
+D. Parameter Sensitivity and Cost-Efficiency Analysis 1 2 3 4 5 6 7 8 9 10   
+
+> Sampling Size N
+> 75.0%
+> 80.0%
+> 85.0%
+> 90.0%
+> 95.0%
+> Pass Rate
+> Pass Rate vs. Sampling Size N on HumanEval Dataset
+> Qwen3-4B
+> Qwen2.5-Coder-7B
+> LLama-3.1-8B
+> GPT-4
+> Selected N= 8
+> Selected
+
+Fig. 3: Performance sensitivity to the sampling size N on HumanEval. The red annotation indicates our chosen setting (N = 8 ), which offers the best trade-off between accuracy and cost. TABLE VII: Comparison of average token consumption per problem and Pass@1 accuracy between MapCoder and MineValiCoder using GPT-4. Lower tokens and higher accu-racy indicate better efficiency and performance.              
+
+> Benchmark MapCoder (Tokens / Pass@1) MineValiCoder (Tokens / Pass@1)
+> HumanEval 12.75k / 93.90% 3.95k /96.34%
+> MBPP 4.96k / 83.10% 3.89k /87.40%
+> APPS 31.80k / 46.67% 32.11k / 64.00%
+
+a) Impact of Sampling Size N : To investigate the trade-off between performance gain and computational cost, we evaluated the Pass@1 accuracy on HumanEval across different backbones and sampling sizes N . As a core hyperparameter of MineValiCoder, N determines the number of TCQM genera-tion rounds, Parallel TDD pipelines, and code candidates input to BiCoTeV. Intuitively, a larger N increases the probability of covering corner test cases during the TCQM module and provides a broader candidate pool for BiCoTeV module. In our analysis, we set N ∈ { 1, 2, . . . , 10 }.As illustrated in Figure 3, the performance follows similar logarithmic growth trends across most models. For GPT-4, Qwen3-4B, and Qwen2.5-Coder-7B, increasing N consistently improves accuracy, with three showing steady gains up to 
+
+N = 8 . In contrast, Llama3.1-8B exhibits a different pattern: its accuracy peaks earlier and even slightly declines at higher 
+
+N values. Our selected setting of N = 8 achieves a balance between high reliability and inference efficiency across diverse model scales: GPT-4 (96.34%), Qwen2.5-Coder-7B (93.29%), Qwen3-4B (92.07%), and Llama3.1-8B (84.76%). Although scaling to N = 10 can push accuracy slightly further for some models, the marginal gains diminish while computational cost increases linearly. This linear growth occurs because each increment in N necessitates an additional independent round for the Parallel TDD pipeline. 
+
+b) Cost and Efficiency Analysis: We analyze average token consumption per problem to assess the computational cost of MineValiCoder relative to MapCoder, a representative multi-agent baseline with complex reasoning workflows. To clearly illustrate how token consumption scales with task complexity, we specifically conduct this analysis across three canonical benchmarks: HumanEval, MBPP, and APPS. These datasets are purposefully selected as they constitute a clear and progressive difficulty spectrum-ranging from fundamental functional programming to complex competition-level algo-rithmic tasks. While LiveCodeBench is utilized in our main experiments to evaluate temporal generalization against data contamination, its internally mixed difficulty levels make it less suited for analyzing the direct correlation between task complexity and computational cost. As shown in Table VII, MineValiCoder consumes sig-nificantly fewer tokens than MapCoder on HumanEval and MBPP. On the challenging APPS dataset, our token con-sumption remains comparable to MapCoder, yet MineVali-Coder achieves a substantial absolute accuracy improvement of +17.33% (64.00% vs. 46.67%). This high efficiency is primarily attributed to the concise design of our framework. By avoiding overly complex and redundant multi-agent in-teractions, MineValiCoder effectively minimizes unnecessary token generation while achieving superior accuracy. V. C ONCLUSION 
+
+In this paper, we introduced MineValiCoder, a fully au-tomated code generation framework that integrates test case quality mining with bipartite graph-based mutual validation. MineValiCoder effectively addresses the challenges of invalid TDD feedback and result instability. Specifically, MineVal-iCoder integrates the Test Case Quality Mining (TCQM) module for high-quality test cases generation and employs a Parallel TDD module for stable code optimization. Finally, it utilizes the Bipartite Graph-Based Code-Test Mutual Val-idation (BiCoTeV) module for selecting the optimal code. Extensive experiments across various models and benchmarks demonstrated that MineValiCoder achieves superior perfor-mance compared to state-of-the-art methods. Our findings highlight the effectiveness of autonomous test case mining and bipartite graph-based mutual validation in code genera-tion. This suggests that MineValiCoder has the potential to empower further improvements in automated software engi-neering. REFERENCES 
+
+[1] B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan, Y. Adi, J. Liu, R. Sauvestre, T. Remez et al. ,“Code llama: Open foundation models for code,” arXiv preprint arXiv:2308.12950 , 2023. [2] Y. Wang, H. Le, A. Gotmare, N. Bui, J. Li, and S. Hoi, “Codet5+: Open code large language models for code un-derstanding and generation,” in Proceedings of the 2023 conference on empirical methods in natural language processing , 2023, pp. 1069–1088. [3] J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya, F. L. Aleman, D. Almeida, J. Altenschmidt, S. Altman, S. Anadkat et al. , “Gpt-4 technical report,” arXiv preprint arXiv:2303.08774 , 2023. [4] H. Touvron, T. Lavril, G. Izacard, X. Martinet, M.-A. Lachaux, T. Lacroix, B. Rozière, N. Goyal, E. Hambro, F. Azhar et al. , “Llama: Open and efficient founda-tion language models,” arXiv preprint arXiv:2302.13971 ,2023. [5] N. S. Mathews and M. Nagappan, “Test-driven develop-ment and llm-based code generation,” in Proceedings of the 39th IEEE/ACM International Conference on Auto-mated Software Engineering , 2024, pp. 1583–1594. [6] M. Adnan, Z. Xu, and C. C. Kuhn, “Large language model guided self-debugging code generation,” arXiv preprint arXiv:2502.02928 , 2025. [7] K. Li and Y. Yuan, “Large language models as test case generators: Performance evaluation and enhancement,” 
+
+arXiv preprint arXiv:2404.13340 , 2024. [8] A. Abdullin, P. Derakhshanfar, and A. Panichella, “Test wars: A comparative study of sbst, symbolic execution, and llm-based approaches to unit test generation,” in 
+
+2025 IEEE Conference on Software Testing, Verification and Validation (ICST) . IEEE, 2025, pp. 221–232. [9] H. Taherkhani and H. Hemmati, “Valtest: Automated validation of language model generated test cases,” arXiv preprint arXiv:2411.08254 , 2024. [10] Z. Wang, S. Liu, Y. Sun, H. Li, and K. Shen, “Codecon-tests+: High-quality test case generation for competitive programming,” arXiv preprint arXiv:2506.05817 , 2025. [11] M. Chen, “Evaluating large language models trained on code,” arXiv preprint arXiv:2107.03374 , 2021. [12] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan, E. Jiang, C. Cai, M. Terry, Q. Le et al. , “Program synthesis with large language models,” arXiv preprint arXiv:2108.07732 , 2021. [13] D. Hendrycks, S. Basart, S. Kadavath, M. Mazeika, A. Arora, E. Guo, C. Burns, S. Puranik, H. He, D. Song 
+
+et al. , “Measuring coding challenge competence with apps,” arXiv preprint arXiv:2105.09938 , 2021. [14] N. Jain, A. Gu, W.-D. Li, F. Yan, T. Zhang, S. Wang, A. Solar-Lezama, K. Sen, and I. Stoica, “Livecodebench: Holistic and contamination free evaluation of large lan-guage models for code,” in International Conference on Learning Representations , vol. 2025, 2025, pp. 58 791– 58 831. [15] R. Li, L. B. Allal, Y. Zi, N. Muennighoff, D. Kocetkov, C. Mou, M. Marone, C. Akiki, J. Li, J. Chim et al. ,“Starcoder: may the source be with you!” arXiv preprint arXiv:2305.06161 , 2023. [16] A. Madaan, N. Tandon, P. Gupta, S. Hallinan, L. Gao, S. Wiegreffe, U. Alon, N. Dziri, S. Prabhumoye, Y. Yang et al. , “Self-refine: Iterative refinement with self-feedback,” Advances in Neural Information Processing Systems , vol. 36, pp. 46 534–46 594, 2023. [17] K. Mao, B. Hu, R. Lin, Z. Li, G. Lu, and Z. Zhang, “Blueprint2code: a multi-agent pipeline for reliable code generation via blueprint planning and repair,” Frontiers in Artificial Intelligence , vol. 8, p. 1660912, 2025. [18] J. Li, H. Le, Y. Zhou, C. Xiong, S. Savarese, and D. Sahoo, “Codetree: Agent-guided tree search for code generation with large language models,” in Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguis-tics: Human Language Technologies (Volume 1: Long Papers) , 2025, pp. 3711–3726. [19] J. Chen, K. Du, X. Dai, W. Zhang, X. Wang, Y. Wang, R. Tang, W. Zhang, and Y. Yu, “Debatecoder: Towards collective intelligence of llms via test case driven llm debate for code generation,” in Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , 2025, pp. 12 055– 12 065. [20] M. A. Islam, M. E. Ali, and M. R. Parvez, “Mapcoder: Multi-agent code generation for competitive problem solving,” arXiv preprint arXiv:2405.11403 , 2024. [21] J. Chen, H. Tang, Z. Chu, Q. Chen, Z. Wang, M. Liu, and B. Qin, “Divide-and-conquer meets consensus: Unleash-ing the power of functions in code generation,” Advances in Neural Information Processing Systems , vol. 37, pp. 67 061–67 105, 2024. [22] X. Wang, J. Wei, D. Schuurmans, Q. V. Le, E. H. Chi, S. Narang, A. Chowdhery, and D. Zhou, “Self-consistency improves chain of thought reasoning in lan-guage models,” in The Eleventh International Conference on Learning Representations , 2023. [23] J. Wei, X. Wang, D. Schuurmans, M. Bosma, F. Xia, E. Chi, Q. V. Le, D. Zhou et al. , “Chain-of-thought prompting elicits reasoning in large language models,” 
+
+Advances in neural information processing systems ,vol. 35, pp. 24 824–24 837, 2022. [24] X. Jiang, Y. Dong, L. Wang, Z. Fang, Q. Shang, G. Li, Z. Jin, and W. Jiao, “Self-planning code generation with large language models,” ACM Transactions on Software Engineering and Methodology , vol. 33, no. 7, pp. 1–30, 2024. [25] N. Shinn, F. Cassano, A. Gopinath, K. Narasimhan, and S. Yao, “Reflexion: Language agents with verbal reinforcement learning,” Advances in Neural Information Processing Systems , vol. 36, pp. 8634–8652, 2023. [26] B. Chen, F. Zhang, A. Nguyen, D. Zan, Z. Lin, J.-G. Lou, and W. Chen, “Codet: Code generation with gener-ated tests,” in The Eleventh International Conference on Learning Representations , 2023. [27] J. Liu, C. S. Xia, Y. Wang, and L. Zhang, “Is your code generated by chatgpt really correct? rigorous evaluation of large language models for code generation,” Advances in Neural Information Processing Systems , vol. 36, pp. 21 558–21 572, 2023. [28] B. Hui, J. Yang, Z. Cui, J. Yang, D. Liu, L. Zhang, T. Liu, J. Zhang, B. Yu, K. Lu et al. , “Qwen2. 5-coder technical report,” arXiv preprint arXiv:2409.12186 , 2024. [29] A. Grattafiori, A. Dubey, A. Jauhri, A. Pandey, A. Ka-dian, A. Al-Dahle, A. Letman, A. Mathur, A. Schelten, A. Vaughan et al. , “The llama 3 herd of models,” arXiv preprint arXiv:2407.21783 , 2024. [30] A. Yang, A. Li, B. Yang, B. Zhang, B. Hui, B. Zheng, B. Yu, C. Gao, C. Huang, C. Lv et al. , “Qwen3 technical report,” arXiv preprint arXiv:2505.09388 , 2025.
