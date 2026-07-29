@@ -1,0 +1,998 @@
+Title: AssumptionMiner: Extracting, Tracing, and Revising Implicit Assumptions in LLM Code Generation
+
+URL Source: https://arxiv.org/pdf/2607.22898v1
+
+Published Time: Tue, 28 Jul 2026 00:15:27 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+> 1
+
+# AssumptionMiner: Extracting, Tracing, and Revising Implicit Assumptions in LLM Code Generation 
+
+Jie JW Wu 
+
+Abstract —Large language models (LLMs) generate code from natural-language prompts, but real prompts are rarely complete specifications. When a prompt leaves input formats, error handling, or design decisions unstated, the model fills the gaps with implicit assump-tions : choices absent from the prompt that nonetheless shape the code’s behavior, and often its correctness. Because these assumptions are invisible, generated code can pass its tests while violating the developer’s intent. We present AssumptionMiner, a framework that makes such assumptions a first-class output of code generation. Instead of producing code alone, Assump-tionMiner also emits an explicit assumption layer : a structured record of every inferred constraint and design decision. Developers inspect, confirm, or revise assumptions through an interactive interface, and an AST-based dependency graph lets the system regenerate only the code a revised assumption governs. We also contribute a benchmark of 180 ambiguous programming tasks with 676 annotated assumptions, including a human-verified curated subset for code-localization evaluation. We evaluate extraction, code lo-calization, and revision support. With open-source mod-els, a confidence-weighted ensemble attains F1 = 0 .816 for extraction, improving on the strongest offline baseline by 3.6×. Under a stricter decision-level metric that also requires each extracted description to name the same design decision as the reference, the best open-source configuration reaches only F1 = 0 .66 , far above the near-zero non-LLM baselines but low in absolute terms, indi-cating that decision-level assumption extraction remains far from solved. On the human-verified localization set, AST-guided localization produces tighter code regions than keyword and whole-file baselines. When developers revise an assumption, targeted regeneration changes less code than non-targeted alternatives, although it also exposes a need for stronger handling of cascading edits. Together, these results show how making assumptions explicit can support more inspectable and controllable LLM-based code generation. The benchmark, code, and replication package are available at https://doi.org/10 .5281/zenodo.21535058. 
+
+Index Terms —Assumption mining, LLM code gen-eration, implicit assumptions, implicit requirements, code adaptability, AST dependency graph, incremental code regeneration, requirements engineering, program analysis, software engineering benchmark 
+
+I. Introduction 
+
+# MODERN software development increasingly relies on large language models (LLMs) to accelerate code generation [ 1], [ 2], [ 3], [ 4 ]. Developers write natural-language prompts and receive executable code within sec-onds, a workflow that has moved from research prototypes 
+
+Jie JW Wu is with Michigan Technological University, Houghton, MI, USA. E-mail: jie.jw.wu@mtu.edu. ORCID: 0000-0002-7895-2023. 
+
+into everyday practice [ 5], [ 6]. Yet real-world prompts are rarely complete specifications: they leave open questions about input formats, boundary conditions, error-handling policies, domain constraints, and intended semantics [ 7], [8]. This gap is structural, not incidental. Traditional soft-ware engineering moves from requirements to design to implementation through successive refinements, and each translation step is an opportunity to surface and resolve ambiguity. LLM-based code generation collapses these steps: natural language is converted directly into executable code in a single opaque step. As Mary Shaw observes, “vibe coding ignores the shifts from the language of the world to the language of the machine” [ 9]: the disambiguation work that those shifts used to force into the open does not disappear. The model performs it silently. When an LLM fills a specification gap, it commits to implicit assumptions :specific design choices that were never stated in the prompt and are never reported to the developer. These implicit assumptions are a pervasive source of misalignment. The generated code may pass unit tests while violating project conventions, security policies, or the developer’s actual intent, a class of defect we term working-but-wrong . In our benchmark of 180 LLM-generated code artifacts, every task contained at least two latent implicit assumptions (mean: 3.8 per task, range: 2–5) identifiable only through inspection, motivating the need for automated extraction. The core difficulty is that existing tools give developers 
+
+no visibility into what the LLM assumed. Prompt engineer-ing guides [ 10 ] advise more detailed prompts but cannot enumerate what was left out. Stoica et al. observe that when a request is ambiguous, an LLM-based agent has two simple ways to disambiguate: it can ask the user for clarification , or it can state the assumptions underlying its answer so that the user sees how to improve the prompt [ 11 ]. The first strategy has grown into an active line of clarification-question research: ClarifyGPT detects ambiguous requirements via code-consistency checks and asks targeted questions [ 12 ]; SpecValidator instead de-tects defective task descriptions (lexical vagueness, under-specification, and malformed formatting) with a lightweight fine-tuned classifier [ 13 ]; HumanEvalComm benchmarks whether code LLMs ask clarifying questions at all when requirements are inconsistent, ambiguous, or incomplete, finding that they usually generate code instead [ 14 ], and such defective descriptions measurably degrade code-model accuracy [ 15 ]; ClarifyCoder fine-tunes models to prefer asking over answering [ 16 ]; TiCoder interactively formalizes arXiv:2607.22898v1 [cs.SE] 24 Jul 2026 2                      
+
+> Without AssumptionMiner
+> def authenticate(user, pwd):
+> h = md5(pwd.encode())
+> if h != user.hash: raise
+> tok = str(uuid.uuid4())
+> if fail_cnt > 3: raise
+> _sessions[uid] = tok
+> for _ in range(100): ...
+> return {"token": tok}
+> T6
+> T2
+> T3
+> T4
+> T5
+> 5 implicit assumptions (colored), committed silently, invisible to developer until code review
+> AM
+> With AssumptionMiner
+> def authenticate(...):
+> h = md5(pwd)
+> if h != ...: ...
+> tok = uuid4()
+> if cnt > 3: ...
+> sessions[u] = tok
+> for _ in ...: ...
+> return tok
+> [T2] A2: token = plain UUID
+> [T6] A1: MD5 →bcrypt (edited)
+> [T3] A3: retry limit = 3
+> [T4] A4: in-memory only
+> [T5] A5: O(n) linear scan
+> Developer edits A1 (MD5 →bcrypt);
+> AM regenerates only the affected region
+> Fig. 1. Implicit assumptions in LLM code generation, before and after AssumptionMiner .Left : An ambiguous prompt yields code with five undisclosed assumptions (colored, tagged with taxonomy categories) about password storage (A1), session format (A2), failure policy (A3), persistence (A4), and performance (A5), invisible until code review. Right :AssumptionMiner augments the same generation step to jointly produce code and an explicit assumption layer (A1–A5). The developer confirms four assumptions and flips A1 (MD5 →bcrypt);
+> AssumptionMiner incrementally regenerates only the affected code region.
+
+user intent by generating tests for the user to confirm [ 17 ]; and self-planning approaches decompose prompts before generation [ 18 ]. These systems reduce ambiguity up-front, but their questions are hypothetical (what might matter) rather than diagnostic (what the model actually decided ), their answers are not linked to specific code regions, and a later change of decision still requires a full reprompt. The second strategy, making the model’s assumptions them-selves explicit, has remained largely unexplored for code generation, even though it imposes no up-front interaction cost on the developer. Self-repair methods [ 19 ], [ 20 ] iterate on test failures but cannot repair silent assumptions that produce passing-but-wrong code. In this research, we operationalize the second strategy: we present AssumptionMiner , a framework that makes implicit assumptions a first-class output of LLM code gen-eration. Rather than extracting assumptions after the fact, 
+
+AssumptionMiner augments the generation step itself: the backbone LLM jointly produces executable code and 
+
+an explicit assumption layer : a structured, formalized list of every inferred constraint and design decision embedded in the generated code. Where clarification-question systems require the developer (or model) to know in advance what to ask, AssumptionMiner diagnoses which decisions the LLM already made, surfacing them as revisable records grounded in the actual generated code. Developers inspect, confirm, or modify individual assumptions through an interactive interface (§IV). When an assumption is flipped or revised, AssumptionMiner incrementally regenerates only the code regions governed by that assumption while preserving all unaffected components. 
+
+Contributions. We make the following contributions in this research: (C1) Assumption taxonomy (§ II-C ): a six-category taxonomy of implicit assumptions in LLM-generated code, covering input validation, data format, error policy, persistence, performance, and security. (C2) Implicit-assumption generation framework 
+
+(§III): a novel approach that integrates assumption surfacing directly into LLM-based code synthesis, producing code and a formalized assumption layer in a single augmented generation step, making implicit LLM reasoning explicit and inspectable. (C3) Assumption–code dependency mechanism 
+
+(§ III-D , § III-E ): a two-pass AST-guided dependency graph (keyword-overlap candidate identification fol-lowed by minimal-subtree AST narrowing), linking each assumption to the code regions it governs, enabling traceable and controllable incremental code updates when assumptions are flipped or revised. (C4) Interactive interface and software artifact (§IV, Appendix E): a developer-facing review interface and an open-source implementation of the full pipeline. (C5) Benchmark and empirical evaluation (§V, §VI): 180 programming tasks under ambiguous prompts, with 676 annotated assumptions (including a 30-task curated subset of novel tasks with 109 human-verified assumptions), evaluated across extraction quality, dependency accuracy, and code adaptability. 
+
+Paper organization. §II defines implicit assumptions and motivates the problem with a running example. §III de-scribes the AssumptionMiner architecture. §IV presents the developer interface. §V introduces the benchmark. §VI reports experimental results and discussion. §VII surveys related work. §VIII discusses threats to validity. §IX con-cludes. Appendices provide the full extraction prompt (§A), complete per-category P/R/ F1 tables (§B), benchmark construction details (§C), the ensemble algorithm (§D), software-artifact details (§E), and reproducibility notes (§F). Our replication package (the benchmark, source code, all evaluation scripts, and raw results) is publicly available at https://doi.org/10.5281/zenodo.21535058. 
+
+II. Motivation & Background 
+
+A. Formal Definition 
+
+Let p be a natural-language prompt (potentially ambigu-ous or underspecified) and c = G(p) be the code produced by an LLM G. We define an implicit assumption as follows. 
+
+Definition 1 (Implicit Assumption). A implicit assumption a of (p, c ) is a proposition that: (i) is not stated in p (arising from ambiguity or underspecification), 3
+
+(ii) is instantiated in c (i.e., c behaves as if a holds), and (iii) has at least one alternative instantiation that sat-isfies p but would produce a meaningfully different 
+
+c.a 
+
+> aWe operationalize “meaningfully different” as producing dis-tinct observable behavior on at least one input not excluded by p.For example, using MD5 vs. bcrypt for password hashing yields different outputs for any password string, satisfying this condition.
+
+The set of implicit assumptions of (p, c ) is denoted A(p, c ).In AssumptionMiner , A(p, c ) is produced during genera-tion as a formalized assumption layer co-output alongside 
+
+c. Each assumption ai ∈ A(p, c ) is characterized by: (i) its category κ(ai) (see § II-C ), (ii) a natural-language 
+
+description d(ai), (iii) the code regions R(ai) ⊆ c it governs, and (iv) a set of alternatives Alt (ai) representing choices the LLM could have made differently. 
+
+B. Running Example 
+
+We use the following prompt as a running example throughout the paper: 
+
+“Implement a user authentication system that checks credentials and returns a session token.” 
+
+A typical LLM-generated implementation embeds at least five implicit assumptions, which AssumptionMiner 
+
+labels A1–A5:
+
+A1 Password storage (T6): Passwords are hashed with MD5 (weak, SHA-256 or bcrypt preferred). 
+
+A2 Session format (T2): Tokens are plain UUID v4 strings, with no signing or expiry logic. 
+
+A3 Failure policy (T3): After three failed attempts a bare exception is raised, with no structured error or HTTP status code. 
+
+A4 Persistence (T4): Sessions are held in an in-memory Python dict, with no database or file persistence. 
+
+A5 Performance (T5): A fixed-iteration loop performs an O(n) linear scan, with no indexing or configurable work factor. These five assumptions are silently embedded in fewer than a dozen lines of generated code (see Figure 1). Without a tool like AssumptionMiner , the developer would need to audit the generated code manually to discover them. (Category labels T1–T6 refer to the assumption taxonomy introduced in §II-C.) 
+
+a) Second Example: An Algorithmic Function.: To demonstrate that implicit assumptions pervade even short algorithmic code, consider a prompt typical of competitive programming or coding interviews: 
+
+“Given a list of integers and a target value, find two numbers that add up to the target.” 
+
+A hash-map solution generated by GPT-4o in seven lines embeds four implicit assumptions invisible in the prompt: 
+
+B1 Return type (T2): The function returns a pair of 
+
+indices (e.g., [1, 3] ), not the values themselves, a choice the prompt does not specify. 
+
+B2 Uniqueness (T3): Exactly one valid pair is assumed. The first match is returned without checking for additional solutions. 
+
+B3 No-solution policy (T3): An empty list [] is re-turned when no pair sums to the target, not None ,not a raised ValueError .
+
+B4 Space–time trade-off (T5): An O(n)-space hash map is chosen over an O(n2) brute-force scan or an 
+
+O(n log n) sort-and-scan approach. Unlike the authentication example, these assumptions arise in seven lines of purely algorithmic code with no external dependencies, confirming that implicit assump-tions are not confined to system-design tasks: they emerge whenever a prompt leaves behavioral or design questions open, regardless of code complexity. 
+
+C. Assumption Taxonomy 
+
+We developed the taxonomy through an iterative, author-led open-coding process over 30 LLM-generated code samples from the curated subset of the benchmark, as-sisted by LLM-proposed candidate labels [ 21 ]. In each iteration, candidate assumptions and category labels were first proposed automatically (GPT-4o), then reviewed, corrected, and grouped into emergent themes by the author. Category boundaries were refined between iterations. The most contested boundary during this process was T1/T3: a guard clause is T1 (Input Validation) when it enforces a caller precondition, but T3 (Error Policy) when the design question is how the function signals failure, a distinction that matters for code reuse across call sites. The process converged after three iterations. The same six categories covered the tasks in the full benchmark without requiring additional categories. This supports their adequacy for the present dataset. It does not establish that the taxonomy is complete for other languages, repositories, or development settings. To assess whether the six categories can be applied reliably, two developers independently categorized all 111 assumptions of the curated subset and then reconciled their disagreements to consensus (rater background and protocol in Appendix C). Agreement before reconciliation was strong (Cohen’s κ = 0 .85 , 88.3% raw agreement), indicating that the taxonomy can be applied consistently by a second developer rather than being idiosyncratic to its author (details in §VIII). 
+
+a) Category characterization.: T1 (Input Valida-tion) is the most frequent category (86% of tasks) and captures assumptions about what the caller guarantees: that a list argument is non-empty, that a string is valid UTF-8, or that an integer falls within a documented range: silent preconditions whose violation causes runtime errors rather than wrong results. T2 (Data Format) is nearly as common (75% of tasks) because most functions must decide how to represent their output (as an index or a value, as a dict or a dataclass, as None or an empty list on failure) without any prompt guidance. T3 (Error Policy) covers the choice of how failures are communicated: raised exceptions vs. sentinel returns vs. silent defaults. 4                        
+
+> TABLE I
+> Taxonomy of implicit assumptions in LLM-generated code. The last column is the percentage of the 180 tasks that contain at least one instance of the category. Because a task usually spans several categories, this column does not sum to 100% and is distinct from the per-assumption shares in Table II.
+> ID Category Description % of tasks
+> T1 Input Validation Input format, encoding, boundary checks, type coercion 86% T2 Data Format Return type, output struc-ture, serialization, nullabil-ity 75% T3 Error Policy Exception types, return sen-tinels, error propagation 81% T4 Persistence Storage backend, schema, consistency guarantees 4% T5 Performance Algorithm complexity, caching, data structure choices 76% T6 Security Auth, cryptography, rate limiting, access control 3%
+
+A function returning False on bad input versus raising 
+
+ValueError are semantically equivalent in isolation but diverge sharply under a caller that inspects the return type. T4 (Persistence) applies when a function writes or reads state: the choice between an in-memory dict and a database, or between append and overwrite, is invisible in the function signature but consequential for any multi-session caller. T5 (Performance) reflects algorithm or data-structure trade-offs (hash map vs. sort-and-scan, eager vs. lazy evaluation) that determine asymptotic complexity without appearing in the function signature. T6 (Security) 
+
+is the least frequent (3%) but highest-stakes category: a password stored as an MD5 hash passes all functional tests yet violates every modern security policy. 
+
+b) Distribution pattern.: Input validation, error policy, performance, and data format each appear in roughly three-quarters or more of tasks, because most non-trivial functions must decide how to treat their inputs, signal failure, structure output, and trade off performance. T4 (Persistence, 4%) and T6 (Security, 3%) are rare because persistence- and security-sensitive tasks are underrepre-sented in general coding prompts. Their low frequency should not be interpreted as low importance: a single T6 assumption (e.g., weak cryptography) can invalidate an entire system. This skew motivates our per-category breakdown in Table IV: aggregate F1 alone would mask systematic failures on low-frequency but critical categories. 
+
+III. The AssumptionMiner Framework 
+
+A. Architecture Overview 
+
+AssumptionMiner consists of five loosely-coupled com-ponents connected by a structured data model (Figure 2). 
+
+C1: Prompt Ingestion. Receives the developer’s natural-language prompt p, optionally enriched with project-level context (language, framework, coding style guide).     
+
+> Developer
+> C1 Prompt Ingestion
+> C2 Code Gen (LLM)
+> C3 Assumption Extractor
+> Assumption Records
+> C4 Dependency Mapper
+> C5 Incremental Regenerator
+> pp(p, c )
+> A
+> AR(·)
+> c′
+> a′
+> i
+> Fig. 2. AssumptionMiner system architecture. Boxes denote com-ponents. Arrows denote data flow. The dashed region marks the developer interaction loop.
+
+C2: Code Generator. Issues p to the backbone LLM and produces the initial code artifact c. Any instruction-tuned LLM (GPT-4o, Qwen2.5-Coder-7B, or similar) may serve as the backbone. 
+
+C3: Assumption Extractor. Given (p, c ), applies astructured extraction prompt (§ III-B ) to enumerate 
+
+A(p, c ) as a list of AssumptionRecord objects (§III-C). 
+
+C4: Dependency Mapper. Links each assumption to the code regions it governs via a lightweight AST-level analysis (§III-D). 
+
+C5: Incremental Regenerator. When the developer re-vises an assumption ai, regenerates only the code regions 
+
+R(ai) while preserving all other regions (§III-E). Algorithm 1 summarizes the end-to-end procedure. Components C3–C5 correspond to its three phases. The remainder of this section details each in turn. 
+
+B. Assumption Extraction 
+
+The core of AssumptionMiner is a two-phase extrac-tion prompt (listing 1). Phase 1 asks the LLM to reason about what choices were made in c that go beyond what p
+
+requires, a chain-of-thought [ 22 ] reasoning step. Phase 2 asks the model to format its discoveries into the structured 
+
+AssumptionRecord schema, enabling downstream program-matic processing. The full prompt text is given in section A. 
+
+C. AssumptionRecord Schema 
+
+Each extracted assumption is stored as an Assump-tionRecord (listing 2). The schema is designed for both human readability and programmatic processing by C4 (dependency mapping) and C5 (incremental regeneration). 
+
+D. Assumption-Code Dependency Mapping 
+
+To support targeted incremental regeneration, Assump-tionMiner must link each assumption to the code regions it governs. This is non-trivial: a single assumption (e.g., 
+
+password hashing algorithm ) may manifest across multiple non-contiguous lines and functions. 5
+
+Algorithm 1 AssumptionMiner : assumption extraction, dependency mapping, and incremental regeneration. 
+
+Require: prompt p, generated code c; category-to-node-type map M; narrowing threshold θ; context width 
+
+k
+
+Ensure: assumption records A with linked code regions; revised code on edit  
+
+> 1:
+
+{Phase 1: Assumption extraction (§III-B)}  
+
+> 2:
+
+r ← Llm (ExtractPrompt (p, c )) {single two-phase prompt, temperature 0} 
+
+> 3:
+
+A ← ParseRecords (r) {each a: description, category 
+
+∈ T1–T6, severity, alternatives}  
+
+> 4:
+
+{Phase 2: Dependency mapping (§III-D)}  
+
+> 5:
+
+(T , N ) ← TreeSitterParse (c) {N [t]: AST nodes of type t} 
+
+> 6:
+
+for all a ∈ A do  
+
+> 7:
+
+K ← Keywords (a); R ← ∅  
+
+> 8:
+
+for all node type t ∈ M [a. category ] and node n ∈
+
+N [t] do  
+
+> 9:
+
+if some κ ∈ K occurs in Text (n) then  
+
+> 10:
+
+if Span (n) ≤ θ then  
+
+> 11:
+
+(s, e ) ← (n. start , n. end)  
+
+> 12:
+
+else  
+
+> 13:
+
+(s, e ) ← NarrowToKeywordLines (n, K )
+
+{fall back to full span if no keyword line}  
+
+> 14:
+
+end if  
+
+> 15:
+
+R ← R ∪ { CodeRef (s, e, t )} 
+
+> 16:
+
+end if  
+
+> 17:
+
+end for  
+
+> 18:
+
+a. code _refs ← R 
+
+> 19:
+
+end for  
+
+> 20:
+
+{Phase 3: Incremental regeneration when the user revises a ∈ A to a new description d′ (§III-E)}  
+
+> 21:
+
+for all ρ ∈ SortByStartDesc (a. code _refs) do  
+
+> 22:
+
+x ← ContextWindow (c, ρ, k ) {±k lines around region ρ} 
+
+> 23:
+
+y ← Llm (RegenPrompt (a. description , d ′, x ))  
+
+> 24:
+
+c ← Splice (c, ρ, ExtractCode (y), k ) {reverse or-der keeps line offsets valid}  
+
+> 25:
+
+end for  
+
+> 26:
+
+return A and, on revision, the updated code c
+
+We construct an Assumption-Code Dependency Graph 
+
+G = ( Va ∪ Vc, E ) (Figure 3), where Va is the set of assump-tions, Vc is the set of AST nodes in c, and (ai, n j ) ∈ E
+
+if assumption ai governs node nj . Edge weights reflect confidence. Edge construction proceeds in two passes: 1) Keyword-overlap pass. We extract content words from the assumption’s description and 
+
+alternatives fields and tokenize the code identifiers. AST nodes of the category-appropriate types (e.g., T3: except_clause , with_statement ,
+
+call ; T5: assignment , for_statement ; T6: 
+
+import_statement , call ) are matched against node identifier text. A candidate is retained when                                                                                                  
+
+> SYSTEM : You are an expert software engineer auditing LLM - generated code for implicit design decisions . USER : ### Original Prompt { PROMPT } ### Generated Code { CODE } ### Task 1. REASON : List every design decision in the code that is NOT required by the prompt . For each , name arealistic alternative . 2. FORMAT : Return aJSON array of AssumptionRecord objects . Schema : { schema } Return ONLY valid JSON after the tag [ RECORDS ]. [ RECORDS ]
+> Listing 1. Assumption extraction prompt template (abbreviated).
+> {PROMPT} and {CODE} are replaced at runtime.
+> {" id ": " string " , // e . g . " A1 " " category ": " T1 | T2 | T3 | T4 | T5 | T6 " , " description ": " string " , // natural -language statement " rationale ": " string " , // why LLM made this choice " alternatives ": [" string "] , // >= 1alternatives " code_refs ": [{ // dependency info ( C4 populates ) " file ": " string " , " start_line ": " int " , " end_line ": " int " , " ast_node ": " string " // optional AST node type }] , " confidence ": " float " , // [0 , 1] extraction confidence " severity ": " low | medium | high " // LLM -assigned ; human may override }
+> Listing 2. AssumptionRecord JSON schema.
+
+any keyword from the assumption’s description or 
+
+alternatives appears as a substring in the node’s identifier tokens. Optionally, an LLM call can replace keyword scoring with semantic region descriptions (use_llm=True ). We evaluate this variant in § VI-D :a strong open-source mapper improves accuracy over the heuristic at additional inference cost. 2) AST refinement pass. We parse c with the 
+
+tree-sitter library and perform a bottom-up traver-sal from each candidate leaf node, stopping at the deepest ancestor that encloses all candidate nodes for that assumption. This yields the minimal enclosing sub-tree. 6
+
+## A1
+
+## A2
+
+## A3
+
+## A4
+
+## A5
+
+T6 T2 T3 T4 T5 
+
+def hash_password() 
+
+token = uuid4() 
+
+return False 
+
+sessions = {} 
+
+def authenticate() 
+
+0.92 
+
+0.88 
+
+0.71 
+
+0.85 
+
+0.79 
+
+0.83 
+
+## Assumptions AST Nodes          
+
+> Fig. 3. Assumption-code dependency graph for the running example. Left: assumption nodes A1–A5(colored by category). Right: AST nodes in the generated code. Edge weight = dependency confi-dence. The graph is many-to-many: A2governs two nodes, and
+> authenticate() is governed by both A2and A5.
+
+E. Incremental Regeneration 
+
+When a developer revises assumption ai to a new value a′
+
+> i
+
+, AssumptionMiner identifies R(ai) = {n ∈
+
+Vc : ( ai, n ) ∈ E} and constructs a targeted regeneration prompt containing only the affected sub-tree, the revised assumption, and the surrounding context (at most k lines above/below each region, k = 5 in our experiments). The remainder of c is left unchanged. This approach is analogous to in-place surgical editing [ 23 ], but guided by explicit assumption metadata rather than test-failure signals. 
+
+IV. Interactive Interface 
+
+The AssumptionMiner interface (Figure 4) is a web-based IDE panel implemented in React that augments a standard code editor. Developers interact through three primary actions: 
+
+Inspect. Each AssumptionRecord is a severity-colored card (red/amber/green). Hovering highlights its code region in the editor. 
+
+Edit. Developers modify the description or pick an alter-native . Changes are staged, not yet applied. 
+
+Regenerate. Pressing Regenerate triggers C5 for all staged edits, topologically ordered over the dependency graph. 
+
+Implementation. AssumptionMiner is implemented as an open-source Python package ( assumption_miner ), one module per component (C1–C5), with the interface served as a web application and a unit-test suite of 119 tests. Appendix E details the module layout, experiment entry points, and extensibility. The package and all experiment scripts are part of the released artifact.                                  
+
+> TABLE II
+> Benchmark composition. The 180 tasks split into the 30-task curated subset, which carries human-verified code-region references (used for RQ2), and the 150-task extended tier drawn from HumanEval/MBPP. All headline results (Tables III and IV, RQ3) use all 180 tasks.
+> Metric Curated subset Extended tier All (180)
+> Tasks 30 150 180 Total assumptions 109 567 676 Mean assumptions / task 3.6 3.8 3.8 Mean lines of code / task 11.0 10.6 10.7
+> Category breakdown: count and % of each tier’s assumptions (columns sum to 100%)
+> T1 Input Validation 20 (18%) 183 (32%) 203 (30%) T2 Data Format 31 (28%) 112 (20%) 143 (21%) T3 Error Policy 24 (22%) 142 (25%) 166 (25%) T4 Persistence 8 (7%) 0 (0%) 8 (1%) T5 Performance 21 (19%) 130 (23%) 151 (22%) T6 Security 5 (5%) 0 (0%) 5 (1%)
+
+V. The AssumptionMiner Benchmark 
+
+To enable systematic, reproducible evaluation of assump-tion mining methods, we construct the AssumptionMiner 
+
+benchmark (Table II). 
+
+Task collection. The benchmark consists of 180 programming tasks under ambiguous or underspecified prompts. Thirty tasks are novel, spanning diverse do-mains (data structures, algorithms, file I/O, networking, system utilities), stress-testing the underrepresented T4– Persistence and T6–Security categories, and selected to be out-of-distribution with respect to HumanEval [ 1] and MBPP [2], which supply the remaining 150 tasks. 
+
+Annotation. All 180 tasks use GPT-4o [ 24 ] to ex-tract the reference assumption list with the same struc-tured prompt as the extractor (§ III-B ), followed by programmatic validation (schema conformance, category-vocabulary checks, and deduplication). The 30 novel tasks form the curated subset : their prompts were designed specifically for this benchmark, and they additionally carry code-region references (line ranges) used for RQ2. Since the reference annotations are LLM-derived, two developers, each with at least five years of professional software-development experience in industry, independently verified the curated subset (111 assumptions), spending roughly four hours each, and reconciled to consensus: they agreed that 110 of 111 are valid implicit assumptions (99.1% raw agreement, κ = 0 .66 ) and agreed on category at κ = 0 .85 
+
+(§VIII, Appendix C). Adjudication then removed two invalid entries and corrected eight category labels, yielding the 109 human-verified assumptions used throughout the paper. Because GPT-4o produced the reference annotations, results for the GPT-4o backbone carry a self-consistency risk, marked † in Table III. The open-source backbones (Qwen32B, DeepSeek) share no weights or provider with the annotation model, though their scores still measure agreement with the reference. All tasks share the six-category schema (Table I). 
+
+Benchmark statistics are summarized in Table II. Full benchmark construction details, including prompt selection criteria and the annotation resolution process, are provided in section C. 7
+
+AssumptionMiner: Interactive Interface              
+
+> Prompt
+> “Implement user authentication: check credentials, hash password, return session token.”
+> Generated Code
+> def authenticate(user, pwd):
+> h = md5(pwd.encode())
+> if h != user.hash: raise
+> _sessions[uid] = tok
+> if fail_cnt > 3: raise
+> return {"token": str(tok)}
+> Assumption Records
+> T6 A1: Security (high)
+> Password hashed with MD5. Weak by current standards; bcrypt or argon2id strongly recommended.
+> Accept Edit Reject
+> T4 A4: Persistence (medium)
+> Sessions stored in in-memory dict; lost on restart. Edited: switched to Redis (TTL = 1 h).
+> Regenerating affected region. . .
+> T3 A3: Error Policy (low)
+> Three consecutive failures raise an exception; no back-off or account lockout defined.
+> Accept Edit Reject
+> Accept All |Regenerate Selected (1) 1 of 3 reviewed
+> Fig. 4. AssumptionMiner interactive interface. (1) Highlighted code regions correspond to extracted assumptions. (2) The assumption panel lets developers inspect and edit each assumption record. (3) The revision panel applies changes through incremental regeneration.
+
+In the curated subset, 67% of code-region references are single-line (mean span: 2.0 lines), suggesting assumptions typically manifest at specific statements. This motivates our IoU threshold of 0.5 for RQ2. All T4 (Persistence) and T6 (Security) assumptions in the benchmark occur in the curated subset: the 150 HumanEval/MBPP tasks of the extended tier contain none, so the novel tasks provide the benchmark’s only coverage of these two rare but high-stakes categories. (Note the two frequency views: Table I reports the share of tasks containing ≥ 1 instance of a category over all 180 tasks, whereas the breakdown above reports each category’s share of the assumptions in each tier.) 
+
+Metrics. We define three extraction metrics over A(p, c )
+
+and a reference set A∗(p, c ):
+
+AR (Assumption Recall): |A ∩ A ∗| / |A ∗|
+
+AP (Assumption Precision): |A ∩ A ∗| / |A| 
+
+AF 1 (Assumption F1): Harmonic mean of AR and AP 
+
+Matching. We report extraction quality under two matching rules of increasing strictness. Category-level (lenient) matching counts a predicted assumption as correct when its category equals that of an unused reference assumption for the same task, with multiplicity (if the extractor proposes two T3 assumptions and the reference contains one, only one is a true positive). It answers “did the extractor notice a decision of this kind?” and is the basis of AR , AP , and AF 1 . Being category-only, it is deliberately lenient and comparable to how prior work scores taxonomy coverage. Decision-level (strict) matching additionally requires the predicted description to refer to the same decision as the reference: a match holds only when categories agree and the description similarity sim (d(a), d (a∗)) ≥ τ . It answers the harder question “did the extractor identify the actual decision?” We compute sim as the cosine similarity of sentence embeddings (a determin-istic, reproducible measure) and calibrate τ against human same-decision judgments on a sample of matched pairs (§ VI-B , scripts/run_rq1_semantic.py ). We deliberately avoid an LLM judge, which would reintroduce the very LLM-grades-LLM circularity we control for elsewhere. For RQ2 dependency links, we use line-level IoU: IoU ( ˆR, R ∗) = 
+
+| ˆR ∩ R∗| / | ˆR ∪ R∗|; a link is correct when IoU ≥ 0.5. This threshold is motivated by the reference annotation spans, which are predominantly 1–3 lines. IoU ≥0.5 requires the predicted region to overlap with at least half the annotated span. 
+
+VI. Evaluation 
+
+We evaluate AssumptionMiner through three research questions. RQ1 assesses whether the system recovers im-plicit decisions from generated code. RQ2 assesses whether it localizes those decisions to the relevant implementation region, and RQ3 assesses whether those links support more focused revisions. This sequence separates the three claims required by the approach: identifying a decision, tracing it to code, and using the trace during change. 
+
+A. Experimental Setup 
+
+Backbone LLMs. We evaluate AssumptionMiner 
+
+with four backbone LLMs: GPT-4o [ 24 ] (OpenAI API, model alias gpt-4o ), Qwen2.5-Coder-32B-Instruct (here-after Qwen32B), DeepSeek-Coder-V2-Lite-Instruct (here-after DeepSeek), and Qwen2.5-Coder-7B-Instruct (here-after Qwen-7B). The latter three are served locally via vLLM [ 25 ] on a single NVIDIA RTX PRO 6000 Blackwell workstation GPU (96 GB of VRAM). All are evaluated on the full n = 180 benchmark tasks. We additionally report a Conf-Weighted ( CW ) ensemble combining Qwen2.5-Coder-32B (high-recall backbone) and DeepSeek-Coder-V2-Lite (high-precision backbone), averaging per-assumption confidence scores and thresholding at 0.5. Results for all backbones are reported in Table III. 8
+
+Baselines.  
+
+> •
+
+Comment Extraction (CE): Extracts design decisions from code comments and docstrings only, and requires no LLM call.  
+
+> •
+
+Knowledge-Based Pattern Extraction (KBE): Mines Python AST structure and code idioms (return sen-tinels, exception breadth, hash-map use) against a hand-built rule base to infer implicit design choices, and runs entirely offline without an LLM. We also considered three additional chain-of-thought/prompting baselines during development: 
+
+Direct Generation (DG) , which asks the LLM to list assumptions without the structured two-phase prompt; 
+
+Clarifying Questions (CQ) , which prompts the LLM to generate questions it would ask before coding; and 
+
+Chain-of-Thought (CoT) prompting [ 22 ], which elicits reasoning before extraction. In preliminary experiments on the 30 curated-subset tasks, DG reached F1 = 0 .41 (vs. 0.59 for the two-phase prompt), CQ reached F1 = 0 .37 (it generates hypothetical questions rather than identifying actual code choices), and CoT reached F1 = 0 .56 . None exceeded the structured two-phase prompt in either precision or recall. We therefore use the structured prompt as the single AssumptionMiner extraction method and report only CE and KBE as offline baselines in the main tables. 
+
+Dependency baselines (RQ2):  
+
+> •
+
+Keyword Heuristic (KH): Token-overlap between as-sumption description and code tokens, with no AST information.  
+
+> •
+
+Full-File Dependency (FF): Trivially assigns every assumption to the entire file (upper bound on recall, lower bound on precision). 
+
+Regeneration baselines (RQ3):  
+
+> •
+
+Full Regeneration (FR): Re-generates the entire func-tion from scratch with the revised assumption in the prompt.  
+
+> •
+
+In-Place LLM Edit (IPE): Passes the full code + revision instruction to the LLM and asks it to apply the change [23].  
+
+> •
+
+Manual Reprompt (MR): Developer manually rewrites the prompt. LLM generates fresh code. 
+
+B. RQ1: Extraction Quality 
+
+RQ1 asks whether AssumptionMiner can recover the implicit assumptions that a developer would otherwise need to infer through code review. We evaluate extraction against the benchmark reference annotations on all 180 tasks. We first compare methods using category-level precision, recall, and F1. This measures whether a method identifies a decision of the appropriate kind. We then examine performance by category and report a stricter decision-level match to distinguish category coverage from description fidelity. Because GPT-4o created the initial reference annotations, we treat the open-source backbones (Qwen32B, DeepSeek, Qwen-7B, and their CW ensemble), which share no weights or provider with the annotation                                                             
+
+> TABLE III
+> RQ1 assumption-extraction quality on the full benchmark (n= 180 , 676 assumptions). Best per column in bold .†GPT-4o is both annotator and evaluator here (it produced all reference annotations), so its scores may be inflated by self-consistency. The open-source backbones are fully cross-model. CW = Conf-Weighted cross-model ensemble. The strict AF 1column is explained in §VI-B.
+> Method AR AP AF 1AF 1(strict)
+> Offline baselines (no LLM, n= 180 )
+> Comment Extraction (CE) 0.176 0.312 0.225 0.079 Pattern Extraction (KBE) 0.044 0.476 0.081 0.019
+> AssumptionMiner (ours, n= 180 )
+> AssumptionMiner (GPT-4o) †0.905 0.864 0.884 0.806
+> AssumptionMiner (Qwen2.5-Coder-32B) 0.753 0.797 0.774 0.654
+> AssumptionMiner (DeepSeek-Coder-V2-Lite) 0.732 0.814 0.771 0.565
+> AssumptionMiner (Qwen2.5-Coder-7B) 0.468 0.810 0.593 0.463
+> Ensemble (ours, n= 180 , cross-model)
+> AssumptionMiner Ens. (Qwen32B+DeepSeek, CW) 0.823 0.810 0.816 0.662
+> Bootstrap 95% CI over per-task F1(10,000 resamples of the 180 tasks): GPT-4o †[0 .866 ,0.910] , Qwen32B [0 .745 ,0.794] , DeepSeek
+> [0 .737 ,0.785] , Qwen-7B [0 .553 ,0.608] .
+
+model, as the primary cross-model evidence, and report the GPT-4o result separately (marked †). Table III presents the aggregate comparison. It estab-lishes the overall extraction result before Table IV examines where the methods succeed or fail across assumption categories. The aggregate values do not reveal whether performance is concentrated in common, easy-to-observe decisions. We therefore break F1 down by taxonomy category in Table IV. The complete precision and recall values are deferred to Appendix B. 
+
+Findings ( n = 180 ). The offline baselines provide little coverage because the decisions of interest are seldom written in comments or directly encoded by a fixed pattern. CE reaches F1 = 0 .225 , largely through documented return formats (T2), whereas KBE reaches F1 = 0 .081 because its recall is only 0.044. The strongest open-source result is the CW ensemble (F1 = 0 .816 ). Qwen32B and DeepSeek are nearly tied overall ( F1 = 0 .774 and 0.771), but make complementary errors: Qwen32B recovers more assumptions and DeepSeek is slightly more precise. Their overlapping bootstrap in-tervals (Table III) indicate that this small difference is not meaningful. GPT-4o obtains the highest score, but we treat it as secondary evidence because it also produced the reference annotations. The per-category F1 results (Table IV) identify an important boundary of the benchmark. Data-format and performance decisions are comparatively easy to recover, whereas the rare persistence and security decisions are harder. All T4 and T6 instances occur in the curated tasks, showing why conventional HumanEval/MBPP-style prompts are insufficient for assessing these categories. 
+
+Lenient vs. strict matching. The scores above use lenient category-level matching. Under the strict 
+
+decision-level metric, which additionally requires the predicted description to refer to the same decision as the reference (§ VI-A ), scores fall substantially. We mea-sure description similarity by sentence-embedding cosine 9           
+
+> TABLE IV
+> RQ1 per-category AF 1(n= 180 ). Best cross-model F1per category in bold (GPT-4o †produced the reference annotations). CE F1= 0 .363 on T2 (return-type docstrings) but near-zero on all other categories.
+
+Method T1 T2 T3 T4 T5 T6 All 
+
+Comment Extraction (CE) 0.171 0.363 0.058 0.000 0.116 0.000 0.225 
+
+AssumptionMiner (GPT-4o) † 0.905 0.882 0.869 0.615 0.902 0.500 0.884 
+
+AssumptionMiner (Qwen2.5-Coder-32B) 0.709 0.795 0.771 0.667 0.851 0.500 0.774 
+
+AssumptionMiner (DeepSeek-Coder-V2-Lite) 0.799 0.796 0.725 0.588 0.781 0.533 0.771 
+
+(all-MiniLM-L6-v2 ) and calibrate the match threshold against human judgment: an author labeled 30 candidate (predicted, reference) pairs sampled across the similarity range as same-decision or not (three boundary cases adjudicated jointly), and τ = 0 .56 best separates the labels (24/30 = 80% agreement, any τ between 0.55 and 0.58 
+
+performs identically). At τ = 0 .56 , the strict decision-level scores are GPT-4o † F1 = 0 .806 (P = 0 .788 , R = 0 .825 ), Qwen2.5-Coder-32B F1 = 0 .654 , DeepSeek-Coder-V2-Lite 
+
+F1 = 0.565 , and Qwen2.5-Coder-7B F1 = 0.463 (the strict column of Table III), each well below its lenient counterpart, and consistent with the purely lexical lower bound ( F1 ≈ 0.60 for Qwen2.5-Coder-32B), which penalizes paraphrases that the embedding metric credits. The CW ensemble attains the highest strict AF 1 of any cross-model configuration ( F1 = 0 .662 ), mirroring its lenient lead and confirming that merging a high-recall and a high-precision backbone helps under the stricter criterion as well. The offline baselines, by contrast, collapse to near-zero (CE 
+
+F1 = 0.079 , KBE F1 = 0.019 ): the few assumptions they surface almost never name the same decision as the reference. To score the baselines and the ensemble strictly (neither emits per-assumption descriptions natively), we reconstruct one description per prediction from its ex-tracted span ( scripts/build_strict_inputs.py ), which reproduces each method’s lenient prediction count exactly (CE 381, KBE 63, and ensemble 689 predictions, the last giving lenient F1 = 0 .816 ). The gap is not a weakness of 
+
+AssumptionMiner ’s framework but a property of the benchmark: identifying which implicit decision was made, not merely that a decision of some category exists, remains difficult for current models, so the benchmark is far from saturated and retains headroom to measure future progress. 
+
+RQ1 answer. Open-source models recover implicit as-sumptions substantially better than the offline comment-and pattern-based baselines. The cross-model CW ensemble reaches F1 = 0 .816 , compared with 0.225 for the strongest offline baseline. Exact decision matching remains more difficult than category-level matching, especially for the rare security and persistence categories. 
+
+C. RQ2: Dependency Accuracy 
+
+RQ2 asks whether the dependency mapper identifies the code region that implements a recovered assumption. This question matters because localized regeneration is meaningful only when the selected region is sufficiently specific. Our primary analysis uses the 109 human-verified code-region references in the curated subset. We also report a secondary analysis on all 676 references. Its additional 567 references are auto-labeled, so those results measure agreement with the generated reference rather than accuracy against ground truth. We report both threshold accuracy (IoU ≥ 0.5) and mean IoU to distinguish selecting the right area from selecting a tight span.                                               
+
+> TABLE V
+> RQ2: Dependency accuracy (Acc. = IoU ≥0.5; IoU = mean; Exact = exact-match rate; Calls = LLM calls per assumption).
+> nC= 109 curated-subset references (primary); nF= 676 full set (adds 567 auto-labeled references; secondary). AM-LLM = AssumptionMiner with use_llm=True and the given mapper model (§VI-D). Both mappers are evaluated on the curated and full sets. Best per column in bold .
+> Curated ( nC)Full ( nF)Method Acc IoU Exact Acc IoU Calls
+> Keyword Heuristic (KH) 0.606 0.545 0.431 0.284 0.288 0Full-File (FF) 0.064 0.196 0.018 0.368 0.397 0
+> AssumptionMiner (heuristic) 0.569 0.581 0.505 0.376 0.376 0AM-LLM (GPT-4o) 0.560 0.596 0.431 0.475 0.480 1AM-LLM (Qwen2.5-Coder-32B) 0.642 0.653 0.505 0.479 0.464 1
+
+Findings. The curated subset is the primary result because its references were human-verified. On this set, 
+
+AssumptionMiner and keyword matching have similar threshold accuracy (56.9% and 60.6%), but AST narrowing yields the tightest regions (mean IoU 0.581, versus 0.545 for keyword matching). The whole-file baseline performs poorly because these references usually identify a small part of the implementation. Table VI ablates the mapper’s category-to-node-type map (§ III-D ): Full is the shipped map, and Original is the map before development-time tuning added the T3 call , T3 with_statement , and T5 import_from_statement types (its “expansions”), to-gether worth +2 .7pp. Removing the base T5 assignment 
+
+type, present in both maps, costs the same 2.7pp on its own. Assignments (e.g., cache = {} ) are where data-structure choices surface, so they are important for localizing perfor-mance decisions. The full-set result should be interpreted differently. It includes 567 auto-labeled references for very short functions, where marking the entire function is often sufficient. In that setting AssumptionMiner improves on keyword matching but is close to the whole-file baseline. We therefore use the curated-subset result to support claims about localization precision and report the full set as a secondary robustness check. 10 
+
+> TABLE VI
+> RQ2 ablation: dependency mapper accuracy when removing one node type at a time from the full configuration (30 curated-subset tasks, 109 assumptions).
+
+Configuration Acc. ∆ Acc. 
+
+Full (all expansions) 0.569 n/a 
+
+−T3 call 0.560 −0.9pp 
+
+−T3 with_statement 0.560 −0.9pp 
+
+−T5 import_from_statement 0.569 0.0pp 
+
+−T5 assignment 0.541 −2.7pp Original (no expansions) 0.541 −2.7pp 
+
+We also asked whether the dependency map’s accuracy carries through to code adaptability: whether tasks with more accurate maps also receive smaller edits in RQ3. On the human-verified references this correlation is weak: splitting the 30 tasks by AssumptionMiner link accuracy (IoU ≥0.5) into high ( n = 23 ) and low ( n = 7 ) groups, mean edit distance rises only from 0.258 to 0.281 ( 1.09 ×), and In-Place LLM Edit shows a similar spread (0.264 vs. 0.323). We therefore do not claim a strong mapping-accuracy-to-edit-size effect. The value of the dependency map is in enabling targeted regeneration at all (RQ3), not in a monotonic accuracy-edit relationship. § VI-D shows an LLM-guided mapper with a strong open-source mapper can improve over this heuristic on the curated subset (the AM-LLM rows of Table V), at the cost of one additional inference call per assumption. 
+
+RQ2 answer. On human-verified references, AST narrow-ing produces tighter localizations than keyword matching, although their threshold accuracies are similar. An optional LLM-guided mapper improves accuracy to 64.2% at the cost of an additional inference call. Whole-file localization is competitive only on the secondary set of very short, auto-labeled functions. 
+
+D. Mapper Ablation: Use-LLM vs. Heuristic 
+
+We ablate whether replacing keyword-overlap scoring with an LLM-guided localization step ( use_llm=True ,§III-D ) improves dependency accuracy. We evaluate five mapper configurations on the 109 human-verified assump-tions of the curated subset, scored against the consensus reference regions: AssumptionMiner (heuristic), AM-LLM (Qwen32B), AM-LLM (GPT-4o), KH, and FF. All five appear in the nC columns of Table V, together with each variant’s per-assumption inference cost. 
+
+Findings. The LLM-guided mapper with a Qwen2.5-Coder-32B backbone achieves 64.2% accuracy (IoU 0.653 ), the best of all mapper variants in Table V, exceeding the 
+
+AssumptionMiner heuristic (56.9%, IoU 0.581 ) by 7.3 pp. With a GPT-4o mapper, the LLM-guided variant scores 56.0% (IoU 0.596 ), on par with the heuristic (within 1 pp on accuracy). The result is therefore mapper-dependent: a strong open-source code model improves localization over keyword-narrowing plus AST filtering, while GPT-4o does not, and either LLM variant incurs one additional inference call per assumption. Both LLM mappers lead on the secondary full set (Table V, nF columns): Qwen32B reaches 47.9% accuracy (IoU 0.464 ) and GPT-4o 47.5% (IoU 0.480 ), versus 37.6% for the heuristic and 36.8% for whole-file localization. Whereas the heuristic barely separates from whole-file localization on these short auto-labeled functions, both LLM mappers keep a clear margin, so on the full set the mapper choice matters less than whether an LLM mapper is used at all. We keep the AST heuristic as 
+
+AssumptionMiner ’s default for its zero inference cost and competitive accuracy, and expose the LLM-guided mapper via the use_llm flag for accuracy-critical settings. (An earlier version of this comparison, which scored noisy 
+
+predicted extractor descriptions against the pre-correction references, favored the heuristic, 45.5% vs. 30.9–31.8%. That reference set has since been superseded by the human-verified consensus, so we report the numbers above as primary.) 
+
+E. RQ3: Code Adaptability 
+
+RQ3 asks whether assumption-guided regeneration re-duces the scope of a code change when a developer revises one decision. We use the full 180-task benchmark with GPT-4o and repeat the AssumptionMiner configuration on the 30 novel tasks with Qwen32B. Assumptions are extracted with C3 (§ III-B ). No manual dependency annotation is required because syntactic validity and edit distance are measured on the regenerated output. 
+
+Assumption modification procedure. For each task we select the highest-severity AssumptionRecord and rewrite its description to the first entry in its alternatives 
+
+field, producing a (code, original-assumption, revised-assumption) triple. The revised record is passed to the regenerator (§ III-E ) together with the affected code sub-tree and k = 5 context lines. Only the regions governed by the selected assumption are updated. This operational-ization ensures the revision is semantically meaningful (a real alternative that the LLM could have chosen) and reproducible (deterministic given the AssumptionRecord). 
+
+Worked example. For the authentication task of the running example, the selected record is A1 (T6): “Passwords are hashed with MD5, a cryptographically broken algorithm” ,whose first alternative is “bcrypt.” The regenerator receives the revised record, the dependency-mapped sub-tree (the 
+
+hash_password function body), and five context lines. It rewrites the hashing call and its salt handling, leaving session, persistence, and rate-limiting code untouched. On this task the regenerated code differs from the original by a normalized edit distance of 0.40, versus 0.85 for Full Regeneration and 0.82 for Manual Reprompt, which rewrite the entire function. 
+
+Metrics.  
+
+> •
+
+Syntactic Validity Rate (SVR) : fraction of tasks where the revised code compiles ( py_compile ). This is a necessary but not sufficient condition for functional correctness. It does not verify that the revision im-plements the intended behavior, and full unit-test evaluation is future work (§VIII). 11                            
+
+> TABLE VII
+> RQ3: Code adaptability when one assumption is revised (n= 180 , GPT-4o, full benchmark). SVR = syntactic validity rate ( py_compile ); Edit Dist. = normalized Levenshtein (lower = more targeted). AssumptionMiner achieves lowest edit distance in all configurations.
+> Method SVR Edit Dist. Lat. (s)
+> Manual Reprompt 1.000 0.574 1.79 Full Regeneration 1.000 0.549 1.61 In-Place LLM Edit 1.000 0.306 1.46
+> AssumptionMiner (Incremental) 0.833 0.244 2.40
+> Cross-model: AssumptionMiner (Qwen2.5-Coder-32B, n= 30 novel tasks)
+> AssumptionMiner (Qwen2.5-Coder-32B, local) 0.833 0.242 3.58
+> •
+
+Edit Distance : character-level Levenshtein distance between original and revised code, normalized by the length of the longer string (lower = more targeted).  
+
+> •
+
+Latency : wall-clock time for the regeneration step in seconds. 
+
+Findings. AssumptionMiner makes the smallest edits in both configurations (0.244 on the full benchmark and 0.242 with Qwen32B on the novel tasks). Its advantage is substantial over full regeneration and manual reprompting, and smaller but still present relative to in-place editing. The bootstrap intervals for the full benchmark do not overlap with those of any baseline. This benefit has a clear trade-off: the targeted pipeline achieves 83.3% syntactic validity, whereas all non-targeted baselines compile in every case. The error analysis at-tributes most failures to cascading edits, in which a revision invalidates another linked region. Thus, the result supports targeted regeneration as a way to limit change scope, not as a substitute for validation of the revised program. 
+
+RQ3 answer. Assumption-guided regeneration reduces the size of a revision, with the lowest edit distance in both configurations. It currently trades that precision for lower syntactic validity (83.3% versus 100% for the non-targeted baselines), so conflict detection and functional testing are necessary next steps. 
+
+F. Error Analysis 
+
+Figure 5 illustrates six representative failure modes: three in extraction (1–3) and three in localization and regeneration (4–6). For the extraction modes, Table VIII summarizes each backbone’s error profile, derived from the saved RQ1 predictions (per-category false-negative and false-positive counts follow from per-category precision and recall over the 676 reference assumptions). Modes (4)–(6) draw on the RQ2 and RQ3 runs (Tables V and VII). The cases in Figure 5 are illustrative.                                     
+
+> TABLE VIII
+> Extraction error profile per backbone, derived from the saved RQ1 predictions ( n= 180 , 676 reference assumptions).
+> Backbone FN FP Top FN cat. Top FP cat.
+> GPT-4o †64 96 T2 (36%) T3 (34%) Qwen2.5-Coder-32B 167 130 T1 (49%) T3 (54%) DeepSeek-Coder-V2-Lite 181 113 T3 (32%) T2 (27%)
+> (1) False negative
+> T4: Persistence
+> users = {}
+> Missed: “no I/O; in-memory only.”
+> (2) False positive
+> T6: Security (hallucinated)
+> return token
+> Hallucinated: “tokens expire af-ter 1h.”
+> (3) Wrong category
+> T5 labeled T3
+> d = {}; d[k] = v
+> Hash-map choice mis-classified as error policy.
+> (4) Imprecise dependency
+> T3: full method returned
+> def validate(x): ...entire body... GT: only if x is None: return False .
+> (5) Failed regeneration
+> Wrong region modified
+> def parse() ←edited Should have modified def encode() .
+> (6) Cascading edit
+> Revising A1invalidates A3
+> bcrypt.hash(pw)
+> T3 “return False” region no longer valid.
+> Fig. 5. Representative error cases across six failure modes.
+
+(1) False negatives are the most frequent extraction failure for the open-source backbones, though GPT-4o inverts the balance (Table VIII). The extractor misses assumptions that have no identifier-level cue: a T4 assump-tion encoded as users = {} is invisible to any approach that relies on function names or import statements. T1 (Input Validation) is a leading source across backbones because its realizations are often single-line guard checks with no domain-specific vocabulary. 
+
+(2) False positives arise when the extractor proposes an assumption the code does not implement. They concen-trate in T3 (Table VIII), partly reflecting wrong-category predictions (mode 3 below), which lenient matching counts twice: as a false positive in the predicted category and a false negative in the reference category. A rarer but distinctive pattern is T6 hallucination: the extractor infers expiry logic or HTTPS enforcement from context, but the code contains neither, reflecting a tendency in LLMs to over-specify security concerns when prompted to audit code. Requiring textual evidence in the code before proposing a T6 assumption is a straightforward prompt-level mitigation. 
+
+(3) Wrong-category errors occur most often at the T1/T3 boundary (guard clauses), the T2/T4 boundary (return type vs. storage), and the T3/T6 boundary (error handling vs. security policy). These are the same category boundaries that human annotators debated most during taxonomy development (§ II-C ). Category errors propagate to downstream dependency mapping, since AST node-type filters are category-specific. 
+
+(4) Imprecise dependency errors occur when the dependency mapper identifies the correct function but returns its entire body rather than the specific statement. This is common for T3 assumptions whose realization spans multiple return statements or except clauses scattered through a function. The AST refinement pass computes a minimal enclosing sub-tree, which in these multi-site cases spans the entire function body by construction. A future fix is to report a union of minimal sub-trees rather than a single enclosing sub-tree when candidates are non-contiguous. 
+
+(5) Failed regeneration occurs when the regenerator modifies the wrong code region. Root cause: the depen-dency map for one assumption partially overlaps with a 12 
+
+different function. For example, a T5 assumption about algorithm choice may be associated with def encode() via the keyword hash , but the mapper returns def parse() 
+
+because it contains more matching tokens. Disambiguation between candidate regions would require either stronger assumption descriptions or a secondary prompt to the LLM asking which function best matches. 
+
+(6) Cascading edits are the dominant cause of the 17pp syntactic-validity gap between AssumptionMiner 
+
+and full-regeneration baselines. When revising assumption 
+
+A1 (e.g., switching from MD5 to bcrypt), the regenerator correctly updates the hashing region, but the T3 assump-tion A3 (“return False on bad password”) was linked to the old hashing pipeline. After the bcrypt transition, A3’s code region no longer exists in the same form. Regenerating 
+
+A1 without updating A3’s region leaves the function in an internally inconsistent state. A conflict-detection pass that re-validates all dependency links after each regeneration step, and flags invalidated regions for secondary review, would address this without requiring full regeneration. 
+
+G. Discussion 
+
+The four backbones trade precision against recall in a consistent way. Qwen2.5-Coder-32B is recall-biased and DeepSeek-Coder-V2-Lite is precision-biased, which is pre-cisely why combining them in the CW ensemble yields the best fully cross-model result ( F1 = 0 .816 ). For code review, recall is usually the more valuable bias: a missed assumption is costlier than a spurious one a developer can quickly reject. The trade-off tightens at lower capacity (Qwen2.5-Coder-7B stays precise but has by far the lowest recall), suggesting that smaller models prefer safe, high-confidence extractions and that added capacity mainly buys recall. It nonetheless remains a usable no-API-cost option, comfortably ahead of both offline baselines. The AssumptionRecord schema (listing 2) is, structurally, an automated and fine-grained analogue of an Architectural Decision Record. We develop this connection, and its implications for architecture knowledge management, in §VII. A natural extension is to promote Assumption-Miner -generated records to first-class ADR artifacts stored alongside the code, giving a live decision log that grows with the codebase. RQ3 exposes a genuine tension between how surgical 
+
+AssumptionMiner is and how reliably its output compiles. It makes the smallest edits of any method but reaches only 83% syntactic validity, whereas In-Place LLM Edit (IPE) compiles in every case at a larger edit distance. What sets AssumptionMiner apart is traceability : each edit is tied to a specific AssumptionRecord, so a developer can audit which decision drove which change, and independent revisions can be applied in parallel, neither of which a free-form IPE edit supports. The validity gap stems mainly from cascading edits (error mode 6, Figure 5), where revising 
+
+Ai invalidates Aj ’s region. We intend to close it with a conflict-detection pass. In deployment the regeneration step is cheap: across our RQ3 runs it averaged 2.4 s per task with GPT-4o and 3.6 s with Qwen32B on local vLLM (Table VII), and extraction adds one comparable LLM call. That overhead is modest against the several seconds generation already takes in a typical IDE, and the resulting records double as auto-generated design documentation. AssumptionMiner can be dropped into existing workflows as a post-generation hook in any IDE extension that wraps an LLM code assistant. Teams adopting it at scale would accumulate a queryable corpus of assumption records, enabling cross-project comparison of how different backbones handle recurring ambiguity patterns such as error-propagation policy (T3) or authentication mechanism (T6). This paper is a first investigation: it establishes assump-tion mining as a problem, contributes a benchmark and taxonomy, and provides an initial empirical evaluation. Two deeper questions stay open. First, why does an LLM make a particular assumption (a mechanistic-interpretability question)? Second, can extraction achieve provably reliable coverage rather than the empirical coverage RQ1 measures? Both need interpretability tooling beyond our current scope. The self-consistency concern of using LLMs to both generate and extract assumptions is addressed here through cross-model validation (§ VI-B ) and, going forward, through the human-verification protocol released with the artifact (§VIII). 
+
+VII. Related Work 
+
+A. LLM Code Generation, Repair, and Ambiguity 
+
+Large language models achieve strong results on program-ming benchmarks such as HumanEval [ 1], MBPP [ 2], and SWE-bench [ 4]. Self-repair approaches [ 19 ], [ 20 ] improve correctness by iterating on test failures. Self-planning methods [ 18 ], [ 26 ] decompose prompts before generation. Conversational tools [ 23 ] use test-driven dialogue to refine incorrect code. User studies [ 6], [ 5] show that developers frequently struggle to identify why generated code is wrong, a gap that AssumptionMiner directly addresses by surfacing implicit design decisions as editable, traceable records. Automated Program Repair (APR) [ 27 ], [ 28 ], [ 29 ] gener-ates patches for observable failures (test errors, crashes). 
+
+AssumptionMiner ’s incremental regenerator (C5) shares the patch-isolation structure, but its trigger is funda-mentally different: APR is fault-driven , whereas C5 is 
+
+assumption-driven , targeting working-but-wrong code that produces no test failures yet violates developer intent, a regime APR cannot address. Requirements engineering research addresses natural-language ambiguity detection [ 8 ], [ 30 ], [ 31 ] in human-written specifications, and a parallel line studies ambiguity in the prompts given to code models: ambiguous, contradic-tory, or incomplete task descriptions measurably degrade generated-code correctness [ 15 ], and lightweight classifiers can flag such defective descriptions before generation [ 13 ]. These approaches all analyze the input specification. As-sumptionMiner instead extends ambiguity handling to the LLM’s output , where the artifact under analysis is 13 
+
+executable code and the goal is not only detection but also structured, targeted revision. 
+
+B. Interactive Code Generation and Prompt Engineering 
+
+Several systems augment LLM code generation with interactive clarification steps. Clarify [ 18 ] generates clarify-ing questions before producing code, reducing assumption-driven errors in some settings. TiCoder [ 17 ] formalizes user intent interactively by generating candidate tests the developer confirms or rejects, pruning the space of programs consistent with the prompt. However, these systems require developers to answer questions up-front and do not link answers to specific code regions, meaning later revision requires a full reprompt rather than a targeted update. Prompt engineering surveys [ 10 ] document patterns for eliciting more precise behavior from LLMs, but operate entirely at the prompt level and cannot recover implicit decisions already made by the model. AssumptionMiner 
+
+is complementary to both: it operates post-generation ,diagnosing what the LLM already decided rather than shaping what it will decide, and enables revision without a full reprompt. 
+
+C. Program Analysis and Traceability 
+
+Traceability techniques [ 32 ], [ 33 ] link requirement arti-facts to code via information retrieval or machine learning, and static analysis tools [ 34 ], [ 35 ] construct data-flow and control-flow dependency graphs. Neither class of technique connects dependency edges to the natural-language in-tent that produced the code. AssumptionMiner bridges this gap with assumption-to-code dependency graphs for LLM-generated artifacts, enabling developer auditing and automated change propagation. Specification mining [ 36 ] and contract inference extract program invariants post-hoc from executions or static analysis. LLM-augmented testing tools (CodaMosa [ 37 ], Fuzz4All [ 38 ]) leverage language models for coverage-driven exploration and oracle generation, but all operate after 
+
+code exists and cannot attribute discovered properties to specific prompt ambiguities. AssumptionMiner is com-plementary: its assumption layer could seed downstream invariant checkers, while its primary role is interactive disambiguation at generation time. 
+
+D. Design Rationale and Decision Documentation 
+
+Architectural Decision Records (ADRs) [ 39 ], [ 40 ] capture the rationale, alternatives, and consequences of design decisions as lightweight prose documents. The Assump-tionRecord schema in AssumptionMiner is directly inspired by this tradition: both treat design decisions as first-class, addressable artifacts with explicit alternatives. The key distinction is automation and granularity : ADRs are authored manually by architects for major architec-tural choices, whereas AssumptionMiner generates fine-grained assumption records automatically during code synthesis, capturing routine, ephemeral decisions that are too numerous for manual ADR authoring in practice. The resulting corpus could retroactively seed architectural documentation tools [ 40 ], bridging micro-level assumption tracking and macro-level architecture knowledge manage-ment. Previous work on automated design-rationale extrac-tion [ 27 ] targets source code history and commit messages. 
+
+AssumptionMiner targets the generation-time decision surface, which is both earlier in the lifecycle and richer in implicit signals. 
+
+VIII. Threats to Validity 
+
+We assess threats following Wohlin et al. [41]. 
+
+Internal validity. The primary internal threat is that the benchmark reference annotations are LLM-derived :GPT-4o proposed all assumptions and code-region ref-erences, and the taxonomy was developed by a single researcher with LLM assistance. Hallucinated or mis-categorized reference entries would distort the reported precision and recall. To bound this threat, two developers independently reviewed all 111 assumptions of the curated subset, judging for each (a) whether it is a valid implicit assumption under Definition 1, (b) its taxonomy category, and (c) whether its code-region reference is correct (rater background, effort, and completed sheets in Appendix C and the artifact). Because one of the two annotators is an author, the agreement statistics measure consistency between the author and a second, independent developer rather than between two fully external raters. The second developer’s independent agreement nonetheless indicates the labels are not idiosyncratic to the author. Agreement was high on the two judgments that do not depend on line numbers: validity reached 99.1% raw agreement ( κ = 0 .66 ,and both raters independently rejected only a single candidate that restates an explicit prompt requirement), and category reached 88.3% raw agreement ( κ = 0 .85 ,“almost perfect” [ 42 ]). The κ for validity is lower than its raw agreement because κ is deflated when one class dominates (nearly all candidates are valid). We therefore report both. The code-region review corroborated the AST-based reference correction of Appendix C: one rater independently flagged the majority of the automatically corrected references as originally wrong, and after correc-tion the other rater accepted them. These results support the reliability of the curated-subset reference. Residual risk concerns the 150-task extended tier, which is not human-verified and is used for RQ1 and the secondary RQ2 analysis. Extraction runs at temperature 0 to minimize non-determinism. Each reported number comes from a single scored run per task and configuration, with raw outputs preserved in the artifact. 
+
+LLM backbone bias. Because GPT-4o produced the ref-erence annotations, evaluating AssumptionMiner (GPT-4o) on this benchmark risks circular self-consistency rather than true generalization, which we flag with † throughout (Tables III and IV). We treat the fully cross-model results as our primary validity claims: Qwen2.5-Coder-32B ( F1 =0.774 ) and DeepSeek-Coder-V2-Lite ( F1 = 0 .771 ), neither 14 
+
+of which was involved in benchmark construction, though their scores still measure agreement with the reference. The human verification above further reduces the concern that the reference itself is an artifact of the annotating model. 
+
+Benchmark contamination. HumanEval [1 ] and MBPP [ 2] tasks (the 150-task extended tier) are part of GPT-4o’s training data. The model may therefore generate predictable, stereotyped solutions whose assumptions are easier to extract, potentially inflating extraction accuracy relative to novel tasks. The 30 tasks of the curated subset are novel and designed to be out-of-distribution, further reinforcing the primacy of cross-model results on that subset. 
+
+External validity. The benchmark is Python-only and may not generalize to statically typed languages (e.g., Rust, Java) where some assumptions are enforced by the type system. Industrial-scale codebases with multi-file context may expose additional assumption categories not covered by our six-category taxonomy, and team conventions or organizational style guides may create assumption patterns not present in HumanEval/MBPP tasks. 
+
+Construct validity. The headline AR /AP /AF 1 use category-level matching, which measures coverage of deci-sion kinds rather than description fidelity: two assumptions in the same category but with different descriptions both count as correct. This leniency inflates absolute scores symmetrically across methods, so relative comparisons remain meaningful but the absolute lenient F1 should not be read as decision-level accuracy. To bound the effect we also report the strict decision-level metric (§ VI-A , § VI-B ), which requires the predicted description to match the reference decision. It is substantially lower, quantifying the gap rather than leaving it unmeasured. We use embedding cosine (deterministic) rather than an LLM judge for this metric to avoid compounding the LLM-grades-LLM circularity discussed above. RQ3’s syntactic validity rate is necessary but not sufficient for functional correctness. Unit-test evaluation is left to future work. 
+
+Conclusion validity. We use a two-tier evaluation design. RQ1 and RQ3 are evaluated on the full benchmark (n = 180 ). RQ2’s primary analysis uses the curated subset ( n = 30 tasks, 109 assumptions), where code-region references exist, with a secondary full-set analysis. For 
+
+n = 180 comparisons we report bootstrap 95% confidence intervals (§ VI-B , § VI-E ) and Cliff’s δ effect sizes (§ VI-E ). At n = 30 we omit significance testing and report point estimates only. The consistent direction of effects across four independent backbones further supports conclusion robustness. 
+
+IX. Conclusion 
+
+LLM code generation silently embeds implicit assump-tions (a mean of 3.8 per task in our benchmark) that developers have no systematic way to inspect or revise. These decisions are one source of working-but-wrong code: code that passes available tests yet violates developer intent. We presented AssumptionMiner , a framework that mines implicit assumptions from LLM-generated code, surfaces them as structured AssumptionRecord objects linked to their governing code regions, and propagates developer-specified revisions through targeted incremental regeneration. Offline baselines that rely on surface syntax obtain low scores ( F1 = 0 .225 and below), suggesting that such cues alone are insufficient for this task. Using only open-source models, AssumptionMiner ’s cross-model ensemble reaches F1 = 0 .816 , a 3.6× improvement over the strongest offline baseline, and the best result we obtained without a proprietary API. Under a stricter decision-level metric that also requires the extracted description to match the reference decision, however, the same ensemble reaches only F1 = 0 .66 (and the best individual open-source model 
+
+0.65 ), far above the near-zero non-LLM baselines but low in absolute terms. Reliably identifying which implicit decision a model made is thus far from solved, and we hope the benchmark and this second, stricter metric draw future work to the problem. Its dependency mapper localizes assumptions to the lines that implement them more tightly than either baseline, although on binary accuracy it is competitive with, rather than clearly better than, a keyword heuristic (an optional LLM-guided variant does better, at extra inference cost). When a developer revises an assumption, the incremental regenerator changes 1.3–
+
+2.4× less code than non-targeted alternatives, but at a cost in syntactic validity. The error analysis identifies cascading edits as a common failure mode. Conflict detection is a promising, but untested, mitigation. The broader implication is that implicit assumptions in AI-generated code are not merely a quality concern but a traceability concern: without explicit records of why code looks the way it does, developers cannot confidently revise AI-generated artifacts. Within the scope of this study, 
+
+AssumptionMiner shows that assumption records can be generated at interactive-scale cost and used to support auditable code updates. Whether this workflow improves developer decision making in practice remains an important question for future user studies. Future work includes extending human verification to the 150-task extended tier and beyond, extending Assumption-Miner to multi-file repositories, incorporating project-level style guides as assumption priors, a conflict-detection pass for cascading edits, description-level quality metrics, unit-test-based evaluation of regenerated code, and integration with test generation and static analysis tools. We release the benchmark and the AssumptionMiner implementation (see Data Availability). 
+
+Acknowledgment 
+
+The author thanks Mike Papadakis (University of Lux-embourg) for helpful discussions. We acknowledge the use of OpenAI Codex and An-thropic’s Claude [ 43 ] for assistance in polishing the writing of this paper. 15 
+
+Data Availability 
+
+The AssumptionMiner benchmark (180 tasks / 676 assumptions, 30 curated-subset tasks for RQ2), the As-sumptionMiner source code, all evaluation scripts, raw results for RQ1–RQ3, and the human-verification pro-tocol and annotation sheets, with instructions to repro-duce all tables and figures, are archived on Zenodo at https://doi.org/10.5281/zenodo.21535058 (DOI: 
+
+10.5281/zenodo.21535058 ). 
+
+References 
+
+[1] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. d. O. Pinto, J. Kaplan, H. Edwards et al. , “Evaluating large language models trained on code,” arXiv preprint arXiv:2107.03374 , 2021. [2] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan et al. , “Program synthesis with large language models,” 
+
+arXiv preprint arXiv:2108.07732 , 2021. [3] Y. Li, D. Choi, J. Chung, N. Kushman, J. Schrittwieser, R. Leblond et al. , “Competition-level code generation with AlphaCode,” Science , vol. 378, pp. 1092–1097, 2022. [4] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. Narasimhan, “SWE-bench: Can language models resolve real-world GitHub issues?” in Proc. ICLR , 2024. [5] A. Ziegler, E. Kalliamvakou, X. A. Li, A. Rice, D. Rifkin, S. Simister, G. Sittampalam, and E. Aftandilian, “Productivity assessment of neural code completion,” in Proc. MAPS , 2022. [6] P. Vaithilingam, T. Zhang, and E. L. Glassman, “Expectation vs. experience: Evaluating the usability of code generation tools powered by large language models,” in Proc. CHI EA , 2022. [7] K. Wiegers and J. Beatty, Software Requirements , 3rd ed. Microsoft Press, 2013. [8] A. Ferrari and A. Esuli, “An NLP approach for cross-domain ambiguity detection in requirements engineering,” Automated Software Engineering , vol. 26, pp. 559–598, 2019. [9] M. Shaw, “Correctness, confidence, and context: Framing software assurance in the AI age,” 2026. [Online]. Available: https://arxiv.org/abs/2607.04667 [10] J. White, Q. Fu, S. Hays, M. Sandborn, C. Olea, H. Gilbert 
+
+et al. , “A prompt pattern catalog to enhance prompt engineering with ChatGPT,” arXiv preprint arXiv:2302.11382 , 2023. [11] I. Stoica, M. Zaharia, J. Gonzalez, K. Goldberg, K. Sen, H. Zhang, A. Angelopoulos, S. G. Patil, L. Chen, W.-L. Chiang, and J. Q. Davis, “Specifications: The missing link to making the development of LLM systems an engineering discipline,” 2024. [Online]. Available: https://arxiv.org/abs/2412.05299 [12] F. Mu, L. Shi, S. Wang, Z. Yu, B. Zhang, C. Wang, S. Liu, and Q. Wang, “ClarifyGPT: A framework for enhancing LLM-based code generation via requirements clarification,” Proceedings of the ACM on Software Engineering , vol. 1, no. FSE, 2024. [13] A. Akli, M. Papadakis, M. Cordy, and Y. Le Traon, “Defective task descriptions in LLM-based code generation: Detection and analysis,” arXiv:2604.24703, 2026. [14] J. J. W. Wu and F. H. Fard, “HumanEvalComm: Benchmarking the communication competence of code generation for LLMs and LLM agent,” ACM Transactions on Software Engineering and Methodology , 2025. [15] M. Larbi, A. Akli, M. Papadakis, R. Bouyousfi, M. Cordy, F. Sarro, and Y. Le Traon, “When prompts go wrong: Eval-uating code model robustness to ambiguous, contradictory, and incomplete task descriptions,” arXiv:2507.20439, 2025. [16] J. J. W. Wu et al. , “ClarifyCoder: Clarification-aware fine-tuning for programmatic problem solving,” 2025, tODO: complete author list from arXiv:2504.16331. [Online]. Available: https://arxiv.org/abs/2504.16331 [17] S. K. Lahiri, A. Naik, G. Sakkas, P. Choudhury, C. von Veh, M. Musuvathi, J. P. Inala, C. Wang, and J. Gao, “Interac-tive code generation via test-driven user-intent formalization,” arXiv:2208.05950, 2022. [18] X. Jiang, Y. Dong, L. Wang, Q. Shang, and G. Li, “Self-planning code generation with large language models,” arXiv preprint arXiv:2303.06689 , 2023. [19] T. X. Olausson, J. P. Inala, C. Wang, J. Gao, and A. Solar-Lezama, “Is self-repair a silver bullet for code generation?” in 
+
+Proc. ICLR , 2024. [20] A. Madaan, N. Tandon, P. Gupta, S. Hallinan, L. Gao, S. Wiegr-effe et al. , “Self-refine: Iterative refinement with self-feedback,” in Proc. NeurIPS , 2023. [21] A. Strauss and J. Corbin, Basics of Qualitative Research: Techniques and Procedures for Developing Grounded Theory ,2nd ed. Sage Publications, 1998. [22] J. Wei, X. Wang, D. Schuurmans, M. Bosma, B. Ichter, F. Xia, E. H. Chi, Q. V. Le, and D. Zhou, “Chain-of-thought prompting elicits reasoning in large language models,” in Proc. NeurIPS ,2022. [23] C. S. Xia and L. Zhang, “Conversational automated program repair,” arXiv preprint arXiv:2301.13246 , 2023. [24] OpenAI, “GPT-4o system card,” 2024. [Online]. Available: https://arxiv.org/abs/2410.21276 [25] W. Kwon, Z. Li, S. Zhuang, Y. Sheng, L. Zheng, C. H. Yu, J. E. Gonzalez, H. Zhang, and I. Stoica, “Efficient memory manage-ment for large language model serving with PagedAttention,” in 
+
+Proc. ACM SOSP , 2023. [26] Y. Dong, X. Jiang, Z. Jin, and G. Li, “Self-collaboration code generation via ChatGPT,” ACM Transactions on Software Engineering and Methodology , vol. 33, no. 7, pp. 1–38, 2024. [27] K. Liu, A. Koyuncu, D. Kim, and T. F. Bissyandé, “AVATAR: Fixing semantic bugs with fix patterns of static analysis viola-tions,” in Proc. SANER , 2019. [28] Z. Chen, S. Kommrusch, M. Tufano, L.-N. Pouchet, D. Poshy-vanyk, and M. Monperrus, “SequenceR: Sequence-to-sequence learning for end-to-end program repair,” IEEE Transactions on Software Engineering , vol. 47, no. 9, pp. 1943–1959, 2021. [29] H. Ye, M. Martinez, and M. Monperrus, “Neural program repair with execution-based backpropagation,” in Proc. ICSE , 2022. [30] N. Kiyavitskaya, N. Zeni, L. Mich, and D. M. Berry, “Require-ments for tools for ambiguity identification and measurement in natural language requirements specifications,” in Requirements Engineering , 2008. [31] S. Ezzini, S. Abualhaija, C. Arora, M. Sabetzadeh, and L. C. Briand, “Using domain-specific corpora for improved handling of ambiguity in requirements,” in Proc. ICSE , 2021, pp. 1485–1497. [32] J. Lin, Y. Liu, Q. Zeng, M. Jiang, and J. Cleland-Huang, “Traceability transformed: Generating more accurate links with pre-trained BERT models,” in Proc. ICSE , 2021, pp. 324–335. [33] C. McMillan, M. Grechanik, D. Poshyvanyk, C. Fu, and Q. Xie, “Portfolio: Finding relevant functions and their usages,” in Proc. ICSE , 2011, pp. 111–120. [34] B. Livshits, M. Sridharan, Y. Smaragdakis, O. Lhoták, J. N. Amaral, B.-Y. E. Chang et al. , “In defense of soundiness: A manifesto,” Communications of the ACM , vol. 58, no. 2, pp. 44–46, 2015. [35] D. Guo, S. Ren, S. Lu, Z. Feng, D. Tang, S. Liu et al. ,“GraphCodeBERT: Pre-training code representations with data flow,” in Proc. ICLR , 2021. [36] M. D. Ernst, J. H. Perkins, P. J. Guo, S. McCamant, C. Pacheco, M. S. Tschantz, and C. Xiao, “The Daikon system for dynamic de-tection of likely invariants,” Science of Computer Programming ,vol. 69, no. 1–3, pp. 35–45, 2007. [37] C. Lemieux, J. P. Inala, S. K. Lahiri, and K. Sen, “CodaMosa: Escaping coverage plateaus in test generation with pre-trained large language models,” in Proc. ICSE , 2023. [38] C. S. Xia, M. Paltenghi, J. L. Tian, M. Pradel, and L. Zhang, “Fuzz4All: Universal fuzzing with large language models,” in 
+
+Proc. ICSE , 2024. [39] A. Jansen and J. Bosch, “Software architecture as a set of architectural design decisions,” in Proc. Working IEEE/IFIP Conference on Software Architecture (WICSA) , 2005, pp. 109– 120. [40] R. Capilla, A. Jansen, A. Tang, P. Avgeriou, and M. A. Babar, “10 years of software architecture knowledge management: Practice and future,” Journal of Systems and Software , vol. 116, pp. 191– 205, 2016. [41] C. Wohlin, P. Runeson, M. Höst, M. C. Ohlsson, B. Regnell, and A. Wesslén, Experimentation in Software Engineering . Springer, 2012. [42] J. R. Landis and G. G. Koch, “The measurement of observer agreement for categorical data,” Biometrics , vol. 33, no. 1, pp. 159–174, 1977. 16  
+
+> [43] Anthropic, “Claude [large language model],” 2025. [Online]. Available: https://www.anthropic.com/claude
+
+Appendix A Full Extraction Prompt Template 
+
+The full system and user prompt used by C3 (Assumption Extractor) in all experiments is:                                                                                                  
+
+> SYSTEM : You are an expert software engineer auditing LLM -generated code for implicit design decisions ( implicit assumptions ) . USER : ### Original Prompt { prompt } ### Generated Code ‘‘‘ python { code } ‘‘‘ ### Task 1. REASON : List every design decision embedded in the code that is NOT explicitly required by the prompt . For each , name at least one realistic alternative . 2. FORMAT : Return aJSON array of AssumptionRecord objects matching this schema : { schema } Taxonomy categories : T1 --Input format /validation T2 --Return type /output structure T3 --Edge - case /error - handling policy T4 --Persistence /storage backend T5 --Algorithm /performance trade - off T6 --Security /authentication policy Return ONLY valid JSON after the tag [ RECORDS ]. Do not include any other text after [ RECORDS ]. [ RECORDS ]
+> Listing 3. Full extraction prompt. {prompt} ,{code} , and {schema}
+> are substituted at runtime.
+
+The schema object inserted at {schema} is:                       
+
+> {" id ": " string ( e . g . ’A1 ’) " , " category ": " T1 | T2 | T3 | T4 | T5 | T6 " , " description ": " natural - language statement of the assumption " , " rationale ": " why the LLM made this choice " , " alternatives ": [" list of >=1 realistic alternatives "] , " confidence ": " float in [0 ,1]" , " severity ": " low | medium | high " }
+
+The code_refs field (used by C4) is not included in the extraction prompt. C4 populates it separately after the extraction call returns. 
+
+Appendix B Full Per-Category Precision, Recall, and F1
+
+Table IX extends Table IV with per-category AR and 
+
+AP values for the cross-model backbones. 
+
+Appendix C Benchmark Construction Details 
+
+A. Novel Task Design 
+
+The 30 novel tasks of the curated subset were de-signed to: (a) cover domains underrepresented in standard benchmarks (authentication, serialization, file I/O, network I/O, concurrency); (b) stress-test T4 (Persistence) and T6 (Security) categories by requiring tasks where storage backend and security policy choices are meaningful; (c) be short enough that GPT-4o could solve them in under 30 lines of Python, avoiding multi-file complexity; and (d) be genuinely ambiguous: each task deliberately omits at least two meaningful design choices. 
+
+B. Reference Annotation Pipeline 
+
+For every task, GPT-4o [ 24 ] extracted an Assumption-Record list using the standard prompt (section A) at tem-perature 0. Records were then validated programmatically (schema conformance, category vocabulary, deduplication by category and description similarity). For the curated subset, code-region references (line ranges) were produced by the same pipeline from the code_refs field. Because these line numbers are LLM-counted rather than parser-derived, they are susceptible to indexing errors: a tree-sitter consistency scan (each reference’s declared AST-node type checked against the node actually present at the stored lines) found 15 of the 111 curated references off by one to two lines, consistent with sporadic 0-indexed counting by the annotating model. These were corrected by snapping each reference to its declared node, with every correction manually adjudicated against the assumption description (scripts/fix_coderef_offsets.py in the artifact documents all 15). All RQ2 results in this paper are scored against the corrected references. 
+
+Human verification. Two developers then independently reviewed all 111 curated-subset assumptions using the released protocol, recording for each a validity judgment, a taxonomy category, and whether the (corrected) code-region reference is correct. Both have at least five years of professional software-development experience in industry. One is an author of this paper and the other is an indepen-dent developer not otherwise involved in the project. Each rater spent roughly four hours on this independent pass, after which the two met for an approximately one-hour joint session to resolve every disagreement to consensus. Inter-rater agreement (before reconciliation) was 99.1% (κ = 0 .66 ) on validity and 88.3% ( κ = 0 .85 ) on category. On the code-region judgment the raters agreed on 89.6% of comparable references. The region review also served as an independent audit of the AST correction above: one rater, working from the pre-correction line numbers, flagged the majority of the 15 corrected references as originally wrong, while the other, working from the corrected numbers, accepted them, an independent confirmation of the fix. Disagreements were resolved by discussion to form the final reference: two assumptions were removed as invalid, 17 
+
+TABLE IX 
+
+Full per-category precision ( AP ), recall ( AR ), and F1 (AF 1 ) for all AssumptionMiner backbones on the benchmark ( n = 180 ,676 assumptions). † self-evaluation risk for GPT-4o on 150/180 tasks.                                                                                                      
+
+> T1 T2 T3 T4 T5 T6 Method All F1PRF1PRF1PRF1PRF1PRF1PRF1
+> GPT-4o †0.884 0.876 0.936 0.905 0.930 0.839 0.882 0.823 0.922 0.869 0.800 0.500 0.615 0.866 0.940 0.902 0.429 0.600 0.500 Qwen2.5-Coder-32B 0.774 0.865 0.601 0.709 0.934 0.692 0.795 0.679 0.892 0.771 0.600 0.750 0.667 0.834 0.868 0.851 0.429 0.600 0.500 DeepSeek-Coder-V2-Lite 0.771 0.876 0.734 0.799 0.788 0.804 0.796 0.818 0.651 0.725 0.556 0.625 0.588 0.808 0.755 0.781 0.400 0.800 0.533 Qwen2.5-Coder-7B 0.593 0.923 0.414 0.571 0.738 0.867 0.797 0.904 0.283 0.431 0.375 0.375 0.375 0.824 0.371 0.511 0.667 0.400 0.500
+
+eight category labels were corrected, and twelve code-region spans were reconciled (several additional off-by-one references the automated scan had missed), yielding a human-verified curated subset of 109 assumptions. All curated-subset (RQ2) and open-source RQ1 results in this paper are scored against this reconciled reference. Re-scoring changed the full-benchmark numbers by at most 0.006, confirming the LLM-derived reference was already reliable. The rating sheets, the agreement script, the adjudication decisions, and the resulting consensus.jsonl 
+
+are included in the artifact. 
+
+C. Extended-Tier Tasks 
+
+The 150 tasks drawn from HumanEval and MBPP use the same pipeline. These annotations are used only for RQ1 extraction evaluation and the RQ2 full-set secondary analysis (Table V, auto-labeled columns). RQ2’s primary analysis uses only the curated subset. The extended tier is not human-verified. This is noted as a residual threat in §VIII. 
+
+Appendix D Conf-Weighted Ensemble Algorithm 
+
+Algorithm 4 gives the pseudocode for the Conf-Weighted (CW) ensemble used to combine the high-recall back-bone (Qwen2.5-Coder-32B) and high-precision backbone (DeepSeek-Coder-V2-Lite). 
+
+def e n se mb le _ co nf_weighted ( preds_a , preds_b , threshold =0.5) : " " " Include ␣ a ␣ category ␣ if ␣ the ␣ mean ␣ ␣ ␣ ␣ confidence ␣ across ␣ all ␣ instances ␣ from ␣ ␣ ␣ ␣ either ␣ backbone ␣ >= ␣ threshold ; ␣ keep ␣ the ␣ ␣ ␣ ␣ highest - confidence ␣ instance . " " " by_cat = defaultdict ( list )
+
+for p in preds_a + preds_b : by_cat [ p [ " category " ]]. append ( p ) result = [] 
+
+for cat , items in sorted ( by_cat . items () ) : mean_conf = ( sum ( x [ " confidence " ] 
+
+for x in items ) / len ( items ) ) 
+
+if mean_conf >= threshold : best = max ( items , key = lambda x : x [ " confidence " ]) result . append ( best ) 
+
+return result 
+
+Listing 4. Conf-Weighted (CW) ensemble (as implemented in scripts/run_rq1_ensemble.py ). preds_a and preds_b are AssumptionRecord lists from the two backbones for one task. 
+
+Because both backbones vote on each category and only the single highest-confidence instance per qualifying category is kept, CW trades a small amount of recall for precision relative to a plain union. On the benchmark the three strategies score: Union (keep all records from either backbone) P = 0 .755 , R = 0 .857 , F1 = 0 .803 ;
+
+Intersection (keep only categories produced by both backbones) P = 0 .887 , R = 0 .624 , F1 = 0 .733 ; CW 
+
+P = 0 .810 , R = 0 .823 , F1 = 0 .816 . CW outperforms both by combining the backbones’ confidence signals rather than applying a binary gate. 
+
+Appendix E Software Artifact Details AssumptionMiner is implemented as an open-source Python package ( assumption_miner ) released alongside this paper. This section describes the software architecture, interfaces, and replication support. 
+
+A. Architecture and Components 
+
+The package maps directly to the five components described in section III-A, one module per component: 
+
+C1 (Prompt Ingestion), ingestion.py . A
+
+CodeSample data class with three constructors: 
+
+from_strings (prompt and code as plain strings), 
+
+from_json_file (iterates benchmark JSON files such as 
+
+data/benchmark.json ), and from_code_file (prompt plus a path to a source file). 
+
+C2 (Code Generator), generator.py .
+
+generate_code() dispatches to interchangeable backends selected by the ASSUMPTION_MINER_BACKEND environment variable: openai (OpenAI API, configurable model) or local (an OpenAI-compatible vLLM endpoint for open-source models). 
+
+C3 (Assumption Extractor), extractor.py .
+
+extract_assumptions() issues the structured two-part prompt (Appendix A) and parses the [RECORDS] JSON block into AssumptionRecord objects ( schema.py , which also defines the CodeRef type for dependency links). 
+
+C4 (Dependency Mapper), dependency.py .
+
+map_dependencies() implements the two-pass strategy: keyword-overlap candidate selection followed by AST narrowing that snaps candidate lines to the smallest enclosing category-appropriate node. The LLM-guided variant evaluated in § VI-D is available via a use_llm flag. The AST heuristic is the default for its zero inference cost, with the LLM-guided mapper available for accuracy-critical settings. 18 
+
+Fig. 6. The AssumptionMiner web interface on the running authentication example (screenshots of the released interface/ application). 
+
+Top: after Analyze , the backbone-generated code (left) is shown beside its five extracted assumption records (right), each labeled with its taxonomy category (T2–T6) and an LLM-assigned severity. Hovering a card highlights the code lines it governs. Bottom: mid-review, the developer has accepted A2, rejected A5, and opened A1 for editing (MD5 → bcrypt). Pressing Regenerate invokes the incremental regenerator (C5) on only that assumption’s code region. The footer tracks review progress. 19 
+
+C5 (Incremental Regenerator), regenerator.py .
+
+regenerate() accepts a revised AssumptionRecord and the original code, constructs a region-targeted prompt from the dependency map ( k = 5 context lines), and splices the regenerated region back into the surrounding code. The offline baselines of Table III (CE, KBE) and the prompting baselines (DG, CQ, CoT) are implemented in 
+
+baselines.py , so every number in section VI is repro-ducible from the same package. 
+
+B. Scripts and Entry Points 
+
+All experiment scripts are under scripts/ : 
+
+> •
+
+run_rq1.py : extraction evaluation on a benchmark file.  
+
+> •
+
+run_rq1_offline.py : CE/KBE offline baselines.  
+
+> •
+
+run_rq1_ensemble.py : Union/Intersection/CW en-sembles combining two extractor outputs.  
+
+> •
+
+run_rq1_semantic.py : strict decision-level AF 1 via sentence-embedding similarity at threshold τ . 
+
+> •
+
+build_strict_inputs.py : reconstructs per-prediction descriptions for the CE/KBE baselines and the CW ensemble so they can be scored under the strict metric.  
+
+> •
+
+run_rq2.py , run_rq2_ablation.py ,
+
+run_rq2_usellm.py : dependency accuracy, node-type ablation, and the heuristic-vs.-LLM mapper comparison.  
+
+> •
+
+run_rq3.py : code adaptability evaluation. Each script accepts –benchmark , –out , –backend , and 
+
+–limit flags documented in –help output. A –dry-run 
+
+flag substitutes the offline KBE extractor for all LLM calls, enabling smoke-testing without API credentials or GPU access. 
+
+C. Interactive Interface 
+
+The interactive interface (§IV) is a single-page web application served by interface/server.py , exposing three REST endpoints: /api/analyze (prompt → code + assumption records), /api/regenerate (code + revised assumption → updated code), and /api/status . It runs against either backend (OpenAI or local vLLM) using the same environment-variable configuration as the package. Figure 6 shows the running interface on the paper’s authentication example: the generated code appears on the left, and each extracted assumption becomes a category-tagged, severity-scored card on the right that the developer can accept, edit, or reject before regenerating. 
+
+D. Extensibility 
+
+New backbone LLMs are added as a dispatch case in generator.py /extractor.py (any OpenAI-compatible endpoint works out of the box via the local backend). New assumption categories require extending the taxonomy vocabulary in the extraction prompt and the category-to-node-type map in dependency.py .
+
+E. Quality and Testing 
+
+The package ships with a unit-test suite of 119 tests across eight modules (assumption_miner/tests/ ), all passing at release, covering schema serialization round-trips, dependency-mapper AST logic, extractor output parsing, ingestion, the offline baselines, and the RQ evaluation helpers. All results in section VI were generated from the released code with no post-hoc modifications. 
+
+Appendix F Reproducibility Notes 
+
+A. Environment 
+
+All local-model experiments were conducted on a ma-chine with an NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition GPU (96 GB VRAM), serving models through vLLM’s OpenAI-compatible server. The package requires Python ≥3.10 with tree-sitter ≥0.22 and tree-sitter-python ≥0.22 (exact dependency pins are recorded in pyproject.toml in the artifact). Cloud API calls used the OpenAI API with model alias gpt-4o .
+
+B. Running the Experiments 
+
+From the repository root:                                                                               
+
+> #Install d e p e n d e n c i e s
+> pip install -e " .[ dev ] "
+> #RQ1 -GPT -4 o ( cloud )
+> python scripts / run_rq1 . py \-- backend openai -- model gpt -4 o \-- benchmark data / benchmark . json \-- out data / results / rq1_gpt4o . json \-- delay 0.5
+> #RQ1 -Qwen2 .5 - Coder -32 B ( local vLLM )
+> bash scripts / start_vllm_server . sh #terminal 1
+> python scripts / run_rq1 . py \-- backend local \-- benchmark data / benchmark . json \-- out data / results / rq1_qwen32b . json \-- delay 0.1 #terminal 2#RQ1 ensemble ( no GPU if using cloud backb ones )
+> python scripts / run_rq1_ensemble . py \-- benchmark data / benchmark . json \-- out data / results / rq1_ensemble . json
+> #RQ2 mapper ablation
+> python scripts / run_rq2_usellm . py \-- backend openai -- model gpt -4 o \-- benchmark data / benchmark . json \-- out data / results / rq2_use_llm_gpt4o . json
+> #RQ3 code a d a p t a b i l i t y
+> python scripts / run_rq3 . py \-- backend openai -- model gpt -4 o \-- benchmark data / benchmark_mini . json \-- out data / results / rq3_gpt4o . json
+
+A dry-run mode (no API calls) is available for smoke testing:       
+
+> python scripts / run_rq1 . py -- dry - run \-- benchmark data / benchmark_mini . json -- limit 320
+
+C. Randomness 
+
+LLM outputs are non-deterministic in general. We mini-mize this at the source. Assumption extraction (C3) runs at temperature=0 . Code generation (C2) and regeneration (C5) run at temperature=0.2 (RQ3 baselines likewise at 0.2). Each reported metric comes from a single scored run per task and configuration. Raw model outputs for every run are preserved in the artifact, and the bootstrap confidence intervals in § VI-B and § VI-E quantify across-task variability. 
+
+Jie “JW” Wu is an Assistant Professor in the Department of Computer Science at Michi-gan Technological University, USA, starting Fall 2025. He was a Postdoctoral Fellow at the University of British Columbia Okanagan, Canada, from 2024 to 2025. He worked as a full-time software developer for eight years at Snap Inc. and Microsoft in USA. His recent research centers on intent-aware software engineering, developing AI-assisted techniques that infer, communicate, and preserve developer intent to enable the development of high-quality software.
