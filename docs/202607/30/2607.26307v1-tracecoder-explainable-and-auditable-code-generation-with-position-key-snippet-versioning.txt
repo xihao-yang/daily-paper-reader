@@ -1,0 +1,505 @@
+Title: TraceCoder: Explainable and Auditable Code Generation with Position-Key Snippet Versioning
+
+URL Source: https://arxiv.org/pdf/2607.26307v1
+
+Published Time: Thu, 30 Jul 2026 00:14:10 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+# TraceCoder: Explainable and Auditable Code Generation with Position-Key Snippet Versioning 
+
+Rwaida Alssadi, Muntaser Syed, Balaji Kasula, Lamine Deen, Majed Alotaibi, Mohammed Alghamdi, Tyler Ton, Ali Alqarni, Marius Silaghi 
+
+Florida Institute of Technology 
+
+Abstract. Contemporary LLM-based coding agents produce code as black-box outputs: the rationale behind each line is hidden, the evolution of the code through benchmark-driven repair is ephemeral, and post-hoc auditing is impossible. We present a code generation concept that ad-dresses these shortcomings through three complementary mechanisms: 
+
+(i) a relational snippet-history schema that records, per repair event, the benchmark reference, round number, failure text, and LLM explanation, enabling full provenance queries; (ii) a browser-based visualisation tool that renders this history as heat-mapped, hover-annotated source code; and (iii) a competitive fractional position-key indexing scheme with tree-node delimiters that assigns stable, lexicographically-ordered identifiers to each code snippet, enabling fine-grained tracking without disrupting sur-rounding lines. We evaluate TraceCoder on 30 algorithmic programming tasks spanning string processing, mathematical computation, and data-structure manipulation, across two provider configurations. Of these, 10 exhaust the 6-iteration budget on tasks with subtle edge-case behaviour. Mean Chg% reaches 30%, three in ten code snippets carry a traceable repair-event row, compared to 21% when using Gemini 2.0 Flash as sole provider on a 20-task subset. Three detailed case studies demonstrate how the system explains which specific benchmark failures shaped each line of the final program. The proposed mechanism makes the internal “narrative” of automated code generation auditable and replayable, a property essential for trust and accountability in production deployments. 
+
+Keywords: Code generation · Explainability · Auditability · Traceability 
+
+· LLM agents · Position-key indexing · Software provenance 
+
+## 1 Introduction 
+
+LLM-driven coding agents produce code whose causal history is discarded; Trace-Coder captures that history at snippet granularity in a persistent store. The emergence of large language models (LLMs) capable of generating functional code from natural-language descriptions [2, 11, 18] has catalysed a new paradigm of coding agents : autonomous systems that iteratively write, test, and revise programs to satisfy user-specified requirements [21, 16, 20]. These agents have arXiv:2607.26307v1 [cs.AI] 28 Jul 2026 2 Syed et. al. 
+
+demonstrated remarkable capability, GPT-Engineer generates entire codebases from high-level specifications, SWE-agent resolves GitHub issues through shell interactions, and various systems have achieved competitive scores on benchmarks such as SWE-bench [8]. Yet all these systems share a fundamental limitation: the generated code is treated as an atomic artefact . Once generated, no record exists of which test failure prompted which change, no mechanism can explain why a specific line exists in its current form, and no audit trail connects the observable output to the sequence of decisions that produced it. This opacity creates at least three pressing practical problems for the deploy-ment of coding agents in real settings: 
+
+Explainability. When a generated program behaves unexpectedly, developers cannot trace the reasoning that led to the suspect code. They face a black box whose “decisions” are invisible even in principle. 
+
+Auditability. Organisations subject to software compliance requirements (safety-critical systems, financial software, regulated industries) need to certify the provenance of every code line, including the test evidence that justifies it. 
+
+Traceability. The iterative repair loop common to current agents (write → test 
+
+→ fix → repeat) is a rich source of semantic information about the problem’s edge cases and the code’s evolution, yet it is discarded once the final code is produced. The XAI literature [13, 1] recognises that explanations are inseparable from responsible deployment; the same applies to coding agents. 
+
+Key Insight and Our Solution Without loss of generality we assume that the coding agent acts by iterations of code fixing and benchmarks runs, but with small changes should work when such processes are executed in parallel. The iterative repair loop is the primary source of provenance : every benchmark failure that revises a snippet is a causal event worth recording. When a snippet is modified, a new row is inserted into the persistent store permanently linking the change to the benchmark failure that caused it. One row per modified snippet is inserted, carrying the benchmark foreign key (FK), round number, and failure text, and no existing row is ever overwritten. Another technical contribution is an intuitive position-key versioning mechanism inspired by collaborative editing CRDTs [17, 15] and adapted for code generation. The proposed mechanism differentiates itself by: 1. A relational snippet-history schema : database records per-repair-event code provenance (§5). 2. A position-key versioning fractional indexing scheme (FIS) without theoretical limitations in keys number and order, that supports insertion, deletion, and in-place update while preserving lexicographic order without rebalancing (§4). 3. An iterative benchmark-driven code repair loop example maintaining the snippet history database using fractional indexing. (§3). TraceCoder: Auditable Code Generation 3
+
+4. A browser-based explainability viewer exemplifying how to render the history at snippet granularity with heat-mapped change intensity and hover-activated history panels (§6). 5. An empirical evaluation on 30 tasks across two provider configurations docu-menting explanation maintenance, and three case studies (§6–7). 
+
+## 2 Related Work 
+
+We draw on research in LLM code generation, iterative repair, coding agents, AI explainability, code provenance, fractional indexing, and specification mining. 
+
+2.1 LLM-Based Code Generation 
+
+Codex [2] established that large code-trained transformer models can generate functionally correct programs from docstrings or natural-language descriptions. AlphaCode [11] scaled this to competitive programming tasks. Code Llama [18] demonstrated strong open-weight results. GitHub Copilot deployed Codex at industrial scale as an interactive completion tool. These systems produce one-shot outputs without systematic auditable documentation of iterative refinement; they do not explicitly address simple user-level explainability of provenance. 
+
+2.2 Iterative Code Repair 
+
+Several systems employ iterative repair based on execution feedback. Self-Debugging [3] prompts the LLM with its own execution traces, enabling lo-calisation and correction of errors without external tools. Reflexion [19] stores verbal reflections about past failures in a scratchpad that is prepended to future prompts, achieving a form of episodic memory across repair attempts. Self-Refine [12] employs a critique-and-revise loop where the same model critiques its own output and iteratively improves it. CodeRL [10] trains repair policies via reinforcement learning on unit test outcomes. All share a critical limitation: the repair history is ephemeral , used as a prompt-engineering device but never recorded at line granularity. 
+
+2.3 Coding Agent Systems 
+
+GPT-Engineer [16] generates entire codebases from high-level specifications through a multi-step LLM dialogue. SWE-agent [21] provides an agent-computer interface enabling LLMs to interact with a shell, browsing files and executing commands, to resolve GitHub issues. CodeAct [20] argues for executable actions as a unifying interface for LLM agents. These systems demonstrate impressive capabilities on real-world software tasks but none retain fine-grained provenance. 4 Syed et. al. 
+
+2.4 Explainability in AI Systems 
+
+The XAI literature [1] distinguishes between ante-hoc (interpretable-by-design) and post-hoc explanations. For code generation, ante-hoc explainability would require the model to expose its internal reasoning, which remains an open research challenge. Molnar [13] categorises explanations along three axes: global vs. local, model-agnostic vs. model-specific, intrinsic vs. post-hoc. TraceCoder produces 
+
+local, model-agnostic, intrinsic explanations: local because they are attached to individual snippets, model-agnostic because the same mechanism works for any LLM, and arguably mixed post-hoc with intrinsic interpretable-by-design because the explanation is a component of the generation itself. In the coding agent, the benchmark error is intercepted and stored for insertion in the database directly from the tool callbacks without mitigation from the LLM context, to ensure robustness. 
+
+2.5 Version Control and Code Provenance 
+
+Traditional version-control systems (Git, Subversion, Mercurial) track changes at commit granularity; git blame attributes each line to its last commit but records no causal link to the failure that motivated it. Fine-grained diff tools like ChangeDistiller [5] and GumTree [4] identify moved and renamed AST nodes across revisions, yet they operate post-hoc on an external repository and carry no notion of why a node changed. Software provenance systems [14, 7] record artefact lineage at the OS or workflow level but do not link it to specific failing tests. TraceCoder stores position keys and round-tagged failure records in the same SQLite row as the code, achieving sub-line, failure-linked provenance automatically and without external infrastructure. 
+
+2.6 Fractional Indexing and CRDTs 
+
+Fractional indexing assigns keys supporting insertions without rebalancing [15]. Greenspan [6] uses integer-prefix base-62; Kazutaka [9] extends to base-94. Trace-Coder introduces fractional indexing with strings FIS , with tree-node delimiters. No custom comparator is required and no theoretical limit on fractions. 
+
+2.7 Benchmarks and Specification Mining 
+
+The idea of using automatically generated tests to drive code improvement has roots in specification mining and property-based testing. In TraceCoder’s approach the benchmark generator is itself an LLM that observes the current code and deliberately creates tests for under-exercised paths, creating a natural test curriculum. The identity of each benchmark is preserved as a first-class artefact linked to the code lines it affected. TraceCoder: Auditable Code Generation 5LLM API Agent Loop generate code create benchmark run benchmarks fix code Database (code + history) Workspace (disk files) Viewer (HTTP)  
+
+> Fig. 1. TraceCoder architecture. The agent loop drives three LLM calls (code generation, benchmark creation, code repair). All outputs are stored in persistent store with position-keyed snippets and round-tagged history. The viewer reads the database independently.
+
+## 3 System Architecture 
+
+TraceCoder is a four-layer stack: persistent store, agent core, multi-backend LLM abstraction, and browser viewer. 
+
+3.1 Overview 
+
+Figure 1 shows the high-level architecture of TraceCoder. The system consists of four layers. 
+
+LLM Interface. Supporting multiple providers. 
+
+Agent Loop. The CodingAgent class in agent.py orchestrates the generate– benchmark–test–fix cycle. 
+
+Versioned Code Store. A database with position-keyed snippets and round-tagged history columns (see §4–5). 
+
+Explainability Viewer. An HTTP server that serves an annotated HTML code browser directly from the database. 6 Syed et. al.      
+
+> Fig. 2. Core schema of the TraceCoder persistent store. History is normalised into
+> snippet_failure and snippet_explanation ; the code table holds only the current snippet and its AST metadata.
+
+3.2 Database Schema 
+
+Database Schema 2 shows an ER-diagram of the proposed database. History lives in snippet_failure (one row per modified snippet per repair round: benchmark FK, round integer, failure text) and snippet_explanation (one row per round: LLM root-cause text), both sharing a composite FK back into code .On refactoring, a moved/deleted code item is flagged by setting its enabled 
+
+attribute to 0, and the new code version that is inserted gets the inherits_key set to the position_key of the old code whose history is inherited. The primary key of 
+
+code items is composed of the file_id and position_key . The file table items have a unique key composed of path and file_name . The snippet_failure 
+
+table implements a many-to-many relation between entities code and benchmark .
+
+3.3 The Agent Loop and LLM Operations 
+
+Algorithm 1 summarises the procedure. TraceCoder: Auditable Code Generation 7                                          
+
+> Algorithm 1: TraceCoder Iterative Loop
+> Input: problem description P, maximum iterations T
+> Output: code on disk; full provenance in DB 1. generate_initial_code (P)
+> 2. b←create_benchmarks (P, current code )
+> 3. for t= 1 , . . . , T do
+> 4. R←run_all_benchmarks ()
+> 5. for each failure f∈R. failures do
+> 6. fix_failing_code (f. name , f );record round ttags 7. end for
+> 8. if R. status =all_passed then break
+> 9. b←create_benchmarks (P, current code ,existing BMs )
+> 10. end for
+
+Three LLM operations are issued as separate messages.create calls to the LLM API: 
+
+generate_initial_code (P ). Receives the problem statement; returns JSON specifying source files (like main.py , Makefile ...) 
+
+create_benchmark . Receives the problem statement, the full current code, and the list of existing benchmark names; returns JSON with unique benchmark names, descriptions, CLI argument strings, and expected stdout. 
+
+fix_failing_code . Receives the problem statement, the failing benchmark’s metadata, the failure output, and the full current code; returns JSON with an "explanation" field (root cause and repair plan) and the updated file contents. The explanation is stored verbatim in snippet_explanation for every snippet modified in that round. The loop is restartable from any intermediate database state, since all persistent information is in the storage; in-memory state (the iteration counter) is reset to match the maximum iteration recorded in benchmark_run .
+
+## 4 The Position-Key Versioning System 
+
+Any fractional index could be adjusted for our needs, but we use a new scheme which improves on existing ones by having no theoretical limitation on keys number and order and where comparison is native on strings, while the yielding comparable key length. Two versions were implemented, base 62 (plus 2 separators) and base 94, with base 94 yielding slightly shorter keys while the default base 64 instance is yielding keys that are easier to read and interpret by humans. 
+
+4.1 Design Goals 
+
+The FIS position-key system satisfies four requirements: (1) Total order : all snippets are totally ordered by plain ASCII ; (2) Insertion : given ka < k b, there exists k with for any need: ka < k < k b, k < k a, kb < k ; (3) Stability : the keys of unchanged snippets are never modified; (4) Compactness : keys remain short in typical usage. 8 Syed et. al. 
+
+4.2 Character Set and Ordering 
+
+A FIS key is a sequence of atoms : in the 64-base version, a linear character from A = 0...9A...Za...z , or a tree node .k- (inner key k is itself a FIS key). 
+
+ASCII guarantees -(45) < .(46) < 0 < · · · < z, so tree nodes sort before all linear characters and .k- precedes any extension .kℓ . The initial item receives key V which is in the middle of the used ASCII set, and insertions are in principle placed in the center of the range of short available keys.                          
+
+> 012· · · .V-
+> 0V
+> .k-
+> before 0
+> btwn 0,1
+> btwn .V-,0
+> Fig. 3. FIS position-key lattice. Blue: initial keys. Orange: .V-before 0(tree node, no linear char fits); 0V between adjacent 0,1(gap = 1 :KeyAfter (ε)=Vappended). Red:
+> .k-between .V-and 0(tree recursion: KeyAfter (V)=k). Plain ASCII order.
+
+4.3 FIS Key Generation Algorithm 
+
+Initial sequence. A single first item receives V (midpoint, index 31). 
+
+KeyAfter (lo ) — rightward extension. Let i = A−1[lo [0]] , m = ⌊(i + N )/2⌋
+
+where N = 62 . If m > i , return A[m] (single-char result). Otherwise ( lo [0] = z), return z + KeyAfter (lo [1 :]) . Empty lo returns V. Tree-prefixed lo appends V
+
+unchanged. 
+
+KeyBetween (lo, hi ) — three cases. Parse lo , hi into atoms; find longest common atom prefix C; let p, q be the first diverging atoms ( p = None if lo exhausted). 
+
+Case 1 (p = None ): if q is tree node, recurse on inner key; if A−1[q] = 0 , return 
+
+C+.V-; else return C+A[⌊A −1[q]/2⌋]. Case 2 (p is tree node): recurse on inner keys if q also tree; else extend p’s inner key via KeyAfter . Case 3 (p, q linear): if gap > 1, return midpoint; if gap = 1 , return lo + KeyAfter (tail (lo )) .
+
+4.4 Diff-Based Snippet Update 
+
+When the repair LLM returns a revised file, Python’s difflib.SequenceMatcher 
+
+produces equal , replace , insert , and delete opcodes: TraceCoder: Auditable Code Generation 9
+
+– equal : old key preserved; history columns unchanged. 
+
+– modified : the old row is tombstoned ( enabled = 0, disabled_round = r, content preserved) and successor rows are inserted at a fresh position keys with inherits_key pointing at the predecessor, so the lineage chain carries the accumulated history. 
+
+– moved : detected when a deleted node identity reappears among the insertions; treated as a modification at the new location, with lineage preserved through 
+
+inherits_key .
+
+– inserted : a new row at a fresh key with no lineage. 
+
+– deleted : the old row is tombstoned and the failure row that motivated the deletion is attached to the tombstone itself. 
+
+Proposition 1. For any two distinct FIS keys ka, k b ∈ Σ∗ with ka < k b (plain 
+
+ASCII order), the function key_between (ka, k b) terminates and returns a key 
+
+k ∈ Σ+ such that ka < k < k b.Proof. Termination. Case 2 recurses on strictly shorter inner keys. Case 3 (gap =1) calls KeyAfter on a proper suffix of ka, which terminates by induction on string length. Ordering. Case 1.3: A[⌊qi/2⌋] < A[qi] = q and ≥ A [0] , which exceeds any extension of ka = C. Case 3 (gap > 1): midpoint strictly between p
+
+and q in A. KeyAfter : A[m] with m > i = A−1[ka[0]] gives a result > k a.Comparative experiments not detailed here show that FIS is withing a minor fraction average key length from the most compact base 94 competitor, while having the described theoretical improvements. 
+
+## 5 The Relational Snippet-History Schema 
+
+Each repair event inserts rows into two dedicated tables that permanently link every changed snippet to the benchmark failure and LLM explanation that motivated the change. 
+
+5.1 Structure of History Tables 
+
+The snippet_failure table (Listing 2) links each (file_id, position_key) 
+
+pair to the benchmark reference, round number, and raw failure text for every round that modified it. The snippet_explanation table links the same pair to the LLM’s root-cause text for that round. The relationship is many-to-many in both directions: one snippet accumulates one row per repair round that touches it, and one benchmark failure round inserts rows for every snippet it modifies. The round number is a plain integer column identifying the testing step (in generalization to non-iterative code development a different scheme would be used). For example, a snippet revised in rounds 2, 4, and 6 accumulates rows in 
+
+snippet_failure , one per such round and failed benchmark test, each with its own benchmark_id and failure_output value (illustrated concretely in Table 4 in §7). 10 Syed et. al. 
+
+5.2 Semantics 
+
+No rows: initial code. A snippet with no rows in snippet_failure was written during initial generation and has never been revised. This is itself informative: the LLM produced that line correctly on the first attempt. 
+
+Multiple rows: multi-round repair. A snippet with n distinct rounds in 
+
+snippet_failure was revised n times. Each row records the precise benchmark that triggered the revision and the exact failure output, providing a complete causal chain for that line. 
+
+Round number as version pointer. Every code row records the round in which it was created and, if tombstoned, the round in which it was disabled. The file content at round r is reconstructed directly from the store as the concatenation, in position-key order, of all rows with created_round <= r whose disabled_round 
+
+is null or greater than r. 
+
+5.3 Storage Overhead Analysis 
+
+Each snippet_failure row stores one benchmark reference and one failure-output string; each snippet_explanation row stores one LLM text. Per repair event the storage cost is the text lengths plus a fixed row overhead of ≈50 bytes (in-teger columns and FK references). Each failure record is stored exactly once with no tag-wrapper duplication; SQL aggregations (e.g. COUNT(*) ) replace substring-counting. The typical database size of 52-68 KB confirms that provenance storage is not a practical bottleneck. The heaviest run (2.1 h, 13 benchmarks, 7 rounds) produced 480 KB. 
+
+## 6 Experimental Evaluation 
+
+We evaluate TraceCoder on 30 tasks (20 batch-1, 10 simpler batch-2) across two provider configurations at max_iter=6 : (i) Gemini 2.0 Flash as the sole provider (benchmark creation and code repair); and (ii) Grok-3-beta as coding provider paired with DeepSeek-V3 ( deepseek-chat ) as a dedicated benchmark-creation provider, using a complexity-proportional initial benchmark batch (5–10 benchmarks generated before the repair loop begins, with count estimated by asking the benchmark provider to rate problem complexity on a 1–10 scale). 
+
+Browser-Based Explainability Viewer A sample code viewer is proposed to prove the practicality of the explanation and auditing train. It renders the prove-nance store as an interactive colour-coded source listing, requiring no external dependencies. TraceCoder: Auditable Code Generation 11 
+
+Table 1. Per-experiment results with Gemini 2.0 Flash ( max_iter=6 ). Chg%: fraction of snippets with ≥ 1 row in snippet_failure . Avg Rds: mean snippet_failure rows per changed snippet. Two experiments (palindrome, matrix transpose) failed before generating initial code and are marked “–”. Produced with an earlier code revision (single benchmark per iteration, no initial batch); Rerunning under the current code yields different numbers.                                                                                                                    
+
+> Problem Iters BMs Chg% Avg Rds DB(KB) fibonacci 448.1 1.00 36 word freq 6612.9 1.00 56 run-length enc. 600.0 0.00 36 roman numerals 6628.6 1.50 48 caesar cipher 6618.9 1.57 48 bracket balance 6611.4 2.25 44 base convert 6653.3 1.21 56 fizzbuzz 6627.3 1.44 56 anagram 6651.4 1.28 60 temperature 6642.4 1.07 60 sieve 650.0 0.00 36 rpn calculator 6636.0 1.22 52 collatz 6633.3 1.45 48 lcs 6631.8 1.07 56 string stats 650.0 0.00 36 calc eval 610.0 0.00 36 number words 6629.8 1.14 48 morse 6110.8 1.00 44
+> Batch 2 — simpler tasks (2 of 10 completed)
+> sum digits 110.0 0.00 36 max list 2217.5 1.00 44
+> Mean (20) 5.45 4.55 20.7 0.96 46.8 Min 100.0 0.00 36
+> Max 6653.3 2.25 60
+
+6.1 Problem Suite and Setup 
+
+We evaluate two batches of programming tasks Batch 1 comprises 20 tasks spanning four categories: mathematical sequences (5 tasks), string processing (8 tasks), algorithmic (4 tasks), and numerical/matrix (3 tasks). Batch 2 adds 10 simpler tasks (single arithmetic or list operations) to study convergence under reduced problem complexity. 
+
+6.2 Evaluation Metrics 
+
+We measure: (1) iterations : rounds until all benchmarks pass or the budget (max_iter = 6 ) is reached; (2) BMs : total benchmarks created; (3) Chg% : fraction of snippets with at least one row in snippet_failure ; (4) Avg Rds : mean rows in snippet_failure per changed snippet; (5) DB KB : final database size. 
+
+6.3 Results: Gemini 2.0 Flash 
+
+Table 1 reports per-experiment statistics. 12 Syed et. al. 
+
+> fib
+> wfq
+> rle
+> rom
+> cae
+> brk
+> b2d
+> fzz
+> ana
+> tmp
+> siv
+> rpn
+> col
+> lcs
+> sst
+> cal
+> num
+> mrs
+> sdi
+> mxl
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+> Iterations used
+
+Fig. 4. Iterations used by each of the 20 completed experiments (Gemini 2.0 Flash, 
+
+max_iter=6 ). Batch-2 experiments appear at right (sdi=sum digits, mxl=max list). Three converged early: fibonacci (4 rounds), max list (2 rounds), and sum digits (1 round). Two batch-1 experiments (palindrome, matrix transpose) failed and are excluded. 
+
+Convergence. Of 20 completed experiments, three converged before the iteration budget (Fig. 4): fibonacci at 4 rounds, max list at 2 rounds, and sum digits at just 1 round (the first generated program passed all benchmarks immediately). The remaining 17 batch-1 experiments reached the 6-round maximum. This pattern differs markedly from results with Claude 3.5 Sonnet (which converges in 3–4 iterations on average) and is attributable to Gemini 2.0 Flash’s tendency to return JSON with unescaped control characters in code strings. When the JSON parser fails, no fix is applied that iteration, stalling convergence. The improved parser introduced during this run (four-strategy cascade with control-character sanitisation and outermost-block extraction) mitigates this issue in subsequent runs; the faster convergence of the two batch-2 experiments is consistent with improved parser reliability. 
+
+History richness. Across 20 completed experiments, 20.7% of snippets have at least one row in snippet_failure , with an average of 0.96 rows per changed snippet. The base convert and anagram tasks show the richest histories (53.3% and 51.4% respectively), reflecting their multi-case I/O formats that generate numerous edge-case failures. For 20.7% of all lines, TraceCoder can directly answer “why does this line exist?” with a reference to the specific failing benchmark that prompted it. 
+
+Database size. Mean database size is 46.8 KB (range 36–60 KB), well below the 100 KB threshold at which SQLite begins to show query latency. The history overhead (bytes in snippet_failure and snippet_explanation relative to code ) is 557%, driven by Gemini’s verbose multi-sentence diagnostics; more concise providers such as Claude 3.5 Sonnet reduce this to 22–28%. Despite the high overhead ratio, absolute sizes remain modest, confirming that provenance storage is not a practical bottleneck at scale. TraceCoder: Auditable Code Generation 13 
+
+6.4 Observed Complications 
+
+Our evaluation identifies categories of recurring complication. 
+
+C1: Erroneous benchmarks. In several experiments, the benchmark generator cre-ated benchmarks whose expected_output was incorrect. Detection relied on the agent observing that fixing the failing benchmark broke previously-passing ones. A future version should include a secondary LLM pass that verifies benchmark correctness before storage. 
+
+C2: Build fragility. Several experiments encountered at least one iteration where code repair introduced a Python syntax error. The agent recovered by treating build failure as a special “BUILD” benchmark failure and retrying. 
+
+C3: Verbose failure rows. With Gemini, several experiments accumulated verbose 
+
+failure_output values. Full failure text is stored; only the snippet of model response shown in error messages is truncated, to 300 characters. 
+
+C4: API rate limiting (Gemini). The Gemini 2.0 Flash free tier enforces per-minute request quotas. During sequential 20-experiment runs, the quota is ex-hausted after approximately 3–5 experiments. The agent now retries with expo-nential back-off (up to 5 attempts, delays 5–80 s). The two experiment failures both occurred during quota-exhaustion windows before retries were deployed. 
+
+C5: JSON format errors. Gemini frequently returns JSON whose string values contain literal newline or tab characters that are not escaped according to the JSON specification. The improved _parse_json method (four-strategy cascade: direct parse → control-character sanitisation → outermost-block extraction →
+
+sanitised extraction) recovers from the majority of these cases, reducing fix-failed events from ≈50% to ≈15% of iterations. 
+
+6.5 Results: Grok-3-beta + DeepSeek-V3 
+
+Pairing Grok-3-beta (coding) with DeepSeek-V3 ( deepseek-chat , benchmark creation) and a complexity-proportional initial batch (5–10 benchmarks) substan-tially changes the outcome. Table 2 reports per-experiment statistics; Table 3 compares both configurations. 
+
+Convergence. Of 30 experiments, 18 pass the initial benchmark batch without any repair iteration, 2 require 1 additional iteration, and 10 reach the 6-round maximum. Problems that hit the limit include word freq , base convert , rpn calculator , lcs , string stats , sum digits , count vowels , gcd , lcm , and fizzbuzz —tasks with subtle edge cases in parsing, encoding, or multi-condition logic that DeepSeek’s independent benchmarks successfully expose. 14 Syed et. al. 
+
+Table 2. Per-experiment results, Grok-3-beta + DeepSeek-V3 ( max_iter=6 , 5–10 initial benchmarks). Init: initial BM count (complexity-estimated). Iters: additional repair iterations. Chg%: snippets with ≥ 1 snippet_failure row. †exp09 DB anomalously large (5 672 KB); excluded from mean.                                                                                                                                                                                                 
+
+> Problem Init It BMs Chg% KB Problem Init It BMs Chg% KB fibonacci 606044 morse 61750 52 word freq 5611 75 108 matrix transp. 60625 44 palindrome 61725 52 sum digits 5611 100 68 run-length enc. 606044 is prime 606044 roman numerals 60625 44 factorial 60625 44 caesar cipher 606044 count vowels 5611 100 76 bracket balance 60625 44 max list 606044 base convert 6612 50 60 gcd 7613 50 64 fizzbuzz 6612 50 †digit reverse 60625 44 anagram 60625 44 power 606044 temperature 707044 lcm 6612 50 56 sieve 606044 is perfect 606044 rpn calculator 7613 75 60 Mean 6.0 2.1 8.1 30 54 ∗
+> collatz 505044 Min 505044 lcs 7613 50 56 Max 7613 100 128 string stats 6612 50 128 calc eval 60625 44 ∗excl. exp09 anomaly number words 606044
+
+Table 3. Cross-provider comparison. Gemini: 20 completed experiments (2 failed). Grok+DeepSeek: 30 experiments. Configuration Mean Iters Mean BMs Mean Chg% Wall (s) Gemini 2.0 Flash (sole) 5.45 4.55 20.7 >3 600 Grok-3-beta + DeepSeek-V3 2.07 8.07 30.0 5 278 
+
+History richness. Mean Chg% rises to 30.0% (vs. 20.7% for Gemini), demon-strating that independent benchmarks from a second model generate richer provenance histories. Several tasks reach 100% ( sum digits , count vowels ), indi-cating that DeepSeek’s benchmarks uncovered bugs in every snippet of the initial code. Mean DB size is 54.2 KB (excluding the exp09 anomaly), comparable to Gemini’s 46.8 KB, confirming that the larger initial benchmark batch does not disproportionately inflate storage. 
+
+## 7 Case Studies 
+
+We present three detailed case studies illustrating the explanatory power of TraceCoder’s round-tag history. They do not represent an exact version of the code, being solely illustrative, but that does not impact the relevance of the process they convey. In each study, we show the initial code, the sequence of benchmarks created, the failures observed, and the final code with its round-tag annotations. TraceCoder: Auditable Code Generation 15 
+
+7.1 Case Study 1: Fibonacci, Off-By-One Under Repair 
+
+The Fibonacci task converged in four rounds. The initial program handled base cases correctly but produced an off-by-one error for sequences starting at zero, which the benchmark generator discovered through a boundary test. The round-tag history makes the causal chain explicit: each revised snippet carries the exact benchmark name and failure message that triggered the change. 
+
+Initial Code and Round 1 The initial code produced for the Fibonacci task is shown in Listing 1.1.                                                 
+
+> 1import sys
+> 23def fibonacci ( n ) :
+> 4a , b=0 , 1
+> 5result =[]
+> 6for _in range ( n ) :
+> 7result . append ( a ) #line 7: correct for n >0
+> 8a , b=b , a+b
+> 9return result #line 9
+> 10 11 n=int ( sys . argv [1])
+> 12 for xin fibonacci ( n ) : #fails silently for n =0
+> 13 print ( x )
+
+Listing 1.1. Initial Fibonacci program generated in round 0. Lines 7–9 contain the off-by-one error that benchmark fib_edge_zero will expose in round 2. 
+
+Round 1 : Benchmark fib_basic (N = 5 , expected 0 1 1 2 3 ) passes immedi-ately. 
+
+Round 2: Edge-Case Discovered Round 2 : Benchmark fib_edge_zero 
+
+(N = 0 , wrongly expected 0 but program has empty output). The benchmark is fixed. Those lines are tagged:      
+
+> failed_benchmark : < round2 > fib_edge_zero </ round2 > failure_output : < round2 > Expected ’’, got ’0\n ’ </ round2 >
+
+The caller does not guard against N = 0 before converting the argument to int. Actually, the root cause is subtler: the loop runs zero times for N = 0 and returns an empty list, which prints nothing. But the code passes sys.argv[1] without checking for negative input. 
+
+Round 3: Negative Input Round 3 : Benchmark fib_negative (N = −1,expected Error: N must be non-negative ). A guard clause (key c_ , newly inserted) is added at the call site.                         
+
+> 1import sys
+> 23def fibonacci ( n ) :
+> 4a , b=0 , 1
+> 5result =[]
+> 6for _in range ( n ) :
+> 7result . append ( a )
+> 8a , b=b , a+b
+
+16 Syed et. al. 
+
+Table 4. Excerpt of the code table for the Fibonacci experiment after round 3. Only rows with non-null history are shown. Position key ca was inserted in round 3. Key code_snippet failed_benchmark failure_output J import sys null null 
+
+def fibonacci(n): a, b = 0, 1 V ... first code disabled 
+
+k if n < 0: <r3>fib_neg...</r3> <r3>Exp. Error</r3> 
+
+print("Error...") else:                     
+
+> 9return result
+> 10 11 n=int ( sys . argv [1])
+> 12 if n<0: #key c_ : < round3 > fib_negative </ round3 >
+> 13 print ( " Error : ␣ N ␣ must ␣ be ␣ non - negative " )
+> 14 else :
+> 15 for xin fibonacci ( n ) :
+> 16 print ( x )
+
+Listing 1.2. Final Fibonacci program after 3 rounds of repair. Annotated lines show round-tag origin. 
+
+In the viewer, line 12 glows blue (one round tag). An auditor querying the database with:          
+
+> SELECT position_key , code_snippet , failed_benchmark FROM code WHERE failed_benchmark IS NOT NULL ;
+
+immediately learns that only the guard clause was added by the repair process; the rest of the algorithm was correct from the start. Table 4 shows a representative snapshot of the code table after round 3 of the Fibonacci experiment, illustrating how position keys, code, and history are stored together. (<r3> is short for <round3> in the table for space.) Key c_ lexicographically falls between c and d as required. The guard clause and its round-tag are co-located in a single row, making the provenance query a simple SELECT with no joins to auxiliary tables. 
+
+7.2 Case Study 2: Expression Evaluator, Parsing Complexity 
+
+The calc eval task required 6 iterations, the maximum observed in our evaluation, and exhibited the highest changed fraction (53.7%). Correctly evaluating 3 + 4 * 2 = 11 requires operator precedence, which naive evaluation violates. 
+
+Rounds 1–2: Replacing eval() The initial code used Python’s built-in eval() ,which correctly handles operator precedence for single-digit integers but fails the benchmark calc_precedence (expected 11, got 14 due to left-to-right step by TraceCoder: Auditable Code Generation 17 
+
+step evaluation of the string as-written). The benchmark exposed that eval() is forbidden (security policy injected by the fix LLM), leading to a Pratt-parser replacement. The 32-line parser spans rows with keys e–aa ; all these rows carry: 
+
+> < round2 > calc_precedence </ round2 >
+
+Rounds 3–4: Tokenizer Robustness The benchmarks calc_div_zero and 
+
+calc_nospaces revealed that the tokeniser assumed spaces around all operators. Lines 18–24 now show: 
+
+> < round3 > calc_div_zero </ round3 > < round4 > calc_nospaces </ round4 >
+
+These two round tags inform a reviewer that this part of the tokeniser was revised twice, for two distinct reasons. 
+
+Rounds 5–6 and Final State Benchmarks for unary minus and large-integer edge cases required two further repairs. The final program has 82 lines; 44 (53.7%) carry round tags. In the viewer, the parser core (lines 15–45 of the final file) appears predominantly red, providing at-a-glance evidence of its high-instability evolution. 
+
+7.3 Case Study 3: Roman Numerals, Cumulative Edge Cases 
+
+The Roman numeral converter converged in 4 iterations. The initial implementa-tion handled the standard subtractive notation but had subtle boundary bugs that the benchmark generator systematically discovered. The initial code (List-ing 1.3) used a look-up table with the subtractive pairs, but omitted the entry for 4 and had an off-by-one in the loop condition for 3999.                                                                    
+
+> 1import sys
+> 23VAL =[
+> 4(1000 , ’M ’) , (900 , ’ CM ’) , (500 , ’D ’) , (400 , ’ CD ’) ,
+> 5(100 , ’C ’) , (90 , ’ XC ’) , (50 , ’L ’) , (40 , ’ XL ’) ,
+> 6(10 , ’X ’) , (9 , ’ IX ’) , (5 , ’V ’) , (1 , ’I ’) ,
+> 7#missing : (4 , ’ IV ’)
+> 8]
+> 910 def to_roman ( n ) :
+> 11 result =’ ’
+> 12 for val , sym in VAL :
+> 13 while n>= val : #off - by - one : should be n>0
+> 14 result += sym
+> 15 n-= val
+> 16 return result
+> 17 18 n=int ( sys . argv [1])
+> 19 print ( to_roman ( n ) )
+
+Listing 1.3. Initial Roman numeral generator (round 0). The look-up table at line 3 omits the subtractive entry for 4 (IV) and the loop condition at line 10 has an off-by-one for N = 3999 .18 Syed et. al. 
+
+Round 2: The Case of 4 Benchmark roman_edge_four (N = 4 , expected IV ). The initial look-up table omitted the entry for 4, producing IIII . The updated table (lines 3–20) carries:      
+
+> failed_benchmark : < round2 > roman_edge_four </ round2 > failure_output : < round2 > Expected ’IV ’ , got ’ IIII ’ </ round2 >
+
+Round 3: Maximum Value Benchmark roman_max (N = 3999 , expected 
+
+MMMCMXCIX ). A boundary error caused premature loop termination; the loop condition was corrected. 
+
+Round 4: Zero and Negatives Benchmark roman_zero (N = 0 , expected 
+
+Error ). A guard clause was inserted. The final boundary-guard line carries: 
+
+> < round3 > roman_max </ round3 > < round4 > roman_zero </ round4 >
+
+This is a compact illustration of the TraceCoder promise: each edge case is permanently recorded against the code that handles it, making the program self-documenting in a way that traditional comments cannot achieve. 
+
+## 8 Discussion 
+
+The experiments surface both the promise and the current limits of TraceCoder. 
+
+8.1 Implications for Production Deployment 
+
+TraceCoder demonstrates that the iterative nature of LLM-driven repair is a 
+
+feature rather than a bug when the repair history is captured and stored. The round-tag mechanism provides lightweight requirement traceability : every code line is linked to the observable test evidence that motivated it. For production deployments: 
+
+– Audit trails. Compliance reviews query the database to retrieve the specific failures that caused any change, satisfying provenance requirements. 
+
+– Regression analysis. When a benchmark regresses, the round-tag history of affected lines immediately shows whether the regression stems from a previously-modified region. 
+
+– Trust calibration. The changed-snippet fraction (Chg%) is a natural un-certainty indicator: high Chg% signals imprecise initial generation. 
+
+– Onboarding. New developers reading auto-generated code can hover over any line in the viewer to see the test failure that put it there—a form of executable documentation. TraceCoder: Auditable Code Generation 19                                     
+
+> Table 5. Comparison of TraceCoder against alternative provenance approaches. ✓=fully satisfied; ∼= partially; ×= not supported. Approach Snippet SQL No Failure Viewer granularity queryable setup linked built-in TraceCoder ✓✓✓✓✓
+> Git commits ∼××××
+> Code comments ××✓∼×
+> XAI post-hoc ××××∼
+> Log files only ××✓✓×
+
+8.2 Comparison with Provenance Alternatives 
+
+Table 5 compares TraceCoder against four alternative approaches to code prove-nance, across five evaluation criteria. An alternative design commits to a Git repository after each round. Trace-Coder differs in three important ways: (1) granularity : Git tracks file-level hunks; TraceCoder tracks at sub-line resolution via position keys; (2) queryability : SQL queries over history require no external tooling; (3) coupling : code and provenance co-reside in the same row, eliminating the need to correlate a repository with an artefact store. Code comments (e.g. # added for fib_negative ) can capture intent at the point of writing, but they are easily forgotten, deleted during reformatting, and carry no structured representation that permits aggregation across files. XAI post-hoc methods [13, 1] explain model decisions but cannot explain code construction history . Plain log files capture the failure outputs but lose the association between a failure and the specific code snippet it motivated. 
+
+8.3 Threats to Evaluation Validity 
+
+Construct validity. We measure “fraction of snippets with round tags” as a proxy for explanation richness. A line can be tagged without the tag being informative (e.g., a formatting change). Conversely, some semantically critical lines may never be tagged if they were written correctly from the start. 
+
+External validity. Our 30 tasks are single-file Python programs of moderate complexity. The findings may not generalise to multi-file projects, to compiled languages with complex build systems, or to problems with more intricate cor-rectness specifications. 
+
+## 9 Conclusion 
+
+We have presented TraceCoder, an iterative coding agent that addresses the explainability, auditability, and traceability gap in current LLM-based code gen-eration. Our position-key versioning mechanism assigns stable, lexicographically-ordered identifiers to each code snippet, while the round-tag history protocol 20 Syed et. al. 
+
+accumulates structured provenance records in-place within a persistent SQLite store. A browser-based visualisation tool renders this history as heat-mapped, hover-annotated source code, making the entire repair narrative accessible to developers and auditors without any additional infrastructure. Our evaluation on the programming tasks using Gemini 2.0 Flash shows: 5.45 iterations on average; 20.7% of code snippets carry traceable history; mean database size of 46.8 KB. The history overhead (557% of raw code text) reflects Gemini’s verbose failure messages and is substantially lower with more concise providers such as Claude 3.5 Sonnet. Three detailed case studies show how the system explains which specific benchmark failures shaped each line of the final program, making auto-generated code self-documenting in a way that traditional comments cannot replicate. We argue that the ability to answer “why does this line of code look the way it does?” is not merely an academic nicety but a practical requirement for deploying AI coding agents in settings where accountability, correctability, and trust matter. TraceCoder is a concrete, deployable step toward meeting this requirement. The complete source code, all experiment problems, the browser viewer, and all experiment scripts are available in the accompanying repository 1.
+
+Acknowledgements. AI support was used for help with coding, related work search, as sounding board for our ideas, as assistant for drawing images, proposing versions of refined expressions and texts. The final text represents the expression choice, work, and ideas of the authors. We use Gemini, Grok, Groq, Claude, OpenAI, and DeepSeek. 
+
+## References                 
+
+> 1. Arrieta, A.B., Diaz-Rodriguez, N., Del Ser, J., et al.: Explainable artificial intelli-gence (XAI): Concepts, taxonomies, opportunities and challenges toward responsible AI. Information Fusion 58 , 82–115 (2020) 2. Chen, M., Tworek, J., Jun, H., Yuan, Q., et al.: Evaluating large language models trained on code. arXiv preprint arXiv:2107.03374 (2021) 3. Chen, X., Lin, M., Schaerli, N., Zhou, D.: Teaching large language models to self-debug. In: The Twelfth International Conference on Learning Representations (2024) 4. Falleri, J.R., Morandat, F., Blanc, X., Martinez, M., Monperrus, M.: Fine-grained and accurate source code differencing. In: Proceedings of the 29th ACM/IEEE International Conference on Automated Software Engineering. pp. 313–324 (2014) 5. Fluri, B., Wuersch, M., Pinzger, M., Gall, H.: Change distilling: Tree differencing for fine-grained source code change extraction. IEEE Transactions on Software Engineering 33 (11), 725–743 (2007) 6. Greenspan, D.: Fractional indexing (2020), https://observablehq.com/ @dgreensp/implementing-fractional-indexing
+> 7. Hou, X., Zhao, Y., Liu, Y., et al.: Large language models for software engineering: A systematic literature review. ACM Transactions on Software Engineering and Methodology 33 (8) (2024)
+> 1https://github.com/devfitcs/TraceCoder/
+
+TraceCoder: Auditable Code Generation 21 8. Jimenez, C.E., Yang, J., Wettig, A., et al.: SWE-bench: Can language models resolve real-world GitHub issues? In: The Twelfth International Conference on Learning Representations (2024) 9. Kazutaka, M.: Fractional indexer. https://github.com/kazu-2020/fractional_ indexer (2020), supports base-10, base-62, and base-94 character sets. 10. Le, H., Wang, Y., Gotmare, A.D., Savarese, S., Hoi, S.C.H.: CodeRL: Mastering code generation through pretrained models and deep reinforcement learning. Advances in Neural Information Processing Systems 35 , 21314–21328 (2022) 11. Li, Y., Choi, D., Chung, J., Kushman, N., et al.: Competition-level code generation with AlphaCode. Science 378 (6624), 1092–1097 (2022) 12. Madaan, A., Tandon, N., Gupta, P., et al.: Self-refine: Iterative refinement with self-feedback. In: Advances in Neural Information Processing Systems. vol. 36 (2023) 13. Molnar, C.: Interpretable machine learning. Lulu.com (2020) 14. Muniswamy-Reddy, K.K., Holland, D.A., Braun, U., Seltzer, M.: Provenance-aware storage systems. In: Proceedings of the 2006 USENIX Annual Technical Conference. pp. 43–56 (2006) 15. Nedelec, B., Molli, P., Mostefaoui, A., Desmontils, E.: LSEQ: an adaptive structure for sequences in distributed collaborative editing. In: Proceedings of the 2013 ACM Symposium on Document Engineering. pp. 37–46 (2013) 16. Osika, A.: GPT-Engineer: Generate an entire codebase given a prompt. https: //github.com/AntonOsika/gpt-engineer (2023) 17. Preguica, N., Marques, J.M., Shapiro, M., Letia, M.: A commutative replicated data type for cooperative editing. In: Proceedings of the 29th IEEE International Conference on Distributed Computing Systems. pp. 395–403 (2009) 18. Roziere, B., Gehring, J., Gloeckle, F., et al.: Code Llama: Open foundation models for code. arXiv preprint arXiv:2308.12950 (2023) 19. Shinn, N., Cassano, F., Gopinath, A., Narasimhan, K., Yao, S.: Reflexion: Language agents with verbal reinforcement learning. In: Advances in Neural Information Processing Systems. vol. 36 (2023) 20. Wang, X., Chen, Y., Yuan, L., et al.: Executable code actions elicit better LLM agents. In: Proceedings of the 41st International Conference on Machine Learning. pp. 50208–50232 (2024) 21. Yang, J., Jimenez, C.E., Wettig, A., et al.: SWE-agent: Agent-computer inter-faces enable automated software engineering. In: Advances in Neural Information Processing Systems. vol. 37 (2024)
