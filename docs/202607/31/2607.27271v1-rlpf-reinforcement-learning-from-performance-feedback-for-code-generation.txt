@@ -1,0 +1,641 @@
+Title: RLPF: Reinforcement Learning from Performance Feedback for Code Generation
+
+URL Source: https://arxiv.org/pdf/2607.27271v1
+
+Published Time: Fri, 31 Jul 2026 00:02:31 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# RLPF: Reinforcement Learning from Performance Feedback for Code Generation 
+
+## Huihao Jing , Haozhe Cui , Wenbin Hu , Shaojin Chen , Haochen Shi , Changxuan Fan ,Yuxuan Liu , Hanyu Yang , Sirui Zhang , Ziyi Chen , Haoran Li ∗, Yangqiu Song 
+
+The Hong Kong University of Science and Technology (HKUST), New York University (NYU), 
+
+Southwest University of Political Science and Law (SWUPL), Hong Kong University, MODEIO.AI hjingaa@connect.ust.hk 
+
+Abstract 
+
+Code models are increasingly trained with execution feed-back, but most training signals still stop at correctness. This leaves an important gap for systems code: two programs can pass the same tests while differing greatly in runtime. We study how to train code agents to prefer faster correct imple-mentations, rather than treating efficiency only as an evalu-ation metric. The key difficulty is that runtime is a fragile reward. It is meaningful only after a program is correct, varies across tasks, and gives little guidance when most sampled programs fail to compile or run. We propose RLPF , rein-forcement learning from performance feedback, which turns execution outcomes into a staged reward. Failed programs are ordered by execution progress, while correct programs are ranked by their relative improvement from the baseline to-ward the expert reference. This gives useful feedback before correctness and performance-sensitive feedback after correct-ness. Fine-tuning Qwen3-32B with RLPF on PerfCodeBench raises correct-and-runnable solutions from 11 .1% to 54 .6% 
+
+and improves relative efficiency from 8.1% to 38 .6% . The trained model becomes competitive with stronger open-weight systems, and its optimization behavior transfers modestly to EffiBench-X. Additional studies show that model-generated references provide useful but weaker supervision, and that the full composite reward is more reliable than correctness-only or runtime-only baselines. These results suggest that code agents can be trained not only to pass tests, but also to optimize the programs they write. 
+
+Code — https://github.com/HKUST-KnowComp/RLPF 
+
+Models — https://huggingface.co/Egbertjing/RLPF-Qwen3-32B-PerfCodeBench 
+
+## Introduction 
+
+Large language models (LLMs) have become capable code generators. Frontier systems such as Claude Code (Anthropic 2026) and Codex agents (OpenAI 2026), together with a growing line of agentic software-engineering research (Yang et al. 2024; Wang et al. 2025), can navigate repositories, run tests, and repair their own outputs. Correctness-oriented benchmarks, from function-level synthesis to repository-scale issue resolution (Jimenez et al. 2024; Jain et al. 2025; Zhuo et al. 2025), have therefore made executable cor-rectness the central measure of code-model progress. For 
+
+> ∗
+
+Corresponding author. 
+
+performance-critical code, this is only a partial goal. A pro-gram that passes all tests may still be unusable if it is much slower than a simple baseline or far from an optimized imple-mentation. Recent efficiency-oriented studies (Huang et al. 2024; Du et al. 2024; Qiu et al. 2025; Liu et al. 2024; Qing et al. 2025; Ouyang et al. 2025; Peng et al. 2025; Jing et al. 2026) show this gap clearly: strong models can often produce correct programs, but their solutions still fail to match expert runtimes. As code agents are used in more realistic software workflows, the question is no longer only whether they can write working code. It is whether they can learn to prefer bet-ter working code. This makes performance a natural target for reinforcement learning, but not a simple one. Runtime is an execution-based signal. It can be observed only after the generated program is valid, runs, and passes the oracle. It also has task-dependent scale: a one-second improvement on one problem and a one-millisecond improvement on an-other do not carry the same meaning. A naive runtime or speedup reward therefore gives unstable supervision across heterogeneous tasks. The problem is sharper under group-relative policy optimization (GRPO) (Shao et al. 2024). If every rollout in a group fails before correctness, runtime cannot provide a useful ordering, and the policy receives little signal exactly when training is hardest. We propose RLPF , reinforcement learning from perfor-mance feedback. The main idea is to reward the execution process in stages. Before correctness, RLPF orders failed programs by how far they progress through the executable pipeline, from extraction and compilation to execution and oracle checking. After correctness, it ranks programs by how much of the baseline-to-reference performance gap they close. This design gives the policy two kinds of feedback in one training run: progress feedback for failed programs, and efficiency feedback for correct programs. It also makes performance comparable across tasks by measuring improve-ment relative to the task’s own baseline and expert reference. We instantiate RLPF on PerfCodeBench. On the family-disjoint test split, RLPF raises a weak base model from 
+
+11 .1% to 54 .6% correct-and-runnable rate and from 8.1% 
+
+to 38 .6% CGRE. The improvement is not merely correct-ness inflation: most correct outputs also beat the baseline. The trained model becomes competitive with stronger open-weight systems, while a clear gap to expert references and proprietary frontier models remains. We further test a weaker, arXiv:2607.27271v1 [cs.LG] 29 Jul 2026 distillation-like setting where GPT-5.4 outputs serve as per-formance references; these references help, but are less stable than curated expert implementations. Finally, reward base-lines, component ablations, and EffiBench-X transfer results show that the full reward is more reliable than correctness-only or runtime-only supervision and that the learned pref-erence for faster correct code partly transfers beyond the training benchmark. Our contributions are as follows: 
+
+• We formulate performance as a trainable objective for code agents. RLPF moves beyond test passing by rewarding correct programs according to their efficiency relative to a baseline and an expert reference. 
+
+• We introduce a staged reward for heterogeneous ex-ecution outcomes. The reward provides progress feed-back before correctness and performance feedback after correctness, avoiding the sparse signal of naive runtime rewards. 
+
+• We show that performance feedback changes model behavior. RLPF substantially improves Qwen3-32B on PerfCodeBench, transfers modestly to EffiBench-X, and controlled studies identify both the value and the limits of model-generated references, simple reward baselines, and reward components. 
+
+## Related Work 
+
+LLM Code Generation. 
+
+Large language models have made rapid progress in code generation, from function-level synthesis to competitive programming and software-engineering workflows. This progress has been shaped by executable benchmarks such as HumanEval and EvalPlus (Chen et al. 2021; Liu et al. 2023a), MBPP (Austin et al. 2021), APPS (Hendrycks et al. 2021), LiveCodeBench (Jain et al. 2025), and SWE-bench (Jimenez et al. 2024), which evaluate generated code through unit tests, execution, or realistic repository-level tasks. Recent benchmarks further move toward practical developer set-tings; DevBench (Kumarappan et al. 2026), for example, is a telemetry-driven and developer-informed benchmark covering realistic code-completion scenarios. As a result, functional correctness has become the default measure of code quality, and much follow-up work focuses on improving test passing through execution feedback, self-debugging, re-trieval, multi-agent collaboration, or test-time scaling. How-ever, passing tests is not enough for performance-critical code: two correct programs can differ greatly in runtime, memory use, and hardware efficiency. PIE, PerfCodeGen, EffiPair, and PhyloEvolve use execution feedback or paired edits to produce faster implementations (Shypula et al. 2023; Peng et al. 2024; Hajizadeh and Jana 2026; Zhao et al. 2026). Efficiency benchmarks now cover general-purpose languages and GPU kernels (Du et al. 2024; Qiu et al. 2025; Liu et al. 2024; Qing et al. 2025; Ouyang et al. 2025; Jing et al. 2026). EffiCoder shows that SFT on curated optimized solutions can improve correctness and efficiency (Huang et al. 2025). RLPF instead uses online RL, combining failure-stage feed-back with correctness-gated, task-normalized performance rewards. 
+
+Reinforcement Learning for Code. 
+
+Reinforcement learning has recently emerged as an important post-training paradigm for code LLMs, especially through reinforcement learning with verifiable rewards (RLVR) (Le et al. 2022; Liu et al. 2023b; Yu et al. 2024; Shen et al. 2023; Guo et al. 2025). In code generation, verifiable rewards are typically derived from execution results, allowing models to optimize directly against executable correctness signals. Re-cent work extends this paradigm in several directions. RLEF trains models to use execution feedback during code synthe-sis (Gehring et al. 2024). CodeRL+ augments sparse pass/-fail rewards with execution-semantics alignment (Jiang et al. 2025). CodeScaler uses learned reward models to reduce re-liance on online execution (Zhu et al. 2026). Other studies ex-plore offline RL (Wu et al. 2026b), verification feedback for small models (Skopin and Kotelnikov 2026), collaborative multi-agent RL (Dou et al. 2026), and synthetic-data-driven code RL (Wu et al. 2026a). Despite this progress, code RL remains largely correctness-centric: rewards usually separate correct pro-grams from incorrect ones, while efficiency is left as a post-training evaluation metric. Such training improves test pass-ing, but does not teach models to prefer faster correct imple-mentations. RLPF addresses this gap by treating efficiency as a first-class verifiable signal, extending RL for code from verifiable correctness to verified optimization. 
+
+Speedup Rewards for Code Optimization. 
+
+A natural way to add performance feedback is to use run-time improvement, speedup, throughput, or hardware uti-lization as the reward. Several recent optimization-oriented systems follow this idea. Wei et al. (Wei et al. 2025) study RL for assembly code optimization and compare correctness-guided speedup with a speedup-only reward. CUDA-L1 (Li et al. 2025) trains LLMs for CUDA kernel optimization with speedup-based rewards. Mikasa et al. (Mikasa et al. 2026) use real-machine GFLOPS feedback as the reward for online GRPO in HPC code generation. MaxCode (Ou et al. 2026) similarly treats execution performance as the central signal during candidate search. These works show that performance feedback can improve code optimization. However, they usually use the final mea-sured performance of a candidate program, such as speedup, runtime, throughput, or GFLOPS, as the main reward signal. This is effective when tasks are specialized and comparable, but it becomes unstable for general code generation. Differ-ent tasks have different runtime scales, optimization margins, and failure modes, so raw performance values are difficult to compare across problems. More importantly, they provide little useful signal when a program fails to compile, execute, or pass tests. RLPF therefore uses performance feedback only after building a denser execution-state signal. It first shapes compilation, execution, and correctness outcomes, and then ranks correct programs by relative efficiency. This preserves the benefit of speedup-based optimization while making the reward more stable across heterogeneous execu-tion outcomes. Train LLMs with RLPF 
+
+RLPF is based on the principle that code-performance train-ing should reward the entire execution process, rather than treating performance as a single terminal scalar. A gen-erated program must first be extractable, compilable, ex-ecutable, and correct before runtime efficiency becomes meaningful. Therefore, RLPF separates reward design into two regimes. In the failure regime , the reward measures exe-cution progress: how far an incorrect rollout moves through the execution pipeline. In the success regime , the reward mea-sures relative performance: how efficient a correct rollout is compared with the task baseline and expert reference. This design lets RLPF provide learning signal even before correct-ness, while still optimizing performance once correctness is achieved. We optimize the policy with group-relative policy opti-mization (GRPO) (Schulman et al. 2017; Shao et al. 2024). GRPO compares multiple rollouts from the same prompt, so the reward must induce a meaningful ordering among candidate programs. In RLPF, this ordering is defined by execution outcomes rather than by a single runtime scalar. Failed rollouts are ranked by how far they progress through the execution pipeline, while correct rollouts are ranked by their performance improvement relative to the task baseline and expert reference. This lets the same reward structure cover the full outcome space, from invalid generations to optimized correct programs. 
+
+Problem Setup 
+
+We consider performance-oriented code generation. Each task i provides a natural-language problem description, a required function signature, a baseline implementation, an expert reference implementation, and an executable test har-ness. The baseline implementation defines a valid but unop-timized starting point, while the expert reference is a stronger implementation written by human experts and serves as the target performance level. Given the problem description, the model generates a candidate program. The harness then eval-uates the candidate through the execution pipeline: it ex-tracts the generated code, compiles it when needed, executes it, checks oracle tests, and measures runtime. If the candi-date passes the tests, its runtime is compared with both the baseline and the expert reference to measure the model’s performance-improvement ability. 
+
+Success-Mode Reward: Relative Efficiency 
+
+For task i, let T ib , T ir , and T ic denote the median wall-clock runtime of the baseline implementation, the expert reference, and the candidate program. Let Ci ∈ { 0, 1} indicate whether the candidate passes all oracle tests. For correct programs, we score efficiency using three signals: 
+
+FBR i = Ci · 1T ic < T ib
+
+ , (1) 
+
+RBR i = Ci · 1T ic ≤ T ir
+
+ , (2) 
+
+CGRE i = Ci · clip 
+
+ T ib − T ic
+
+T ib − T ir
+
+, 0, 1
+
+
+
+. (3) FBR indicates whether the candidate is faster than the baseline. RBR indicates whether it reaches or beats the expert reference. CGRE is the dominant continuous term: it mea-sures how much of the baseline-to-reference performance gap the candidate closes. Unlike raw runtime or raw speedup, CGRE is normalized by the task-specific optimization gap, making it more comparable across tasks with different run-time scales and optimization margins. The success-mode reward is 
+
+Rsucc  
+
+> i
+
+= CGRE i + αF FBR i + αRRBR i. (4) We use αF = 0 .16 and αR = 0 .10 . CGRE remains the main efficiency signal, while FBR and RBR provide small bonuses for crossing important performance thresholds. 
+
+Failure-Mode Reward: Execution Progress 
+
+The success-mode reward is only meaningful for correct pro-grams. However, in early training, especially on hard systems tasks, most rollouts may fail before correctness. If failed roll-outs are not distinguished, GRPO receives an overly sparse reward signal: most early samples collapse to the same failure value, making it hard for the policy to learn which genera-tions are closer to correctness. RLPF therefore assigns failed rollouts a separate shaping reward based on their execution state. We use four pre-correct failure modes, σ ∈ NX , NC , NR , WO , where NX means no extractable program, NC means no compilation, NR means no successful execution, and WO means wrong output af-ter execution. These states form a natural progress order: producing parseable code is better than producing no code; compiling is better than failing to compile; running is better than crashing; and producing a wrong answer is closer to success than failing earlier. We encode this order as 
+
+s(σ) = 
+
+
+
+−0.05 , σ = NX ,
+
+0.00 , σ = NC ,
+
++0 .05 , σ = NR ,
+
++0 .10 , σ = WO .
+
+(5) This failure-mode reward does not optimize speed directly. Instead, it teaches the model to climb the execution pipeline until correctness becomes reachable. 
+
+Final Reward Staircase 
+
+The final reward combines the two regimes with an explicit gap between failure and success. For failed rollouts, RLPF uses the failure-mode shaping reward directly. For correct rollouts, RLPF uses the larger value between the success-mode efficiency reward and a correctness floor: 
+
+Ri =
+
+s(σi), Ci = 0 ,
+
+max {s(WO) + ϵ, R succ  
+
+> i
+
+} , Ci = 1 . (6) Here s(WO) is the highest pre-correct reward, and ϵ > 0
+
+creates a strict gap between the best failed rollout and the worst correct rollout. In our implementation, s(WO) = 0 .10 
+
+and ϵ = 0 .05 , so every correct program receives at least 0.15 ,even if it does not improve over the baseline. This produces the following reward staircase: 
+
+NX < NC < NR < WO < correct 
+
+< faster-than-baseline < reference-or-better . (7) binary correctness reward 
+
+RLVR       
+
+> Candidate Program
+> yi∼πθ(⋅ ∣ x)
+> Execute & Evaluate
+> compile / test / time
+> passes?
+> Nfail
+> R= 0
+> Y
+> R= 1
+> Correct solutions are indistinguishable;
+> the reward is invariant to efficiency.
+> absolute runtime ratio
+
+Speedup Reward           
+
+> Candidate Program
+> yi∼πθ(⋅ ∣ x)
+> Execute & Evaluate
+> compile / test / time
+> passes?
+> Nfail
+> R= 0
+> Y
+> Time candidate Tm
+> against baseline Tb
+> R= clip(1 − Tm
+> Tb, 0, 1)
+> Failed rollouts provide no learning signal,
+> while reward scales can vary across tasks.
+> correctness-gated relative efficiency
+
+RLPF (Ours)                                         
+
+> shaping ladder
+> Candidate Program
+> yi∼πθ(⋅ ∣ x)
+> Y
+> extracts?
+> NNX
+> −0.05
+> Y
+> compiles?
+> NNC
+> 0.00
+> Y
+> executes?
+> NNR
+> +0.05
+> Y
+> passes?
+> NWO
+> +0.10
+> Y
+> CGRE
+> relative efficiency
+> +αFFBR
+> faster than baseline
+> +αRRBR
+> reaches reference
+> R= max( CGRE + αFFBR + αRRBR, sWO +ε)
+> NX NC NR WO correct
+> (low →high perf.)
+> rollout outcome ⟶stronger performance
+> 0.0
+> 0.5
+> 1.0
+> reward
+> reward vs. performance
+> NX NC NR WO correct
+> (low →high perf.)
+> rollout outcome ⟶stronger performance
+> reward vs. performance
+> NX NC NR WO correct
+> (low →high perf.)
+> rollout outcome ⟶stronger performance
+> reward vs. performance
+
++ε
+
++αFFBR 
+
++αRRBR 
+
+CGRE 
+
+From correctness-only rewards to correctness-gated performance feedback Figure 1: From correctness-only rewards to correctness-gated performance feedback. RLVR rewards correctness alone and cannot distinguish fast correct programs from slow correct programs. A naive speedup reward uses runtime improvement as the main signal, but provides little feedback before correctness. RLPF decomposes execution outcomes into an ordered reward structure: failed rollouts receive staged shaping feedback, while correct rollouts are ranked by correctness-gated relative efficiency. The first part of the staircase ranks failed programs by ex-ecution progress, while the second part ranks correct pro-grams by efficiency. Thus, RLPF provides dense feedback before correctness and performance-sensitive feedback af-ter correctness, while ensuring that correctness remains the boundary between the two regimes. 
+
+## Experiment Setup 
+
+Benchmarks and Evaluation Protocol 
+
+We use PerfCodeBench (Jing et al. 2026) for both training and in-distribution evaluation. It matches the setting targeted by RLPF: each task asks the model to produce a drop-in im-plementation, which is then checked for correctness and com-pared with a baseline and an expert reference for efficiency. We train on the 1,413 tasks in the PerfCodeBench train split and evaluate on the family-disjoint test split of 306 tasks. The benchmark covers C, C++, CUDA, Go, Java, and Python. We also evaluate out of distribution on the C++, Python, Java, Go, and JavaScript subset of EffiBench-X (Qing et al. 2025). No EffiBench-X data is used during training. Because it does not use the same baseline-reference setup as PerfCodeBench, we treat it as a transfer test: we report Pass@1 for correctness, and for efficiency we compare the trained model with the base model only on problems both solve, using geometric-mean improvement and win rate. 
+
+Metrics 
+
+For PerfCodeBench, we report CRR, FBR, RBR, CGRE, and CGRE ≥0.8. The last metric is the percentage of all test tasks—not only the correctly solved subset—on which a correct candidate closes at least 80% of the baseline-to-reference performance gap, i.e., CGRE i ≥ 0.8. Together, these metrics separate correctness, improvement over the baseline, expert-level performance, and the fraction of the expert gap that is closed. For EffiBench-X, we use a separate protocol because it does not provide the same baseline-reference setup as Perf-CodeBench. For each shared problem k, let ρk be the ratio between the base-model measurement and the trained-model measurement, so ρk > 1 means the trained model improves over the base model. We summarize the paired improvement by the geometric mean: 
+
+∆ = exp 1
+
+N
+
+> N
+
+X
+
+> k=1
+
+ln ρk
+
+!
+
+− 1, (8) We report ∆ as a percentage for execution time (ET) and memory integral (MI), together with the ET win rate, i.e., the fraction of shared problems on which the trained model is faster than the base model. 
+
+Training Setup 
+
+Our policy model is Qwen3-32B (Yang et al. 2025), fine-tuned with GRPO (Shao et al. 2024) and LoRA (Hu et al. 2022) under the RLPF reward. For each prompt, the policy samples G = 8 candidate programs, which are then scored by the same executable harness used in evaluation. The reward is the composite objective in Eqs. 4–6, with αF = 0 .16 
+
+and αR = 0 .10 . We keep the base model frozen. The full RLPF model, reward baselines, and ablation variants are each trained for five epochs. During training, runtime is measured once; during evaluation, we report the median of K = 3 
+
+runs. 
+
+Baseline and Ablation Setup 
+
+We use the same model, training split, decoding setting, and evaluation harness for all reward baselines and abla-tions. The goal is to isolate the training signal, so we do not change the base model or the test protocol across variants. We first include two simple reward baselines. The runtime-only baseline replaces the full reward with a naive runtime signal. The RLVR baseline uses a binary correctness reward: a rollout receives reward only for passing the oracle, with no performance term and no failure-mode shaping. We then run component ablations that remove one part of the com-posite reward at a time: the faster-than-baseline bonus, the reference-or-better bonus, or the failure-mode shaping lad-der. Together, these runs test whether RLPF works because of one dominant term or because the terms provide comple-mentary feedback. For the model-generated reference experiment, we keep the RLPF reward structure but replace the expert reference target with a verified GPT-5.4 candidate when one is avail-able. The teacher candidate must pass the same correctness oracle before its measured runtime is used as the reference. This variant tests a weaker data setting, where performance supervision comes from a strong model rather than from a curated expert implementation. 
+
+Checkpoint Selection 
+
+For every model, including the full RLPF recipe, reward baselines, and ablation variants, we select the checkpoint at the exponential-moving-average (EMA) peak of its training reward curve. This unified criterion compares each variant near its own best observed training point rather than at an arbitrary step. All models are decoded with thinking disabled, matching the training regime. No EffiBench-X data is used during training. 
+
+## Experiment Results 
+
+Table 1 reports the PerfCodeBench test-split leaderboard. We first compare the full RLPF recipe against the Qwen3-32B 
+
+base model and against strong general-purpose systems. 
+
+RLPF changes the failure regime 
+
+The base Qwen3-32B model is a weak starting point for Per-fCodeBench. It often fails before runtime can be measured, reaching only 11 .1% CRR. RLPF raises the same frozen base model with a LoRA adapter to 54 .6% CRR and 38 .6 CGRE. This is not a small score shift. It changes the dominant failure mode: the model moves from mostly failing the executable pipeline to producing usable implementations on a large part of the family-disjoint test split. This is important because performance feedback is only meaningful after several ear-lier steps succeed. A candidate must be extracted, compiled or loaded, run without crashing, and pass the oracle before its runtime can be interpreted. RLPF improves this whole path. It does not simply make already-correct programs faster; it moves many samples into the part of the search space where efficiency can be optimized at all. This helps explain why a small adapter can have a large effect on a difficult systems benchmark. 
+
+Correctness gains are coupled with speed gains 
+
+The improvement is not just more runnable code. The RLVR baseline is the clearest contrast: it reaches 50 .0% CRR, close to RLPF, but only 31 .7% FBR and 29 .0 CGRE. In other words, correctness-only training can teach the model to pass the harness, but many of those passing programs remain slow. RLPF has a similar correctness level but much higher efficiency, with roughly 85% of its correct solutions beating the baseline. This coupling between correctness and speed is the main evidence that the reward changes the model’s pref-erence among correct implementations. The model learns that passing tests is not the endpoint. Among passing pro-grams, it favors implementations that remove unnecessary work, use tighter loops, choose better primitives, or reduce data movement. 
+
+Efficiency training improves model ranking 
+
+RLPF also changes how the 32B model compares to stronger general-purpose systems. The trained model clearly sur-passes its base model and outperforms Qwen3.6-Plus and Gemini 3.1 Pro on the main PerfCodeBench metrics. It is also close to Gemma-4-26B-A4B-IT: Gemma solves more tasks, but RLPF has slightly higher FBR and similar RBR. This suggests that performance-specific RL can recover part of the gap to stronger pretrained models, especially on tasks where the base model can already reach a valid implementa-tion. The comparison also shows what RLPF does not solve. GPT-5.4, Claude Opus 4.5, and DeepSeek-V4-Pro remain clearly ahead, especially on RBR. These models not only pro-duce more correct programs, but their correct programs also reach the expert reference more often. Thus RLPF improves the optimization policy of a weaker model, but it does not remove the value of broader pretrained competence, stronger code priors, and better task understanding. Model CRR FBR RBR Slow/CRR Gap/FBR CGRE CGRE ≥0.8 
+
+Ours: Qwen3-32B + GRPO on PerfCodeBench 
+
+RLPF-32B 54 .58 46 .41 25 .82 14 .97 44 .37 38 .58 37 .25 
+
+RLPF w. GPT-5.4 reference 50 .33 42 .81 25 .49 14 .94 40 .46 36 .53 35 .29 
+
+w/o FBR 40 .52 32 .03 18 .30 20 .95 42 .87 25 .44 23 .20 
+
+w/o RBR 39 .87 31 .05 19 .61 22 .12 36 .84 25 .14 23 .53 
+
+w/o shaping 39 .54 31 .05 18 .95 21 .47 38 .97 24 .22 22 .22 
+
+Runtime reward only 37 .91 31 .70 17 .65 16 .38 44 .32 24 .66 22 .55 
+
+RLVR correctness only 50 .00 31 .70 16 .34 36 .60 48 .45 28 .98 28 .43 
+
+Qwen3-32B (base, no RL) 11 .11 8.17 5.56 26 .46 31 .95 8.11 8.17 
+
+Frontier and strong general-purpose models 
+
+GPT-5.4 78 .10 63 .07 50 .65 19 .24 19 .69 56 .24 55 .23 
+
+Claude Opus 4.5 65 .03 53 .59 39 .87 17 .59 25 .60 45 .59 43 .79 
+
+Gemini 3.1 Pro (preview) 34 .64 30 .07 23 .20 13 .19 22 .85 26 .47 26 .14 
+
+DeepSeek-V4-Pro 64 .38 55 .56 49 .02 13 .70 11 .77 49 .83 48 .04 
+
+Qwen3.6-Plus 46 .73 38 .24 21 .90 18 .17 42 .73 32 .93 31 .70 
+
+Qwen3.6-Max (preview) 43 .14 35 .29 16 .67 18 .20 52 .76 30 .40 29 .74 
+
+Gemma-4-26B-A4B-IT 59 .80 45 .42 26 .47 24 .05 41 .72 39 .65 37 .25 
+
+Gemma-4-31B-IT 49 .67 37 .25 18 .63 25 .01 49 .99 32 .87 32 .35 
+
+Table 1: PerfCodeBench test split leaderboard on 306 family-disjoint tasks. All values are percentages. CRR is correct-and-runnable; FBR (faster-than-baseline) and RBR (reference-or-better) are nested within CRR. Slow/CRR = (CRR − FBR) /CRR 
+
+is the percentage of correct solutions that are not faster than the baseline; Gap/FBR = (FBR − RBR) /FBR is the percentage of faster-than-baseline solutions that still trail the expert reference. Lower values are better for both conditional rates. Our RLPF 
+
+variants are highlighted, including one variant that uses a verified GPT-5.4 candidate as the performance reference. Reward studies include component removals and simple correctness-only or runtime-only baselines. Best results are shown in bold .
+
+Baseline improvement and reference matching are different regimes 
+
+The table separates two levels of efficiency. FBR measures whether a correct candidate beats the baseline. RBR mea-sures whether it reaches the expert reference. RLPF improves both, but the gains are not equally strong. Its Gap/FBR rate is 44 .4% : among solutions that beat the baseline, a substan-tial share still trails the expert reference. This difference is expected. Beating a baseline can often be achieved with lo-cal cleanup, less redundant work, better loop structure, or a simple library call. Matching the reference is harder. It may require a different algorithm, a specific memory layout, a par-allel schedule, or careful use of the GPU or cache hierarchy. RLPF makes clear progress on the first regime and starts to improve the second, but reference-level optimization remains the main bottleneck. 
+
+The metric breakdown reveals where progress is concentrated 
+
+The metric columns are useful because they prevent a single leaderboard score from hiding the shape of the improve-ment. CRR shows whether the model reaches the correct-and-executable region. FBR shows whether those correct solutions are actually useful relative to the provided base-line. RBR and CGRE then distinguish partial speedups from expert-level ones. Under this breakdown, RLPF’s strongest movement is from non-runnable or merely correct code to-ward faster-than-baseline code. Its weaker movement is from faster-than-baseline code to reference-or-better code. This gives a concrete diagnosis for future work: the reward already teaches the model to search for optimization opportunities, but more pressure or stronger initialization is needed near the expert ceiling. 
+
+## Ablation and Transfer Studies 
+
+We next study why the method works and how far the learned behavior transfers. We vary the performance ref-erence, ablate the reward components, and evaluate on an out-of-distribution benchmark. 
+
+Model-Generated Performance References 
+
+Expert references provide a clean performance target, but they also require strong benchmark construction. Each task needs a reliable optimized implementation, a stable harness, and enough runtime gap to define meaningful feedback. We therefore test a weaker data setting: can RLPF still work when the reference comes from a strong model rather than from an expert implementation? To study this, we first run GPT-5.4 on the training tasks. When its candidate is correct, we use that candidate’s measured runtime as the reference target in the RLPF reward. This variant answers a practical question: can a frontier model provide useful performance supervision when expert references are unavailable? The answer is partly yes. The GPT-5.4-reference variant reaches 50 .3% CRR and 
+
+36 .5% CGRE, close to full RLPF, and it is also close on RBR. However, it still loses correctness and faster-than-baseline rate. Model-generated references are useful, but they are less uniform than expert references. They only help on tasks the 0 250 500 750 1000 1250 1500 1750                
+
+> Training step
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> 0.30
+> 0.35
+> Group-mean reward
+> Reward dynamics under varying reward shape (TB EMA, α = 0.99)
+> Rfull =CGRE + α FFBR + α RRBR +shape
+> Rruntime = 1 − T model /T base
+> Rfull w.o. FBR
+> Rfull w.o. RBR
+> Rfull w.o. shape
+> 0.22
+> 0.20
+> 0.19
+> 0.17
+> 0.11
+
+Figure 2: Training dynamics under each reward’s native scale (TensorBoard group-mean reward, EMA-smoothed, 
+
+α=0 .99 ). The curves illustrate within-run optimization be-havior and stability; their absolute magnitudes are not directly comparable across reward definitions. All variants improve early and remain bounded without sustained collapse. teacher solves correctly, and the teacher’s code may still miss task-specific optimizations. 
+
+Reward Baselines and Component Ablations 
+
+We then isolate the reward itself. Table 1 includes two simple reward baselines and three component ablations, all trained with the same model, data, seed, and optimizer. Point es-timates favor the full reward but cannot establish compo-nent necessity. RLVR obtains high correctness as a base-line, but its conditional Slow/CRR rate is 36 .6% , compared with 15 .0% for RLPF. Thus, a substantially larger fraction of RLVR’s correct programs fail to improve over the baseline. The runtime-only baseline has the opposite problem: it di-rectly targets speed, but its training signal is sparse and noisy because raw runtime is useful only after correctness and has task-dependent scale. Figure 2 diagnoses within-run behavior rather than com-paring reward values. All trajectories rise rapidly and then fluctuate within bounded ranges, without sustained collapse. On its native scale, the full reward improves through most of training but recedes after a late peak, making checkpoint selection important. The ablations stabilize earlier, and the late spike without shaping is transient. Runtime-only train-ing also remains bounded, so its lower value is not evidence of inferior optimization. Because the scales differ and the plot does not report zero-variance rollout groups, we do not compare absolute heights. Cross-variant quality is instead evaluated with the common test metrics in Table 1. 
+
+Out-of-Distribution Transfer 
+
+Finally, we test whether the learned behavior is tied to the Per-fCodeBench harness. We evaluate a five-language EffiBench-X subset with no task overlap with training. All models are decoded with thinking disabled, and each trained model is compared with the same base model under the same protocol. Correctness changes little on EffiBench-X, so the main signal is efficiency on shared solved problems. Full RLPF improves execution time by 3.9% in geometric mean and wins on 
+
+57 .9% of paired problems. These are the most consistently positive point estimates among the tested reward variants, 
+
+Reward ∆ET (%) Win (%) ∆MI (%) 
+
+RLPF (full) +3.9 57.9 +4.3 
+
+w/o FBR -0.3 54.5 0.0 w/o RBR -0.3 51.6 -0.3 w/o shape -2.9 50.5 -2.0 runtime only +1.1 50.9 +1.0 
+
+Table 2: Out-of-distribution efficiency on EffiBench-X (five evaluated languages). Each row is a paired comparison against the base model on the problems both solve: ∆ET / 
+
+∆MI are the per-problem geometric-mean improvements in execution time and memory integral (higher = better), and Win is the fraction of problems faster than base. Full RLPF shows the most consistent positive point estimates, while the evidence for transfer remains modest. Largest point estimates are shown in bold .but the gain is modest and the table does not establish sta-tistical significance. Overall, the results provide preliminary evidence of transfer beyond PerfCodeBench, not proof that every reward component is necessary for out-of-distribution generalization. 
+
+## Conclusion 
+
+Passing tests is only the first step for systems code. Once a program is correct, the harder question is whether the model can prefer the implementation that uses less time and bet-ter matches an optimized reference. This requires feedback that is executable, comparable across tasks, and still useful before the model reaches correctness. RLPF provides such feedback by connecting execution progress with performance improvement. On PerfCodeBench, this changes Qwen3-32B from a model that rarely reaches the measurable regime into one that solves and speeds up many tasks: CRR rises from 
+
+11 .1% to 54 .6% , and CGRE rises from 8.1% to 38 .6% . The same pattern appears in the ablations and, more modestly, in out-of-distribution transfer: the trained model not only passes more tests but also produces faster correct code more often. The next challenge is to move from useful speedups to expert-level implementations. RLPF narrows this gap, but does not close it. Stronger reference signals and better pres-sure near the expert ceiling are therefore the natural next step. 
+
+## Limitations 
+
+RLPF relies on executable feedback, so its quality depends on the benchmark harness, correctness oracle, and runtime measurements. Repeated evaluation and relative metrics re-duce noise, but timing and benchmark test suites remain im-perfect for heterogeneous systems tasks (Le et al. 2026). The method also requires a meaningful performance gap between the baseline and expert reference; weak or unavailable refer-ences provide less useful reward. RLPF finds useful speedups more reliably than it matches expert implementations, which often require algorithmic, memory-layout, parallelization, or hardware-specific changes that scalar feedback alone may not reveal. Finally, modest out-of-distribution gains indicate only partial transfer beyond PerfCodeBench. References 
+
+Anthropic. 2026. Claude Code: Overview. https://code. claude.com/docs/en/overview. Accessed July 27, 2026. Austin, J.; Odena, A.; Nye, M.; Bosma, M.; Michalewski, H.; Dohan, D.; Jiang, E.; Cai, C.; Terry, M.; Le, Q.; and Sutton, C. 2021. Program Synthesis with Large Language Models. 
+
+arXiv preprint arXiv:2108.07732 .Chen, M.; Tworek, J.; Jun, H.; Yuan, Q.; Pinto, H. P. d. O.; Kaplan, J.; Edwards, H.; Burda, Y.; Joseph, N.; Brockman, G.; Ray, A.; Puri, R.; Krueger, G.; Petrov, M.; Khlaaf, H.; Sastry, G.; Mishkin, P.; Chan, B.; Gray, S.; Ryder, N.; Pavlov, M.; Power, A.; Kaiser, L.; Bavarian, M.; Winter, C.; Tillet, P.; Such, F. P.; Cummings, D.; Plappert, M.; Chantzis, F.; Barnes, E.; Herbert-Voss, A.; Guss, W. H.; Nichol, A.; Paino, A.; Tezak, N.; Tang, J.; Babuschkin, I.; Balaji, S.; Jain, S.; Saunders, W.; Hesse, C.; Carr, A. N.; Leike, J.; Achiam, J.; Misra, V.; Morikawa, E.; Radford, A.; Knight, M.; Brundage, M.; Murati, M.; Mayer, K.; Welinder, P.; Mc-Grew, B.; Amodei, D.; McCandlish, S.; Sutskever, I.; and Zaremba, W. 2021. Evaluating Large Language Models Trained on Code. arXiv preprint arXiv:2107.03374 .Dou, Z.; Zhao, Q.; Wan, Z.; Xia, X.; and Biswas, S. 2026. CoRe-Code: Collaborative Reinforcement Learning for Code Generation. arXiv preprint arXiv:2605.24812 .Du, M.; Luu, A. T.; Ji, B.; Liu, Q.; and Ng, S.-K. 2024. Mer-cury: A Code Efficiency Benchmark for Code Large Lan-guage Models. arXiv preprint arXiv:2402.07844 .Gehring, J.; Zheng, K.; Copet, J.; Mella, V.; Carbonneaux, Q.; Cohen, T.; and Synnaeve, G. 2024. RLEF: Ground-ing Code LLMs in Execution Feedback with Reinforcement Learning. arXiv preprint arXiv:2410.02089 .Guo, D.; Yang, D.; Zhang, H.; et al. 2025. DeepSeek-R1 Incentivizes Reasoning in LLMs through Reinforcement Learning. Nature , 645: 633–638. Hajizadeh, S.; and Jana, S. 2026. EffiPair: Improving the Efficiency of LLM-generated Code with Relative Contrastive Feedback. arXiv preprint arXiv:2604.05137 .Hendrycks, D.; Basart, S.; Kadavath, S.; Mazeika, M.; Arora, A.; Guo, E.; Burns, C.; Puranik, S.; He, H.; Song, D.; and Steinhardt, J. 2021. Measuring Coding Challenge Compe-tence with APPS. In Advances in Neural Information Pro-cessing Systems .Hu, E. J.; Shen, Y.; Wallis, P.; Allen-Zhu, Z.; Li, Y.; Wang, S.; Wang, L.; and Chen, W. 2022. LoRA: Low-Rank Adaptation of Large Language Models. In International Conference on Learning Representations .Huang, D.; Qing, Y.; Shang, W.; Cui, H.; and Zhang, J. 2024. EffiBench: Benchmarking the Efficiency of Automatically Generated Code. In NeurIPS .Huang, D.; Zeng, G.; Dai, J.; Luo, M.; Weng, H.; Qing, Y.; Cui, H.; Guo, Z.; and Zhang, J. M. 2025. EffiCoder: Enhanc-ing Code Generation in Large Language Models through Efficiency-Aware Fine-Tuning. In International Conference on Machine Learning .Jain, N.; Han, K.; Gu, A.; Li, W.; Yan, F.; Zhang, T.; Wang, S.; Solar-Lezama, A.; Sen, K.; and Stoica, I. 2025. Live-CodeBench: Holistic and Contamination Free Evaluation of Large Language Models for Code. In ICLR . OpenReview.net. Jiang, X.; Dong, Y.; Liu, M.; Deng, H.; Wang, T.; Tao, Y.; Cao, R.; Li, B.; Jin, Z.; Jiao, W.; Huang, F.; Li, Y.; and Li, G. 2025. CodeRL+: Improving Code Generation via Reinforcement with Execution Semantics Alignment. arXiv preprint arXiv:2510.18471 .Jimenez, C. E.; Yang, J.; Wettig, A.; Yao, S.; Pei, K.; Press, O.; and Narasimhan, K. R. 2024. SWE-bench: Can Lan-guage Models Resolve Real-world Github Issues? In ICLR .OpenReview.net. Jing, H.; Hu, W.; Chen, S.; Shi, H.; Yang, H.; Zhang, S.; Li, H.; and Song, Y. 2026. PerfCodeBench: Benchmarking LLMs for System-Level High-Performance Code Optimiza-tion. arXiv:2605.15222. Kumarappan, A.; Golnari, P. A.; Wen, W.; Liu, X.; Ryan, G.; Sun, Y.; Fu, S.; and Nallipogu, E. 2026. DevBench: A Real-istic, Developer-Informed Benchmark for Code Generation Models. arXiv preprint arXiv:2601.11895 .Le, H.; Wang, Y.; Gotmare, A. D.; Savarese, S.; and Hoi, S. C. H. 2022. CodeRL: Mastering Code Generation through Pretrained Models and Deep Reinforcement Learning. arXiv preprint arXiv:2207.01780 .Le, N. M.; Xu, Y.; Wang, Z.; and Chen, T.-H. P. 2026. Re-thinking Code Performance Benchmarks for LLMs. arXiv preprint arXiv:2607.07619 .Li, X.; Wang, A.; Wang, G.; Li, J.; and Shum, C. 2025. CUDA-L1: Improving CUDA Optimization via Contrastive Reinforcement Learning. arXiv preprint arXiv:2507.14111 .Liu, J.; Xia, C. S.; Wang, Y.; and Zhang, L. 2023a. Is Your Code Generated by ChatGPT Really Correct? Rigorous Eval-uation of Large Language Models for Code Generation. arXiv preprint arXiv:2305.01210 .Liu, J.; Xie, S.; Wang, J.; Wei, Y.; Ding, Y.; and Zhang, L. 2024. Evaluating Language Models for Efficient Code Generation. In Conference on Language Modeling .Liu, J.; Zhu, Y.; Xiao, K.; Fu, Q.; Han, X.; Yang, W.; and Ye, D. 2023b. RLTF: Reinforcement Learning from Unit Test Feedback. arXiv preprint arXiv:2307.04349 .Mikasa, R.; Hayashi, S.-i.; Mukunoki, D.; Hoshino, T.; and Katagiri, T. 2026. Improving HPC Code Generation Capability of LLMs via Online Reinforcement Learning with Real-Machine Benchmark Rewards. arXiv preprint arXiv:2602.12049 .OpenAI. 2026. Codex. https://openai.com/codex/. Accessed July 27, 2026. Ou, J.; Chaudhary, S.; Bostrom, K.; Weir, N.; Zhang, S.; Rangwala, H.; and Karypis, G. 2026. MaxCode: A Max-Reward Reinforcement Learning Framework for Automated Code Optimization. arXiv preprint arXiv:2601.05475 .Ouyang, A.; Guo, S.; Arora, S.; Zhang, A. L.; Hu, W.; Ré, C.; and Mirhoseini, A. 2025. KernelBench: Can LLMs Write Efficient GPU Kernels? arXiv preprint arXiv:2502.10517 .Peng, Y.; Gotmare, A. D.; Lyu, M.; Xiong, C.; Savarese, S.; and Sahoo, D. 2024. PerfCodeGen: Improving Performance of LLM Generated Code with Execution Feedback. arXiv preprint arXiv:2412.03578 .Peng, Y.; Wan, J.; Li, Y.; and Ren, X. 2025. COFFE: A Code Efficiency Benchmark for Code Generation. Proc. ACM Softw. Eng. , 2(FSE): 242–265. Qing, Y.; Zhu, B.; Du, M.; Guo, Z.; Zhuo, T. Y.; Zhang, Q.; Zhang, J. M.; Cui, H.; Yiu, S.; Huang, D.; Ng, S.; and Tuan, L. A. 2025. EffiBench-X: A Multi-Language Benchmark for Measuring Efficiency of LLM-Generated Code. CoRR ,abs/2505.13004. Qiu, R.; Zeng, W. W.; Ezick, J.; Lott, C.; and Tong, H. 2025. How Efficient is LLM-Generated Code? A Rigorous and High-Standard Benchmark. In International Conference on Learning Representations .Schulman, J.; Wolski, F.; Dhariwal, P.; Radford, A.; and Klimov, O. 2017. Proximal Policy Optimization Algorithms. 
+
+arXiv preprint arXiv:1707.06347 .Shao, Z.; Wang, P.; Zhu, Q.; Xu, R.; Song, J.; Bi, X.; Zhang, H.; Zhang, M.; Li, Y. K.; Wu, Y.; and Guo, D. 2024. DeepSeekMath: Pushing the Limits of Mathemati-cal Reasoning in Open Language Models. arXiv preprint arXiv:2402.03300 .Shen, B.; Zhang, J.; Chen, T.; Zan, D.; Geng, B.; Fu, A.; Zeng, M.; Yu, A.; Ji, J.; Zhao, J.; Guo, Y.; and Wang, Q. 2023. PanGu-Coder2: Boosting Large Language Models for Code with Ranking Feedback. arXiv preprint arXiv:2307.14936 .Shypula, A.; Madaan, A.; Zeng, Y.; Alon, U.; Gardner, J.; Hashemi, M.; Neubig, G.; Ranganathan, P.; Bastani, O.; and Yazdanbakhsh, A. 2023. Learning Performance-Improving Code Edits. arXiv preprint arXiv:2302.07867 .Skopin, E.; and Kotelnikov, E. 2026. Improving Small Language Models for Code Generation with Reinforce-ment Learning from Verification Feedback. arXiv preprint arXiv:2605.30478 .Wang, X.; Li, B.; Song, Y.; Xu, F. F.; Tang, X.; Zhuge, M.; Pan, J.; Song, Y.; Li, B.; Singh, J.; Tran, H. H.; Li, F.; Ma, R.; Zheng, M.; Qian, B.; Shao, Y.; Muennighoff, N.; Zhang, Y.; Hui, B.; Lin, J.; et al. 2025. OpenHands: An Open Platform for AI Software Developers as Generalist Agents. In ICLR .OpenReview.net. Wei, A.; Suresh, T.; Tan, H.; Xu, Y.; Singh, G.; Wang, K.; and Aiken, A. 2025. SuperCoder: Assembly Program Super-optimization with Large Language Models. arXiv preprint arXiv:2505.11480 .Wu, J.; Li, H.; Zhang, X.; Guo, J.; Luo, J.; Liu, S.; Huang, Y.; Chu, R.; Li, S.; and Yang, Y. 2026a. X-Coder: Advanc-ing Competitive Programming with Fully Synthetic Tasks, Solutions, and Tests. arXiv preprint arXiv:2601.06953 .Wu, M.; Anand, A.; Verma, S.; and Mezini, M. 2026b. Effi-cient Post-training of LLMs for Code Generation with Offline Reinforcement Learning. arXiv preprint arXiv:2605.28409 .Yang, A.; Li, A.; Yang, B.; Zhang, B.; Hui, B.; et al. 2025. Qwen3 Technical Report. arXiv preprint arXiv:2505.09388 .                                
+
+> Language Train Val Test Total C++ 869 55 163 1087 C114 16 32 162 CUDA 93 16 16 125 Go 112 16 32 160 Java 128 16 32 176 Python 97 16 31 144 Total 1413 135 306 1854
+
+Table 3: Language distribution of PerfCodeBench. Yang, J.; Jimenez, C. E.; Wettig, A.; Lieret, K.; Yao, S.; Narasimhan, K.; and Press, O. 2024. SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineer-ing. In NeurIPS .Yu, Z.; Tao, Y.; Chen, L.; Sun, T.; and Yang, H. 2024. B-Coder: Value-Based Deep Reinforcement Learning for Pro-gram Synthesis. In International Conference on Learning Representations .Zhao, L.; Huang, W.; Guo, Y.; Bian, J.; Wang, C.; and Zhang, X. 2026. Large Language Model-Powered Evolu-tionary Code Optimization on a Phylogenetic Tree. arXiv preprint arXiv:2601.14523 .Zhu, X.; Zhou, X.; Zhu, B.; Hu, H.; Du, M.; Zhang, H.; Wang, H.; and Guo, Z. 2026. CodeScaler: Scaling Code LLM Training and Test-Time Inference via Reward Models. 
+
+arXiv preprint arXiv:2602.17684 .Zhuo, T. Y.; Vu, M. C.; Chim, J.; Hu, H.; Yu, W.; Widyasari, R.; Yusuf, I. N. B.; Zhan, H.; He, J.; Paul, I.; Brunner, S.; Gong, C.; Hoang, J.; Zebaze, A. R.; Hong, X.; Li, W.; Kad-dour, J.; Xu, M.; Zhang, Z.; Yadav, P.; et al. 2025. Big-CodeBench: Benchmarking Code Generation with Diverse Function Calls and Complex Instructions. In ICLR . Open-Review.net. 
+
+## Dataset Overview 
+
+PerfCodeBench contains 1,854 executable performance tasks. Each task provides a fixed interface, a baseline imple-mentation, an optimized reference implementation, a correct-ness oracle, and a benchmark harness. The train, validation, and test splits contain 1,413 , 135 , and 306 tasks, respectively. The test split is family-disjoint from training, so evaluation measures whether the learned optimization behavior trans-fers to held-out task families rather than to near-duplicate prompts. The dataset is intentionally heterogeneous. C++ tasks in-clude joins, selection-vector gathers, packed integer decod-ing, hashing, bitmap filtering, and SIMD-oriented string pro-cessing. C, Go, Java, and Python tasks include CSV filtering, dictionary decoding, delta prefix sums, fixed-record serial-ization, log scanning, JSON field extraction, top-k selection, and group-by histograms. CUDA tasks include reductions, scans, histograms, tiled transpose, and sorting. This diversity is important for RLPF because a useful performance reward must compare candidates across different languages, runtime scales, and failure modes. Run Tokens Hours GPU-hours RLPF 52.6M 74.6 597 RLVR baseline 51.0M 69.2 553 Runtime baseline 53.2M 69.1 553 w.o. FBR 52.8M 73.1 585 w.o. RBR 52.9M 71.6 573 w.o. shaping 53.0M 72.7 581 GPT-5.4 reference 51.4M 67.9 543 
+
+Table 4: Approximate training cost from trainer logs. GPU-hours are wall-clock hours multiplied by 8 A800 GPUs.                     
+
+> Model Corr. FBR RBR C/R fail Qwen3-32B 34 25 17 225 RLPF 167 142 79 90 RLVR 153 97 50 60 Runtime 116 97 54 97
+
+Table 5: Failure-mode summary on the PerfCodeBench test split. Counts are over 306 tasks. C/R fail denotes compile-or-run failure. 
+
+## Compute Configuration and Cost 
+
+Training is run on one local machine with 8 NVIDIA A800-SXM4-80GB GPUs. We use Qwen3-32B as the policy model, LoRA with rank 32 and LoRA alpha 64 , BF16 train-ing, DeepSpeed ZeRO-3 sharding, GRPO group size G = 8 ,per-device batch size 1, gradient accumulation 4, and maxi-mum completion length 768 . During training, each sampled candidate is executed once by the PerfCodeBench harness. During evaluation, each runtime is measured three times and summarized by the median. The training cost is dominated by two sources: model-side rollout generation and executable reward evaluation. The lat-ter includes extraction, compilation or loading, execution, oracle checking, and runtime measurement. It varies by lan-guage and by whether the generated program reaches the measurable stage. Therefore, wall-clock time is a more infor-mative cost measure than token count alone. 
+
+## Failure Mode Analysis 
+
+PerfCodeBench lets us inspect where a candidate fails in the executable pipeline. This matters because performance feedback is only meaningful after the program is extractable, compiles or loads, runs, and passes the oracle. In the base Qwen3-32B evaluation, only 34 of 306 test tasks reach the correct region. Most failures happen earlier: 225 tasks fail during compilation or execution, and 6 time out. After RLPF, the number of correct tasks rises to 167 , while compile-or-run failures fall to 90 .The remaining failures fall into several patterns. Some candidates still fail because they use the wrong interface, omit required imports, or generate code that is plausible in isolation but invalid as a drop-in implementation. Some candidates run but fail the oracle, especially in parsing and serialization tasks where boundary cases matter. Another im-portant group is correct but slower than the baseline. These                      
+
+> Variant Correct FBR CGRE RLPF 167 142 38.6 Runtime reward only 116 97 24.7 RLVR correctness only 153 97 29.0 w.o. FBR 124 98 25.4 w.o. RBR 122 95 25.1 w.o. shaping 121 95 24.2
+
+Table 6: Isolated reward effects on the PerfCodeBench test split. Counts are over 306 tasks, and CGRE is reported as a percentage. cases show why correctness-only reinforcement learning is insufficient: passing tests does not imply that the implementa-tion avoids redundant parsing, extra allocation, unnecessary synchronization, or high-constant-factor library calls. 
+
+## Reward Baselines and Component Ablations 
+
+The isolated reward experiments separate three regimes. The RLVR baseline gives a correctness-only reward. It solves many tasks, but a large fraction of correct programs remain slower than the baseline. The runtime-only baseline directly targets speed, but it has a sparse and task-dependent signal because runtime is useful only after correctness. The compo-nent ablations remove one part of RLPF at a time and show that the full reward is not explained by a single term. The terms play different roles. Failure-mode shaping gives GRPO an ordering before correctness. The FBR bonus re-wards the first useful step beyond the baseline. The RBR bonus keeps pressure near the expert reference. Together, these terms make the reward useful both before and after correctness, which is the main difference between RLPF and simpler reward designs. 
+
+## Representative Case Studies 
+
+Several test-set examples illustrate the behavior learned after training. On openmp_sum_atomic_v900_j , the base model fails before producing a valid measurable program. RLPF produces a correct implementation that is about 101 ×
+
+faster than the baseline. This task family rewards reducing synchronization-heavy accumulation and exposing more par-allel work. On java_bitset_and_popcount_v3200_106 ,the base model again fails in the executable pipeline. RLPF reaches a correct solution that is about 51 × faster than the baseline and matches the reference threshold. The improve-ment comes from selecting a more suitable low-level primi-tive and avoiding per-element overhead. RLPF also improves smaller data-processing cases. On 
+
+python_json_field_checksum_v2700_029 , the RLVR baseline produces a correct program that is slightly slower than the baseline, while RLPF produces a correct faster program and reaches the reference threshold. On 
+
+go_groupby_histogram_checksum_v3300_124 ,RLVR is again correct but slower, whereas RLPF beats the baseline. These examples show the difference between learning to pass the oracle and learning to prefer leaner correct code. 
+
+## Model-Generated Performance References 
+
+Expert references provide the cleanest performance target, but they require strong benchmark construction. We there-fore also test a weaker supervision setting where a correct GPT-5.4 candidate supplies the reference runtime. This set-ting approximates a practical distillation scenario: a strong model can provide performance supervision on tasks it solves correctly, even when a curated expert implementation is un-available. The GPT-5.4-reference variant reaches 50 .3% CRR and 
+
+36 .5 CGRE, close to full RLPF but still weaker on correct-ness and faster-than-baseline coverage. This suggests that model-generated references are useful but less uniform than expert references. They only cover tasks solved correctly by the teacher, and the teacher may still miss task-specific opti-mizations that the benchmark reference captures. 
+
+## Metric Decomposition 
+
+The main paper reports CRR, FBR, RBR, and CGRE because they describe different parts of the optimization pipeline. CRR measures whether a model can produce a correct runnable implementation. FBR measures whether the cor-rect implementation is useful relative to the baseline. RBR measures whether it reaches the expert reference. CGRE gives a continuous view of progress between the baseline and reference. Two derived quantities are useful for diagnosis. The first is 
+
+Slow = CRR − FBR, the share of programs that are correct but not faster than the baseline. The second is Gap = FBR −
+
+RBR, the share of programs that beat the baseline but still do not reach the reference. RLPF mainly improves the transition from correctness to faster-than-baseline code. Its remaining gap is closer to the reference boundary, where task-specific optimization choices still matter. This decomposition also explains why a single correctness score is not enough. RLVR reaches a high CRR, but many of its correct solutions remain slow. Runtime-only training has a lower Slow value, but it reaches fewer correct programs overall. RLPF keeps the correctness gain while increasing the number of faster-than-baseline programs, which is the desired regime for performance-oriented code generation. 
+
+## Training Dynamics 
+
+The reward curves are plotted on each reward’s native scale, so their absolute heights should not be compared across re-ward definitions. They are still useful for understanding sta-bility. All variants rise early and remain bounded. The full reward reaches its highest EMA value around step 1552 and then declines mildly by the final checkpoint. This is why the main experiments use EMA-peak model selection rather than always taking the last checkpoint. The curve shapes also support the reward design. Remov-ing RBR tends to peak earlier, suggesting that the reward gives less pressure near the expert target. Removing shaping can still learn, but its signal is concentrated after correctness and its late improvement is less stable. The full reward has the strongest late-stage signal because it combines failure-stage progress, baseline improvement, and reference matching. 
+
+## Additional Case Study Analysis 
+
+The case studies in Table 7 focus on large improvements. We add a second table to show a broader set of behaviors. These examples separate three cases: conversions from failure to fast correct code, conversions from correct-but-slow to faster code, and cases where the model beats the baseline but still falls short of the expert reference. These cases show that RLPF is not only finding rare large speedups. It also changes the preference among correct pro-grams. In parsing and aggregation tasks, the gains can be modest because the baseline is already close to a reasonable implementation. These small gains are still important: they show that the reward can distinguish correct programs by runtime rather than treating them as equivalent. 
+
+## Remaining Failure Patterns 
+
+RLPF reduces compile and run failures, but it does not re-move them. The remaining failures are concentrated in four patterns. First, some generations still violate the required interface, especially when the prompt contains a complete source file but the model emits only a function body. Sec-ond, some candidates use unavailable libraries or language features that are not accepted by the harness. Third, some programs pass simple-looking logic but fail boundary cases in parsing, serialization, and integer overflow. Fourth, some hardware-oriented or parallel kernels compile but still miss the intended low-level optimization, such as memory locality, synchronization reduction, or layout-aware access. This analysis motivates two future directions. The first is better format control before execution, which would reduce avoidable compile failures. The second is more specialized performance supervision for low-level optimization domains, where correctness and performance depend on hardware-aware choices that are hard to learn from sparse successes. 
+
+## Transition Analysis 
+
+Another way to read the results is to compare task outcomes before and after RLPF. Relative to the base model, RLPF converts 135 previously incorrect tasks into correct ones, 
+
+117 tasks into faster-than-baseline solutions, and 65 tasks into reference-level solutions. Relative to RLVR, the gains are more focused: RLPF converts 58 additional tasks into faster-than-baseline solutions and 40 additional tasks into reference-level solutions. This supports the main claim that RLPF does not only improve correctness. It changes the rank-ing among correct programs. The transition table also shows a tradeoff. RLPF is not a strict superset of RLVR. It loses correctness on 20 tasks that RLVR solves, while gaining correctness on 34 tasks that RLVR misses. This is expected because the policy is opti-mized for a different ordering: it must keep correctness, but it also receives pressure to search for faster implementations. The net result is a model that solves slightly more tasks and, Task Base RLPF Speedup Main pattern                     
+
+> openmp_sum_atomic_v900_j fail correct 101 .1×lower synchronization cost
+> java_bitset_and_popcount_v3200_106 fail correct 50 .9×better low-level primitive
+> dictionary_decode_checksum_v1200_b fail correct 21 .8×reference-level decoding path
+> python_json_field_checksum_v2700_029 fail correct 1.3×less parsing overhead
+> go_groupby_histogram_checksum_v3300_124 fail correct 1.1×leaner aggregation path
+
+Table 7: Representative test-set cases improved by RLPF. Speedup is measured against the task baseline.                     
+
+> Model CRR FBR Slow Gap Qwen3-32B 11.1 8.2 2.9 2.6 RLVR 50.0 31.7 18.3 15.4 Runtime 37.9 31.7 6.2 14.1 RLPF 54.6 46.4 8.2 20.6
+
+Table 8: Metric decomposition on the PerfCodeBench test split. All values are percentages. Slow denotes correct but not faster than the baseline; Gap denotes faster than baseline but not reference-level.           
+
+> Reward Peak step Final EMA Full RLPF 1552 0.223 w.o. FBR 1556 0.186 w.o. RBR 1166 0.170 w.o. shaping 1677 0.198
+
+Table 9: Training-curve summary from exported Tensor-Board EMA values ( α = 0 .99 ). Peak step is selected on the EMA curve. more importantly, produces many more useful correct pro-grams. 
+
+## Speedup Distribution 
+
+The average speedup of faster-than-baseline RLPF outputs is high, but the distribution is skewed. A small number of tasks expose very large gains, while many tasks provide modest but real improvements. The median speedup among faster RLPF solutions is 4.77 ×, and 68 tasks exceed 5×. Only 5
+
+tasks exceed 50 ×. This suggests that the benchmark contains both low-level bottlenecks with large optimization headroom and tighter data-processing tasks where the best realistic gain is smaller. This distribution is useful for interpreting CGRE. A small speedup can have high CGRE when the expert reference is also close to the baseline. Conversely, a large absolute speedup can still have moderate CGRE if the reference is much faster. For this reason, the paper reports both threshold metrics and the continuous relative-efficiency metric. 
+
+## Task-Family Contributions 
+
+RLPF gains are concentrated in task families with clear implementation bottlenecks. Table 14 lists repre-sentative families with at least three test tasks. Some families are nearly saturated: topk_ordered_sum ,
+
+dictionary_decode_checksum , and 
+
+dense_groupby_sum have high CGRE once solved. Other families, such as 
+
+sorted_interval_lookup_sum , produce many faster-than-baseline solutions but low CGRE, meaning that RLPF improves over the baseline without reaching the expert design. The table highlights two different success modes. In fami-lies such as bitset popcount and dictionary decoding, a single structural choice often moves the program close to the ref-erence. In families such as interval lookup and Go group-by histograms, RLPF often improves the code but still trails the expert. These latter families are useful stress tests because they require fine-grained choices rather than one obvious replacement. 
+
+## Failure-Stage Counts 
+
+The executable harness records whether a candidate is ex-tracted, compiled, run, and judged correct. In the base model, most failures are compilation failures. RLPF reduces this number from 266 to 131 , while increasing correct programs from 34 to 167 . Run-stage failures remain small in absolute count. This indicates that most of the improvement comes from producing code that matches the expected replacement format and survives compilation, after which the reward can provide performance signal. The slight increase in run failures is not a major regres-sion by itself. As more generations compile, more candidates reach later execution stages where runtime errors and ora-cle failures can be observed. This is the intended behavior of staged execution feedback: earlier-stage failures should move forward in the pipeline, even if not all of them become correct immediately. 
+
+## Prompt Templates 
+
+Training and in-house evaluation use the same task prompt template. The only difference in the OpenAI-based evalua-tion path is the API wrapper and its strict JSON schema; the underlying task prompt is the same. We include the full templates here for reproducibility. Task Before RLPF RLPF speedup CGRE Interpretation 
+
+openmp_sum_atomic_v900_j fail 101 .1× 0.99 removes a severe synchronization bottleneck 
+
+java_bitset_and_popcount_v3200_106 fail 50 .9× 1.00 switches to a more suitable bit-level primitive 
+
+dictionary_decode_checksum_v1200_b fail 21 .8× 1.00 reaches the intended decoding strategy 
+
+packed12_decode_filter_sum_lowthr RLVR slow 1.43 × 0.54 turns a correct solution into a useful speedup 
+
+python_json_field_checksum_v2700_029 RLVR slow 1.27 × 1.00 reduces repeated parsing overhead 
+
+go_groupby_histogram_checksum_v3300_124 RLVR slow 1.14 × 0.63 improves allocation and aggregation behavior 
+
+sorted_interval_lookup_sum_v1200_c RLVR slow 1.01 × 0.01 barely beats baseline; still far from reference 
+
+Table 10: Additional test-set cases illustrating different improvement regimes. “RLVR slow” means the correctness-only baseline passed the oracle but did not beat the baseline runtime. 
+
+Pattern Typical cause Interface error missing entrypoint or wrong signature Build error unavailable include, package, or flag Oracle failure boundary case or numeric mismatch Timeout algorithmic or synchronization bottleneck Slow correct extra allocation or high constant factor 
+
+Table 11: Qualitative failure patterns observed in test-set traces. 
+
+Reference Fail →Corr. NotFast →FBR NotRef →RBR Lost Corr. Base 135 117 65 2RLVR 34 58 40 20 Runtime 59 54 37 8
+
+Table 12: Outcome transitions from each reference model to RLPF on the same 306 test tasks. “Lost Corr.” counts tasks solved by the reference model but not by RLPF. 
+
+Speedup threshold RLPF tasks 
+
+≥ 1.05 × 115 
+
+≥ 1.20 × 112 
+
+≥ 1.50 × 106 
+
+≥ 2.00 × 97 
+
+≥ 5.00 × 68 
+
+≥ 10 .0× 45 
+
+≥ 20 .0× 24 
+
+≥ 50 .0× 5
+
+Table 13: Speedup distribution for the 142 RLPF outputs that beat the baseline. Listing 1: System prompt used during rollout generation and evaluation. 
+
+1 You are a performance engineer. Your job is to rewrite the given source file so that it runs as fast as possible while preserving correctness. Do not change the function signature or entrypoint used by the harness. Output JSON only, with keys ’summary’ and ’solution_source’. The solution_source must be a complete, compilable replacement file. 
+
+Listing 2: User prompt template shared by training and in-house evaluation. 
+
+1 Optimize the following implementation for performance while preserving correctness. 
+
+2 Return a full, complete, compilable replacement for <source_name>. 
+
+3 Do not change the externally required function signature or entrypoint. 
+
+45 Task ID: <task_id> 
+
+6 Title: <title> 
+
+7 Goal: <goal> 
+
+8 Metric: <metric> 
+
+9 Correctness rule: <correctness_rule> 
+
+10 Allowed external includes: <comma-separated list> 
+
+11 12 Interface / task contract: 
+
+13 <optional interface text> 
+
+14 15 Current baseline <source_name>: 
+
+16 <baseline source> 
+
+Listing 3: OpenAI evaluation wrapper. The prompt is the same as above, but the request also enforces a strict JSON schema. 
+
+1 {
+
+2 "type": "object", 
+
+3 "additionalProperties": false, 
+
+4 "properties": {
+
+5 "summary": {"type": "string"}, 
+
+6 "solution_source": {"type": "string "} 
+
+7 }, 
+
+8 "required": ["summary", "solution_source"] 
+
+9 }Task family Tasks Correct FBR Mean CGRE 
+
+sorted_interval_lookup_sum 19 19 18 0.01 
+
+java_bitset_and_popcount 16 16 16 1.00 
+
+java_fixed_record_serialize 16 16 15 0.91 
+
+openmp_sum_atomic 16 14 14 0.77 
+
+python_json_field_checksum 16 16 11 0.65 
+
+topk_ordered_sum 11 11 11 1.00 
+
+dictionary_decode_checksum 11 11 11 1.00 
+
+dense_groupby_sum 11 11 11 0.99 
+
+csr_row_sum_checksum 11 11 11 0.99 
+
+go_groupby_histogram_checksum 16 16 5 0.19 
+
+Table 14: Representative task-family contributions for RLPF. Families are grouped by normalized task identifier. Mean CGRE is averaged over all tasks in the family, including failures. 
+
+Outcome stage Base RLPF Correct 34 167 Compile failure 266 131 Run failure 6 8
+
+Table 15: Failure-stage counts from the test-set execution traces. Counts are mutually exclusive and sum to 306 .
