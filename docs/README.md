@@ -6,44 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-01
-- 运行时间：2026-08-01 20:29:37 UTC
+- 最新运行日期：2026-08-02
+- 运行时间：2026-08-02 21:16:35 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：1
-- 速读区：6
+- 本次总论文数：5
+- 精读区：0
+- 速读区：5
 
 ### 今日简报（AI）
-- 今日共生成 7 篇推荐（精读 1 篇，速读 6 篇）
-- 精读：《Can Large Language Models Resolve Real Java Merge Conflicts? An Evaluation with a Calibrated LLM-as-Judge》（8.0/10）
-- 速读：《Agentic Method for Deterministic Validation of Legacy Code Migration》（6.5/10）, 《MindForge: Teaching Small Language Models Whole-Life-Cycle Software Engineering via Source-Free Program Synthesis》（6.0/10）, 《Automated Transcript Analysis for Detecting Flaws in Agentic Benchmarks》（6.0/10）
+- 今日共生成 5 篇推荐（精读 0 篇，速读 5 篇）
+- 速读：《SpecFirst: Behavioral Specification Elicitation as a First-Class Step in Agent-Based Program Synthesis from Scratch》（7.5/10）, 《Delta Debugging for Cyber-Physical Systems with Flaky Test Executions》（6.5/10）, 《Bifrost: Empowering Pretrained Language Model with Fallibility Representation for Log-Based Fault Diagnosis》（6.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202608/01/README](/202608/01/README)
+- 详情：[/202608/02/README](/202608/02/README)
 
 ### 精读区论文标签
-1. [Can Large Language Models Resolve Real Java Merge Conflicts? An Evaluation with a Calibrated LLM-as-Judge](/202608/01/2607.27674v1-can-large-language-models-resolve-real-java-merge-conflicts-an-evaluation-with-a-calibrated-llm-as-judge)  
-   标签：评分：8.0/10、query:apr-oracle
-   evidence：用于评估合并冲突候选解决方案的校准LLM评判器
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Agentic Method for Deterministic Validation of Legacy Code Migration](/202608/01/2607.28271v1-agentic-method-for-deterministic-validation-of-legacy-code-migration)  
+1. [SpecFirst: Behavioral Specification Elicitation as a First-Class Step in Agent-Based Program Synthesis from Scratch](/202608/02/2607.27167v1-specfirst-behavioral-specification-elicitation-as-a-first-class-step-in-agent-based-program-synthesis-from-scratch)  
+   标签：评分：7.5/10、query:apr-oracle
+   evidence：行为规范提取作为程序合成的行为预言机
+2. [Delta Debugging for Cyber-Physical Systems with Flaky Test Executions](/202608/02/2607.25695v1-delta-debugging-for-cyber-physical-systems-with-flaky-test-executions)  
    标签：评分：6.5/10、query:apr-oracle
-   evidence：使用代理测试合成对遗留代码迁移进行确定性验证
-2. [MindForge: Teaching Small Language Models Whole-Life-Cycle Software Engineering via Source-Free Program Synthesis](/202608/01/2607.27146v1-mindforge-teaching-small-language-models-whole-life-cycle-software-engineering-via-source-free-program-synthesis)  
+   evidence：针对网络物理系统中不可靠测试执行的统计故障分析
+3. [Bifrost: Empowering Pretrained Language Model with Fallibility Representation for Log-Based Fault Diagnosis](/202608/02/2607.23169v1-bifrost-empowering-pretrained-language-model-with-fallibility-representation-for-log-based-fault-diagnosis)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：包括错误修复在内的基于学习的程序修复
-3. [Automated Transcript Analysis for Detecting Flaws in Agentic Benchmarks](/202608/01/2607.27518v1-automated-transcript-analysis-for-detecting-flaws-in-agentic-benchmarks)  
+   evidence：基于日志的运行时调试故障诊断
+4. [VeriSkill: A Self-Evolution Framework for Program Verification Skills](/202608/02/2607.27733v1-veriskill-a-self-evolution-framework-for-program-verification-skills)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：自动检测SWE-Bench-Verified等代理基准测试中的缺陷
-4. [How Benchmarks Mis-Score Computer-Use Agents](/202608/01/2607.28367v1-how-benchmarks-mis-score-computer-use-agents)  
+   evidence：用于程序验证的自我演化框架，通过反馈改进候选技能
+5. [Structural Validation of LLM-Generated Microservice Decompositions Using Source-Code Dependencies](/202608/02/2607.28331v1-structural-validation-of-llm-generated-microservice-decompositions-using-source-code-dependencies)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：针对智能体基准测试中脆弱脚本预言机的可靠性框架
-5. [CoGate: Confidence-Gated Co-Decoding for Secure Code Generation](/202608/01/2607.28529v1-cogate-confidence-gated-co-decoding-for-secure-code-generation)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：通过置信度门控协同解码确保安全代码生成
-6. [ORCA-bench: How Ready Are Language Model Agents for Oncall?](/202608/01/2607.28545v1-orca-bench-how-ready-are-language-model-agents-for-oncall)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：语言模型代理在生产环境中修复和搜索代码的基准测试
+   evidence：使用静态依赖分析对LLM生成的代码进行自动验证流水线
 
 
 <div class="dpr-home-promo-card">
