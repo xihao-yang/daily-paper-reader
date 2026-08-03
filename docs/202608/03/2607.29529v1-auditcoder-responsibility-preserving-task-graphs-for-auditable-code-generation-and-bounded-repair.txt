@@ -1,0 +1,1422 @@
+Title: AuditCoder: Responsibility-Preserving Task Graphs for Auditable Code Generation and Bounded Repair
+
+URL Source: https://arxiv.org/pdf/2607.29529v1
+
+Published Time: Mon, 03 Aug 2026 01:03:56 GMT
+
+Number of Pages: 36
+
+Markdown Content:
+# AuditCoder: Responsibility-Preserving Task Graphs for Auditable Code Generation and Bounded Repair 
+
+## Kangjie Huang, Chen Lyu ∗
+
+School of Computer Science and Artificial Intelligence, Shandong Normal University 202411000534@stu.sdnu.edu.cn, lvchen@sdnu.edu.cn 
+
+Abstract 
+
+Code generators return programs, but typically do not pre-serve the construction record needed to connect a failure to the decision that produced the affected code or to delimit a justified repair. We present AuditCoder , which treats the pro-gram and an auditable construction trace as joint outputs. Be-fore code generation, a contract-annotated task graph assigns stable responsibility identities that remain attached to each commitment, its owned implementation, provenance, valida-tion evidence, and intervention history. When validation fails, a conservative locator maps heterogeneous evidence to a node or dependency branch—or abstains—and bounded repair re-generates only that region while reusing the frozen comple-ment. On APPS, AuditCoder reaches 82 .5–83 .0% pass@1 ,recovering much of the loss caused by unrepaired graph de-composition but trailing AgentCoder by 7.5–8.5 points. On ClassEval, it reaches 75 .0–82 .0% , outperforming CoT + retry while remaining below AgentCoder. A separate audit of 200 APPS records yields 0.9725 task-macro decision–code trace coverage; the locator identifies an evidence-supported node or branch for 26 of 60 failures, and 17 of those localized re-pairs pass. For tasks with stable, locally testable boundaries, the graph functions not only as a decomposition structure but also as a persistent index for validation and repair. 
+
+Code and project resources: 
+
+https://github.com/puppet0x3f/AuditCoder 
+
+## 1 Introduction 
+
+AI-assisted code is entering software projects at scale, but the resulting code can be difficult to review and repair. A 2026 SonarSource survey of 1,149 professional developers (Sonar-Source 2026) reports that respondents attributed 42% of committed code to AI generation or assistance; 96% did not fully trust its functional correctness, and 38% reported greater review effort than for human-written code. The sur-vey does not directly measure productivity, but it highlights an operational question: once generated code fails, which construction decision produced the affected code, and what region does the available evidence justify changing? Most generation pipelines do not preserve this link. Plan-ning may expose subgoals and interfaces, but later assem-bly often erases which commitment owns which code. One commitment may span several helpers or non-contiguous 
+
+> ∗
+
+Corresponding author. Explicit generation-time commitments (not persisted)                                                         
+
+> Generated program Failure evidence and repair
+> C1 Normalize days
+> C2 De fi ne DP state
+> C3 Advance pass windows
+> C4 Update DP and return
+> Plan text has no durable code owner
+> 1def min_cost(days, costs): 2days =sorted(days) 3dp =[0] *(len(days)+1) 4p7 =p30 =05for t, din enumerate(days, 1):
+> 6while days[p7] <= d-6:
+> 7p7 += 18while days[p30] <= d-29: 9p30 += 110 dp[t] =min(dp[t-1]+costs[0], 11 dp[p7]+costs[1], 12 dp[p30]+costs[2]) 13 return dp[-1]
+> Failing test
+> days=[1,7], costs=[3,4,20] expected=4, got=6
+> Post-hoc suspicious set
+> DP state? window logic?
+> transitions? input handling?
+> Diagnosis, patch, or retry
+> Can improve the current artifact, but does not recover the executed construction responsibility.
+> Missing lifecycle link: stable responsibility ID -> owned code -> evidence -> repair history
+> cb
+> bug
+> a
+
+Figure 1: Decision–code responsibility misalignment. Plan-ning may expose explicit commitments, but the generated program does not preserve which commitment owns which code. Failure evidence can identify suspicious code without revealing the responsible construction record or a justified repair boundary. statements, and one function may implement several com-mitments. As Figure 1 illustrates, a failing test therefore identifies a symptom rather than the generation-time respon-sibility behind it or a justified repair boundary. We call this gap decision–code responsibility misalignment .Preserving this link requires a durable responsibility unit :a planned subproblem whose goal, interface, inputs and out-puts, owned implementation, validation evidence, and re-visions share one stable identifier. AuditCoder represents these units as task-graph nodes. We call a run process-auditable when the identifiers are assigned before imple-mentation is generated and reused during generation, assem-bly, validation, localization, and repair. A recorded decision 
+
+is an external system commitment—for example, a subgoal, interface, algorithmic responsibility, or complexity budget— rather than latent chain-of-thought. A reviewer can then trace code to the commitment and evidence under which it was produced, while the system can reuse the same address to delimit later repairs. Constructing such records before code exists raises three challenges. 
+
+❶ Defining responsibility units before implementation. 
+
+The planner must commit an initial graph whose nodes are specific enough to own implementations and expose depen-dencies, interfaces, provenance, complexity budgets, and lo-arXiv:2607.29529v1 [cs.SE] 31 Jul 2026 cal checks. Coarse nodes weaken localization; overly fine nodes add interface overhead and may split a global invari-ant across locally plausible components. Later graph changes must therefore be explicit revisions rather than silent goal drift. 
+
+❷ Preserving ownership through generation and assem-bly. Algorithm-specialized agents can implement leaf nodes, but an agent role does not establish code ownership. Every generated function or helper must belong to exactly one re-sponsibility node, while one node may own several code units. Assembly must preserve dependency order, interface contracts, and provenance-consistent data flow; cross-node edits must expand the transaction boundary and be recorded. 
+
+❸ Turning evidence into a defensible repair boundary. 
+
+Failures may arise from one node, a dependency branch, or a graph-level assumption. Compilation results, examples, differential checks, contract and complexity checks, coun-terexamples, and resource signals provide evidence of dif-ferent strengths. The system must map this evidence back to the construction-time responsibility units, repair only a sup-ported node or branch, and abstain when no stable boundary can be justified. Prior work supplies many of these ingredients separately. Planning and modular-synthesis methods create plans or can-didate components (Zhang et al. 2023; Jiang et al. 2024; Ze-likman et al. 2023; Chen et al. 2024a); role-specialized agents divide planning, coding, testing, and debugging (Huang et al. 2023; Islam, Ali, and Parvez 2024); feedback, repair, trace-ability, and verification methods provide diagnostic or prop-erty evidence. These methods do not generally require one pre-code unit to remain the address for the selected imple-mentation, its validation evidence, repair scope, and revi-sion history. The repair target is therefore commonly recon-structed from the finished artifact rather than retrieved from the construction record. 
+
+AuditCoder makes the responsibility unit persistent through a contract-annotated task graph . Before leaf gen-eration, the Plan Agent commits the initial graph and sta-ble IDs. Each node records its goal, contract, provenance, complexity budget, and local validation requirements; algo-rithm agents generate node-owned code, and an ownership map preserves these assignments during assembly. Local and global evidence is stored under the same IDs. After failure, a conservative locator returns an evidence-supported node or branch, or abstains. Bounded repair regenerates the selected region, reuses the frozen complement, records cross-node integration exceptions, and appends the transaction to the same history. The graph is a recorded construction hypoth-esis rather than proof of a correct decomposition; tightly coupled tasks may require a coarser unit, graph revision, or abstention. The evaluation covers algorithmic, class-level, and small exploratory cross-domain Python tasks, but not repository-scale audit chains. Figure 2 summarizes the life-cycle. The evaluation asks whether evidence-guided repair re-covers accuracy lost to auditable decomposition and whether the retained records support bounded intervention. On APPS (Hendrycks et al. 2021), task planning alone is fragile: in the matched Qwen setting, algorithm-specialized agents raise pass@1 from 62.5% to 70.0%, and evidence-guided repair raises it to 83.0%. AuditCoder remains below Agent-Coder on APPS and ClassEval (Du et al. 2024), but exceeds CoT + retry on ClassEval. The 200-record process audit re-veals a sharper limitation: although final task-macro trace coverage is 0.9725, only 26 of 60 failures yield an evidence-supported node or branch. Because APPS provides no node-level root-cause labels, this is coverage rather than localiza-tion accuracy. The gap between retained records and usable localization suggests that the current bottleneck is evidence strong enough to justify a repair boundary, not record persis-tence. 
+
+Contributions. ❶ We identify decision–code responsibil-ity misalignment and define process auditability as lifecy-cle continuity from an explicit planning commitment to its owned code, validation evidence, and repair history. 
+
+❷ We introduce AuditCoder , whose contract-annotated task graph assigns responsibility IDs before generation, preserves code ownership and provenance through assem-bly, and supports evidence-based node/branch localization, frozen-complement repair, explicit integration exceptions, and abstention. ❸ We evaluate AuditCoder on APPS and ClassEval and conduct a separate 200-record process audit, quantifying functional recovery, trace retention, localization coverage, repair success, and the limits imposed by tightly coupled tasks. 
+
+## 2 Related Work 
+
+Planning, decomposition, and modular synthesis. 
+
+Planning-guided decoding combines an LLM with look-ahead search over candidate programs (Zhang et al. 2023), while self-planning externalizes solution steps before imple-mentation (Jiang et al. 2024). Parsel (Zelikman et al. 2023) searches test-satisfying combinations of implementations de-scribed by a function hierarchy, and FunCoder (Chen et al. 2024a) introduces sub-functions during generation and uses functional consensus. These methods use decomposition to guide search or compose modular programs. In AuditCoder ,the distinction is the component’s lifecycle: a responsibility identity is allocated before code and remains the address for the selected implementation, validation evidence, and later repair transactions. 
+
+Role-specialized generation. AgentCoder (Huang et al. 2023) separates programming, test design, and test execution; MapCoder (Islam, Ali, and Parvez 2024) separates retrieval, planning, coding, and debugging. Such roles determine who acts, but not which unit persistently owns the emitted code. 
+
+AuditCoder also routes leaf units to algorithm-specialized generators, yet the responsibility node—not the agent role— owns the implementation and indexes its contract, evidence, and history. The routing labels are execution categories rather than a learned skill ontology. 
+
+Execution feedback, debugging, and repository repair. 
+
+CodeT (Chen et al. 2023) uses generated tests and execu-tion agreement for selection. Self-Debugging (Chen et al. 2024b), CRITIC (Gou et al. 2024), and Reflexion (Shinn et al. 2023) feed explanations, tool critiques, or reflections into later attempts; LDB (Zhong, Wang, and Shang 2024) inspects executed basic-block states, and classical fault lo-calization (Jones and Harrold 2005; Wong et al. 2016) ranks suspicious program entities. Repository-level systems such as SWE-agent (Yang et al. 2024), RepairAgent (Bouzenia, Devanbu, and Pradel 2025), AutoCodeRover (Zhang et al. 2024), Agentless (Xia et al. 2025), and SpecRover (Ruan, Zhang, and Roychoudhury 2025) localize, patch, and val-idate existing projects. These methods derive repair targets from tests, code, issue context, or execution evidence. Audit-Coder instead asks whether the target can be retrieved from a responsibility record created with the code. Repository agents cover broader artifacts; the comparison here concerns construction provenance. 
+
+Traceability and formal evidence. CodePlan (Bairi et al. 2024) models repository dependencies and edit impact. Code Gradients (North, Atapour-Abarghouei, and Bencomo 2024) and R2Code (Wang et al. 2026) recover requirement–code correspondences, while Wang et al. (2025) and Barrak (2025) study traceability or accountability in LLM pipelines. These links need not retain the selected candidate, execution evi-dence, and intervention sequence. Formal workflows provide stronger property evidence: Clover (Sun et al. 2024) closes a generation–verification loop, DafnyBench (Loughridge et al. 2025) evaluates formally verifiable generation, and Au-toVerus (Yang et al. 2025) generates Rust proofs. Property evidence does not reconstruct the construction path, while construction provenance does not establish the verified prop-erty. 
+
+Positioning. The common comparison axis is when an ad-dressable unit is created and what remains attached to it. 
+
+AuditCoder creates a responsibility unit before code gen-eration and reuses its identity for owned code, validation evidence, and intervention history. A localization result can therefore constrain execution: the selected node or branch may change, boundary expansion is recorded, the comple-ment is reused, and unsupported localization leads to ab-stention. The contribution is this lifecycle continuity, not decomposition, multi-agent execution, testing, localization, traceability, or verification in isolation. 
+
+## 3 Method 
+
+Overview. Given a natural-language programming task x,
+
+AuditCoder returns an executable program y together with a structured construction trace A:
+
+(y, A) = AuditCoder (x), A = ( G, S, E, H).
+
+Here G is the contract-annotated task graph, S contains re-sponsibility records, E stores validation evidence, and H is the append-only repair history. For implementation node vi,the record is 
+
+si = (id i, g i, a i, F i, c i, ρ i, r i, h i),
+
+where gi is the generation-time commitment, ai is the routed executor, Fi is the interface contract, ci is the node-owned implementation bundle, ρi is variable provenance, ri is lo-cal evidence, and hi references interventions. The executor records who acts; id i remains the responsibility address. The trace enforces three invariants. Pre-code identity as-signs id i before implementation is sampled. Ownership and evidence binding maps each registered executable unit and its evidence to one responsibility address. Identity-preserving intervention confines regeneration to an evidence-supported region, reuses the frozen complement, and appends the trans-action. These are pipeline constraints, not a reconstruction of latent reasoning. Figure 2 and the subsections follow this order. In the ex-ample, S2 is created before code, later owns c2 and r2, and is selected while S1 and S3 are frozen. Appendix B.1 gives the complete procedure. 
+
+3.1 Contract-Annotated Task Graph 
+
+The planner commits an intermediate representation before node-local generation: 
+
+I = Π( x) = ( P, B, G, Q), G = ( V, D, T ).
+
+Here P stores parsed input/output constraints, B algorithmic assumptions and complexity targets, Q program-level vali-dation requirements, V the nodes, D their dependencies, and 
+
+T a topological order. Existing IDs cannot be silently repur-posed; later structural changes are recorded as graph deltas in repair transactions. Each node is a responsibility unit: 
+
+vi = (id i, g i, τ i, X i, Y i, F i, ρ i, C i, q i),Fi = (name i, args i, ret i, pre i, post i, inv i).
+
+Here τi is an algorithm-routing category, Xi, Y i are in-put/output variables, Ci is the complexity budget, and qi is the local validation requirement. The routing category guides agent selection but is not the audit identity. The provenance map ρi records whether a variable comes from the task, an upstream node, or a local intermediate. U ⊆ V contains code-owning nodes: usually leaves, but also internal nodes that own orchestration code. The contract combines machine-checkable interface fields with semantic obligations. Function names, typed arguments, return schemas, dependencies, and complexity probes can be checked directly. Natural-language pre/postconditions and invariants become executable evidence only when instan-tiated as tests, assertions, static checks, or proof obliga-tions. The experiments use execution-based tests and contract checks, although the schema can also store static or formal-analysis results. Appendix B.3 gives a serialized instance. These fields constrain generation and define what evidence can be attributed to the node. 
+
+3.2 Node-Local Generation and Assembly 
+
+For each vi ∈ U , the router chooses an executor, the executor produces only node-owned code, and the local verifier returns structured evidence: 
+
+ai = Route( vi, M, B),ci ← Generate( ai, g i, F i, X i, Y i, ρ i, C i, B),ri = VerifyLocal( ci, F i, q i, C i).
+
+The router may use τi to select an algorithm-specialized agent, but ownership remains attached to id i. Local evidence S0                        
+
+> S1 S3 S2
+> ID S2 - maintain 7/30-day windows
+> Commitment: advance fi rst uncovered day Interface: advance_windows(days, t, d) Contract: preserve days within pass window Owner: node S2; nodes may not modify its code
+> 1. Plan-time responsibility IDs
+> Initial graph Representative responsibility node
+> Identity exists before code generation
+> 2. Node-owned code and evidence
+> Responsibility record S2
+> Commitment advance pass-window pointers
+> Code C2 while days [p7] <= d - 6: . . .
+> Interface advance_windows(days,t,d) -> p7,p30
+> Provenance days <- S1; d,t <- loop state
+> Evidence r2 boundary test rejected
+> Assembly and global validation
+> S1:c1 S2:c2 S3:c3 S0:program y
+> test: expected 4, got 6
+> 3. Evidence-addressed repair
+> Failure evidence
+> wrong_answer expected 4, got 6
+> Conservative locator
+> evidence -> S2 unsupported -> abstain
+> Before c2
+> window condition: days [p7] <= d - 6
+> After c2'
+> window condition: days [p7] < d - 6
+> PASS program y reuse S1,S3 unchanged append h = (e, S2, delta, c2, result)
+> S0
+> S1 S3 S2
+> Lifecycle invariant: S2 Plan S2 Owned code S2 Evidence S2 Repair History
+> Selected region and frozen complement
+
+Figure 2: Overview of the responsibility-preserving lifecycle in AuditCoder . Before code generation, the planner assigns stable responsibility identities and node-level contracts. During node-local generation and assembly, every registered function or helper is owned by one responsibility node, and validation evidence is indexed by the same identity. After a failure, the locator selects an evidence-supported node or dependency branch, or abstains; only the selected region is regenerated, the frozen complement is reused, and the repair event is appended to the same responsibility record. The figure illustrates identity continuity and stable code ownership, not a semantic one-to-one mapping between decisions and statements. may include compilation status, examples, generated bound-ary cases, interface checks, contract assertions, and resource probes. A passing record is test-validated : it records success-ful checks rather than formal correctness. Every registered function or helper is entered in an own-ership map 
+
+μ : Fun reg → U , μ(f ) = vi.
+
+The map is total over registered units and assigns each ex-actly one owner. A bundle ci may contain several func-tions, helpers, or non-contiguous statements, which inherit the node’s ownership; no one-to-one decision–span corre-spondence is assumed. Node-local generation cannot silently rewrite another node’s code. If assembly requires such a change, an inte-gration exception records the parent, affected child, ratio-nale, and region, and expands the transaction boundary. The assembler then constructs 
+
+y = Ω( G, {(vi, c i)}vi∈U )
+
+while enforcing dependency order and provenance-consistent arguments. Global validation produces an addi-tional evidence record: 
+
+rg = Execute( y, Q), E = {rg} ∪ { ri}vi∈U .
+
+The global record contains pass/fail status, traceback frames, observed and expected outputs, resource signals, and failed contract checks. Node addresses and μ make this evidence usable for responsibility localization rather than only whole-program retry. 
+
+3.3 Evidence-to-Responsibility Localization 
+
+When global validation fails, the locator combines global evidence, node-local records, and the ownership map: 
+
+z = Locate( rg, G, {ri}vi∈U , μ )
+
+∈ {⊥} ∪ (V × M × R loc × C × E ) ,
+
+where Rloc is the rule-label set and C a discrete confidence scale. z = ⊥ denotes abstention; otherwise, 
+
+z = (ˆ v, ˆa, m, κ, ˆe),
+
+where ˆv is the selected node, ˆa its routed agent, m the rule label, κ the confidence level, and ˆe the supporting evidence. Rules follow a fixed priority. R1: Traceback. A registered frame f maps to μ(f ) with high confidence. R2: Resource evidence. A timeout or memory failure maps to the narrowest node or branch supported by its complexity budget, resource probes, and ownership of implicated loops or data structures; incomparable candidates cause abstention. R3: Local rejec-tion. A rejected boundary case, interface check, or invariant selects its node with low-to-medium confidence when com-patible with the global failure. R4: Abstention. Graph-level or otherwise insufficient evidence returns ⊥.In Figure 2, the wrong answer is compatible with the boundary-case rejection stored under S2, so R3 selects S2;without such node-addressed evidence, the outcome is ab-stention. The result is an evidence-supported region, not a ground-truth cause, which is why Section 4.3 reports local-ization coverage rather than accuracy. 
+
+3.4 Evidence-Guided Bounded Repair 
+
+For z = (ˆ v, ˆa, m, κ, ˆe)̸ = ⊥, AuditCoder selects an evidence-supported region. Node repair applies to one im-plementation node; branch repair applies when a strategy, interface, or decomposition error is shared by a dependency branch: 
+
+R(z) = 
+
+{ˆv}, Node ,
+
+Subtree(EB( z); G), Branch ,
+
+F(z) = V \ R (z).
+
+Here EB( z) is the branch root and F the frozen comple-ment. For v0 → v1 → · · · → vℓ = ˆ v, the default root is the first non-root ancestor v1, narrowed to a deeper ances-tor when supported. This permits branch replanning without defaulting to whole-program regeneration. The repair operator updates only the selected region: 
+
+G′R, {c′
+
+> i
+
+, r ′
+
+> i
+
+}vi∈R∩U = Repair( GR, {ci, r i}vi∈R∩U , z ) .
+
+Node repair keeps the interface fixed unless evidence indi-cates a mismatch. Branch repair may replan internally, but external inputs, outputs, return types, and downstream call sites must remain compatible with F. Integration exceptions expand R before regeneration; no edit silently crosses the frozen boundary. The repaired artifact is assembled as 
+
+y′ = Ω  G′, {c′
+
+> i
+
+}vi∈R∩U ∪ { ci}vi∈U\R 
+
+ ,
+
+subject to the preservation invariant 
+
+∀vi ∈ F ∩ U , c′ 
+
+> i
+
+= ci.
+
+After revalidation, the candidate is compared with the pre-repair state using the recorded strict-improvement policy over full pass, external and internal passes, and clean exits. An improving candidate is accepted; otherwise, the persisted snapshots of assembled code, node snippets, and test results are restored. Let d record the accept/reject decision and σ the rollback status. The transaction 
+
+h = ( z, R, F, ∆G, ∆c, r ′
+
+> g
+
+, d, σ )
+
+is appended to H and referenced by affected-node histories 
+
+hi. The enforced property is scope preservation, not global minimality: regeneration is confined to expanded R and the frozen complement is reused unchanged. Appendix E speci-fies the recorded decision and rollback fields. If z = ⊥, bounded repair stops. A separately logged global fallback may follow, but it lies outside the frozen-complement guarantee and is reported separately in Sec-tions 4.3 and 4.4. 
+
+## 4 Experiments 
+
+We organize the evaluation around three questions. RQ1 
+
+tests whether evidence-guided bounded repair can recover accuracy lost when generation is decomposed into auditable graph units. RQ2 examines whether the retained records re-main structurally usable and support evidence-bounded re-pair transactions. RQ3 studies when such boundaries are appropriate and where their computational cost arises. 
+
+4.1 Setup 
+
+Datasets, comparisons, and protocol. APPS is a natural-language-to-Python benchmark with hidden tests (Hendrycks et al. 2021); we use a fixed sample of 200 tasks (50 introduc-tory, 100 interview, and 50 competition). ClassEval evalu-ates class-level Python generation with interdependent meth-ods and shared state (Du et al. 2024); each model–method run contains 100 records. We compare direct and reasoning baselines, staged or role-specialized generation, and graph variants that progressively add task planning, algorithm-specialized agents, and evidence-guided subtree repair. Func-tional comparisons use DeepSeek-V3.2 (DeepSeek-AI 2025) and Qwen3.6-plus (Alibaba Cloud 2026) with the same task inputs, decoding policy, execution harness, resource limits, and the attempt budget prescribed for each method. Fixed-run pass@1 is computed from the single output retained at the end of that method’s generation, retry, or repair sequence; hidden-test outcomes are never used to choose among can-didates. The process audit in Table 2 uses a separate evidence source. It aggregates 200 existing deepseek-v4-flash 
+
+APPS records from completed batches without rerunning or modifying them. Because these records differ from the func-tional experiments in model and run provenance, Table 2 characterizes the retained process evidence rather than an accuracy–auditability trade-off. Appendix C gives the base-line definitions, settings, denominators, exclusions, and re-production commands. We also perform an exploratory 22-task transfer check across file-based finance, blind scien-tific computing, and source-grounded aerospace/communi-cations with deepseek-v4-flash , one retained candi-date, and frozen external tests (Appendix K). 
+
+4.2 RQ1: Functional Recovery 
+
+Table 1 separates the effects of graph decomposition, al-gorithm specialization, and repair. On APPS, task planning alone reaches 39.5% with DeepSeek and 62.5% with Qwen. In the matched 200-task Qwen rows, algorithm-specialized agents raise pass@1 from 62.5% to 70.0%, and evidence-guided repair raises it to 83.0%. The DeepSeek sequence is directionally similar, but its middle row contains only 175 valid outputs. Thus, decomposition can introduce interface and strategy failures, while retaining the graph as a repair index makes many recoverable. AgentCoder remains the strongest functional baseline, ex-ceeding AuditCoder by 8.5/7.5 points on APPS and 11.0/6.0 on ClassEval. On ClassEval, AuditCoder exceeds CoT + retry by 20.0/31.0 points. Because ClassEval contains inter-dependent methods and shared state, it extends the evidence beyond isolated functions. For exploratory transfer, AgentCoder and AuditCoder re-solve 4/6 versus 4/6 finance tasks, 6/8 versus 5/8 scientific tasks, and 6/8 versus 5/8 aerospace/communications tasks under the protocol above. These small suites show that the pipeline operates across heterogeneous Python task forms; they do not establish broad domain generalization. Overall, RQ1 supports functional recovery under auditable decom-position and limited task-form transfer, while leaving a clear gap to AgentCoder. Table 1: Fixed-run pass@1 (%) on APPS and ClassEval. AgentCoder attains the highest functional accuracy among the evaluated methods; AuditCoder is the strongest graph-based variant. 
+
+APPS (200 tasks unless marked) Method DeepSeek Qwen 
+
+Baselines without the contract-annotated graph 
+
+Direct 68 .0 77 .5
+
+Direct + retry 81 .5 85 .0
+
+CoT 74 .0 79 .5
+
+CoT + retry 90 .5 90 .0
+
+Step-by-Step 69 .0 75 .0
+
+Framework 67 .5 68 .5
+
+AgentCoder 91 .0 90 .5
+
+Graph-based variants 
+
+Task plan 39 .5 62 .5
+
+Task plan + algorithm agents 52.0 † 70 .0
+
+AuditCoder 82 .5 83 .0
+
+ClassEval (100 records/run) Method DeepSeek Qwen 
+
+Direct + retry 52 .0 52 .0
+
+CoT + retry 55 .0 51 .0
+
+AgentCoder 86 .0 88 .0
+
+AuditCoder 75 .0 82 .0
+
+> †The DeepSeek task-plan + algorithm-agents row contains 175 valid structured outputs after malformed JSON is filtered; it is a diagnostic ablation rather than a paired 200-task comparison.
+
+Table 2: Record structure, localized repair, and transaction governance in a separate post-hoc aggregation of 200 APPS records. 
+
+Metric n Mean / rate Med. 
+
+Trace and graph structure 
+
+DCTC-leaf, task macro ↑ 200 0.9625 → 0.9725 1 .0 → 1.0
+
+Graph integrity ↑ 200 185/200 (.925) –Contract–signature consistency ↑
+
+332 323/332 (.973) –
+
+Repair evidence and governance 
+
+Recorded localization coverage ↑
+
+60 26/60 (.433) –Localized repair success ↑ 26 17/26 (.654) –Repair region size, nodes ↓ 26 .468 .500 Changed code ratio, LOC ↓ 26 .526 .677 Test regression rate ↓ 55 2/55 (.036) –Decision compliance ↑ 55 55/55 (1.0) –Rollback integrity ↑ 21 21/21 (1.0) –
+
+4.3 RQ2: Auditability and Bounded Repair 
+
+Table 2 reports three layers of process evidence: whether the responsibility records remain structurally intact, whether failures admit an evidence-supported repair boundary, and whether the resulting transaction follows the recorded ac-ceptance or rollback policy. Decision–Code Trace Coverage (DCTC) is the per-task fraction of leaf responsibility records that retain nonempty owned code, interface contract, prove-nance, and validation fields; the task-macro score averages this fraction across tasks. Its increase from 0.9625 after ini-tial assembly to 0.9725 after repair and reassembly indicates that these links are usually retained through intervention. Be-cause any nonempty validation verdict counts, DCTC mea-sures record completeness rather than the truth of the fields or the correctness of the program. The stricter structural checks reveal the remaining defects. Graph integrity is 0.925 because it additionally requires re-solvable references, an acyclic parent relation, and an exe-cution order consistent with the recorded leaves. Contract– signature consistency is 0.973, but it checks only that one de-clared function exists with matching positional parameters; it does not evaluate semantic pre/postconditions, complexity, or behavior. Localization is markedly more selective than trace re-tention. The locator records an evidence-supported node or branch for 26 of 60 failures: six are supported by registered traceback frames and 20 by low-confidence verification re-ports. The remaining 34 cases abstain from bounded repair and proceed to a separately logged global fallback; those paths are outside the frozen-complement guarantee and are excluded from localized-repair and locality metrics. Since APPS provides no ground-truth responsibility node, 26/60 is a coverage measure, not localization accuracy or correct-abstention accuracy. Seventeen of the 26 localized repairs pass the external tests. Their mean repair-region size (RRS) is 0.4679 of graph nodes, and the mean changed-code ratio (CCR) is 0.5260 of final lines of code (LOC). These values clarify the meaning of bounded : the permitted scope is explicit, but it is often a nontrivial branch rather than a small patch. RRS and CCR need not coincide because not every line owned by a selected node changes, while persisted deltas also reflect accepted repairs and rollbacks. Of 55 test observations that passed before repair, two fail afterward. The governance metrics concern the transaction record rather than functional quality. All 55 transactions with accep-tance metadata agree with the system’s strict-improvement ordering over full pass, external and internal passes, and clean exits. All 21 comparable rollbacks restore the three audited snapshots: assembled code, node snippets, and APPS results. These checks establish consistency with the recorded policy and snapshots; they do not establish test completeness, re-pair optimality, or restoration of all runtime and intermediate state. Appendices D and E provide the formal definitions and record schemas. Suitable Case: Multi-stage reasoning with stable artifacts   
+
+> Codeforces 1038F / APPS 42 AuditCoder 10/10 CoT 5/10
+
+Limitation Case: Highly coupled global modeling   
+
+> Codeforces 884F / APPS 53 AuditCoder 1/10 CoT 10/10
+> Pattern s
+> Cyclic boundary correction
+
+Σ
+
+> Final count
+> Expected 2, CoT 1
+
+✓ Each stage exposes a clear, veri fi able output. Errors can be localized and repaired stage by stage. 
+
+> Relaxed local model
+> pair -> left slot / right slot
+> Over-optimistic but invalid solution
+> Expected 26, got 36
+
+! Local pieces may look plausible, but correctness depends on all constraints being modeled together.       
+
+> Easy ：weak coupling, stable artifacts, defensible local boundaries Hard ：global invariant, strong coupling, no independent repair boundary
+> Character frequencies Symmetric-pair inequality Flow model / feasible region Slot-level reward Flow conservation
+> 156
+> pair reward = left gain + right gain char -> pair -> sink slot information collapsed
+> CoT often misses boundary-crossing cases
+> KMP failure array
+> Automaton transitions
+> Linear DP
+> stable artifact
+> 234
+
+Figure 3: Two diagnostic cases illustrating the scope of graph-based responsibility boundaries. Stable, locally testable artifacts support localized validation and repair (left), whereas a tightly coupled global invariant makes locally plausible components misleading (right). The counts summarize 10 attempts for each case and are not aggregate estimates. Appendix F shows how these quantities arise in one trans-action. For APPS task 3103, a wrong answer and compatible local rejections select branch S1 . The branch is replanned un-der the same external raw_input –to– result contract, the outer orchestration remains in the frozen complement, and the retained validation cases pass after reassembly. The example is not an additional aggregate result; it illustrates how one responsibility address joins the evidence, selected scope, code revision, and final outcome. 
+
+4.4 RQ3: Applicability and Cost 
+
+The two cases in Figure 3 delimit when a responsibility graph is useful. In the suitable case, parsing, automaton con-struction, dynamic programming, boundary correction, and aggregation each produce a stable intermediate artifact. An implementation error can therefore remain a node-level trans-action, while an interface or decomposition error can be lifted to a branch without changing the branch’s external contract. In the limitation case, frequencies, pair constraints, rewards, and flow conservation jointly define one feasible region. A local surrogate discards state needed across constraints, so a defensible response is to use a coarser responsibility unit, revise the graph, or abstain. The cases explain the struc-tural mechanism; they do not estimate how frequently either regime occurs. The token breakdown shows where this design be-comes expensive. The 200-record audit collection consumes 15.98M tokens, or 79.9K per task. Initial generation accounts for 70.09% of the total and repair for 29.91%. Across both stages, planning and reasoning consume 64.46%, code gener-ation and assembly 28.27%, and explicit verification 7.28%. The 34 abstention-triggered global fallbacks alone consume 57.88% of all repair tokens, more than the 26 evidence-localized paths. Thus, the main cost comes from planning and from failures to establish a local boundary, rather than from verification alone. Abstention preserves the conserva-tive repair semantics, but a subsequent global fallback shifts rather than removes the computational cost. For simple self-contained tasks that do not require an audit trail, lightweight CoT or global retry is the more economi-cal choice. AuditCoder is most appropriate when the task admits meaningful intermediate artifacts and the value of persistent responsibility, bounded intervention, and an in-spectable repair history justifies the additional calls. Ap-pendix H gives the detailed accounting. 
+
+## 5 Conclusion 
+
+AuditCoder follows one principle: a generation-time sub-problem remains responsible for its implementation, evi-dence, and interventions. Its contract-annotated task graph maps failures to evidence-supported nodes or branches, re-pairs them, reuses the frozen complement, or abstains with-out a defensible boundary. As a repair index, the graph re-covers much of the accuracy lost to decomposition, but re-mains below the strongest functional baselines. The audit exposes the bottleneck: trace links persist, but only 26 of 60 failures support a node or branch boundary, while planning and global fallback dominate cost. It suits tasks with sta-ble, locally testable artifacts. Repositories still require bet-ter boundaries and compact cross-file histories. Trustwor-thy code generation requires not only better programs, but durable responsibility for how they are built and changed. References 
+
+Alibaba Cloud. 2026. Qwen3.6: Alibaba Cloud Launch Announce-ment. https://www.alibabacloud.com/blog/alibaba-cloud-unveils-qwen3-6_602718. Announcement including Qwen3.6-plus. Ac-cessed: 2026-05-07. Bairi, R.; Sonwane, A.; Kanade, A.; D. C., V.; Iyer, A.; Parthasarathy, S.; Rajamani, S. K.; Ashok, B.; and Shet, S. 2024. CodePlan: Repository-Level Coding Using LLMs and Planning. 
+
+Proceedings of the ACM on Software Engineering , 1(FSE): 675– 698. Barrak, A. 2025. Traceability and Accountability in Role-Specialized Multi-Agent LLM Pipelines. In 2025 40th IEEE/ACM International Conference on Automated Software Engineering Workshops , 315–322. Bouzenia, I.; Devanbu, P. T.; and Pradel, M. 2025. RepairAgent: An Autonomous, LLM-Based Agent for Program Repair. In Proceed-ings of the 47th IEEE/ACM International Conference on Software Engineering .Chen, B.; Zhang, F.; Nguyen, A.; Zan, D.; Lin, Z.; Lou, J.-G.; and Chen, W. 2023. CodeT: Code Generation with Generated Tests. In The Eleventh International Conference on Learning Representa-tions .Chen, J.; Tang, H.; Chu, Z.; Chen, Q.; Wang, Z.; Liu, M.; and Qin, B. 2024a. Divide-and-Conquer Meets Consensus: Unleashing the Power of Functions in Code Generation. In Advances in Neural Information Processing Systems , volume 37, 67061–67105. Chen, X.; Lin, M.; Schärli, N.; and Zhou, D. 2024b. Teaching Large Language Models to Self-Debug. In The Twelfth International Conference on Learning Representations .DeepSeek-AI. 2025. DeepSeek-V3.2: Pushing the Frontier of Effi-cient Reasoning and Agentic AI. https://huggingface.co/deepseek-ai/DeepSeek-V3.2. Model card. Accessed: 2026-05-07. Du, X.; Liu, M.; Wang, K.; Wang, H.; Liu, J.; Chen, Y.; Feng, J.; Sha, C.; Peng, X.; and Lou, Y. 2024. Evaluating Large Language Models in Class-Level Code Generation. In Proceedings of the 46th IEEE/ACM International Conference on Software Engineer-ing , 982–994. Gou, Z.; Shao, Z.; Gong, Y.; Shen, Y.; Yang, Y.; Duan, N.; and Chen, W. 2024. CRITIC: Large Language Models Can Self-Correct with Tool-Interactive Critiquing. In The Twelfth International Confer-ence on Learning Representations .Hendrycks, D.; Basart, S.; Kadavath, S.; Mazeika, M.; Arora, A.; Guo, E.; Burns, C.; Puranik, S.; He, H.; Song, D.; and Steinhardt, J. 2021. Measuring Coding Challenge Competence With APPS. In 
+
+Proceedings of the Neural Information Processing Systems Track on Datasets and Benchmarks .Huang, D.; Zhang, J. M.; Luck, M.; Bu, Q.; Qing, Y.; and Cui, H. 2023. AgentCoder: Multi-Agent-based Code Generation with Iter-ative Testing and Optimisation. arXiv preprint arXiv:2312.13010. arXiv:2312.13010. Islam, M. A.; Ali, M. E.; and Parvez, M. R. 2024. MapCoder: Multi-Agent Code Generation for Competitive Problem Solving. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics , 4912–4944. Jiang, X.; Dong, Y.; Wang, L.; Fang, Z.; Shang, Q.; Li, G.; Jin, Z.; and Jiao, W. 2024. Self-Planning Code Generation with Large Language Models. ACM Transactions on Software Engineering and Methodology , 33(7): 182:1–182:30. Jones, J. A.; and Harrold, M. J. 2005. Empirical Evaluation of the Tarantula Automatic Fault-Localization Technique. In Proceedings of the 20th IEEE/ACM International Conference on Automated Soft-ware Engineering , 273–282. Loughridge, C.; Sun, Q.; Ahrenbach, S.; Cassano, F.; Sun, C.; Sheng, Y.; Mudide, A.; Misu, M. R. H.; Amin, N.; and Tegmark, M. 2025. DafnyBench: A Benchmark for Formal Software Verification. 
+
+Transactions on Machine Learning Research .North, M.; Atapour-Abarghouei, A.; and Bencomo, N. 2024. Code Gradients: Towards Automated Traceability of LLM-Generated Code. In 2024 IEEE 32nd International Requirements Engineering Conference , 321–329. QF-Bench. 2026. QuantitativeFinance-Bench: A State-Aware In-teractive Benchmark for Financial Agent Tasks. https://github.com/ QF-Bench/QuantitativeFinance-Bench. Software benchmark. Ac-cessed: 2026-07-29. Ruan, H.; Zhang, Y.; and Roychoudhury, A. 2025. SpecRover: Code Intent Extraction via LLMs. In Proceedings of the 47th IEEE/ACM International Conference on Software Engineering , 963–974. Shinn, N.; Cassano, F.; Gopinath, A.; Narasimhan, K.; and Yao, S. 2023. Reflexion: Language Agents with Verbal Reinforcement Learning. In Advances in Neural Information Processing Systems ,volume 36, 8634–8652. SonarSource. 2026. State of Code Developer Survey Report 2026. Technical report, SonarSource. Quantitative online survey of 1,149 professional developers; fieldwork conducted in October 2025. Sun, C.; Sheng, Y.; Padon, O.; and Barrett, C. 2024. Clover: Closed-Loop Verifiable Code Generation. In AI Verification: First Interna-tional Symposium, SAIV 2024 , 134–155. Springer. Tian, M.; Gao, L.; Zhang, S. D.; Chen, X.; Fan, C.; Guo, X.; Haas, R.; Ji, P.; Krongchon, K.; Li, Y.; Liu, S.; Luo, D.; Ma, Y.; Tong, H.; Trinh, K.; Tian, C.; Wang, Z.; Wu, B.; Xiong, Y.; Yin, S.; Zhu, M.; Lieret, K.; Lu, Y.; Liu, G.; Du, Y.; Tao, T.; Press, O.; Callan, J.; Huerta, E.; and Peng, H. 2024. SciCode: A Research Coding Benchmark Curated by Scientists. In Advances in Neural Information Processing Systems , volume 37, 30624–30650. Wang, F.; Xi, X.; Cui, Z.; Dai, H.; and Wang, X. 2025. Embedding Traceability in Large Language Model Code Generation: Towards Trustworthy AI-Augmented Software Engineering. In Compan-ion Proceedings of the 33rd ACM International Conference on the Foundations of Software Engineering , 1760–1763. Wang, Y.; Keung, J.; Ma, X.; Mao, Z.; Chen, K.; and Li, Y. 2026. R2Code: A Self-Reflective LLM Framework for Requirements-to-Code Traceability. arXiv preprint arXiv:2604.22432. Accepted to IEEE COMPSAC 2026, arXiv:2604.22432. Wong, W. E.; Gao, R.; Li, Y.; Abreu, R.; and Wotawa, F. 2016. A Survey on Software Fault Localization. IEEE Transactions on Software Engineering , 42(8): 707–740. Xia, C. S.; Deng, Y.; Dunn, S.; and Zhang, L. 2025. Demystifying LLM-Based Software Engineering Agents. Proceedings of the ACM on Software Engineering , 2(FSE): 801–824. Yang, C.; Li, X.; Misu, M. R. H.; Yao, J.; Cui, W.; Gong, Y.; Hawblitzel, C.; Lahiri, S.; Lorch, J. R.; Lu, S.; Yang, F.; Zhou, Z.; and Lu, S. 2025. AutoVerus: Automated Proof Generation for Rust Code. Proceedings of the ACM on Programming Languages ,9(OOPSLA2): 396:1–396:29. Yang, J.; Jimenez, C. E.; Wettig, A.; Lieret, K.; Yao, S.; Narasimhan, K. R.; and Press, O. 2024. SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering. In Advances in Neural Information Processing Systems , volume 37, 50528–50652. Zelikman, E.; Huang, Q.; Poesia, G.; Goodman, N. D.; and Haber, N. 2023. Parsel: Algorithmic Reasoning with Language Models by Composing Decompositions. In Advances in Neural Information Processing Systems , volume 36, 31466–31523. Zhang, S.; Chen, Z.; Shen, Y.; Ding, M.; Tenenbaum, J. B.; and Gan, C. 2023. Planning with Large Language Models for Code Generation. In The Eleventh International Conference on Learning Representations .Zhang, Y.; Ruan, H.; Fan, Z.; and Roychoudhury, A. 2024. Au-toCodeRover: Autonomous Program Improvement. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis , 1592–1604. Zhong, L.; Wang, Z.; and Shang, J. 2024. Debug like a Human: A Large Language Model Debugger via Verifying Runtime Execution Step by Step. In Findings of the Association for Computational Linguistics: ACL 2024 , 851–870. Guide to the Supplement 
+
+The main paper is intentionally self-contained. This sup-plement provides the additional material needed to inspect the method implementation, reproduce the reported exper-iments, and trace the aggregate audit claims to concrete records. Appendix A gives a compact lifecycle-oriented po-sitioning table without repeating the prose of Section 2. Ap-pendix B specifies the complete inference procedure, the se-rialized responsibility record, and a concrete record instance. Appendices C–E document the experimental protocol, met-ric definitions, and case-level repair-log schema. Appendix F provides one end-to-end audit transaction. Appendices G–I report failure boundaries, token cost, and limitations. Finally, Appendix J identifies the boundary-critical prompt and ar-tifact components, Appendix K documents the exploratory cross-domain suites, and Appendix L reproduces the com-plete prompt-template corpus. Machine-readable logs are placed in the separately submitted Code and Data Supple-ment. 
+
+## A Lifecycle-Dimension Positioning 
+
+Section 2 explains the conceptual distinctions in prose. Ta-ble 3 provides a compact lifecycle-oriented comparison. Its entries indicate whether a property is a required system in-variant, not whether a prior system could be extended to support it. 
+
+## B Additional Method Details 
+
+B.1 Full Inference Algorithm 
+
+Algorithm 1 makes explicit the three invariants summarized in the main paper: pre-code identity allocation, ownership-and-evidence binding, and identity-preserving intervention. The ownership map μ is included in the locator call because traceback frames and registered helpers are resolved through this map. 
+
+B.2 Lifecycle Invariants and Serialized Audit Schema 
+
+For implementation node vi, the conceptual responsibility record is 
+
+si = (id i, g i, a i, F i, c i, ρ i, r i, h i).
+
+The serialized form must therefore contain the owned imple-mentation bundle explicitly; omitting code from the schema would break the decision–code link that the method claims to preserve. We use the following record: 
+
+Node i = {id , goal , parent ,
+
+dependencies , agent_type ,
+
+interface , complexity_budget ,
+
+owned_code , provenance ,
+
+validation ,
+
+integration_exceptions ,
+
+repair_history }.
+
+B.3 Concrete Responsibility-Record Instance 
+
+Figure 4 instantiates the serialized schema with the permutation-construction example. It presents the task break-down across root, child, and grandchild responsibility records together with the critical-audit fields retained for each unit. The agent-oriented headings identify routed execution roles; the node identities and the responsibility records inside the cards remain the evidence-addressable units used by Audit-Coder . The figure is a static artifact snapshot; Figure 2 in the main paper shows how the records are used over time for validation, localization, and bounded repair. The distinction between an agent role and a responsibil-ity address is essential. For example, “Greedy” identifies a routed executor, whereas the node identity is the stable lookup key for its commitment, selected code, validation evidence, and intervention history. The function map dis-played in S0 assigns check_feasibility to S1_S1 
+
+and construct_permutation to S1_S2 . The parallel constructor shown under S2 therefore exposes a duplicated responsibility that must be marked unused or resolved by the ownership checker before assembly; it is not a second valid owner. The parent consumes the mapped child records during assembly; it does not acquire ownership of the child code. 
+
+## C Experimental Protocol and Reproducibility 
+
+This section records the operational details needed to repro-duce the functional and audit analyses. Aggregate outcomes are reported in Tables 1–2 of the main paper. 
+
+Baseline operations. Direct generates one complete pro-gram; Direct + retry permits one global retry after failed validation. CoT and CoT + retry add an explicit reasoning stage. Step-by-Step continues implementation from an incre-mentally accumulated partial program. Framework first pro-duces a code skeleton and then fills its details. AgentCoder uses programmer, test-designer, and test-executor roles with iterative execution feedback. The graph ablations progres-sively add a task graph, algorithm-specialized generators, and evidence-guided subtree repair. 
+
+Run selection and denominators. No output is selected after observing hidden-test success. Fixed-run pass@1 uses one retained output per evaluated record. Rows with a method-defined retry or repair consume their permitted ad-ditional calls, but do not sample multiple candidates and retrospectively select a passing one. Where a parser failure changes the denominator, the row reports that denominator explicitly. 
+
+Bounded repair versus global fallback. A locator out-put of ⊥ terminates the bounded-repair procedure in Algo-rithm 1. In the consolidated implementation records, an op-tional, separately logged global fallback may subsequently generate another candidate. Those 34 paths are outside the frozen-complement guarantee, are excluded from localized-repair success and locality metrics, and are reported sepa-rately in the cost analysis. Method family Primary addressable unit Identity allocated before code Selected code and evidence retained under that identity Repair boundary as an execution constraint Persistent intervention history 
+
+Structured reasoning Thoughts, actions, or search states Not generally an executable ownership requirement. Not generally required to bind an implementation bundle and validation record. Search or revision may be structured, but the boundary need not be a code-ownership invariant. Reasoning/search traces may be retained, but not necessarily as code-responsibility transactions. Planning and modular synthesis Plans, function descriptions, modules, or candidate composi-tions A planning component may exist before code. Component identity supports synthesis, but selected candidates, runtime evidence, and later versions need not remain under one immutable responsibility address. Components may be replaced or recomposed; preservation of the outside region is not necessarily enforced as an audit invariant. Prior candidates or caches may be available, but append-only repair provenance is not the defining object. Execution feedback and post-hoc repair Programs, basic blocks, files, functions, or edit spans Localization usually starts from the generated or existing artifact. Runtime evidence can be precise, but the diagnostic unit need not be the plan-time commitment that produced the code. The patch scope is selected retrospectively and may be global or artifact-derived. Repair iterations can be logged, but are not necessarily indexed by a pre-code responsibility identity. Traceability and formal evidence Requirement–code links, proof obligations, specifications, or verified artifacts Requirements or proof objects may predate code. Strong property or correspondence evidence can be retained, while the executed candidate-selection and repair history remain orthogonal. Verification can constrain admissible artifacts, but it does not by itself define the construction-time repair transaction. Depends on the workflow; construction provenance is not implied by property validity. 
+
+AuditCoder Contract-annotated responsibil-ity node and its owned imple-mentation bundle Required: the responsibility ID is allocated when the graph is created, before implementation sampling. Required: commitment, interface, owned code, provenance, validation evidence, and versions use the same address. Required: repair selects an evidence-supported node or branch, freezes the complement, records cross-boundary exceptions, or abstains. Required: each intervention is appended to the same responsibility record. 
+
+The distinction is lifecycle continuity: planning, generation, assembly, validation, localization, and repair reuse one pre-code responsibility address. The table does not claim that decomposition, feedback, traceability, or verification are individually new. 
+
+Table 3: Lifecycle-oriented positioning. The table complements, rather than repeats, the related-work discussion in the main paper. 
+
+Submitted reproducibility materials. The separately up-loaded Code and Data Supplement should contain the im-plementation, prompt sources, evaluation scripts, fixed task identifiers, run manifests, environment specification, raw au-dit traces, per-task repair records, and commands that re-produce each table. The technical supplement intentionally contains no pointer to a mutable web repository. 
+
+## D Audit Metric Definitions 
+
+Let A be the selected audit-record set. For t ∈ A, let 
+
+Gt = ( Vt, Dt, Tt) be its final task graph, Ut ⊆ V t the im-plementation nodes, and Lt ⊆ U t the leaf implementation nodes; let U = S
+
+t∈A Ut denote their pooled set. 
+
+Decision–code trace coverage. For leaf node vi, let ci, Fi,
+
+ρi, and ri denote its owned code, basic interface contract, input-source fields, and validation record. Then 
+
+DCTC t = 1
+
+|L t|
+
+X
+
+vi∈L t
+
+I[ci̸ = ∅ ∧ Fi̸ = ∅ ∧ ρi̸ = ∅ ∧ ri̸ = ∅].
+
+Table 2 reports both the macro average |A| −1 P
+
+t∈A DCTC t
+
+and the leaf-micro ratio obtained by pooling all covered leaves. Initial DCTC is computed after initial assembly; final DCTC is computed after repair and reassembly. A nonempty verdict counts even when it is reject ; DCTC therefore measures record presence, not code correctness, provenance truth, or contract execution. 
+
+Graph integrity. GraphValid( t) requires nonempty unique node IDs, a resolvable root, valid parent and de-pendency references, an acyclic parent relation, no duplicate execution-order entries, and equality between the execution-order set and the recorded leaf set. The graph-integrity rate is 
+
+GIR = 1
+
+|A| 
+
+X
+
+t∈A 
+
+I[GraphValid( t)] .
+
+This is a post-hoc structural check. It does not establish that a decomposition or dependency edge is semantically correct. 
+
+Contract-signature consistency. For implementation node vi, SigMatch( vi) requires a nonempty declared func-Algorithm 1 AuditCoder inference with evidence-guided bounded repair. The procedure returns the final program and an audit trace containing responsibility records, validation evidence, and append-only repair history. 
+
+Require: task x, agent set M, repair budget K
+
+Ensure: executable program y, audit trace A = ( G, S, E, H)
+
+Stage 1: allocate responsibility identities and construct contracts. 
+
+1: I ← Π( x); extract (P, B, G, Q)
+
+2: U ← ImplementationNodes( G)
+
+3: initialize S ← ∅ , E ← ∅ , H ← ∅ , μ ← ∅ 
+
+Stage 2: generate node-owned code and bind local evidence. 
+
+4: for each vi ∈ U in topological order do 
+
+5: ai ← Route( vi, M, B)
+
+6: ci ← Generate( ai, g i, F i, X i, Y i, ρ i, C i, B)
+
+7: μ ← RegisterOwnedUnits( μ, v i, c i) ▷ every registered function/helper has one owner 8: ri ← VerifyLocal( ci, F i, q i, C i)
+
+9: S ← S ∪ { (id i, g i, a i, F i, c i, ρ i, r i, ∅)}
+
+10: end for 
+
+Stage 3: assemble and collect global evidence. 
+
+11: y ← Ω( G, {(vi, c i)}vi∈U )
+
+12: rg ← Execute( y, Q); E ← E ∪ { rg}
+
+13: if rg passes then 
+
+14: return y, (G, S, E, H)
+
+15: end if 
+
+Stage 4: intervene only on an evidence-supported region. 
+
+16: for k = 1 to K do 
+
+17: z ← Locate( rg, G, {ri}vi∈U , μ )
+
+18: if z = ⊥ then 
+
+19: return y, (G, S, E, H) ▷ abstain from unsupported local repair 20: end if 
+
+21: R ← SelectRegion( z, G)
+
+22: R ← ExpandForIntegrationExceptions( R, S) ▷ no silent cross-boundary edit 23: F ← V \ R 
+
+24: freeze {ci, r i}vi∈F ∩U 
+
+25: ξ0 ← Snapshot( y, {ci}vi∈U , r g)
+
+26: Gcand  
+
+> R
+
+, {ccand  
+
+> i
+
+, r cand  
+
+> i
+
+}vi∈R∩U ← Repair( GR, {ci, r i}vi∈R∩U , z )
+
+27: ∆G, ∆c ← Diff  GR, Gcand  
+
+> R
+
+, {ci}, {ccand  
+
+> i
+
+}
+
+28: Gcand ← ReplaceRegion  G, R, Gcand 
+
+> R
+
+
+
+29: ycand ← Ω Gcand , {ccand  
+
+> i
+
+}vi∈R∩U ∪ { ci}vi∈U \R 
+
+
+
+30: assert ccand  
+
+> i
+
+= ci for all vi ∈ F ∩ U 
+
+31: rcand g ← Execute( ycand , Q)
+
+32: E ← E ∪ { rcand g }
+
+33: d ← Decide( rg, r cand g ) ▷ recorded strict-improvement policy 34: if d = Accept then 
+
+35: G ← G cand 
+
+36: {ci, r i}vi∈R∩U ← { ccand  
+
+> i
+
+, r cand  
+
+> i
+
+}vi∈R∩U 
+
+37: y ← ycand 
+
+38: rg ← rcand g
+
+39: σ ← NotApplicable 
+
+40: else 
+
+41: Restore( ξ0)
+
+42: σ ← Restored 
+
+43: end if 
+
+44: S ← AppendIntervention  S, R, z, {ccand  
+
+> i
+
+, r cand  
+
+> i
+
+}, d, σ 
+
+45: H ← H ∪ (z, R, F, ∆G, ∆c, {rcand  
+
+> i
+
+}, r cand g , d, σ )
+
+46: if d = Accept and rg passes then 
+
+47: return y, (G, S, E, H)
+
+48: end if 
+
+49: end for 
+
+50: return y, (G, S, E, H) ▷ return the best audited attempt within budget 
+
+tion name, parseable Python code, exactly one function with that name, and positional parameter names and order that match the declared interface after an optional leading self Field group Stored content Lifecycle rule 
+
+Identity and structure id , goal , parent , and dependencies . id is allocated when the graph is created, before any implementation is sampled, and is not reassigned after repair. Agent routing agent_type and the concrete routed agent iden-tifier. The agent answers who executes ; it does not replace the responsibility ID that answers which code/evidence region is owned .Interface contract Function name, typed parameters, return schema, preconditions, postconditions, invariants, and com-plexity budget. Machine-checkable fields are validated directly; semantic clauses count as executable evidence only when instantiated as tests, assertions, analyzers, or proof obligations. Owned implementation owned_code : the selected function/helper bundle registered under the node. The ownership map μ is total over registered code units and maps each unit to exactly one responsibility owner. Provenance and evidence Variable-source map, local tests, contract checks, resource probes, and global evidence linked back to the node. Code and evidence reuse the same address; a passing record means test/tool validated, not formally proved by default. Exceptions and history Cross-node integration exceptions, selected region, frozen complement, graph/code deltas, validation outcome, and prior versions. Cross-boundary edits must be explicit and expand the transaction boundary; repair history is append-only. 
+
+Table 4: Serialized responsibility-record fields and the invariants they support. ROOT AGENT S0 depth=0 
+
+Task 
+
+read N,K , coordinate feasibility checking and construction, then emit a permutation or -1 .
+
+Responsibility and permission boundary Allowed: parse task input, invoke dependency-owned functions, assemble the  fi nal program, and emit the result. 
+
+Stop condition: return after global veri fi cation passes, the repairbudget is exhausted, or localization abstains. 
+
+Forbidden region: may not silently change a child contract, overwrite child-owned code, or alter the committed graph topology. 
+
+Contract evidence Global invariant: output a permutation of 1..N 
+
+with max(LIS,LDS)==K , or -1 when impossible. 
+
+Boundary cases: 1 1 → 1 , 4 1 → -1 , 5 6 → -1 .
+
+Data and code provenance Function map: solve → S0/orchestration ,   
+
+> check_feasibility →S1_S1/math
+
+,   
+
+> construct_permutation →S1_S2/greedy
+
+.
+
+> is_possible = check_feasibility(N, K) result_str = construct_permutation(N, K, is_possible) print(result_str)
+
+Critical Audit Agent Category 
+
+no specialized agent type; this is an orchestration node. 
+
+... 
+
+SUB AGENT S1 depth=1 
+
+Task 
+
+coordinate the feasibility checker and nested constructor. 
+
+Responsibility and permission boundary 
+
+coordinate child outputs and, after supported localization,replan only the selected S1 subtree. 
+
+> is_possible = check_feasibility(N, K) return construct_permutation(N, K, is_possible)
+
+Critical Audit Agent Category 
+
+no specialized agent type; this is an orchestration node. 
+
+... 
+
+SUB AGENT S2 depth=1 
+
+Task 
+
+construct the permutation using K reversed blocks. 
+
+Responsibility and permission boundary 
+
+implement its own constructor and node-local helpers, then submit it to local veri fi cation. 
+
+> for i in range(K): block_size = base_size + (i < remainder) result.extend(range(current + block_size - 1, current -1, -1))
+
+Critical Audit Agent Category 
+
+Greedy 
+
+... ... ... ... ... ... ... ... ... 
+
+SUB SUB AGENT S1_S1 depth=2 
+
+Task 
+
+decide feasibility using the Erdős–Szekeres bound. 
+
+Responsibility and permission boundary 
+
+implement and locally verify only the feasibility predicate. 
+
+> def check_feasibility(N, K): return K * K >= N
+
+Critical Audit Agent Category 
+
+Math 
+
+... 
+
+SUB SUB AGENT S1_S2 depth=2 
+
+Task 
+
+construct the permutation after feasibility checking. 
+
+Responsibility and permission boundary 
+
+construct and locally verify the permutation using the feasibility input. 
+
+> block_size = math.ceil(N / K) for i in range(K): block = range(i * block_size + 1, min((i + 1) * block_size, N) + 1) perm.extend(reversed(block))
+
+Critical Audit Agent Category 
+
+Greedy 
+
+... ... ... ... ... 
+
+Decision Code Decision Code Decision Code Decision Code Decision Code 
+
+Figure 4: Task breakdown and critical-audit records for the permutation-construction example. Solid black arrows show task dependencies fixed by the global planner before code generation; gray dashed arrows show child-to-parent code and audit-record propagation for assembly; red bidirectional arrows mark the recorded decision–code link within each node. Agent headings denote routed execution roles, while responsibility records remain the evidence-addressable audit units. is removed. Then 
+
+CSCR = 
+
+P
+
+vi∈U I[SigMatch( vi)] 
+
+|U| .
+
+The check does not cover type annotations, default or keyword-only arguments, preconditions, postconditions, in-Item Evaluated records Protocol and disclosure 
+
+APPS functional runs Fixed 200-task sample: 50 introductory, 100 interview, and 50 competition tasks. The same problem statements, execution interface, timeout, memory policy, decoding configuration, and maximum attempt budget are used across methods unless the method definition requires a retry or repair call. ClassEval functional runs 100 class-level records per model– method run. The class-level harness checks interdependent methods and shared state; the denominator is fixed at 100 for each reported row. Audit-record aggregation 200 existing APPS records: 50 introduc-tory, 100 interview, and 50 competition tasks. Table 2 is a read-only post-hoc aggregation of completed 
+
+deepseek-v4-flash batches. This record set is not a single frozen run or a same-protocol replication of the functional rows. Repair subset 60 initially failing tasks enter repair: 26 contain a recorded node/branch localiza-tion; for the remaining 34, the locator ab-stains and the pipeline records a global fallback. Localized repair success, RRS, and CCR use the 26 localized transactions. Decision compliance uses 55 transactions with acceptance records; five legacy transactions are excluded rather than imputed. Malformed structured output The DeepSeek task-plan + algorithm-agents row has 175 valid JSON records. The row reports the valid-record denominator after filtering malformed outputs. Because its task set is smaller, it is treated as a diagnostic ablation rather than a paired significance comparison with 200-record rows. Model and call metadata DeepSeek-V3.2 and Qwen3.6-plus for the functional tables; 
+
+deepseek-v4-flash for the post-hoc audit aggregation. The audit source manifest records the provider-visible model, input files, and file hashes. The consolidated legacy records do not establish one common git commit, environment fingerprint, or result-schema version. Sandbox evidence Every executed program. The harness records exit status, stdout, stderr, traceback frames, observed and expected outputs, runtime, timeout status, and memory status when available. 
+
+Table 5: Evaluation denominators, exclusions, and logged metadata. Exact numeric model settings and sandbox limits should be read from the run manifest included in the Code and Data Supplement, not inferred from aggregate tables. variants, complexity, or functional behavior. 
+
+Recorded localization coverage and localized repair suc-cess. Let Frepair be initially failed tasks admitted to repair, and let RecordedLocate( t) indicate that the persisted record names a node or branch and records a localization method. Define Floc = {t ∈ F repair : RecordedLocate( t)}. Then 
+
+LocCov = |F loc ||F repair | ,
+
+LRS APPS = |{ t ∈ F loc : Pass APPS (Repair( t)) }| |F loc | .
+
+The 26 localized records comprise six high-confidence trace-back cases and 20 low-confidence verification-report cases. For the remaining 34 cases, the locator abstains and the pipeline records a global fallback. Natural APPS failures have no responsibility-node ground truth, so coverage is not Localization@1 or causal accuracy. 
+
+Repair region and changed code. For selected node re-gion R ⊆ V and programs y and y′ before and after the persisted repair decision, 
+
+RRS nodes = |R| |V| , CCR LOC = ChangedLOC( y, y ′)LOC( y′) .
+
+RRS measures graph-node scope, whereas CCR measures the persisted textual delta. The reported CCR mixes accepted repairs, rollback-induced zero deltas, and five legacy records without acceptance metadata; it should not be interpreted as the delta distribution of accepted candidates alone. 
+
+Test regression. If Tpass (y) is the pooled set of external tests passed before localized repair, then 
+
+Regress = |{ τ ∈ T pass (y) : τ fails on y′}| |T pass (y)| .
+
+The main-table denominator is 55 eligible test observations, of which two fail after repair; it is not the number of repaired tasks. 
+
+Strict-improvement decision compliance. The recorded candidate ordering is the lexicographic tuple 
+
+Rank( x) = ( Fx, E x, I x, C Ex , C Ix ),
+
+where the components indicate full pass, external passes, internal passes, external clean exits, and internal clean exits. A candidate is expected to be accepted exactly when its candidate rank exceeds its initial rank. For transaction a,let da be the recorded binary decision and ea = I[Rcand  
+
+> a
+
+>Rinit  
+
+> a
+
+] the expected decision. For transactions Arecorded with acceptance metadata, 
+
+SIDC = 1
+
+|A recorded |
+
+X
+
+> a∈A recorded
+
+I[da = ea].
+
+This checks policy consistency against recorded ranks, not whether the tests or ranks are themselves complete. Five legacy repairs lack acceptance records and are excluded rather than counted as compliant. Rollback integrity. For rollback transaction a,
+
+Restored( a) requires equality between the final and initial values of (i) assembled code, (ii) node code snippets, and (iii) APPS test results. The audited rollback-integrity rate is 
+
+RIR = 
+
+P
+
+a∈A rollback I[Restored( a)] 
+
+|A rollback | .
+
+This three-snapshot comparison does not prove restoration of the complete IR, verification reports, process state, or append-only event history. 
+
+## E Repair Records and Aggregate-to-Case Evidence 
+
+The aggregate values in Table 2 are computed from machine-readable trace and repair records. Table 6 identifies the fields required to audit that aggregation. 
+
+Field Meaning 
+
+task_id , record source Identifiers joining the benchmark record, construction trace, and source-manifest entry. A nonempty per-transaction trace_id is not assumed for the consolidated legacy bundle. 
+
+failure_type External symptom: wrong answer, exception, timeout, memory/resource failure, or another harness verdict. 
+
+evidence_type Locator rule and supporting evidence: registered traceback frame, resource signal, compatible local rejection, or abstention. 
+
+selected_unit Responsibility node or branch root selected by the locator, with the discrete confidence label. 
+
+repair_region ,
+
+frozen_region 
+
+Node IDs included in the transaction and node IDs preserved outside it. 
+
+RRS_nodes , CCR_LOC Selected node fraction and persisted changed-code ratio for localized repair. 
+
+repair_success ,
+
+regression_rate 
+
+External post-repair outcome and failures among previously passing tests. Acceptance record and ranks Recorded decision and the initial/candidate strict-improvement tuples used to audit it. Initial/final code, snip-pets, and APPS results The three persisted snapshot pairs used by the rollback-integrity check. 
+
+Table 6: Per-task fields used by the reported repair met-rics. The available records support localization, persisted-delta, decision-compliance, regression, and three-snapshot rollback checks; they do not establish a complete append-only transaction history. 
+
+## F Compact Audit Case Study 
+
+This case study uses APPS task 3103 (Kattis 
+
+helpfulcurrents ). The task counts routes from aship’s starting column to the castle tile @. A ship may move north from a valid cell and may additionally follow an east/west current on > or <. The first assembled program returned 1 for an example whose expected output was 2.The trace attributes the compatible local rejections and global wrong-answer evidence to branch S1 ; the repair transaction therefore replans that branch while retaining the outer boundary. 
+
+Aggregation unit n Reconciliation 
+
+Post-hoc audit records 200 Consolidated 50/100/50 introductory/interview/competition records; no pipeline exception is reported in the selected bundle. Repair cases 60 Twenty-six contain a recorded node/branch localization; for the remaining 34, the locator abstains and the pipeline records a global fallback. Localized repairs 26 Seventeen pass the external APPS tests after repair. Acceptance decisions 55 Thirty-four are accepted and 21 are rolled back; five legacy repair cases have no acceptance record. Regression observations 55 Eligible external tests that passed before localized repair; two fail afterward. Comparable rollbacks 21 All 21 restore the three audited snapshots. 
+
+Table 7: Denominators used by the descriptive audit analysis. 
+
+Audit question Before repair After repair 
+
+What failed? Expected 2; observed 1. Three retained validation cases pass. Where is responsibility assigned? Compatible evidence maps to branch S1 .The transaction remains attached to S1 ; leaves remain S1__S1 and 
+
+S1__S2 .What may change? Only the evidence-supported subtree. The external branch contract and frozen complement are retained. What semantic change is recorded? North/current choice and zero-based input were under-specified or mishandled. Parsing and row-wise DP implement the clarified semantics. 
+
+Table 8: Before/after audit interpretation for APPS 3103. 
+
+Input Expected Actual after repair Pass 
+
+2 2 0; >@; >~ 2 2 true 
+
+3 5 1; »@«; >~#~<; »»~ 4 4 true 
+
+3 4 0; >~@~; ~<#~; »>~ begin repairs begin repairs true 
+
+Table 9: Representative post-repair checks for APPS 3103. The saved trace does not preserve every internal LLM message or temporary source file. It retains the final IR, leaf code and local verification records, assembled code, original failing case, selected error branch, retry strategy, and final external validation evidence. The case therefore illustrates a bounded repair transaction, but it does not establish complete internal-state capture or correctness beyond the retained tests. S0: outer orchestration and output contract 
+
+frozen structural boundary during the selected transaction 
+
+↙ ↘
+
+Selected bounded region R: subtree rooted at S1 S1 commitment: parse the branch input and compute the route count while preserving the external 
+
+raw_input -> result contract. 
+
+S1__S1 String 
+
+parse_input 
+
+records Y, X, x init , grid 
+
+S1__S2 DP 
+
+count_paths 
+
+row-wise route propagation 
+
+Frozen complement F
+
+non-selected responsibilities are reused unchanged; any required cross-boundary edit must be recorded as an integration exception. 
+
+Figure 5: Responsibility boundary used in the APPS 3103 audit transaction. The locator selects the subtree rooted at S1 ; its parser and DP leaves are regenerated under the existing external branch contract. The outer orchestration and non-selected responsibilities form the frozen complement. The figure visualizes the repair transaction, not the entire internal task graph. 
+
+Stage Input / retained record Output or audit evidence 
+
+Initial responsibility graph Root S0 ; selected branch candidate S1 ; parser leaf 
+
+S1__S1 ; DP leaf S1__S2 .The branch boundary is raw_input -> result ; the intended complexity is 
+
+O(Y X ).Local generation and checks Strict leaf interfaces, route-counting hints, and boundary cases. Both leaf implementations compile, but local verification returns reject ; the initial plan also mishandles zero-based input and the optional current transition. Global failure Assembled code and the problem I/O contract. wrong_answer ; for input 2 2 0\n>@\n>~ , expected 2, observed 1.Localization Global failure plus local verification records. Select S1 using compatible local-rejection evidence, confidence=low ; set 
+
+error_branch_root=S1 .Bounded repair Failing sample, old branch record, and frozen external boundary. Retain zero-based x_init ; make north movement available on valid cells; treat following > or < as an additional option; regenerate only the selected subtree and graft it back into the graph. Final validation Reassembled program and three validation cases. all_passed=true , cases_run=3 , cases_passed=3 ; the repair record is closed under the same branch ID. 
+
+Table 10: Stage-level evidence for the APPS 3103 repair transaction. The table summarizes the retained inputs, transformations, evidence, and outcome at each stage. 
+
+## G Failure Modes and Applicability Boundaries 
+
+Table 11 translates the suitable and tightly coupled cases from the main paper into an evidence-to-response taxonomy. The graph is most useful when intermediate artifacts are semantically meaningful, locally testable, and compositional. When a problem is governed by one tightly coupled global invariant, the appropriate auditable unit may be a single global node rather than an artificially decomposed collection of subgoals. 
+
+Failure mode Evidence Response 
+
+Local implementation bug A registered traceback frame or compatible local contract/boundary rejection points to one implementation owner. Prefer node-level repair; freeze the interface and the outside region unless evidence shows a contract mismatch. Contract or interface mismatch Adjacent nodes disagree on arguments, return schema, shape, or boundary conditions. Repair the selected contract/code unit and expand the transaction only as needed to preserve the external frozen boundary. Incorrect decomposition Local goals appear individually plausible but omit a dependency or assign the wrong responsibility. Lift to branch-level repair and replan within the branch’s external input/output contract. Global invariant or high cou-pling Correctness depends on constraints that must be modeled jointly, and no stable local boundary is justified. Revise the graph abstraction or use one global responsibility node; bounded repair may abstain. Ambiguous localization Several incomparable nodes remain compatible with the evidence, or the evidence establishes only a graph-level violation. Return ⊥ rather than assigning an unsupported unit. Repair-induced regression A previously passing test fails after the transaction. Record the non-monotonic outcome, reject the repair, and inspect boundary compatibility and integration exceptions. 
+
+Table 11: Failure taxonomy and evidence-constrained repair response. 
+
+## H Token and Cost Analysis 
+
+Token usage is collected from API response metadata; metric aggregation itself does not invoke an LLM. The aggregation includes only the final 200 records selected into the consol-idated collection and excludes superseded runs replaced by overlays. All 3,800 retained calls contain usage metadata. Averages per valid task use 200 as the denominator; averages per repair use the 60 tasks that enter repair; module averages use each module’s observed call count. Scope Calls Prompt Compl. Total Avg./valid Avg./repair Total 3,800 5,271,855 10,703,880 15,975,735 79,878.68 –Initial generation 2,880 3,893,277 7,303,482 11,196,759 55,983.80 –Repair 920 1,378,578 3,400,398 4,778,976 23,894.88 79,649.60 
+
+Table 12: AuditCoder token usage by scope over the selected 200-record collection. Repair usage is reported both as an average over all valid tasks and as an average over the 60 repaired tasks. 
+
+H.1 Usage by Scope 
+
+The scope totals close exactly: 11 ,196 ,759 + 4 ,778 ,976 = 15 ,975 ,735 , leaving no unclassified calls or tokens. Initial generation contributes 70.09% of total usage and repair con-tributes 29.91%. Prompt and completion tokens account for 33.00% and 67.00%, respectively. The 34 abstention-triggered global fallbacks consume 2,765,867 tokens, or 57.88% of all repair usage. The re-maining 2,013,109 repair tokens are associated with the 26 evidence-localized repairs. 
+
+H.2 Usage by Phase 
+
+The phase view separates planning and reasoning, code gen-eration and assembly, and explicit verification. Planning and reasoning comprise plan_agent calls and, during repair, 
+
+task_replanner calls. Code generation and assembly comprise algo_agents and assembler_agent ; ver-ification comprises weak_signal_eval . The retained 
+
+phase field distinguishes initial-generation calls from re-pair calls. Keeping verification explicit prevents its 1,162,294 tokens from being omitted by a four-phase thinking/code-generation summary. Planning and reasoning dominate total usage at 64.46%, followed by code generation and assembly at 28.27%. Ex-plicit verification contributes the remaining 7.28%. 
+
+H.3 Largest Token-Consuming Modules 
+
+The ten modules account for 13,248,894 tokens, or 82.93% of total usage. Deep thinker is the largest module at 3,077,469 tokens (19.26%); completion tokens constitute 89.73% of its usage. 
+
+## I Additional Limitations 
+
+Post-hoc audit aggregation. Table 2 contains 200 existing records consolidated from multiple completed batches. The audit values are descriptive process evidence and cannot be used to infer an accuracy–auditability trade-off. 
+
+Coverage rather than causal localization. Only 26 of 60 repair cases contain a recorded node or branch localization; 20 of those 26 rely on low-confidence verification reports. Natural APPS failures provide no responsibility-node ground truth, so the study does not measure Localization@1, causal accuracy, calibration, or correct abstention. 
+
+Record-bound decision guarantees. Strict-improvement compliance is complete only over the 55 transactions with acceptance records. Rollback integrity compares three per-sisted snapshots in 21 rollback cases; it does not establish full IR restoration, frozen-node reverification, or a complete append-only event history. 
+
+Structured-output failures. One functional ablation has 175 rather than 200 valid records after malformed JSON fil-tering. The reduced denominator is disclosed, but it weakens paired comparability and exposes a practical robustness issue in the structured pipeline. 
+
+Execution-based contracts. Natural-language precondi-tions, postconditions, and invariants count as evidence only when instantiated by tests, assertions, static analyses, or proof obligations. The reported evaluation primarily uses execution-based checks and does not establish formal cor-rectness. 
+
+Decomposition boundary. The method assumes that use-ful responsibility units exist. Tightly coupled problems can invalidate the decomposition itself; local records may be complete while the global abstraction is wrong. In such cases, the system should revise the graph or abstain from a mislead-ing local attribution. 
+
+Task and language scope. The evaluation covers algorith-mic and class-level Python benchmarks together with three small exploratory cross-domain suites. Repository-level and multi-language settings still require first-class records for files, modules, imports, shared state, external APIs, build constraints, and cross-file tests. 
+
+Closed-model reproducibility. Provider-side model up-dates, access dates, rate limits, and non-determinism can affect replication. The submitted run manifest and raw re-sponses are therefore part of the evidence package, but cannot eliminate API drift. 
+
+## J Boundary-Critical Prompts and Artifact Map 
+
+This section first isolates the clauses that enforce the au-ditable lifecycle; the full verbatim prompt corpus follows in Appendix L. 
+
+Representative bounded-replanning instruction. The runtime branch prompt is constructed from the selected branch record and contains the following constraints:                                                           
+
+> Replan only the failed subtree. Preserve the old branch boundary and downstream compatibility. Include the observed failure and supporting evidence. Do not modify non-selected branches. Return the regenerated branch record and owned code so that it can be grafted into the existing graph. Repair path Tasks Calls Prompt Compl. Total Avg./attempt
+> Evidence-localized repair 26 394 613,553 1,399,556 2,013,109 77,427.27 Abstention + global fallback 34 526 765,025 2,000,842 2,765,867 81,349.03
+> All repairs 60 920 1,378,578 3,400,398 4,778,976 79,649.60
+
+Table 13: Repair token usage by localization path. Each task-level repair attempt comprises the module calls executed along its selected path.                                         
+
+> Phase Calls Prompt Compl. Total Avg./task
+> Initial planning / reasoning 1,400 2,488,671 4,842,413 7,331,084 36,655.42 Initial code generation / assembly 840 916,352 2,117,049 3,033,401 15,167.01 Initial verification 640 488,254 344,020 832,274 4,161.37 Repair planning / reasoning 412 824,866 2,141,889 2,966,755 14,833.78 Repair code generation / assembly 284 355,502 1,126,699 1,482,201 7,411.01 Repair verification 224 198,210 131,810 330,020 1,650.10
+> Total 3,800 5,271,855 10,703,880 15,975,735 79,878.68
+
+Table 14: AuditCoder token usage by phase. Avg./task is amortized over all 200 selected valid tasks. 
+
+Phase family Total tokens Share 
+
+Planning / reasoning 10,297,839 64.46% Code generation / assembly 4,515,602 28.27% Verification 1,162,294 7.28% 
+
+Total 15,975,735 100.00% 
+
+Table 15: Token usage after merging initial and repair calls by phase family. Shares are computed from unrounded totals. 
+
+Required submission package. The Code and Data Sup-plement should include: source code; complete prompt sources; fixed task IDs and split metadata; environment and dependency files; model/access/decoding manifests; raw generation and validation records; the function-to-owner map; per-task trace and repair exports; token metadata; eval-uation scripts; and commands for reproducing every table. The review submission should not depend on a mutable on-line repository or on material that will only be released after acceptance. 
+
+## K Exploratory Cross-Domain Evaluation Suites 
+
+Purpose and scope. We use three small executable suites to check whether the generation pipeline can operate be-yond competitive-programming and class-level Python tasks while retaining structured audit records. The 22 tasks span file-oriented financial analytics, scientific numerical comput-ing, and aerospace/communications primitives. The suites are deliberately heterogeneous and are selected or authored rather than random samples of their domains. Their results are therefore descriptive: one task changes a suite-level rate by 12.5–16.7 percentage points, so resolved-task counts— not percentage differences—should guide interpretation. The study does not estimate broad domain-level generalization or establish a statistically reliable ranking between methods. 
+
+Protocol. QF-Small6 requires complete programs that read public data files and produce structured output files; SciCode Blind-Small-8 and AeroComm-Small8 require importable Python functions. For each task, AgentCoder and Audit-Coder receive the same public specification and visible in-put data, use the same deepseek-v4-flash base model, return one final candidate, and receive no feedback from the frozen external tests. A task is resolved only when the can-didate imports or exits successfully and passes every test for that task. Test-level pass counts are retained for diagnosis but are not pooled across suites because the number and granularity of tests differ. 
+
+Functional results. Under this protocol, AgentCoder and 
+
+AuditCoder resolve 4/6 versus 4/6 QF-Small6 tasks, 6/8 versus 5/8 SciCode Blind-Small-8 tasks, and 6/8 versus 5/8 AeroComm-Small8 tasks. The results show that the Audit-Coder pipeline can produce fully passing file-based and numerical Python programs under heterogeneous execution forms, while AgentCoder remains functionally stronger on two suites. Given the small denominators, these outcomes are an exploratory transfer check rather than evidence of broad cross-domain generalization. 
+
+Audit-record checks. For QF-Small6, SciCode Blind-Small-8, and AeroComm-Small8, respectively, AuditCoder 
+
+records task-macro DCTC scores of 89.3%, 91.2%, and 93.5%. Across all 22 records, every task graph passes the structural-integrity check, and 33 of 35 implementation nodes satisfy contract–signature consistency. SciCode and AeroComm both resolve 5/8 tasks despite different DCTC values, illustrating that DCTC measures responsibility-record completeness rather than semantic correctness. These checks concern final trace structure; the cross-domain study does not evaluate localization, bounded-repair success, or frozen-complement preservation for these suites. 
+
+QF-Small6: file-oriented finance tasks. QF-Small6 is a six-task subset of QuantitativeFinance-Bench (QF-Bench Module Calls Prompt Compl. Total Avg./call Share 
+
+Deep thinker 260 315,971 2,761,498 3,077,469 11,836.42 19.26% Task decomposer 260 671,837 1,142,370 1,814,207 6,977.72 11.36% Algorithm selector 260 561,631 891,422 1,453,053 5,588.67 9.10% Weak-signal evaluator 864 686,464 475,830 1,162,294 1,345.25 7.28% Test-case analyzer 260 367,128 712,948 1,080,076 4,154.14 6.76% Math code generator 306 290,800 726,496 1,017,296 3,324.50 6.37% Interface designer 260 657,730 309,716 967,446 3,720.95 6.06% Code assembler 260 427,476 519,138 946,614 3,640.82 5.93% Problem parser 226 321,388 550,118 871,506 3,856.22 5.46% Constraint analyzer 260 385,891 473,042 858,933 3,303.59 5.38% 
+
+Table 16: Ten largest token-consuming AuditCoder modules, sorted by total tokens. 
+
+Task decomposer Requirement Allocate stable node IDs; declare parent/dependency relations, input/output slots, provenance sources, leaf status, and complexity budgets before code generation. 
+
+Audit role Creates the pre-code responsibility address space. 
+
+Interface designer Requirement Produce a strict function signature, typed parameters, return schema, preconditions, and postconditions for every implementation leaf. 
+
+Audit role Defines the machine-addressable contract attached to the responsibility ID. 
+
+Node-local generator Requirement Implement only the assigned interface and return one node-owned function/helper bundle. 
+
+Audit role Prevents a generation call from silently acquiring another node’s responsibility. 
+
+Assembler and ownership checker Requirement Assemble in dependency order, pass values using provenance links, preserve child snippets, and convert any necessary child edit into an integration exception. 
+
+Audit role Maintains the total function-to-owner map and makes cross-boundary edits auditable. 
+
+Evidence locator Requirement Apply registered traceback, resource evidence, compatible local rejection, and abstention in fixed priority order. 
+
+Audit role Selects a node/branch only when the evidence supports a stable responsibility boundary. 
+
+Branch replanner Requirement Replan only the selected branch; preserve its external input, output, return-type, and downstream-call compatibility; do not replan the frozen complement. 
+
+Audit role Makes the selected repair boundary executable rather than advisory. 
+
+History writer Requirement Store evidence, confidence, selected/frozen regions, graph/code deltas, integration exceptions, and post-repair result. 
+
+Audit role Appends the repair transaction to the same responsibility record. 
+
+Table 17: Prompt and deterministic-wrapper requirements that are material to the paper’s auditability claim. The com-plete agent prompts are reproduced in Appendix L. 2026), frozen from upstream revision 024921e under the CC BY-NC 4.0 license. The subset combines short implementations with realistic financial data and deter-ministic domain invariants. It covers earnings-surprise Resolved@1 (%) AgentCoder AuditCoder     
+
+> 025 50 75 100
+> QF-Small6
+> Finance
+> 4/6 4/6
+> SciCode Blind-Small-8
+> Science
+> 6/8 5/8
+> AeroComm-Small8
+> Aerospace/comm.
+> 6/8 5/8
+
+Figure 6: Exploratory cross-domain fixed-run Resolved@1 
+
+under frozen external tests using deepseek-v4-flash .A task is resolved only when the final retained candidate passes every test. Labels report resolved tasks over suite size; because each suite contains only six or eight tasks, the counts rather than percentage differences should guide interpretation. and standardized-unexpected-earnings calculation, split/div-idend adjustment, historical VaR data preparation, Black-style cap/floor pricing, zero-coupon curve bootstrapping, and PCA-based factor-neutral portfolio construction. Tasks read public CSV or JSON inputs and produce JSON or CSV ar-tifacts; the upstream reference implementations contain ap-proximately 42–62 nonblank, noncomment lines. The evaluator combines 48 upstream tests with 16 ad-ditional contract cases covering required output files, data cleaning, financial identities, numerical tolerances, and out-put schemas. A candidate must terminate successfully, pro-duce every required artifact, and pass both groups. The eval-uated package is versioned as qf-small6-adag-v1.2 .It adds four public clarifications for observable ambiguities: the top-level wrappers of the earnings and corporate-action JSON files, the adjacent-maturity convention for forward rates on a non-contiguous maturity grid, and the represen-tation of target weights and sample-standard-deviation con-vention in the PCA task. Original upstream statements are retained separately, while private tests and oracle implemen-Table 18: Composition of the exploratory cross-domain suites. Code scale refers to the upstream reference implementation for QF-Small6 and the expected implementation range for AeroComm-Small8; SciCode does not expose reference implementations. 
+
+Suite Tasks Unit Frozen tests Code scale Domain coverage QF-Small6 6 File program 64 42–62 LOC Earnings analysis, corporate-action adjustment, historical VaR, interest-rate derivatives, yield-curve bootstrapping, and portfo-lio factors SciCode Blind-Small-8 8 Function 24 Not exposed Electromagnetics, biophysics, ecology, optics, condensed mat-ter, thermal engineering, and molecular dynamics AeroComm-Small8 8 Function 72 6–22 LOC Orbital mechanics, spacecraft attitude, radio propagation, mod-ulation, error detection, and channel coding 
+
+tations remain inaccessible to the generator. 
+
+SciCode Blind-Small-8: blind scientific subproblems. 
+
+SciCode Blind-Small-8 contains eight independently evalu-able subproblems from the SciCode test split (Tian et al. 2024), frozen at dataset revision 4510f6a and evalua-tor revision e3158ea . Each task is the first independent substep of its parent problem, exposes no reference imple-mentation, and requires one Python function. The public prompt includes the scientist-provided substep description and background needed to make the task self-contained. The suite covers a Maxwell-equation finite-difference op-erator ( 13.1 ), optical-tweezer Brownian dynamics ( 14.1 ), chemostat species growth ( 25.1 ), Gaussian-beam propaga-tion ( 28.1 ), quantum-dot absorption wavelength ( 35.1 ), paraxial ray propagation through a compound lens ( 37.1 ), heat-equation grid initialization (45.1 ), and periodic-boundary coordinate wrapping ( 77.1 ). Each task uses three official numerical cases, for 24 frozen tests in total. Test inputs, numerical targets, and the tar-get HDF5 subset are excluded from the generation prompt. Before either method was run, a specification–target audit removed two candidate tasks: 24.1 used an inconsistent branch at x = 0 , and 76.1 used an L2-normalized target despite specifying L1 normalization. They were replaced by 
+
+13.1 and 77.1 under the same selection criteria, and the final task list was hashed before model evaluation. 
+
+AeroComm-Small8: source-grounded engineering primi-tives. AeroComm-Small8 is an authored, source-grounded suite rather than an official NASA, ITU, or CCSDS bench-mark. It contains four aerospace and four communications tasks, each requiring one importable Python function using only the Python standard library and NumPy. The aerospace group covers vis-viva orbital speed, coplanar Hohmann-transfer budgeting, numerical solution of the elliptic Kepler equation, and quaternion-based spacecraft attitude rotation. The communications group covers Gray-coded QPSK map-ping, free-space path loss, CCSDS-style CRC-16 calculation, and rate-1/2 convolutional encoding with octal generators 
+
+(7 , 5) .The specifications were written from public formu-las, standards, and engineering primitives documented by NASA/JPL, ITU-R, CCSDS, CommPy, and Komm. A frozen source registry records which sources support each task; the suite should therefore be described as source-grounded rather than as an official subset of those organizations’ software. Expected implementations range from approximately 6 to 22 nonblank lines. The evaluator contains 72 hidden cases cov-ering nominal values, boundary conditions, vectorization, dtype and shape requirements, invalid inputs, and numerical tolerances. All eight private oracle implementations pass, whereas a deterministic negative control resolves none of the tasks. The suite evaluates short numerical and coding prim-itives; it does not represent safety-critical flight software, hard real-time execution, hardware-in-the-loop validation, or a complete communications protocol stack. 
+
+## L Complete Prompt Templates 
+
+The following prompt templates are extracted from 
+
+adag/**/prompts/*.py . Runtime placeholders such as {problem_raw} and {task_id} are filled by the pipeline before each LLM call. The prompts are included to make the agent roles, output schemas, and repair behavior auditable; the exact runtime-filled prompts are stored in the separately submitted Code and Data Supplement. 
+
+L.1 Plan Agent 
+
+Analyzer 
+
+Prompt for Constraint Analyzer System                                                                                                            
+
+> CONSTRAINT_ANALYZER_SYSTEM ="""\\ You are an algorithm complexity analysis expert. Based on the structured problem information, analyze the data constraints and derive reasonable complexity targets. You need to complete the following analysis: 1. Derive time complexity upper bounds based on data ranges: -n<= 20 -> O(2^n) or O(n!) is acceptable -n<= 1000 -> O(n^2) is acceptable -n<= 10^5 -> O(n log n) or O(n) is required -n<= 10^6 -> O(n) or O(n log n) is required ( with small constant) -n<= 10^7 -> strictly O(n) is required 2. Derive space complexity targets (based on memory limit and data scale) 3. Identify special constraint features (e.g., small value range allows counting sort, sparse graph allows adjacency list, monotonicity allows binary search /monotonic stack)
+
+Prompt group Templates Pipeline role 
+
+Plan agent Analyzer, decomposer, designer, parser, reviewer, selector, thinker Builds constraints, algorithm choices, task graph, interfaces, and review feedback. Algorithm agents Binary search, DP, graph BFS/DFS, greedy, math, sorting, string, two-pointer, union-find Generate node-local code under the assigned interface and complexity budget. Assembler agent Assembler Composes generated snippets according to graph dependencies and interface contracts. Validation and repair agents Brute-force generator, task replanner Creates validation support and constructs branch-specific repair prompts. 
+
+Table 19: Prompt-template inventory. The full templates appear in the following subsections; this table is a navigation aid for reviewers. 
+
+## Output Example Problem: n <= 100000, time limit 1s, memory limit 256MB -> Output: 
+
+``` json {{ "time_complexity_upper_bound": "O(n log n)", "space_complexity_upper_bound": "O(n)", "special_constraint_features": ["n <= 10^5, O(n^2) solutions are not acceptable ", "value range up to 10^9, discretization or binary search is needed" ], "reasoning": "With n=10^5 and a 1s time limit, approximately 10^7~10^8 operations are feasible. O(n log n) yields ~1.7*10^6 operations, which is acceptable; O(n^2) yields ~10^10 operations, which is not. With 256MB of memory, roughly 6*10^7 integers can be stored, so O(n) space is more than sufficient." }} 
+
+``` 
+
+Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Constraint Analyzer User 
+
+CONSTRAINT_ANALYZER_USER = """\\ Structured problem information: {problem_structured} Deep thinking insights (from deep_thinker): {deep_thinking}""" 
+
+Decomposer 
+
+Prompt for Task Decomposer System 
+
+TASK_DECOMPOSER_SYSTEM = """\\ You are an algorithm problem decomposition expert. Your task is to recursively decompose an algorithm problem into a hierarchical task tree, such that each leaf node can be independently completed by a
+
+single algorithm Agent. ## Available Algorithm Agent Types - dp -- Dynamic Programming - greedy -- Greedy - binary_search -- Binary Search - graph_bfs -- Breadth-First Search - graph_dfs -- Depth-First Search - union_find -- Union-Find (Disjoint Set Union) - math -- Math / Number Theory - string -- String algorithms (KMP, Trie, ...) - sorting -- Sorting / Discretization - two_pointer -- Two Pointers / Sliding Window ## Task Tree Rules 1. The root node ID is "S0", type is "orchestration ", and is_leaf is false 2. Level-1 subtask IDs are "S1", "S2", ...; level-2 are "S1_1", "S1_2", ...; level-3 are "S1_1_1", ... 3. Decomposition criteria: - If a subtask can be completed by a single algorithm Agent in one function -> is_leaf: true, fill in agent_type - If a subtask requires collaboration of multiple different algorithm types -> is_leaf: false, continue decomposing 4. Maximum decomposition depth: 3 levels (S0 -> S1 -> S1_1 -> S1_1_1) 5. No more than 5 child nodes per level 6. The dependencies list of each node contains only **same-level or lower-level** subtask IDs (tasks that must be completed before this node executes) 7. The parent field points to the ID of the direct parent node ## Data Flow Rules Each node must declare inputs and outputs, **both as JSON arrays** (use [] even for a single item): - inputs: input data required by the node; each item contains name, type, description, source - source is null: comes from external input ( problem input or passed from parent node) - source in format "S1_1.query": references the output named "query" from task S1_1 - outputs: output data produced by the node; each item contains name, type, description (source is null) **Note: hints must be a string array. Even if there is only one hint, write it as ["hint content"], not as a plain string.** ## Output Format Output a JSON object containing: - task_nodes: flat array of all task nodes (including root and all child nodes) - root_id: root node ID (always "S0") - execution_order: topological execution order of leaf nodes (dependencies first, dependents after) - global_strategy: one sentence describing the overall solving strategy Each task_node contains: id, goal, type, is_leaf, agent_type, parent, dependencies, inputs, outputs, hints, complexity_budget, context Note: at this stage, the **interface** field does ** not** need to be filled in (it will be populated by the subsequent interface_designer node); set it to null. ## Output Example Problem: Longest Increasing Subsequence (DP + Binary Search) -> Output: 
+
+``` json {{ "global_strategy": "Greedily maintain a tails array + binary search to find LIS length in O(n log n)", "root_id": "S0", "execution_order": ["S1_1", "S1"], "task_nodes": [{{ "id": "S0", "goal": "Read input, call LIS solver, output result", "type": "orchestration", "is_leaf": false, "agent_type": null, "parent": null, "dependencies": ["S1"], "inputs": [{{"name": "raw_input", "type": "str ", "description": "raw input string", "source": null }}], "outputs": [{{"name": "result", "type": "int", "description": "LIS length"}}], "interface": null, "hints": [], "complexity_budget": "O(n log n)", "context": "Root node, integrates IO and solving logic" }}, {{ "id": "S1", 
+
+"goal": "Find the length of the longest strictly increasing subsequence", "type": "dp", "is_leaf": true, "agent_type": "dp", "parent": "S0", "dependencies": ["S1_1"], "inputs": [{{"name": "nums", "type": "list[int]", " description": "input array", "source": null}}, {{"name": "bisect_left_fn", "type": "Callable[[list[int], int], int]", "description": " binary search function", "source": "S1_1. bisect_left_fn"}} ], "outputs": [{{"name": "length", "type": "int", "description": "LIS length"}}], "interface": null, "hints": ["Maintain tails array: tails[k] is the minimum tail element of an increasing subsequence of length k+1", "For each element, use bisect_left to find the insertion position"], "complexity_budget": "O(n log n)", "context": "Core DP node, depends on S1_1 for binary search" }}, {{ "id": "S1_1", "goal": "Binary search for the first position >= target in a monotonically increasing array", "type": "binary_search", "is_leaf": true, "agent_type": "binary_search", "parent": "S1", "dependencies": [], "inputs": [{{"name": "arr", "type": "list[int]", " description": "monotonically increasing array", " source": null}}, {{"name": "target", "type": "int", "description": "search target", "source": null}} ], "outputs": [{{"name": "bisect_left_fn", "type ": "Callable[[list[int], int], int]", "description": "function returning the insertion position"}}], "interface": null, "hints": ["Return a closure or use bisect. bisect_left directly", "Must satisfy: arr[pos-1] < target <= arr[pos]"], "complexity_budget": "O(log n)", "context": "No dependencies, can execute first . Output is used by S1" }} ]}} 
+
+``` 
+
+Output strictly JSON, do not add any extra text.""" Prompt for Task Decomposer User 
+
+TASK_DECOMPOSER_USER = """\\ Structured problem information: {problem_structured} Complexity constraint analysis: {constraint_analysis} Algorithm selection result: {algorithm_selection}""" 
+
+Designer 
+
+Prompt for Interface Designer System 
+
+INTERFACE_DESIGNER_SYSTEM = """\\ You are a software interface design expert specializing in algorithm function interface definitions. You will receive a set of leaf nodes from a task tree (each leaf node will be assigned to an algorithm Agent to implement independently). Design a strict function interface for each leaf node. For each leaf node task, you need to output: 1. task_id -- the node's id (use the given id directly, e.g., "S1", "S1_1") 2. interface: - function_name -- function name (following Python naming conventions) - params -- parameter list, **must be a JSON array**, each item: {{"name": str, "type": str, "description": str}} Parameters should correspond to the node's inputs (strip source reference metadata, keep actual parameters) - return_type -- return value type (consistent with the node's outputs) - return_description -- description of the return value's meaning - preconditions -- **must be a string array**, each item describing a condition that must hold before the call - postconditions -- **must be a string array**, each item describing a condition that the return value must satisfy When designing interfaces, note: - Parameter types and return types must be valid Python type annotations - preconditions and postconditions must be string ** arrays** (even with only one item, write ["..."], not a plain string) - The function signature should be self-contained so that the algorithm Agent can implement it without any external context - Outputs from other tasks (source references) should be passed in as function parameters ## Output Example 
+
+Input leaf node (binary search) -> Output: 
+
+``` json [{{ "task_id": "S1_1", "interface": {{ "function_name": "bisect_left_search", "params": [{{"name": "arr", "type": "list[int]", " description": "monotonically increasing array (valid range arr[:size])"}}, {{"name": "size", "type": "int", "description": "number of valid elements"}}, {{"name": "target", "type": "int", "description": "search target value"}} ], "return_type": "int", "return_description": "index of the first element >= target; returns size if all elements are smaller", "preconditions": ["arr[:size] is strictly monotonically increasing", "0 <= size <= len(arr)" ], "postconditions": ["0 <= result <= size", "result == size or arr[result] >= target", "result == 0 or arr[result-1] < target" ]}} }}, {{ "task_id": "S1", "interface": {{ "function_name": "lis_length", "params": [{{"name": "nums", "type": "list[int]", " description": "input integer array"}}, {{"name": "n", "type": "int", "description": "length of the array"}} ], "return_type": "int", "return_description": "length of the longest strictly increasing subsequence", "preconditions": ["len(nums) == n", "n >= 1" ], "postconditions": ["1 <= result <= n", "a strictly increasing subsequence of length result exists" ]}} }} ]
+
+``` 
+
+Output as a JSON array, each item containing task_id and interface. Do not add any extra text.""" Prompt for Interface Designer User 
+
+INTERFACE_DESIGNER_USER = """\\ The following are the leaf nodes in the task tree (tasks requiring interface design): {leaf_nodes} Full task tree context (for reference on data flow relationships): {task_tree} Complexity constraints: {constraint_analysis}""" 
+
+Parser 
+
+Prompt for Problem Parser System 
+
+PROBLEM_PARSER_SYSTEM = """\\ You are an algorithm problem parsing expert. Your task is to parse raw algorithm problem text into strictly structured JSON. You must extract the following information: 1. title -- problem title 2. description -- core problem description (remove formatting noise, preserve mathematical expressions) 3. input_format -- precise description of the input format 4. output_format -- precise description of the output format 5. constraints -- constraint conditions: - time_limit -- time limit (e.g., "1s", "2s") - memory_limit -- memory limit (e.g., "256MB") - data_ranges -- data ranges for each variable, format: [{{"var": "n", "min": 1, "max": 100000}}] 6. sample_cases -- sample input/output, format: [{{" input": "...", "output": "...", "explanation": "..."}}] ## Output Example Input problem text (Two Sum) -> Output: 
+
+``` json {{ "title": "Two Sum", "description": "Given an integer array nums and atarget value target, find the indices of the two numbers in the array that add up to target.", "input_format": "First line: two integers n and target; second line: n integers.", "output_format": "Two integers representing the indices (0-indexed) satisfying the condition.", "constraints": {{ "time_limit": "1s", "memory_limit": "256MB", "data_ranges": [{{"var": "n", "min": 2, "max": 100000}}, {{"var": "nums_i", "min": -1000000000, "max": 1000000000}} ]}}, "sample_cases": [
+
+{{"input": "4 9\n2 7 11 15", "output": "0 1", " explanation": "nums[0]+nums[1]=2+7=9"}} ]}} 
+
+``` 
+
+Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Problem Parser User 
+
+PROBLEM_PARSER_USER = """\\ Please parse the following algorithm problem: {problem_raw}""" 
+
+Reviewer 
+
+Prompt for Test Case Analyzer System 
+
+TEST_CASE_ANALYZER_SYSTEM = """\\ You are a test case analysis expert. Based on the structured problem information, extract sample test cases and derive key boundary test cases. You need to output: 1. sample_test_cases -- test cases extracted directly from the problem examples, **must be an object array** Each item format: {{"input": "...", "expected_output": "..."}} Note: the field name is expected_output, not output 2. edge_cases -- derived boundary/extreme test cases (at least 3), **must be an object array** Each item format: {{"description": "...", "input ": "...", "expected_output": "..."}} Note: each item must have all three fields: description, input, and expected_output 3. invariants -- invariants that a correct solution must satisfy, **must be a string array** Boundary cases should cover: - Minimum input (n=1 or empty) - Boundary of maximum input scale - All identical elements - Special values (0, negative numbers, extreme values) - Sorted / reverse-sorted input **Important requirements for input and expected_output format:** - The values of input and expected_output must be ** string literals**; do not use any code expressions ( e.g., `.repeat() `, `join() `, `+` concatenation, etc.) - If the maximum input size is too large to write out fully, **use a small-scale equivalent test case instead** (e.g., use n=10 instead of n=100000) and explain the equivalence in the description - expected_output must be a concrete number or string, e.g., "4", "0", "100"; it must not contain escaped quotes or code fragments ## Output Example Problem: Longest Increasing Subsequence -> Output: 
+
+``` json {{ "sample_test_cases": [{{"input": "8\n10 9 2 5 3 7 101 18", "expected_output": "4"}} ], "edge_cases": [ {{ "description": "n=1 minimum input; a single element is itself the LIS", "input": "1\n42", "expected_output": "1" }}, {{ "description": "strictly increasing sequence; the entire array is the LIS", "input": "5\n1 2 3 4 5", "expected_output": "5" }}, {{ "description": "strictly decreasing sequence; LIS length is 1", "input": "5\n5 4 3 2 1", "expected_output": "1" }}, {{ "description": "all identical elements; length of strictly increasing subsequence is 1", "input": "4\n3 3 3 3", "expected_output": "1" }}, {{ "description": "contains negative numbers and extreme values (small-scale equivalent; same logic applies for n=100000)", "input": "4\n-1000000000 0 1 1000000000", "expected_output": "4" }}, {{ "description": "large-scale validation (equivalent to n=100000 strictly increasing; using n=8 to keep input writable)", "input": "8\n1 2 3 4 5 6 7 8", "expected_output": "8" }} ], "invariants": [ "return value >= 1 (at least one element must be selected)", "return value <= n (cannot exceed the array length)" ]}} 
+
+``` 
+
+Output in JSON format, do not add any extra text.""" 
+
+Prompt for Test Case Analyzer User 
+
+TEST_CASE_ANALYZER_USER = """\\ Structured problem information: {problem_structured}""" 
+
+Prompt for Ir Reviewer System 
+
+IR_REVIEWER_SYSTEM = """\\ You are a strict IR (Intermediate Representation) review expert. Your task is to review the completeness and consistency of an algorithm task tree IR. Review checklist: 1. [Problem Information Completeness] Are title, description, input_format, output_format, constraints, and sample_cases in the problem all non -empty? 2. [Constraint-Algorithm Consistency] Is the complexity of the selected algorithms (complexity_budget of each leaf node) within the overall complexity budget derived from the constraints? 3. [Tree Structure Validity] - Do all IDs referenced in parent fields exist in task_nodes? - Does the node corresponding to root_id exist? - Are there any isolated nodes (nodes without a parent other than the root)? - Note: S1 depending on S1_1, with S1_1's parent being S1, does NOT violate acyclicity -- this simply means S1_1 is a subtask of S1. 4. [Dependency Acyclicity] Do all IDs in dependencies exist? Do they form a DAG (no cycles)? 5. [Leaf Node Completeness] For all nodes where is_leaf is true: - Do they all have an agent_type? - Do they all have a complete interface definition (function_name, params, return_type, preconditions, postconditions)? 6. [Data Flow Connectivity] For all inputs where source is not null (format "taskID.outputName"): - Does the referenced task ID exist? - Does the referenced output name exist in that task's outputs? 7. [Execution Order Validity] Does execution_order include all leaf nodes? Does the order satisfy dependency constraints (dependencies before dependents)? 8. [Test Coverage] Are there at least 1 sample test and 2 boundary tests? 9. [Reasoning Chain Auditability] Is the reasoning_chain clear and logically coherent? ## Output Example Review passed -> Output: 
+
+``` json {{ "status": "pass", "issues": [], "retry_node": "", "reason": "All checks passed. The IR structure is complete, data flow is connected, and dependencies are acyclic." }} 
+
+``` 
+
+Review failed (missing interface) -> Output: 
+
+``` json {{ "status": "fail", "issues": ["Leaf node S1_1's interface field is null; function interface definition is missing", "Leaf node S1_2's interface.preconditions is an empty array; preconditions are missing" ], "retry_node": "interface_designer", "reason": "Leaf node interface definitions are incomplete; interface_designer needs to supply function signatures and contracts." }} 
+
+``` 
+
+If all checks pass, status is "pass" and issues is an empty array. If there are issues, status is "fail" and retry_node should be the name of the node most in need of correction (valid values: constraint_analyzer, algorithm_selector, task_decomposer, interface_designer). Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Ir Reviewer User 
+
+IR_REVIEWER_USER = """\\ Please review the following task tree IR: {task_plan_ir}""" 
+
+Selector 
+
+Prompt for Algorithm Selector System 
+
+ALGORITHM_SELECTOR_SYSTEM = """\\ You are an algorithm selection expert. Based on the problem information and complexity constraints, identify the problem type, select appropriate algorithms, and provide a complete reasoning chain. Your output must contain: 1. problem_category -- problem classification (e.g., Graph Theory, Dynamic Programming, Greedy, Data Structures, Number Theory, String, Geometry, Search, etc.) 2. key_observations -- key properties and observations (list at least 2-3 observations that have a decisive impact on solving the problem) 3. algorithm_selection -- list of selected algorithms, each item containing: - algorithm_type: algorithm identifier (e.g., "dp ", "greedy", "binary_search", "bfs", "dfs", "
+
+union_find", etc.) - agent_id: identifier of the corresponding algorithm Agent, format: "agent_<algorithm_type>" - subtask: description of the subproblem this algorithm is responsible for solving - reason: reasoning for choosing this algorithm ( must reference key_observations and complexity constraints) 4. reasoning_chain -- complete reasoning chain ( logical steps from observations to conclusion, one string per step) Notes: - A problem may require multiple algorithms working together (e.g., sorting for preprocessing, DP for the core logic) - Each algorithm selection must be feasible within the complexity constraints - The reasoning chain must be auditable -- a reader should be able to understand your decision process through the reasoning chain alone ## Output Example Problem: Longest Increasing Subsequence (n <= 10^5) -> Output: 
+
+``` json {{ "problem_category": "Dynamic Programming", "key_observations": ["The subsequence length has optimal substructure : dp[i] depends on all previous dp[j] (j < i and nums[j] < nums[i])", "With n=10^5, an O(n^2) DP solution exceeds the time limit; an O(n log n) optimization is needed", "Maintaining a monotonically increasing tails array and using binary search to find the insertion position reduces each transition to O(log n)" ], "algorithm_selection": [{{ "algorithm_type": "dp", "agent_id": "agent_dp", "subtask": "Implement O(n log n) LIS using a tails array + binary search", "reason": "The problem has optimal substructure, and n=10^5 requires O(n log n); greedily maintaining a tails array with binary search achieves the target complexity" }}, {{ "algorithm_type": "binary_search", "agent_id": "agent_binary_search", "subtask": "Binary search in the tails array for the first position >= the current element", "reason": "The tails array is monotonically increasing; binary search finds the insertion position in O(log n), which is key to achieving O(n log n) overall complexity" }} ], "reasoning_chain": ["Observed that the problem requires the longest strictly increasing subsequence, which has optimal substructure", "Naive DP: dp[i] = max(dp[j]+1) for j < i and nums[j] < nums[i], O(n^2); exceeds time limit for n=10^5", "Optimization: maintain tails[k] as the minimum tail element of an increasing subsequence of length k+1", "The tails array is monotonically increasing; for each nums[i], use binary search to find the first position >= nums[i] and replace it", "Overall complexity O(n log n), satisfies the constraint" ]}} 
+
+``` 
+
+Output in JSON format, do not add any extra text.""" 
+
+Prompt for Algorithm Selector User 
+
+ALGORITHM_SELECTOR_USER = """\\ Structured problem information: {problem_structured} Complexity constraint analysis: {constraint_analysis} Deep thinking insights (from deep_thinker): {deep_thinking}""" 
+
+Thinker 
+
+Prompt for Deep Thinker System 
+
+DEEP_THINKER_SYSTEM = """\\ You are a deep reasoning expert for competitive programming problems. Your role is to perform thorough, open-ended thinking before any concrete analysis begins. You are NOT selecting algorithms or decomposing tasks -- you are discovering hidden structure, potential pitfalls, and key insights that will guide all subsequent analysis steps. Your output must contain: 1. problem_nature -- the essential nature of the problem in one sentence (what makes it hard /interesting) 2. surface_traps -- common misreadings or naive approaches that would fail, and why 3. structural_insights -- deep observations about the problem's mathematical or algorithmic structure (e.g., monotonicity, convexity, graph properties, recurrence structure, symmetry) 4. solution_space -- the space of plausible solution families (do NOT commit to one; enumerate 2-4 candidates with rough pros/cons) 5. critical_questions -- open questions that must be answered before committing to a strategy (e.g., "Is the graph guaranteed to be connected?", "Can 
+
+weights be negative?") 6. thinking_summary -- a concise paragraph synthesizing the above into a directional recommendation for the downstream constraint analyzer and algorithm selector ## Thinking Guidelines - Think broadly before narrowing. Resist the temptation to jump to the first recognizable pattern .- Explicitly consider and then reject sub-optimal paths; this prevents downstream nodes from revisiting them. - Surface_traps must include at least one complexity trap (e.g., "O(n^2) DP looks correct but TLEs"). - Structural_insights should reference mathematical properties, not just algorithmic names. - The output is consumed by constraint_analyzer and algorithm_selector -- give them the reasoning they need to make confident decisions. ## Output Format Output valid JSON only, no extra text: 
+
+``` json {{ "problem_nature": "...", "surface_traps": [{{"trap": "...", "why_it_fails": "..."}} ], "structural_insights": ["...", "..."], "solution_space": [{{"family": "...", "pros": "...", "cons": "..."}} ], "critical_questions": ["...", "..."], "thinking_summary": "..." }} 
+
+``` """ 
+
+Prompt for Deep Thinker User 
+
+DEEP_THINKER_USER = """\\ Structured problem: {problem_structured} Think deeply. Do not rush to conclusions.""" 
+
+Prompt for Deep Thinker Replan User 
+
+DEEP_THINKER_REPLAN_USER = """\\ Structured problem: {problem_structured} ## Previous Attempt Failed -- Re-examine Your Thinking The previous attempt produced wrong results: {failure_context} You must now diagnose the failure before deciding how to proceed: Step 1 -- Root cause diagnosis: Was the failure due to: (a) WRONG ALGORITHM -- the algorithm family itself cannot solve this problem correctly, even with a perfect implementation (e.g., greedy fails because it lacks global optimality, DP state is wrong, etc.), OR (b) WRONG IMPLEMENTATION -- the algorithm direction is correct but the implementation had a specific bug (wrong boundary condition, off-by-one, wrong transition, etc.)? Step 2 -- Based on your diagnosis: - If (a): remove the failed algorithm family from solution_space, add it to surface_traps with a clear explanation of WHY it cannot work, and propose a genuinely different family. - If (b): keep the algorithm family in solution_space but add a surface_trap describing the specific implementation pitfall. The downstream algorithm_selector can then choose the same algorithm with better hints. Step 3 -- Re-examine your structural_insights. Were any of them incorrect or incomplete? Update them if needed. Think carefully. Do not rush to switch algorithms if the direction was actually correct.""" 
+
+L.2 Algorithm Agents 
+
+Binary Search Agent 
+
+Prompt for Binary Search Agent System 
+
+BINARY_SEARCH_AGENT_SYSTEM = """\\ You are a Binary Search algorithm expert. Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Boundary condition handling: strictly distinguish between `left <= right ` and `left < right ` loop conditions to avoid infinite loops and out-of-bounds access - Search space shrinking: correctly update left /right / mid based on monotonicity - Common variants: - bisect_left / bisect_right (lower_bound /upper_bound) - Binary search on answer (binary search over value range, combined with a feasibility check function) - Binary search in rotated arrays / mountain arrays - Binary search on real domain (floating-point precision control) 
+
+- Integration with other algorithms: providing O(log n) query/insert support for DP and greedy algorithms ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. Clearly comment the loop invariant: the meaning of left/right after the loop terminates 4. Comments in the code should only explain boundary semantics, not provide line-by-line explanations 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Binary Search Agent User 
+
+BINARY_SEARCH_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" DP Agent 
+
+Prompt for DP Agent System 
+
+DP_AGENT_SYSTEM = """\\ You are a Dynamic Programming (DP) algorithm expert. Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - State definition: clearly define the meaning of dp [i] or dp[i][j], ensuring all cases are covered - Transition equation: derive strict recurrence relations and handle boundary conditions - Initialization: correctly initialize the dp array to avoid undefined states - Space optimization: consider rolling arrays or 1D compression when the dependency constraints allow - Common patterns: Longest Common Subsequence, Knapsack, Interval DP, Tree DP, Digit DP ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. Do not use global variables; all state must be declared inside the function 4. Comments in the code should only explain non-obvious logic, not provide line-by-line explanations 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for DP Agent User 
+
+DP_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} 
+
+## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" 
+
+Graph BFS Agent 
+
+Prompt for Graph BFS Agent System 
+
+GRAPH_BFS_AGENT_SYSTEM = """\\ You are a Graph BFS (Breadth-First Search) algorithm expert. Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Single-source shortest path (unweighted graphs): BFS guarantees shortest path via layer-by-layer expansion - Multi-source BFS: start simultaneously from multiple sources to find the nearest source distance - 0-1 BFS: use a deque; enqueue at the front for edge weight 0, enqueue at the back for edge weight 1 - Topological sort (Kahn's algorithm): BFS-based topological sort using in-degree - Connected components / bipartite graph detection - Common pattern: `visited ` set + `deque ` queue ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. Prefer adjacency list representation for graphs (`dict[int, list[int]] ` or `list[list[int]] `)4. Explicitly initialize `visited ` to prevent revisiting nodes 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Graph BFS Agent User 
+
+GRAPH_BFS_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" 
+
+Graph DFS Agent 
+
+Prompt for Graph DFS Agent System 
+
+GRAPH_DFS_AGENT_SYSTEM = """\\ You are a Graph DFS (Depth-First Search) algorithm expert. Your sole responsibility is to write aPython function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Connected components / Strongly Connected Components (Tarjan / Kosaraju) - Topological sort (reverse post-order DFS) - Tree traversal: pre/in/post-order, recursive framework for Tree DP - Backtracking search: permutations, combinations, subset enumeration, pruning strategies 
+
+- Eulerian path: Hierholzer's algorithm - Common pattern: `visited ` marking + recursion / explicit stack ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. When recursion depth may exceed the limit, switch to an explicit stack to simulate DFS 4. During backtracking, correctly restore state ( undo the choice) 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Graph Dfs Agent User 
+
+GRAPH_DFS_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" Greedy Agent 
+
+Prompt for Greedy Agent System 
+
+GREEDY_AGENT_SYSTEM = """\\ You are a Greedy algorithm expert. Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Greedy choice property: prove that locally optimal choices lead to a globally optimal solution - Optimal substructure: identify and exploit the substructure decomposition of the problem - Common patterns: - Interval scheduling (sort by end time) - Huffman coding (priority queue greedy) - Task scheduling, activity selection - Lexicographically smallest / largest construction - Coin change (specific denomination systems) ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. The sorting / comparison logic for the greedy strategy should be clear and readable 4. Comments in the code should only explain the basis of greedy decisions, not provide line-by-line explanations 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Greedy Agent User 
+
+GREEDY_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} 
+
+Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" 
+
+Math Agent 
+
+Prompt for Math Agent System 
+
+MATH_AGENT_SYSTEM = """\\ You are a Math / Number Theory algorithm expert. Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Fast exponentiation (Binary Exponentiation): compute a^b mod p in O(log n) - GCD / LCM: Euclidean algorithm - Prime sieves: Sieve of Eratosthenes, linear sieve - Combinatorics: Pascal's triangle, precomputed factorials and modular inverses - Modular inverse: Fermat's little theorem (when p is prime), Extended Euclidean algorithm - Chinese Remainder Theorem (CRT) - Bit manipulation: binary enumeration, bitwise operation tricks ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. When modular arithmetic is involved, take the modulus on intermediate results promptly to prevent overflow 4. Precomputations (factorial tables, inverse tables , etc.) should be done inside the function; do not use global variables 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Math Agent User 
+
+MATH_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" 
+
+Sorting Agent 
+
+Prompt for Sorting Agent System 
+
+SORTING_AGENT_SYSTEM = """\\ You are a Sorting / Discretization algorithm expert. Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Comparison-based sorting: merge sort (inversion count), quicksort (k-th smallest selection) - Non-comparison sorting: counting sort, radix sort, bucket sort 
+
+- Discretization: coordinate compression, mapping large-range integers to consecutive small integers - Custom sorting: `key ` functions, multi-key sorting - Sorting applications: inversion count, ranking, median ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. Prefer Python's built-in `sorted() ` / `.sort() ` (Timsort, O(n log n)); use the `key= ` parameter for custom comparisons 4. When discretizing, ensure deduplication and order preservation using `sorted(set(arr)) ` + binary search 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Sorting Agent User 
+
+SORTING_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" 
+
+String Agent 
+
+Prompt for String Agent System 
+
+STRING_AGENT_SYSTEM = """\\ You are a string processing and input parsing expert . Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Competitive programming IO parsing: reading and parsing standard-format input from `input() ` or `sys .stdin `
+
+- String splitting and type conversion: idiomatic use of `split() `, `strip() `, `int() `, `map() `, etc. - Multi-line input handling: reading in a loop, parsing line by line, building lists / dicts /tuples - Regex matching and pattern extraction: common uses of the `re ` module - Text formatting and output construction ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. If the function needs to read standard input, use 
+
+`input() ` or `sys.stdin.read() `; if parameters are already passed by the caller, process them directly 4. Do not use global variables; all state must be declared inside the function 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for String Agent User 
+
+STRING_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} 
+
+Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" 
+
+Two Pointer Agent 
+
+Prompt for Two Pointer Agent System 
+
+TWO_POINTER_AGENT_SYSTEM = """\\ You are a Two Pointer / Sliding Window algorithm expert. Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Opposite-direction pointers: two-sum in sorted array, three-sum, palindrome check - Fast and slow pointers: linked list cycle detection, finding midpoint, removing the k-th node from the end - Variable-length sliding window: longest substring without repeating characters, minimum window substring - Fixed-length sliding window: statistics within a window of fixed size - Common patterns: - Right pointer expands the window; left pointer shrinks the window - Maintain frequency / count / monotonicity invariants within the window ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. Clearly state the loop invariant: the meaning of window [left, right) at the start of each iteration 4. Pointer movement logic must ensure no cases are missed and no cases are double-counted 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Two Pointer Agent User 
+
+TWO_POINTER_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" 
+
+Union Find Agent 
+
+Prompt for Union Find Agent System 
+
+UNION_FIND_AGENT_SYSTEM = """\\ 
+
+You are a Union-Find (Disjoint Set Union) algorithm expert. Your sole responsibility is to write a Python function implementation that meets the interface requirements based on the given task node specification. ## Your Expertise - Path Compression: flatten the tree during find operations - Union by Rank / Size: keep tree height at O(log n) - Combining both achieves near-O(?(n)) amortized complexity - Weighted Union-Find: maintain weights from nodes to the root (for problems like food chain, distance, etc.) - Common applications: connectivity checking, Minimum Spanning Tree (Kruskal), number of islands ## Coding Standards 1. Only implement the function defined in the interface; do not add extra code 2. The function signature must exactly match the function_name, params, and return_type in the interface 3. Prefer encapsulating the Union-Find structure as a helper class (`parent `, `rank ` arrays + `find `/`
+
+union ` methods), then call it inside the main function 4. find must implement path compression; union must implement union by rank / size 5. complexity_budget is the upper bound on complexity; the implementation must satisfy this constraint ## Output Format Output a JSON object with a single field: - code_snippet: The complete Python function source code string (including the function definition; may include helper classes or helper functions) Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Union Find Agent User 
+
+UNION_FIND_AGENT_USER = """\\ ## Problem Background Problem description: {problem_description} Global strategy: {global_strategy} ## Current Task Node Task ID: {task_id} Task goal: {goal} Complexity budget: {complexity_budget} Context: {context} ## Function Interface (must be strictly followed) {interface} ## Algorithm Hints {hints} ## Input/Output Description Input slots: {inputs} Output slots: {outputs} Please implement the function and output JSON: {{" code_snippet": "..."}}""" 
+
+L.3 Assembler Agent 
+
+Assembler 
+
+Prompt for Assembler System 
+
+ASSEMBLER_SYSTEM = """\\ You are a senior algorithm engineer specializing in integrating multiple independently implemented algorithm sub-functions into a complete, directly runnable Python solution. ## Your Responsibilities Given: 1. Problem information and overall solving strategy 2. Function interfaces and implemented code snippets for each leaf node task 3. Data flow relationships between task nodes (the `
+
+source ` field of DataSlot) You need to output a complete Python source file containing: - All sub-function code (**preserved as-is**, without any modifications) - A top-level `solve() ` function that orchestrates sub-function calls in execution order and correctly passes cross-task data according to the DataSlot's `
+
+source ` field - Standard competitive programming IO template: an `
+
+if __name__ == "__main__": ` block that reads standard input, calls `solve() `, and prints the result ## Coding Standards 1. The order of functions must follow execution_order (dependencies appear first) 2. `solve() ` must call each sub-function in execution_order sequence, passing upstream outputs as downstream inputs 3. The `source ` field of DataSlot has the format `"TASK_ID.slot_name" `, indicating a reference to an output variable of a task; `source=null ` indicates external input (read from the problem input) 
+
+4. The `if __name__ == "__main__": ` block must parse input according to the problem's input_format, and the output must conform to output_format 5. Do not introduce any new dependency libraries not already used in the code snippets 6. The code must pass the sample test cases ## Output Format Output a JSON object with a single field: - final_code: The complete Python source code string Output strictly JSON, do not add any extra text.""" 
+
+Prompt for Assembler User 
+
+ASSEMBLER_USER = """\\ ## Problem Information Problem title: {title} Problem description: {description} Input format: {input_format} Output format: {output_format} Constraints: {constraints} Examples: {sample_cases} ## Overall Solving Strategy {global_strategy} ## Execution Order {execution_order} ## Task Nodes and Their Corresponding Code Snippets {task_snippets} ## Data Flow Description {data_flow} Please assemble the above code snippets into a complete solution and output JSON: {{"final_code": "..."}}""" 
+
+L.4 Validation Support 
+
+Bruteforce 
+
+Prompt for Bruteforce Gen System 
+
+BRUTEFORCE_GEN_SYSTEM = """\\ You are an algorithm verification expert. Your task is to generate two things for a given algorithm problem: 1. A brute-force / exhaustive reference solution ( Python function) that is guaranteed to be correct but does not need to be efficient 2. A random small-scale input generator (Python function) that generates valid inputs with very small n (<=8) Requirements: - The brute-force solution must match the given function interface signature (same function name, parameters, and return type) - The brute-force solution should use the most straightforward method (enumeration, backtracking, memoized search, etc.) to ensure correctness - The input generator function must be named generate_test_input(), returning a dict where keys are parameter names and values are parameter values - All code must be directly executable Python code Return in JSON format: {"bruteforce_code": "def function_name(...):\n ...", "input_generator_code": "def generate_test_input() :\n ..." }""" 
+
+Prompt for Bruteforce Gen User 
+
+BRUTEFORCE_GEN_USER = """\\ ## Problem Information {problem_description} ## Function Interface Contract 
+
+``` json {interface_json} 
+
+``` 
+
+## Data Ranges 
+
+``` json {data_ranges_json} 
+
+``` 
+
+## Candidate Solution Code (for reference only, do not copy its logic) 
+
+``` python {candidate_code} 
+
+``` 
+
+Please generate the brute-force reference solution and the random input generator. """ 
+
+L.5 Task Replanner 
+
+Task Replanner 
+
+Prompt for Task Replanner System 
+
+TASK_REPLANNER_SYSTEM = """\\ You are an algorithm design expert. Your responsibility is to redesign the existing task node specifications based on runtime errors exposed by the final code, and produce an improved complete task_node JSON. 
+
+When re-planning, focus on the following fields: - hints: Add more specific algorithm hints or boundary handling suggestions based on the error type - interface: Verify the function signature is correct, and revise if necessary - context: Supplement or correct the context information required by this task - complexity_budget: If there is a timeout, consider reducing the complexity requirement Output format: Output only one JSON object -- the improved complete task_node -- without any additional explanatory text.""" 
+
+Prompt for Task Replanner User 
+
+TASK_REPLANNER_USER = """\\ ## Problem Background {problem_context} ## Currently Failing Task Node (Original Specification) 
+
+``` json {task_node_json} 
+
+``` 
+
+## Error Information - Error type: {error_type} - Error details: {error_detail} - Failing test case: {failing_case} ## Task Please analyze the above errors and output an improved complete task_node JSON. Focus on revising the hints, interface, context, and complexity_budget fields so that the regenerated code can pass the tests."""

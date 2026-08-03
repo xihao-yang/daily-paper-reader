@@ -1,0 +1,683 @@
+Title: To Add Is Machine, To Delete Is Human: Measuring and Mitigating Deletion Avoidance in LLM Code Editing
+
+URL Source: https://arxiv.org/pdf/2607.28887v1
+
+Published Time: Mon, 03 Aug 2026 00:15:36 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# To Add Is Machine, To Delete Is Human: Measuring and Mitigating Deletion Avoidance in LLM Code Editing 
+
+## Amir M. Ebrahimi, Mohammed Mehedi Hasan, Aaditya Bhatia, Gopi Krishnan Rajbahadur, Ahmed E. Hassan 
+
+School of Computing, Queen’s University, Kingston, Ontario, Canada amir.ebrahimi@cs.queensu.ca, mohammedmehedi.hasan@queensu.ca, aaditya.bhatia@cs.queensu.ca, grajbahadur@acm.org, ahmed@cs.queensu.ca 
+
+Abstract 
+
+Large language models increasingly write and repair produc-tion code, yet evidence is mounting that their test-passing patches leave codebases harder to maintain. We identify one concrete source: deletion avoidance, the systematic tendency to retain code that an intended edit requires removing. Across the five leading models on the official SWE-bench Veri-fied leaderboard, deletion recall against the developer patch reaches at most 71.7% even on tasks all five solve, and models reach the right file for over 92% of required deletions but cut the exact line in under 52% of cases. Instead, 29.0% of passing patches wrap the targeted code in a guard or fallback, a pattern we call Guard-and-Go. Such patches pass because the original tests rarely check removal: when we retrofit 34 Verified tasks with tests that fail if the targeted code remains, four frontier models spanning closed and open weights fall from 63.2% to 41.9%. Because real repairs mix removal with addition, we curate CanItDelete, a benchmark of 200 tasks mined from real commits whose entire required edit is deletion. Even with the addition work gone, the best model still fails one task in five, and smaller open models fall to 18.0%. We then ablate GPT-5.6 Sol under four cumulative prompts; success moves little until we supply the exact lines, which nearly eliminate incomplete deletion yet raise success only to 80.5% because the model then deletes beyond the spans or adds code instead. Finally, through a pilot study we show one potential fix: teach-ing deletion during post-training reduces deletion avoidance and improves broader code-editing performance, suggesting the behavior is undertrained rather than beyond reach. 
+
+## 1 Introduction 
+
+Frontier LLMs now sit at the core of coding agents that resolve issues, review code, and open pull requests with lit-tle supervision. Whether what they produce is merge-ready, meaning a maintainer would take it into the project, is a separate question from whether it runs. In a large GitHub corpus, 46.4% of agent-authored fixes are rejected (Abu-jadallah, Arabat, and Sayagh 2026; Alam, Mondal, and Roy 2026), and several projects decline AI-generated contribu-tions outright (QEMU Project 2025). Maintainers reviewing 296 already-passing agent pull requests across three SWE-bench Verified repositories merged them at a rate 24 percent-age points below the benchmark score, citing verbosity and departure from repository conventions (Whitfill et al. 2026). Commit statistics point the same way. Across 623 mil-lion analyzed changes, edits that take out or update code def request(self, method, url, **args):        
+
+> ⋮
+> −method = builtin_str(method)
+> +method = to_native_string(method)
+> ⋮
+> return resp
+> Problem ID
+> Developer patch deleted lines
+> are retained in the model patch
+> with guard clause
+> Model Patch (Opus 4.5) Developer Patch
+> psf__request:
+> 2317
+> def request(self, method, url, **args):
+> ⋮
+> −method = builtin_str(method)
+> +if isinstance(method, bytes):
+> +method = method.decode('utf-8')
+> +else:
+> +method = builtin_str(method)
+> ⋮
+> return resp
+
+Figure 1: An example of deletion avoidance in a solved SWE-bench Verified task. The developer patch removes a state-ment, while the model retains it under an ‘else’ guard. older than twelve months fell 74% after 2023, while error-masking constructs rose 47% (GitClear 2026). One reason agent patches read as bloated is that models leave code in place that the change was meant to remove. Reviewers of agent-written pull requests routinely delete generated meth-ods, which they must read in full before deciding (Watanabe et al. 2026). Figure 1 shows the behavior directly: a developer retires an obsolete assignment, while a model given the same issue keeps the assignment and routes execution around it con-ditionally. Both patches pass the same tests, and both are recorded as resolved. We call this deletion avoidance , the systematic tendency to retain code that an intended edit re-quires removing, and we use the term for observable patch behavior rather than for internal intent. 
+
+Deletion avoidance in the wild. Across five leading sub-missions to SWE-bench Verified, patches leave between a quarter and a third of the developer’s deletions in place even on tasks that all five solve. The models are not failing to find the code: they edit the file containing a required deletion for over 92% of target lines and the enclosing function, class, or module for 68.1% to 74.4%, yet remove the exact line in only 44.6% to 51.6% of cases. What they write instead follows one dominant strategy, in which the model keeps the logic the developer removed and adds a condition or bypass around it. We call this Guard-and-Go , and it accounts for 29.0% of all passing patches. Such patches pass because the original tests rarely check removal. When we retrofit 34 deletion-heavy Verified tasks with checks that fail when a validated dele-tion target remains, resolution across four frontier models 1arXiv:2607.28887v1 [cs.SE] 30 Jul 2026 falls 21.3 percentage points, and 29 of 86 previously passing attempts fail. 
+
+CanItDelete : deletion in isolation. None of this at-tributes the failure to deletion itself: nothing in a SWE-bench task asks for a deletion, localization is hard on the benchmark in its own right (Al Awad and Ivanov 2026; Sepidband, Pham, and Hemmati 2026), and developer patches mix removal with additive work. CanItDelete removes those confounds: 200 tasks mined from real commits whose entire required edit is deletion, posed over the full pre-edit file and scored by a de-terministic occurrence-aware evaluator. Across twelve mod-els spanning frontier and open weights, success runs from 79.0% down to 18.0%, and incomplete deletion dominates failures for ten of the twelve. A diagnostic ladder then adds an explicit deletion instruction, a region pointer, and finally the exact spans to remove; only the spans help every model. Even handed them, GPT-5.6 Sol still fails 19.5% of tasks, now mostly by deleting past the boundary or adding code rather than by retaining the target. Deletion fails on both sides: too little when the boundary is uncertain, too much once it is given. What models lack is control, not capability. Finally, deletion is learnable rather than absent. Adding 12.8k deletion examples to a 7B model’s code post-training mixture, 0.7% of its tokens, cuts deletion avoidance on Can-ItDelete by 13.9 percentage points, and the gain transfers to benchmarks the data never targeted, raising SWE-bench Verified by 5.3 points and CanItEdit by 1.4. Deletion may therefore be underrepresented in code post-training rather than beyond the models’ reach. We report this as a proof of concept at a single scale. 
+
+Contributions. We define, characterize, and measure dele-tion avoidance in real repository repairs, identifying Guard-and-Go as its dominant form and showing how much re-ported resolution survives a deletion-sensitive check. We release CanItDelete , a deletion-only benchmark with a deterministic occurrence-aware evaluator and a diagnostic ladder that localizes where deletion fails. All measurement and replication code, the benchmark, and the prompts are in the supplementary material, withheld from public release for anonymity and available on acceptance. 
+
+## 2 Do LLMs Avoid Deleting Code in Practice? 
+
+SWE-bench Verified measures whether a patch resolves an issue, but not how the patch transforms the code. This dis-tinction matters when the developer repair is subtractive: a model may remove the same obsolete logic, or preserve it behind newly added control flow while still satisfying the tested behavior. We ask whether models systematically di-verge from developer repairs in this direction, and what they write instead of the code developers remove. We treat the developer patch as a behavioral reference rather than the unique correct solution. A model that retains a reference deletion may have a valid alternative repair, so a mismatch alone does not establish an error. Instead, we look for recurring evidence across models and tasks: whether models consistently delete less than developers, whether the gap remains after they reach the relevant code, and whether retained logic takes a common structural form. 
+
+2.1 Study Design 
+
+Patches. We analyze the most recent OpenHands-based SWE-bench Verified leaderboard submission for each of five models: GLM-4.6, GPT-5, Kimi-K2, Opus-4.5, and Sales-force SAGE. Scaffolds differ in how they call tools and lo-calize code, and those differences can shape editing behavior independently of the underlying model. We therefore hold the scaffold fixed to reduce this source of variation. Table 5 in Appendix A.1 lists the submissions, their dates, and the selection procedure. 
+
+Tasks. We call the human-authored patch distributed with each SWE-bench task the developer patch . We retain a task when this patch removes at least one line from a non-test Python file without restoring that line inside the same func-tion, class, or module; 377 of the 500 Verified tasks satisfy this criterion. We analyze the 254 tasks with unanimous out-comes: 197 that all five models solve and 57 that all five fail, setting aside the remaining 123. By restricting the compari-son to unanimous outcomes, we hold both task and outcome constant across models. We read the contrast between solved and failed tasks descriptively, since tasks that no model solves may be harder for reasons unrelated to deletion. 
+
+Reference deletions. A reference deletion is a source loca-tion removed by the developer patch from a non-test Python file. We identify these locations by applying both patches to the base-commit. We discard a removed line that reappears among the developer patch’s additions in the same enclosing function, class, or module, since this represents movement rather than removal. A model matches a reference deletion only by deleting the same file and location; identical text re-moved elsewhere does not count. We inspect every non-test Python file the model touches, including files the developer patch leaves untouched, so that we record deletions the de-veloper did not make rather than leaving them unobserved. 
+
+Metrics. Let Gt be the set of reference deletions for task t
+
+and Mt,m the locations deleted by model m. Deletion re-call is the share of the developer’s deletions that the model also performs: Rt,m = |Gt∩Mt,m ||Gt| . We macro-average recall across tasks so that a one-line deletion and a twenty-line deletion receive equal weight. Because recall measures how many of the developer’s deletions a model reproduces, we lead with it. We also compute deletion precision, the share of model deletions that match reference locations, and report it in Table 6 in Appendix A.2. Per-task recall is bounded and skewed, so we compare solved and failed tasks with a two-sided Mann–Whitney U test and report Cliff’s δ with Holm-adjusted p-values (Table 7 in Appendix A.3). Finally, to separate search from execution, we check each reference deletion at three nested levels: whether the model patch mod-ifies its file , whether it modifies at least one line within its enclosing scope , meaning the containing function, class, or module, and whether it removes the exact line .
+
+2.2 Passing Patches Still Leave Developer-Removed Code in Place 
+
+Patches scored as correct by SWE-bench Verified still leave 28.3% to 34.8% of an average task’s reference dele-tions in place. Across the 197 solved tasks, mean deletion 2recall ranges from 65.2% for Kimi-K2 to 71.7% for Opus-4.5 (Table 1). Passing the tests therefore narrows the divergence from the developer’s deletions without eliminating it. A model cannot delete code it never reaches, so we next ask whether localization accounts for this divergence. On these same 197 tasks, models modify the file containing the deletion for 92.5% to 94.4% of reference deletions and its enclosing scope, the containing function, class, or module, for 68.1% to 74.4%, yet they remove the exact line in only 44.6% to 51.6% of cases (Figure 5 in Appendix A.4). Lo-calization explains the decline from file to scope. It does not explain the further 21.4 to 27.8 percentage-point decline that occurs once the model has already modified the enclosing scope. Modifying a scope does not establish that the model inspected every line within it, but we cannot attribute the residual divergence to editing the wrong file. The divergence is sharper still where models fail. Recall falls to between 19.8% and 30.4% on the 57 tasks that all five fail (Table 1), and the two task sets separate at Holm-adjusted 
+
+p < 10 −8 for every model, with Cliff’s δ between 0.485 and 0.543, a large effect throughout. Deletion precision behaves similarly (Table 8 in Appendix A.3). On solved and failed tasks alike, every model deletes less than the developer. 
+
+Finding 1. Even on tasks that all five models solve, the models’ patches leave 28.3% to 34.8% of an average task’s reference deletions in place. Models edit the file containing more than 92% of those deletions, yet remove the exact source line in only 44.6% to 51.6% of cases, so coarse localization explains only part of the gap. 
+
+2.3 Models Substitute Added Control Flow for Removal 
+
+Low deletion recall may still reflect valid alternative im-plementations, so we examine what models write in place of the logic the developer removed. An LLM-based classi-fier, MiniMax-M2.7, assigns each task–model pair one of three labels. Delete-and-Replace removes or replaces most of the developer-removed logic. Guard-and-Go retains that logic and introduces a condition or bypass around it. A non-reference alternative follows neither pattern and addresses the issue elsewhere. The classifier receives the issue, both patches, and precomputed deletion features, and it must sup-port its label with lines from the supplied diffs; we reject any label whose cited evidence is absent. Because this classifica-tion does not require a solved–failed contrast, we run it over every task–model pair available in the five official leader-board submissions rather than the 254 unanimous tasks, giv-ing 2,487 candidate pairs. We exclude 129 pairs whose de-veloper patch we could not parse, leaving 2,358. Appendix B reports the supplied features, the validation procedure, and the complete label definitions. The prompts are available in the replication package. 
+
+Among the 1,703 passing pairs, 494 (29.0%) retain the logic the developer removed and route execution around it (Table 2). 1 Guard-and-Go passes in 72.2% of cases, below 
+
+> 1Guard-and-Go accounts for 29.0% of passing pairs and, coin-
+
+Delete-and-Replace at 85.2% but well above non-reference alternatives at 39.6%, and 190 of the 655 failing pairs follow the same strategy. The same substitution therefore recurs in patches the benchmark accepts as well as in patches it rejects. We open-code the pairs, revise the categories after each round until they saturate, and consolidate the result into ten structural forms. A closed coder then applies them to all 684 Guard-and-Go pairs, assigning a form to 550 and declining on the remaining 134; Appendix B gives the procedure and the full definitions. Retained Path as Live Fallback accounts for 221 of the 550 typed pairs (40.2%), more than the next three forms combined. In this form, the added guard handles the reported case while the developer-removed logic remains the default path for every other input. Such patches preserve a developer-removed path in exe-cutable form, so a reader must judge whether both the original and the newly introduced paths remain necessary. Maintain-ers report the same burden when reviewing agent-authored patches: they delete generated code that they must first read (Watanabe et al. 2026), and they cite verbosity and departure from repository conventions when rejecting patches that had passed the automated grader (Whitfill et al. 2026). Avoiding a deletion tends to enlarge the patch. Passing Guard-and-Go patches exceed their developer counterpart in 61.1% of pairs, with a median size ratio of 1.67 ×. The variation across models is substantial: 97.8% of GLM-4.6 and 81.5% of Kimi-K2 Guard-and-Go patches are larger, against 33.0% for Opus-4.5 (Table 9 in Appendix A.5). Patch size alone does not show that the added code is unnecessary. Read alongside the strategy labels, however, it shows that models often turn a subtractive developer repair into a larger patch that retains the original logic and adds a control path. 
+
+Finding 2. Models substitute added control flow for re-moval, including in patches that SWE-bench Verified marks resolved. Guard-and-Go accounts for 29.0% of passing patches, its dominant form retains the developer-removed logic as an executable fallback, and they exceed the developer patch in size in 61.1% of pairs. 
+
+## 3 Do Passing Tests Detect Missing Deletions? 
+
+Section 2 shows that models repeatedly retain developer-removed logic behind added guards and bypasses, includ-ing in patches that SWE-bench Verified records as resolved. Comparing model patches with the developer patch cannot determine how to interpret this divergence. A retained target may belong to an adequate alternative repair, or the original tests may not require its removal. We thus modify the evalua-tion criterion rather than the model, retrofitting Verified tasks with checks that fail when a validated deletion target remains and measuring how much reported resolution survives. Among the 69 Verified tasks in which deletions constitute at least a quarter of the developer patch, we identify a sub-stantive deletion target using an AST-aware procedure that prioritizes removed conditions, control-flow statements, and 
+
+> cidentally, 29.0% of all 2,358 labelled pairs.
+
+3Model Failed ( n=57 ) Solved ( n=197 ) δ               
+
+> GLM-4.6 24.0% 67.5% 0.532 GPT-5 29.9% 68.5% 0.485 Kimi-K2 19.8% 65.2% 0.543 Opus-4.5 30.4% 71.7% 0.504 Salesforce SAGE 27.5% 68.0% 0.501
+
+Table 1: Mean deletion recall on 197 tasks all five models solve and 57 all five fail. δ denotes effect size.             
+
+> Strategy nShare Pass rate Delete-and-Replace 1,197 50.8% 85.2% Guard-and-Go 684 29.0% 72.2% Non-reference alternative 477 20.2% 39.6%
+
+Table 2: Patch strategies among 2,358 classifier-labeled pairs. Share is overall frequency; pass rate is SWE-bench Verified resolution within each strategy. Table 12 (Appendix B) lists the ten Guard-and-Go forms. complete blocks. We then construct a source-level deletion-sensitive check requiring the target to be absent from its enclosing scope, and retain a task only when the check fails on the base revision and passes after applying the developer patch. This leaves 34 tasks with validated deletion targets and a demonstrated repair that removes them (see the sup-plementary material at Appendix C). Rather than reusing the submissions we analyze in Sec-tion 2, we generate patches with four frontier models span-ning closed and open weights: GPT-5.6 Sol, Opus 4.8, GLM-5.2, and DeepSeek-V4-Pro. Those submissions all predate December 2025, so applying a deletion-sensitive check to them would leave open whether current systems still exhibit the behavior (SWE-bench Team 2025; OpenAI 2026). We use the same models in Section 4, where we examine dele-tion under controlled conditions. 
+
+Across the 136 attempts we generate, 86 (63.2%) pass the original test suites, and 57 (41.9%) also satisfy the deletion-sensitive check. The absolute decline is 21.3 per-centage points, and 29 of the 86 accepted attempts (33.7%) retain the validated target. Every model declines, by 17.6 to 23.5 percentage points (Table 3). Because each task and model patch is fixed under both criteria, the paired decline reflects stricter evaluation, not a change in the task or generation setting. On these deletion-heavy tasks, roughly one third of patches accepted by the original suites retain a validated target that the developer repair removes. However, we derive each check from a target removed by the developer patch, and our experiment measures perfor-mance under that removal requirement rather than establish-ing that deletion is the only behaviorally valid repair. An alternative repair may preserve the target and still satisfy the original behavioral specification. The 34 tasks are also deletion-heavy by construction and do not represent SWE-bench Verified as a whole. The retrofit therefore identifies an evaluation gap without isolating why models fail to produce                       
+
+> Passing attempts Model Tasks Original suite With deletion check Drop (pp)
+> GPT-5.6 Sol 34 21 (61.8%) 15 (44.1%) 17.6 Opus 4.8 34 21 (61.8%) 14 (41.2%) 20.6 GLM-5.2 34 26 (76.5%) 18 (52.9%) 23.5 DeepSeek-V4-Pro 34 18 (52.9%) 10 (29.4%) 23.5
+> Overall 136 86 (63.2%) 57 (41.9%) 21.3
+
+Table 3: Attempts passing the original suite and, among them, the deletion-sensitive check on 34 tasks per model. Drop is in percentage points (pp); each task is about 2.9 pp. a removing repair. Full repository tasks still entangle the de-cision to delete with localization, boundary identification, and accompanying implementation work. 
+
+Finding 3. Adding a deletion-sensitive check reduces resolution by 21.3 percentage points on deletion-heavy SWE-bench Verified tasks. Of the attempts the original suites accept, 33.7% retain the validated target, indi-cating a substantial gap between passing the behavioral tests and satisfying an explicit removal requirement. 
+
+## 4 CanItDelete: A Diagnostic Benchmark for Deletion Avoidance 
+
+Sections 2 and 3 establish that models leave developer-removed code in place and that behavioral test suites accept many of the patches that do. Neither study attributes the failure to deletion itself: in full repository repair, a missed removal can originate in localization, in replacement code, or in surrounding implementation work, and nothing in the task states that removal is required. We therefore build CanIt-Delete , 200 tasks mined from real commits in which dele-tion is the complete required transformation. Because the reference edit adds nothing, every compliant solution must perform the same removal while preserving unrelated code, and a failed output reflects the model’s editing behavior rather than ambiguity about what the task demands. Figure 2 sum-marizes the design: the construction pipeline (A), the signal ladder, four cumulative modes that each add one localizing cue (B), and the failure taxonomy our evaluator assigns (C). The taxonomy and the ladder are what let the benchmark diagnose rather than rank. Appendix D details benchmark construction and validation, and Appendix D.4 specifies the deletion-compliance evaluator. 
+
+4.1 Benchmark Design 
+
+Construction. From the 100 most-starred active reposito-ries in each of Python and JavaScript, we mine 79,074 file edits that delete source lines and add none. We rank them by an equal-weight index over pre-edit length, deleted lines, and deletion hunks, three change-complexity dimensions es-tablished in software-maintenance research (Nagappan and Ball 2005; Kamei et al. 2013), and keep the 200 hardest, 4C. Outcome taxonomy  
+
+> ✓Success
+
+B. Diagnostic modes 
+
+> Exact lines
+> Exact spans; preserve other
+> lines
+> Region pointer
+> Relevant functions or regions
+
+A. Benchmark construction          
+
+> 1. Select repository population
+> 100 Python + 100 JavaScript
+> 5. Generate instruction
+> 200 tasks with instructions
+> 2. Mine deletion-only file edits
+> 79,074 edits
+> 6. Assess task quality
+> LLM quality gate + author gate
+> 3. Rank structural difficulty
+> Changed lines – LOC – deletion
+> hunks
+> 7. CanItDelete benchmark
+> 200 tasks × 4 modes
+> 4. Filter benchmark tasks
+> Top-200 difficult tasks
+> Vanilla
+> Developer-style request
+> Explicit deletion
+> Complete-removal constraint
+> +
+> +
+> +
+> 🎯 Target fully
+> removed
+> 🛡 Unrelated
+> structure preserved
+> ✨No behavior-
+> affecting additions
+> ◑Incomplete
+> deletion
+> ⊕Add + retain
+> ⊖Partial deletion
+> ∞ Mixed missing +
+> excess
+> □ Wrong boundary
+> ⊘No change /
+> disabled / syntax-
+> invalid while target
+> remains
+> ✗Complete
+> delete, invalid edit
+> 🗑 Over-deletion
+> ↔ Scope-changing
+> edit
+> Syntax-invalid
+> after target removal
+
+Figure 2: Overview of CanItDelete benchmark construction, cumulative diagnostic modes, and the structural outcome taxonomy. Success 
+
+> Add + retain
+> Partial
+> Mixed
+> Boundary
+> Other
+> Over-deletion
+> Other
+
+Claude Opus 4.8 
+
+GPT-5.6 Sol 
+
+GPT-5 
+
+GPT-4.1 
+
+DeepSeek-V4-Pro 
+
+GLM-5.2 
+
+Kimi K2 Thinking 
+
+MiniMax-M3 
+
+MiniMax-M2.5 
+
+MiniMax-M2.1 
+
+Qwen3-235B 
+
+Qwen3-30B 
+
+79 12 40 5 7 0 31 5
+
+74 21 6 4 6 2 56 6
+
+62 35 23 1 4 1 32 4
+
+36 22 40 7 8 12 10 1
+
+65 16 41 11 6 1 24 0
+
+66 18 13 3 9 1 48 7
+
+67 24 11 5 15 2 39 5
+
+67 15 21 6 11 2 38 8
+
+48 19 31 6 5 3 33 3
+
+46 28 25 3 8 4 29 4
+
+25 34 16 16 3 3 25 3
+
+18 32 26 12 10 13 9 0
+
+Success 
+
+(% tasks) 
+
+Incomplete deletion 
+
+(% failures) 
+
+Complete deletion, 
+
+invalid edit 
+
+(% failures) 
+
+Figure 3: Vanilla-mode success and failure composition across 12 models. Success is measured over 200 tasks; failure mechanisms are measured over each model’s failed tasks. one file per repository–commit pair (Figure 2A). We select deliberately for stress: every task spans at least three sepa-rated deletion hunks, so the benchmark emphasizes multi-site deletion over one-line cleanup. The 200 tasks come from 35 repositories; 151 are Python, 49 JavaScript-family, and 53 modify test files. We generate instructions only after selec-tion, using GPT-5.6 Sol to draft a short deletion request from the complete pre-edit file and reference diff, and we pass every task through an LLM rubric and an author audit, both requiring the request to cover every substantive deletion and to be locatable from the pre-edit file alone (Appendix D.2). 
+
+Evaluation. We score outputs with a deterministic, occurrence-aware evaluator; no LLM judges any output. An output is deletion-compliant when the complete target is absent, executable structure outside it is preserved, and no behavior-affecting or unrelated change is introduced. Com-menting out or disabling the target does not count, and delet-ing one copy of a repeated line earns no credit for a different required occurrence. We partition failures by whether re-quired code remains into incomplete deletion and complete deletion with an invalid edit ; Figure 2C names the mecha-nisms within each, from add-and-retain to over-deletion. The diagnostic ladder supplies four cumulative modes, vanilla, explicit deletion, region pointer, and exact lines, each adding one cue, so the change in a model’s outcomes from one mode to the next reveals whether intent, search, or boundary knowl-edge was missing (Figure 2B; definitions in Appendix D.3). 
+
+4.2 Deletion Avoidance Persists in Isolation 
+
+The best performing frontier model fails one deletion-only task in five. Claude Opus 4.8 leads the twelve models we evaluate at 79.0% deletion-compliant success, and GPT-5.6 Sol follows at 74.0% (Figure 3). These failures occur even though we remove the confounds identified above: we supply the complete file, we ask only for removal, and the task requires no cross-file localization and no replacement code. The avoidance we measure in the wild in Section 2 therefore persists when the model receives the file directly and deletion is the entire task, and it takes the same form. Add-and-retain, the dominant failure mechanism here, is Guard-and-Go under controlled conditions: an addition standing in for a deletion. 
+
+Open-weight leaders trail the frontier by roughly twelve points, and the remaining open models fall much further. The strongest of them, Kimi K2 Think-ing, MiniMax-M3, GLM-5.2, and DeepSeek-V4-Pro, cluster within a narrow 65.0–67.0% band, whereas the Qwen in-struct models and the earlier MiniMax releases reach only 18.0–47.5% and fail predominantly by leaving required code behind. The task set separates these models rather than satu-rating at either end: 9 of the 200 tasks are solved by all twelve models, 19 by none, and every intermediate solved-by count occurs in between. 
+
+Behind these pass rates sit two distinct failure regimes. 
+
+Incomplete deletion is the majority failure for ten of twelve models (69.8% pooled), but GPT-5.6 Sol and GLM-5.2 de-fine a second regime: they usually remove the target and then over-delete or edit out of scope. Which regime a model falls into is not fixed by capability. Along the GPT line in Figure 3, incomplete deletions fall from 114 to 20 while invalid edits after complete removal rise from 14 to 32, and Qwen shows the same exchange at lower capability, whereas MiniMax-M3 reduces both. A single pass rate would record progress 5here; only the mechanism decomposition shows what kind. 
+
+Finding 4. Across twelve models, deletion-only success ranges from 18.0% to 79.0%, and incomplete deletion accounts for 69.8% of failures. Stronger deletion behav-ior does not always become compliant editing: some models replace target retention with over-deletion, re-vealing distinct problems of deletion completion and scope preservation. 
+
+4.3 Models Fail Even When Given the Exact Lines to Delete 
+
+Even given the exact lines to delete, no model is flawless, and only one comes close. With occurrence-specific spans supplied, Claude Opus 4.8 reaches 97.7%, while the other four ladder models finish between 56.5% and 87.5% (Fig-ure 4). Qwen3-235B still leaves required code in 17.5% of tasks after being told exactly what to remove, the clearest sign that deletion avoidance persists, and across the five models 1.7–26.0% of attempts fail even after the complete target is gone because the edit strays beyond it. 
+
+Exact spans are the only signal that moves every model. 
+
+They raise success by 6.5–31.5 points and cut incomplete deletion to 0.6–3.0% for four of the five, whereas the cheaper signals accomplish little: an explicit no-workaround instruc-tion shifts success by only −2.5 to +2 .5 points. Region pointers change success by 0.0–7.0 points, with the largest gain for GLM-5.2. Deletion avoidance is not a misreading of intent, and search is not the main bottleneck; until we hand over the spans, what models lack is knowledge of where the deletion ends. 
+
+Suppressing incomplete deletion exposes a second ten-dency to over-edit. GPT-5.6 Sol’s invalid-edit rate barely moves with exact lines, from 16.0% to 16.5%, and Qwen3-235B’s rises from 20.5% to 26.0% as its retention falls. The ladder thus separates two capabilities that a single pass rate conflates, finding every required occurrence and stopping at its boundary: aggregate success cannot tell which side a model improved, or whether, like Qwen, it traded one failure for the other, while the mode deltas and the mechanism split can. Current models lack control rather than capability. We report per-model results for all four modes in Appendix D.5. 
+
+Finding 5. Exact deletion spans raise success by 6.5– 31.5 points and nearly eliminate incomplete deletion for four of five models. Nevertheless, as many as 26.0% of tasks still fail after complete target removal, showing that exact localization and disciplined scope preservation are distinct capabilities. 
+
+## 5 Can Deletion-Focused Post-Training Reduce Deletion Avoidance? 
+
+Section 4 shows that models can perform deletion but do not reliably choose it or preserve its boundary. One plausi-ble explanation combines the additive preference observed in people and language models with the action bias observed in coding agents: when a change requires deletion, mod-els may default to acting through added code (Adams et al. 2021; Santagata and De Nobili 2025; Gloaguen et al. 2026). Neither the data nor the objective corrects this. The addi-tive skew is present in the text models learn from (Winter et al. 2023), and evaluation based on behavioral correctness accepts Guard-and-Go, as Section 3 showed that a third of patches accepted by the original suites retain the deletion tar-get. We hypothesize that deletion is insufficiently reinforced during code post-training, both in whether models choose it and in where they stop. Because deletion is a cross-cutting code-editing behavior rather than a standalone downstream task, we add deletion supervision to a general code post-training mixture rather than train a deletion-specific adapter. 
+
+Proof-of-concept intervention. We use a 7B in-house model because a larger member of the same family supports coding workflows in our industrial setting. 2 We augment its code-only post-training mixture with 12,821 deletion exam-ples: 10,000 file-level edits and 2,821 repository-level repairs constructed using the CanItDelete pipeline. These con-tribute 112.1M tokens to the 15.9B-token mixture, approxi-mately 0.7% of the total. Appendix E gives the construction and rejection procedure; we exclude all CanItDelete eval-uation problems from training. Both checkpoints are trained under an identical recipe, six epochs with a global batch size of 64 on 128 xPUs. The base-line is post-trained on the 15.9B-token code-only mixture; the intervention adds the deletion subset to that same mixture and is otherwise unchanged, so the two runs differ only in 0.7% of training tokens. CanItDelete measures the targeted behav-ior. The remaining three cover the code-editing workloads the deployed model serves: SWE-bench Verified evaluates repository-level repair from real issue reports (Jimenez et al. 2024; OpenAI 2024), while CanItEdit and EditBench evalu-ate instructed edits to existing code from a natural-language request (Cassano et al. 2024; Chi et al. 2025). None targets deletion, so together they test whether the intervention trans-fers or introduces regressions. We run inference three times on every benchmark and report the mean. 
+
+Deletion training reduces incomplete deletion and ex-poses failures of scope preservation. CanItDelete suc-cess increases from 6.5% to 13.7%, while incomplete deletion falls from 80.4% to 66.5% (Table 4). The 13.9 percentage-point reduction splits almost evenly: 7.2 points become compliant edits, while 6.7 become complete-but-invalid edits, and over-deletion alone rises by 6.2 points. The intervention therefore makes the model more likely to com-plete the required removal, but does not yet teach it where that removal should stop. The gain concentrates where removal is part of the task. SWE-bench Verified rises 5.3 percentage points, while Can-ItEdit rises 1.40 and EditBench is unchanged at −0.19 : 377 of the 500 Verified tasks require at least one deletion from a non-test file (Section 2), whereas neither instructed-editing benchmark is deletion-oriented. The effect is therefore selec-
+
+> 2Model and hardware details are anonymized.
+
+6Vanilla Explicit                                             
+
+> deletion Region
+> pointer Exact
+> lines
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Share of tasks (%)
+> (a) GLM-5.2
+> 66 64
+> 74
+> 88
+> 15 18
+> 14
+> 3
+> 18 18
+> 12
+> 10
+> Vanilla Explicit
+> deletion Region
+> pointer Exact
+> lines
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100 (b) GPT-5.6 Sol
+> 74 72 74 80
+> 10 10 10 3
+> 16 18 16 16
+> Vanilla Explicit
+> deletion Region
+> pointer Exact
+> lines
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100 (c) MiniMax-M3
+> 67 67 68
+> 85
+> 18
+> 16
+> 16
+> 315
+> 17
+> 15
+> 12
+> Vanilla Explicit
+> deletion Region
+> pointer Exact
+> lines
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100 (d) Claude Opus 4.8
+> 79 80 83
+> 98
+> 14 16
+> 11 1
+> 756
+> 2
+> Vanilla Explicit
+> deletion Region
+> pointer Exact
+> lines
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100 (e) Qwen3-235B-A22B
+> Instruct-2507
+> 25 28 27
+> 56
+> 55 52 50
+> 18 20
+> 20
+> 24
+> 26
+> Success Incomplete deletion Complete deletion, invalid edit
+
+Figure 4: Diagnostic-ladder outcomes under increasingly precise deletion guidance. Four models use 200 tasks; Claude Opus 4.8 uses 173.                       
+
+> CanItDelete outcome Benchmark success
+> Succ. Incomp. Complete invalid Over-deletion SWE-b. Verified EditBench CanItEdit Base 6.5 80.4 13.1 10.6 25.40 39.26 44.30 +Deletion 13.7 66.5 19.8 16.8 30.70 39.07 45.70
+> ∆+7.2 −13 .9+6.7 +6.2 +5.30 -0.19 +1.40
+
+Table 4: 7B-model performance before and after deletion-augmented post-training. Values are three-run means (%); 
+
+∆ is absolute percentage-point change. Over-deletion is a subset of complete-but-invalid edits. tive rather than uniform, which is what a deletion-specific mechanism predicts. None of the studied benchmarks declines by more than 0.2 points, so the intervention clears the regression gate this pilot was built to test. We read the result as a signal rather than a solution: reducing the additive substitution did not remove the disposition to act on the code, which now sur-faces as over-deletion, so deletion completion and boundary control are distinct training objectives. Whether either holds at deployment scale is left to future work. 
+
+Finding 6. In a single-model pilot, adding deletion su-pervision to a code post-training mixture reduces incom-plete deletion by 13.9 percentage points. 
+
+## 6 Related Work 
+
+Additive bias and deletion behavior. People systemati-cally favor additive changes over subtractive ones (Adams et al. 2021), a skew that English corpus statistics reproduce (Winter et al. 2023) and that LLMs inherit on controlled tasks (Santagata and De Nobili 2025). Coding agents show a related tendency, acting when inaction would be correct (Gloaguen et al. 2026). LLM patches can also err in the opposite direction, removing unrelated code and breaking working behavior (Chong et al. 2026). These studies all work in synthetic, no-op, or adjacent editing settings, and none asks whether models retain developer-removed code in real repository repairs. 
+
+Validity of test-based code-editing evaluation. Passing a benchmark’s tests does not establish that the requested change was implemented correctly. Audits of SWE-bench report weak tests, mislabeled passes, and flawed task specifi-cations (Aleithan et al. 2024; Yu et al. 2025; OpenAI 2026). Coverage is narrow as well: 56% of EDIT-Bench tests exer-cise only the edited region (Ebrahimi and Rajbahadur 2026), which leaves room for specification gaming (Krakovna et al. 2020; Ma, Kereopa-Yorke, and Schultz 2026). Deletion-only Kali patches make the complementary point, passing tests without repairing the defect (Ginelli et al. 2022). None of this work isolates deletion as the target behavior. 
+
+Benchmarks for code editing and repair. SWE-bench and its Verified subset evaluate repository-level repair from real issue reports (Jimenez et al. 2024; OpenAI 2024), and instructed-editing benchmarks evaluate modifications re-quested in natural language (Cassano et al. 2024; Chi et al. 2025; Guo et al. 2025). Prior work also shows that supply-ing localization information improves repair (Al Awad and Ivanov 2026; Sepidband, Pham, and Hemmati 2026). In ev-ery case the reference patch combines addition, modification, and removal, so none isolates an LLM’s ability to execute a purely subtractive edit. CanItDelete makes deletion the required behavior and adds a diagnostic ladder that separates failures of intent, localization, and scope preservation. 
+
+## 7 Conclusion and Limitations 
+
+Deletion avoidance recurs across current code models: patches that SWE-bench Verified marks resolved retain a quarter to a third of the developer’s deletions, substituting added control flow for removal, and pass because the tests rarely check it, so resolution rates overstate merge-ready be-havior. The gap persists when deletion is the entire task, and exact spans only trade retention for over-deletion: models lack control over removal rather than the capability. Mod-est deletion supervision reduces the behavior and improves repository-level repair, so the deficit appears undertrained rather than intrinsic. These findings are bounded in scope, construction, and scale. The in-the-wild analysis rests on submitted SWE-bench Verified patches with uncontrolled decoding settings, and the deletion-sensitive check covers 34 deletion-heavy tasks. CanItDelete instructions are drafted with GPT-5.6 Sol, itself an evaluated model, from most-starred repositories whose post-edit files may appear in training data. The pilot trains one 7B model and reports three-run means without 7variance; whether deletion supervision holds at deployment scale or across other languages remains open. 
+
+## References 
+
+Abujadallah, M.; Arabat, A.; and Sayagh, M. 2026. Under-standing the Rejection of Fixes Generated by Agentic Pull Requests: Insights from the AIDev Dataset. arXiv preprint arXiv:2606.13468 .Adams, G. S.; Converse, B. A.; Hales, A. H.; and Klotz, L. E. 2021. People Systematically Overlook Subtractive Changes. 
+
+Nature , 592(7853): 258–261. Al Awad, M. N.; and Ivanov, S. 2026. Loc2Repair: A Framework for Evaluating the Impact of File-Level Issue Localization in Repo-Level LLM Repair. arXiv preprint arXiv:2606.30963 .Alam, K.; Mondal, S.; and Roy, B. 2026. Why Are AI Agent Involved Pull Requests (Fix-Related) Remain Unmerged? An Empirical Study. ArXiv , abs/2602.00164. Aleithan, R.; Xue, H.; Mohajer, M. M.; Nnorom, E.; Uddin, G.; and Wang, S. 2024. SWE-Bench+: Enhanced Coding Benchmark for LLMs. arXiv preprint arXiv:2410.06992 .Cassano, F.; Li, L.; Sethi, A.; Shinn, N.; Brennan-Jones, A.; Lozhkov, A.; Anderson, C. J.; and Guha, A. 2024. Can It Edit? Evaluating the Ability of Large Language Models to Follow Code Editing Instructions. In Proceedings of the Conference on Language Modeling (COLM) .Chi, W.; Chen, V.; Shar, R.; Mittal, A.; Liang, J.; Chiang, W.-L.; Angelopoulos, A. N.; Stoica, I.; Neubig, G.; Talwalkar, A.; and Donahue, C. 2025. EDIT-Bench: Evaluating LLM Abilities to Perform Real-World Instructed Code Edits. In 
+
+Proceedings of the 42nd International Conference on Ma-chine Learning (ICML) .Chong, C. J.; Ahmed, M.; Yao, Z.; and Neamtiu, I. 2026. Can LLMs Be Effective Code Contributors? A Study on Open-Source Projects. In Proceedings of the International Conference on Evaluation and Assessment in Software En-gineering (EASE) .Ebrahimi, A. M.; and Rajbahadur, G. K. 2026. Edit, But Ver-ify: An Empirical Audit of Instructed Code-Editing Bench-marks. arXiv preprint arXiv:2604.05100 .Ginelli, D.; Martinez, M.; Mariani, L.; and Monperrus, M. 2022. A Comprehensive Study of Code-removal Patches in Automated Program Repair. Empirical Software Engineer-ing , 27(4). GitClear. 2026. The Maintainability Gap: AI Code Quality in 2026. Technical report, GitClear. https://www.gitclear. com/the_ai_code_quality_maintainability_gap. Gloaguen, T.; Mündler, N.; Müller, M.; Raychev, V.; and Vechev, M. 2026. Coding Agents Don’t Know When to Act. 
+
+arXiv preprint arXiv:2605.07769 .Guo, J.; Li, Z.; Liu, X.; Ma, K.; Zheng, T.; Yu, Z.; Pan, D.; Li, Y.; Liu, R.; Wang, Y.; Guo, S.; Qu, X.; Yue, X.; Zhang, G.; Chen, W.; and Fu, J. 2025. CodeEditorBench: Evalu-ating Code Editing Capability of LLMs. In The 3rd DL4C Workshop: Emergent Possibilities and Challenges in Deep Learning for Code, at ICLR 2025 . Published on OpenRe-view. Hassan, A. E. 2009. Predicting Faults Using the Complexity of Code Changes. In Proceedings of the 31st International Conference on Software Engineering (ICSE) , 78–88. Jimenez, C. E.; Yang, J.; Wettig, A.; Yao, S.; Pei, K.; Press, O.; and Narasimhan, K. 2024. SWE-bench: Can Language Models Resolve Real-World GitHub Issues? In Proceedings of the Twelfth International Conference on Learning Repre-sentations (ICLR) .Kamei, Y.; Shihab, E.; Adams, B.; Hassan, A. E.; Mockus, A.; Sinha, A.; and Ubayashi, N. 2013. A Large-Scale Empir-ical Study of Just-in-Time Quality Assurance. IEEE Trans-actions on Software Engineering , 39(6): 757–773. Krakovna, V.; Uesato, J.; Mikulik, V.; Rahtz, M.; Everitt, T.; Kumar, R.; Kenton, Z.; Leike, J.; and Legg, S. 2020. Specification Gaming: The Flip Side of AI In-genuity. DeepMind Blog, https://deepmind.google/blog/ specification-gaming-the-flip-side-of-ai-ingenuity/. Ac-cessed July 2026. Li, Y.; Guerin, F.; and Lin, C. 2024. LatestEval: Addressing Data Contamination in Language Model Evaluation through Dynamic and Time-Sensitive Test Construction. In Proceed-ings of the AAAI Conference on Artificial Intelligence .Ma, Y.; Kereopa-Yorke, B.; and Schultz, B. 2026. Building to the Test: Coding Agents Deliver What You Check, Not What You Requested. arXiv preprint arXiv:2606.28430 .Merrill, M. A.; Shaw, A. G.; Carlini, N.; Li, B.; Raj, H.; Bercovich, I.; Shi, L.; Shin, J. Y.; Walshe, T.; Buchanan, E. K.; et al. 2026. Terminal-bench: Benchmarking agents on hard, realistic tasks in command line interfaces. arXiv preprint arXiv:2601.11868 .Moser, R.; Pedrycz, W.; and Succi, G. 2008. A Comparative Analysis of the Efficiency of Change Metrics and Static Code Attributes for Defect Prediction. In Proceedings of the 30th International Conference on Software Engineering (ICSE) ,181–190. Nagappan, N.; and Ball, T. 2005. Use of Relative Code Churn Measures to Predict System Defect Density. In Pro-ceedings of the 27th International Conference on Software Engineering (ICSE) , 284–292. Ni, Z.; Wang, H.; Zhang, S.; Lu, S.; He, Z.; Tang, Z.; Hu, S.; Li, B.; Hu, C.; Jiao, B.; et al. 2026. Gittaskbench: A bench-mark for code agents solving real-world tasks through code repository leveraging. In Proceedings of the AAAI Confer-ence on Artificial Intelligence , volume 40, 32564–32572. OpenAI. 2024. Introducing SWE-bench Verified. https: //openai.com/index/introducing-swe-bench-verified/. OpenAI. 2026. Why SWE-bench Verified No Longer Mea-sures Frontier Coding Capabilities. https://openai.com/ index/why-we-no-longer-evaluate-swe-bench-verified/. Ac-cessed July 2026. Ouyang, S.; Huang, D.; Guo, J.; Sun, Z.; Zhu, Q.; and Zhang, J. M. 2026. DSCodeBench: A realistic benchmark for data science code generation. In Proceedings of the AAAI Con-ference on Artificial Intelligence , volume 40, 32628–32636. QEMU Project. 2025. Code Provenance: Use of AI Content Generators. https://github.com/qemu/qemu/blob/ master/docs/devel/code-provenance.rst. 8Santagata, L.; and De Nobili, C. 2025. More is More: Ad-dition Bias in Large Language Models. Computers in Hu-man Behavior: Artificial Humans . https://doi.org/10.1016/j. chbah.2025.100143. Sepidband, M.; Pham, H. V.; and Hemmati, H. 2026. On the Role of Fault Localization Context for LLM-Based Program Repair. arXiv preprint arXiv:2604.05481 .SWE-bench Team. 2025. Submit to SWE-bench. SWE-bench leaderboard submission documentation. Official sub-missions are maintained in the SWE-bench experiments repository; accessed July 2026. Watanabe, K.; Shirai, T.; Kashiwa, Y.; and Iida, H. 2026. What to Cut? Predicting Unnecessary Methods in Agentic Code Generation. In Proceedings of the 23rd International Conference on Mining Software Repositories (MSR) .Whitfill, P.; Wu, C.; Becker, J.; and Rush, N. 2026. Many SWE-bench-Passing PRs Would Not Be Merged into Main. METR research note. https://metr.org/notes/2026-03-10-many-swe-bench-passing-prs-would-not-be-merged-into-main/. Winter, B.; Fischer, M. H.; Scheepers, C.; and Myachykov, A. 2023. More is Better: English Language Statistics are Biased Toward Addition. Cognitive Science , 47(4): e13254. Yu, B.; Zhu, Y.; He, P.; and Kang, D. 2025. UTBoost: Rigorous Evaluation of Coding Agents on SWE-Bench. In 
+
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (ACL) .Zhu, Q.; Cao, J.; Lu, Y.; Lin, H.; Han, X.; Sun, L.; and Che-ung, S.-C. 2024. Domaineval: An auto-constructed bench-mark for multi-domain code generation. arXiv preprint arXiv:2408.13204 .9A Analyzing Deletion Avoidance Quantatitively 
+
+A.1 Model Choices for Empirical Analysis 
+
+To control for variation introduced by agent scaffolding, we selected models from the official SWE-bench Verified sub-missions repository using a consistent procedure. We first identified submissions using the OpenHands scaffold across both open-weight and proprietary model families. We then excluded submissions older than one year, using July 1, 2025, as the cut-off date. Finally, for each eligible model family, we selected its latest OpenHands-based submission. This proce-dure provides coverage across diverse model families while holding the agent scaffold constant and ensuring that the evaluated submissions are recent. Selected model summary is in Table 5 
+
+Family Selected model Submission directory Submission date 
+
+GLM GLM-4.6 20250930_zai_ glm-4.6 
+
+September 30, 2025 GPT GPT-5 20250807_ openhands_gpt5 
+
+August 7, 2025 Kimi Kimi K2 20250716_ openhands_kimi_k2 
+
+July 16, 2025 Claude Claude Opus 4.5 
+
+20251127_ openhands_ claude-opus-4-5 
+
+November 27, 2025 SAGE Salesforce SAGE 
+
+20251103_ SalesforceAIResearch_ SAGE_OpenHands 
+
+November 3, 2025 
+
+Table 5: Model submissions selected from the official SWE-bench Verified repository. For each model family, we retained the latest submission using the OpenHands scaffold. The submission date is extracted from the leading YYYYMMDD 
+
+component of the repository directory name. 
+
+A.2 Deletion Precision and Recall between Developer Patch and Model Patch 
+
+Failed by all five 
+
+(n = 57 )
+
+Solved by all five 
+
+(n = 197 )
+
+Model Precision Recall Precision Recall 
+
+GLM-4.6 34.6% 24.0% 70.7% 67.5% GPT-5 35.6% 29.9% 69.3% 68.5% Kimi-K2 35.0% 19.8% 70.6% 65.2% Opus-4.5 47.0% 30.4% 74.3% 71.7% Salesforce SAGE 36.7% 27.5% 66.2% 68.0% 
+
+Table 6: Mean per-task deletion precision and recall. A match requires the model-generated patch to delete the same base-commit source location as the official human patch. 
+
+A.3 Statistical Test for Precision and Recall 
+
+Panel A: Descriptive statistics All-passed All-failed Model Median IQR Median IQR 
+
+Salesforce SAGE 1.00 0.75 0.07 0.50 GLM-4.6 1.00 0.75 0.00 0.33 GPT-5 1.00 0.71 0.00 0.50 Kimi-K2 1.00 0.80 0.00 0.25 Opus-4.5 1.00 0.61 0.17 0.50 
+
+Panel B: Statistical comparison Model U Holm-adjusted 
+
+p Cliff’s δ Effect 
+
+Salesforce SAGE 8,426.50 1.29 × 10 −9 0.50 Large GLM-4.6 8,599.50 2.41 × 10 −10 0.53 Large GPT-5 8,338.00 1.99 × 10 −9 0.49 Large Kimi-K2 8,662.00 1.59 × 10 −10 0.54 Large Opus-4.5 8,444.50 6.51 × 10 −10 0.50 Large 
+
+Table 7: Comparison of deletion recall between all-passed (n = 197 ) and all-failed ( n = 57 ) eligible tasks for each evaluated model. Panel A reports the median and interquar-tile range (IQR). Panel B reports the Mann–Whitney U test with Holm-adjusted p-values and Cliff’s δ effect size. 
+
+Panel A: Descriptive statistics All-passed All-failed Model Median IQR Median IQR 
+
+Salesforce SAGE 1.000 0.684 0.038 0.929 GLM-4.6 1.000 0.667 0.000 1.000 GPT-5 1.000 0.684 0.000 1.000 Kimi-K2 1.000 0.667 0.000 1.000 Opus-4.5 1.000 0.500 0.400 1.000 
+
+Panel B: Statistical comparison Model U Holm-adjusted 
+
+p Cliff’s δ Effect 
+
+Salesforce SAGE 7,707.5 9.34 × 10 −6 0.373 Medium GLM-4.6 8,014.0 3.05 × 10 −7 0.427 Medium GPT-5 7,861.0 1.49 × 10 −6 0.400 Medium Kimi-K2 7,867.5 9.67 × 10 −7 0.401 Medium Opus-4.5 7,504.0 1.01 × 10 −5 0.337 Medium 
+
+Table 8: Comparison of deletion precision between all-passed ( n = 197 ) and all-failed ( n = 57 ) eligible tasks for each evaluated model. Panel A reports the median and in-terquartile range (IQR). Panel B reports the Mann–Whitney 
+
+U test with Holm-adjusted p-values and Cliff’s δ effect size. 10 A.4 Exploring the Deletion Avoidance from Localization point of View File Scope Line  
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Overlap rate (%)
+> High 94.4%
+> Low 92.5%
+> High 74.4%
+> Low 68.1% High 51.6%
+> Low 44.6%
+> glm-4_6
+> gpt5
+> kimi_k2
+> opus-4_5
+> SalesForce_Sage
+
+Figure 5: File-, scope-, and exact-line overlap across all re-quired deletions in the 197 tasks solved by all five models 
+
+A.5 Patch Size Comparison between Developer Patch and Model Generated Patch with Guard-and-Go 
+
+Table 9: Model-generated patch size relative to the corre-sponding developer patch for passing Guard-and-Go pairs. LOC is measured as the sum of added and deleted lines.                           
+
+> Model Pairs Model larger Equal LOC Model smaller
+> GLM-4.6 91 89 (97.80%) 0 (0.00%) 2 (2.20%) GPT-5 120 58 (48.33%) 10 (8.33%) 52 (43.33%) Kimi-K2 92 75 (81.52%) 3 (3.26%) 14 (15.22%) Opus-4.5 91 30 (32.97%) 20 (21.98%) 41 (45.05%) Salesforce SAGE 100 50 (50.00%) 14 (14.00%) 36 (36.00%)
+> Overall 494 302 (61.13%) 47 (9.51%) 145 (29.35%)
+
+## B Construction of the Guard-and-Go Taxonomy 
+
+We analyze every task–model pair that the strategy classifier in the main paper’s “Models Substitute Added Control Flow for Removal” subsection labels Guard-and-Go. In each pair, the model retained code that the official human patch deleted and added a guard that routes execution around the retained code. The classifier had to quote both the retained lines and the added guard to justify its label, and we kept only pairs for which both quotes were recovered. This process left 684 pairs for analysis. 
+
+Open and axial coding. Two models, MiniMax-M2.7 and Claude Sonnet 5, independently open-coded each pair af-ter inspecting the problem statement, the official human-authored patch, the model-generated patch, and the classifier rationale. Coding proceeded in six rounds of five pairs, cover-ing 30 pairs in total. After each round, an axial coder (Claude Opus 4.7) compared the new codes against the running tax-onomy and added, merged, or revised categories. Table 10 reports the result of each round. The fifth and sixth rounds added no categories and left all 23 definitions unchanged, so we stopped coding and treated the taxonomy as saturated at 23 categories. 
+
+Consolidation. Many of the 23 categories described the same behavior in different contexts. For example, three cate-gories described catching exceptions from the retained code and returning a default value. They differed only in the num-ber of exception types caught, so we consolidated them into one behavior, Exception Capture Bypass , listed in Table 12. Five other categories described adding a branch for a special input and differed only in the input type: a property object, a regular expression, or a database join. We consolidated them into one behavior, Special-Case Carve-Out Bypass . Apply-ing this rule to all 23 categories yielded the ten types in Table 12: six types merged two or more categories, while four remained unchanged. Claude Opus 4.7 proposed the grouping, and the authors reviewed it and finalized the ten definitions before labeling any pairs. We kept two similar types separate. In Upstream Reroute Around Retained Branch , the guard redirects the problematic input, so the retained code can no longer run. In Retained Path as Live Fallback , the retained code still runs for every input that the guard does not catch. Since the retained code is dead in the first case and live in the second, we report the types separately. 
+
+Closed coding. A final labeler (MiniMax-M2.7, temper-ature 0) applied the frozen taxonomy of ten Guard-and-Go types to all 684 pairs. For each pair, the labeler selected the most specific type and cited the corresponding lines from the model-generated patch as evidence. The labeler could also decline to assign a type. 134 task–model pairs were labeled “other”, indicating behavior that the ten types do not name. Table 2 of the main paper and the accompanying analysis therefore cover the 550 pairs that received a type. To check these labels, one author sampled five pairs from each of the ten types, for 50 pairs in total, and confirmed that the cited lines exhibited the behavior described by the assigned definition. This validation assesses whether the la-bels match the taxonomy’s structural definitions; it does not evaluate each patch’s correctness, maintainability, or intent. We provide the definition of each subtype in 11. 
+
+## C Construction of Deletion-Focused F2P Tests 
+
+We retrofit selected SWE-bench Verified tasks with deletion-focused FAIL_TO_PASS (F2P) tests. The construction pro-cess first identifies a behaviorally important deletion that is not covered by the existing visible tests and then creates a repository-native test that fails when the deleted code remains and passes when the deletion is performed. 11 Round Pairs coded Added Revised Total                         
+
+> 1512 012 210 4016 315 4020 420 3023 525 0023 630 0023
+
+Table 10: Categories in the running taxonomy after each axial round. Each round covers five new pairs. 
+
+C.1 Selecting Behaviorally Important Deletions 
+
+We begin with 69 tasks for which deletions constitute at least 25% of the changed lines in the developer patch. Our analysis covers 65 of these tasks. Because deleted lines may include comments, blank lines, docstrings, delimiters, and other structurally trivial changes, we do not treat every deleted line as an independent target. Instead, we analyze the source version preceding the developer patch and group related deleted lines into deletion units. For Python files, the source structure is used to associate deleted lines with their enclosing syntax elements. When the source cannot be parsed, nearby deleted lines are grouped into a single unit. A deletion unit may represent a removed condition, control-flow statement, function signature, assignment, call, decorator, or complete compound statement such as an if ,
+
+for , try , function, or class block. Imports are considered meaningful only when they are removed together with the code that depends on them. This process identifies 166 dele-tion units across 63 tasks; the remaining two tasks contain no meaningful code deletion after non-code and structurally trivial lines are excluded. We rank the deletion units using the heuristic in Table 13. The score prioritizes deletions that alter control flow, re-move complete program constructs, correspond to entities mentioned in the problem statement, and disappear entirely from the developer patch. Standalone import removals re-ceive a negative score because they generally reflect cleanup induced by another deletion rather than the primary behavior required by the task. The highest-scoring unit is selected as the deletion target for each task. For patch-level analysis, we consider a model to have adopted the selected deletion when it removes at least half of the lines belonging to that unit. Among the 63 selected units, 24 are covered by a listed visible test. The remaining 39 form the candidate pool for deletion-focused F2P construction. 
+
+C.2 Retrofitting and Validating F2P Tests 
+
+For each of the 39 candidates, we first establish a source-level oracle that distinguishes the base version from the developer-patched version. The selected deletion must be present in the base source and absent from the corresponding location after applying the developer patch. Consequently, the resulting predicate fails on the base version because the targeted code remains and passes on the gold version because the intended deletion has occurred. The test reads the target source file from the current check- 
+
+> Subtype Definition
+> Retained Path as Live Fallback Guards the reported case but leaves logic deleted by the official patch as the default path, allowing non-matching inputs to continue executing the retained logic. Special-Case Carve-Out Bypass Adds a branch or relaxes a precondition for one input category while leaving the general resolution mechanism unchanged. Missing-Element Existence Bypass Checks for a required runtime element and returns a default value when it is absent instead of evaluating the retained logic. Failure-Site Symptom Patch Suppresses or compensates for the symptom at the failure site while leaving the producing control flow unchanged. Exception Capture Bypass Catches exceptions raised by retained logic and returns a default value instead of removing the underlying cause. Post-Hoc Output Correction Corrects an incorrect result after the buggy computation has already completed. Missing-Functionality Injection Introduces new logic or parameters to handle the reported case instead of adopting the restructuring performed by the official patch. Upstream Reroute Around Retained Branch Redirects problematic inputs away from a retained branch, leaving the obsolete branch as unreachable legacy logic. Parallel Duplicate-Path Retention Retains logic that the official patch consolidates while introducing an additional execution path that can also satisfy the behavior. Value-Compatibility Shim Conditionally restores a legacy constant or decoding behavior for a specific input.
+
+Table 11: Guard-and-Go structural subtypes identified in model-generated patches. out and compares normalized source lines. It does not import or execute the target project code. This design isolates the structural edit from project initialization, database fixtures, framework settings, and other runtime side effects. When the selected lines disappear entirely from the developer-patched file, the predicate checks their absence from the complete file. When the same text is relocated, rewritten, or duplicated elsewhere, the check is restricted to a stable enclosing func-tion or class. A candidate is excluded if no stable scope can distinguish the base and gold versions. Each test is placed within the repository’s existing test organization. For Django projects, the test is added as a 
+
+unittest module under the same test application used by the original task. For SymPy, it is expressed as a plain test function compatible with the repository’s selector for-mat. For other pytest-based repositories, the test file is placed alongside the original task’s test location. The de-rived SWE-bench record contains only the deletion-focused test in its test_patch , lists the generated selector under 
+
+FAIL_TO_PASS , and leaves PASS_TO_PASS empty. This isolates the evaluation outcome from the task’s original vis-12 Structural form n Share Pass rate                            
+
+> Retained Path as Live Fallback 221 40.2% 68.3% Special-Case Carve-Out Bypass 95 17.3% 52.6% Missing-Element Existence Bypass 60 10.9% 81.7% Failure-Site Symptom Patch 51 9.3% 66.7% Exception Capture Bypass 43 7.8% 53.5% Missing-Functionality Injection 35 6.4% 74.3% Post-Hoc Output Correction 20 3.6% 80.0% Upstream Reroute Around Retained Branch 10 1.8% 90.0% Parallel Duplicate-Path Retention 81.5% 87.5% Value-Compatibility Shim 71.3% 71.4%
+> All typed pairs 550 100.0% 67.3%
+
+Table 12: Distribution of the ten Guard-and-Go structural forms. Of the 684 Guard-and-Go pairs, the closed-source classifier assigned a subtype to 550 and abstained on the re-maining 134. Share is computed over the 550 typed pairs, and pass rate is the proportion of pairs that SWE-bench Verified records as resolved. ible tests. We validate every generated test against materialized base and gold source trees. Retention requires the test to be col-lected correctly, fail on the base version with the intended deletion assertion, and pass on the gold version. Tests that error, skip, are not collected, or fail to distinguish the two versions are discarded. We refer to tests satisfying these con-ditions as host validated ; harness validated additionally de-notes execution within the complete SWE-bench evaluation environment. Of the 39 candidates, 34 satisfy host validation. The remaining five are excluded because no stable source-level predicate separates the base and gold versions. 
+
+## D Extended CanItDelete Design and Results 
+
+D.1 Candidate Mining and Structural Ranking 
+
+Repository population. For each of Python and JavaScript, we select the 100 most-starred active, non-fork public repositories and traverse their reachable non-merge histories. Activity after January 1, 2024 defines the repos-itory population; older commits within those repositories remain eligible. 
+
+Deletion-only file edits. For each commit, we reconstruct every changed file before and after the edit. We retain Python, JavaScript, JSX, and JavaScript-module edits that add no lines, have a pre-edit file of at most 100 KB, have recover-able and decodable revisions, and leave a nonempty post-edit file. We exclude binary changes and file deletions but retain test files. Selection is file-level, so other files in the commit may contain additions or modifications. This yields 79,074 Table 13: Heuristic used to prioritize behaviorally important deletion units.               
+
+> Signal Score
+> Deleted lines are not reintroduced elsewhere +3 .0
+> Complete control block is removed +3 .0
+> Condition guarding existing code is changed or re-moved
+> +3 .0
+> Control-flow statement is removed +3 .0
+> Complete function or class is removed +2 .5
+> Decorator is removed +2 .0
+> Comparison or Boolean logic is removed +1 .5
+> Function or class signature is changed +1 .5
+> Assignment is removed +1 .0
+> Function or method call is removed +1 .0
+> Deleted code contains problem-statement terms +2 .0
+> Larger multi-line deletion unit +1 .5
+> Import and its dependent code are removed +0 .5
+> Standalone import is removed −4.0
+
+Table 14: Task counts across the deletion-focused F2P con-struction process.          
+
+> Selection stage Count
+> Tasks with at least 25% deletion 69 Tasks included in deletion-unit analysis 65 Tasks with a meaningful code deletion 63 Tasks without a meaningful code deletion 2Deletion units identified 166 Targets covered by a listed visible test 24 Targets not covered by a listed visible test 39 Host-validated deletion-focused F2P tasks 34
+
+eligible edits, each with its Git-derived post-edit file as the reference. 
+
+Structural challenge index. Because CanItDelete is a diagnostic stress test rather than a representative GitHub sample, we rank candidates by three established change-complexity dimensions: pre-edit code size, change size, and dispersion (Nagappan and Ball 2005; Hassan 2009; Kamei et al. 2013; Moser, Pedrycz, and Succi 2008). We use the dimensions, but not defect-prediction coefficients, because defect risk and editing difficulty are different constructs. Let L be the number of nonempty pre-edit lines, C the number of nonempty source lines deleted by the reference edit, and H the number of deletion hunks in a unified diff with three lines of context. Removing duplicate repository– commit–file identities leaves N = 74 ,485 candidates. For 
+
+k ∈ { L, C, H }, we compute the right-continuous empirical percentile 
+
+pk(x) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+1[xik ≤ xk] (1) and the equal-weight structural challenge index 
+
+dV2 = pL + pC + pH
+
+3 . (2) 13 Percentiles avoid distributional assumptions and hand-selected saturation thresholds. Equal weights avoid imposing an unsupported exchange rate among file reading, deletion volume, and multi-site coordination. Thus, dV2 ranks struc-tural challenge; it is not a calibrated failure probability. 
+
+Final task selection. We retain the highest-scoring file per repository–commit pair, preventing one logical change from occupying multiple positions, and select the top 200 edits without using model performance. The benchmark spans 200 commits from 35 repositories: 151 Python and 49 JavaScript-family tasks, including 53 test files. Every task has at least three separated deletion hunks. Figure 6 summarizes the benchmark. Median (IQR) values are 1,551 (1,266–1,800) pre-edit LOC, 34 (29–39) deleted lines, 4 (3–5) deletion hunks, and 8 (6–10) instruction words. 
+
+D.2 Instruction Generation and Task Validation 
+
+After structural selection, GPT-5.6 Sol receives the pre-edit file, reference diff, file path, and commit message as weak context. It generates a short, present-tense request covering the complete deletion without additions, invented motiva-tion, or references to a patch or diff. Mechanical checks reject malformed requests, non-deletion scope, prohibited language, and patch-oriented terms. The replication package provides the full prompts. Each task passes an LLM gate and an author gate. Given only the instruction and pre-edit file, the LLM solver view checks nontriviality, grounding, and whether all edit sites are locatable. Given the full before/after record, its eval-uator view checks faithfulness, multi-site consistency, ref-erence correctness, scope, and cross-field coherence. The author then verifies that the request covers every substan-tive Git deletion without broadening the task and that all sites and boundaries are recoverable without the hidden diff, post-edit file, repository context, or tests. Inventory-like re-quests are shortened and revalidated. This separation of Git provenance, generated descriptions, and deterministic evalu-ation follows recent repository-derived benchmarks (Ni et al. 2026; Ouyang et al. 2026; Zhu et al. 2024; Li, Guerin, and Lin 2024). 
+
+D.3 Diagnostic Modes 
+
+The four modes are cumulative: each retains prior guidance and adds one controlled signal. Changes between stages iden-tify missing information; failure with exact lines isolates exe-cution and scope control after intent, region, and boundaries are supplied. 
+
+D.4 Deletion-Compliance Evaluator 
+
+No LLM judges evaluate outputs. An output is deletion-compliant when the full target is absent, the remaining exe-cutable structure agrees with the reference, and no behavior-affecting directive or unrelated code change is introduced. Formatting, whitespace, and ordinary explanatory comments are accepted; commenting out or disabling the target is not. Type-checking, lint, and coverage directives count when they can affect behavior. Exact reference matches are always ac-cepted, including for unsupported source dialects. 1,200 1,800 2,400 3,000        
+
+> median 1,551
+> (a) Pre-edit LOC
+> 20 40 60 80
+> median 34
+> (b) Deleted lines
+> 10 20 30
+> median 4
+> (c) Deletion hunks
+> 510 15
+> median 8
+> (d) Instruction words
+
+Figure 6: Structural distributions across the 200 CanIt-Delete tasks. The evaluator derives occurrence-specific units from the pre-edit-to-reference diff. Source coordinates, hunk member-ship, and anchors prevent one occurrence of a repeated line from receiving credit for another. Decisions combine hunk-anchored alignment, Python AST or JavaScript parser struc-ture, token and dialect fallbacks, and raw-source checks for targets preserved in comments, literal-false branches, early-return wrappers, or similar nonexecuting forms. Failures are partitioned by whether required code remains. 
+
+Incomplete deletion covers partial removal, additions while target code remains, mixed missing and excess deletion, wrong-site or wrong-boundary deletion, no change, disabled or commented targets, and syntax-invalid outputs retain-ing the target. Complete deletion, invalid edit covers over-deletion, scope-changing edits, and syntax-invalid outputs after target removal. The partition separates incomplete re-moval from failure to preserve its boundary. 
+
+D.5 Complete Diagnostic-Ladder Results 
+
+GLM-5.2, GPT-5.6 Sol, MiniMax-M3, and Qwen3-235B use all 200 tasks in every mode. Provider failures left Claude Opus 4.8 with 173 tasks having usable responses in all four modes, so its trajectory uses that paired subset. Each within-model comparison therefore holds its task set fixed; only the Opus panel has fewer tasks than the vanilla analysis. Table 16 reports the complete outcome partition. Explicit deletion changes success by only −2.5 to +2 .5
+
+percentage points relative to vanilla. Region pointers change success by 0.0–7.0 points, with the largest gain for GLM-5.2. Only exact lines improve all five models, by 6.5–31.5 points. Incomplete deletion then falls to 0.6–3.0% for four models, while Qwen3-235B retains target code in 17.5% of tasks. The remaining failures expose a separate boundary-control 14 Table 15: The four cumulative CanItDelete diagnostic modes.        
+
+> Mode Cumulative signal Diagnostic question Vanilla No signal beyond the developer-style request Can the model infer and execute the complete dele-tion end to end? Explicit deletion Requires complete removal and forbids guards, com-ments, disabled branches, fallbacks, replacement code, and other workarounds Is failure caused by not choosing a genuinely sub-tractive edit? Region pointer Identifies relevant functions, methods, or regions without revealing deletion boundaries Is finding every required region the principal obsta-cle? Exact lines Supplies occurrence-specific spans and requires all un-marked text to be preserved Can the model execute a precise deletion once in-tent, location, and boundaries are known?
+
+deficit. Claude Opus 4.8 ends with 1.7% complete-deletion invalid edits, but GPT-5.6 Sol remains at 16.5%. For Qwen3-235B, this rate rises from 20.5% to 26.0% as incomplete deletion falls. Exact localization can therefore replace omit-ted deletions with edits that remove the target but change too much. The ladder separates finding every target occurrence from stopping at its boundary. 
+
+## E Deletion-Focused Training Data Selection 
+
+E.1 File-level examples. 
+
+Unlike CanItDelete , which retains the most structurally difficult edits, we sample across repositories, languages, and deletion difficulty. Given an instruction and the complete pre-edit file, DeepSeek-V3.2 generates the complete edited file. We apply deterministic rejection sampling using the criteria in Section 4.1, yielding 10,000 accepted responses whose required deletions are confined to one file. 
+
+E.2 Repository-level examples. 
+
+We retain non-root, non-merge commits whose Python changes contain only deletions, touch at least two files, and span 3–1,500 changed lines. For each commit, we generate an instruction and an F2P test that fails before the reference edit and passes afterward, and package the task in Harbor format (Merrill et al. 2026). We use mini-SWE-agent with MiniMax-M2.7 as the teacher and apply rejection sampling based on generated F2P tests, obtaining 2,821 samples for training. 15 Table 16: Complete five-model diagnostic-ladder results. Four models use 200 tasks per mode; Claude Opus 4.8 uses 173. Cells report count (percentage). 
+
+Mode Success Incomplete deletion Complete deletion, invalid edit 
+
+GLM-5.2 
+
+Vanilla 133 (66.5) 30 (15.0) 37 (18.5) Explicit deletion 128 (64.0) 36 (18.0) 36 (18.0) Region pointer 147 (73.5) 29 (14.5) 24 (12.0) Exact lines 175 (87.5) 6 (3.0) 19 (9.5) 
+
+GPT-5.6 Sol 
+
+Vanilla 148 (74.0) 20 (10.0) 32 (16.0) Explicit deletion 144 (72.0) 21 (10.5) 35 (17.5) Region pointer 148 (74.0) 19 (9.5) 33 (16.5) Exact lines 161 (80.5) 6 (3.0) 33 (16.5) 
+
+MiniMax-M3 
+
+Vanilla 134 (67.0) 36 (18.0) 30 (15.0) Explicit deletion 134 (67.0) 32 (16.0) 34 (17.0) Region pointer 137 (68.5) 33 (16.5) 30 (15.0) Exact lines 170 (85.0) 6 (3.0) 24 (12.0) 
+
+Claude Opus 4.8 
+
+Vanilla 136 (78.6) 25 (14.5) 12 (6.9) Explicit deletion 138 (79.8) 27 (15.6) 8 (4.6) Region pointer 143 (82.7) 19 (11.0) 11 (6.4) Exact lines 169 (97.7) 1 (0.6) 3 (1.7) 
+
+Qwen3-235B-A22B 
+
+Vanilla 50 (25.0) 109 (54.5) 41 (20.5) Explicit deletion 55 (27.5) 105 (52.5) 40 (20.0) Region pointer 54 (27.0) 99 (49.5) 47 (23.5) Exact lines 113 (56.5) 35 (17.5) 52 (26.0) 
+
+16
