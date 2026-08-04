@@ -1,0 +1,479 @@
+Title: Documentation vs. Code Patterns: What Drives LLM-Based Exception Oracle Generation?
+
+URL Source: https://arxiv.org/pdf/2608.00884v1
+
+Published Time: Tue, 04 Aug 2026 00:56:58 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Documentation vs. Code Patterns: What Drives LLM-Based Exception Oracle Generation? 
+
+# Soneya Binta Hossain ✉
+
+University of Texas at Dallas Richardson, USA sbhossain@utdallas.edu 
+
+# Matthew B. Dwyer 
+
+University of Virginia Charlottesville, USA matthewbdwyer@virginia.edu 
+
+# Tasfia Tasnim 
+
+University of Texas at Dallas Richardson, USA tasfia.tasnim@utdallas.edu 
+
+## Abstract 
+
+LLM-based test oracle generation (TOG) methods report high accu-racy on exception oracle generation, but it remains unclear what evidence drives these predictions. In particular, do models use ex-plicit exceptional-behavior documentation such as Javadoc @throws 
+
+clauses, or do they rely on recurring patterns in tests, code, and documentation? We investigate this question through a large-scale intervention-based study of three TOG systems spanning classifier-based and generative architectures and model sizes from roughly 110M to 7B parameters, evaluated on three real-world benchmarks comprising two generated-test datasets and a new benchmark of developer-written tests. We first remove Javadoc @throws clauses and find that accuracy changes only marginally, with the largest drop be-low one percentage point. This indicates that structured exception documentation is not the primary driver of exception-oracle pre-diction. We then apply attribution-guided substitution ablations to identify the signals that predictions depend on. The results show that high accuracy can be driven by shortcut signals: some models are highly sensitive to a small number of structural tokens, while others distribute reliance across many lexical cues. These findings challenge the assumption that strong exception-oracle accuracy reflects robust use of exception semantics. Future TOG systems should therefore be evaluated not only by whether they predict the correct oracle type, but also by whether their pre-dictions are grounded in meaningful exception-triggering evidence. 
+
+## CCS Concepts 
+
+• Software and its engineering → Software testing and debug-ging .
+
+## Keywords 
+
+automated software testing, test oracle generation, exception ora-cles, large language models, Javadoc, model attribution 
+
+ACM Reference Format: 
+
+Soneya Binta Hossain, Matthew B. Dwyer, and Tasfia Tasnim. 2026. Doc-umentation vs. Code Patterns: What Drives LLM-Based Exception Oracle Generation?. In Proceedings of the 41st IEEE/ACM International Conference on Automated Software Engineering (ASE ’26), October 12–16, 2026, Munich, Ger-many. ACM, New York, NY, USA, 12 pages. https://doi.org/10.1145/3832783. 3837464  
+
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> ASE ’26, Munich, Germany
+> ©2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2882-2/2026/10 https://doi.org/10.1145/3832783.3837464
+
+## 1 Introduction 
+
+Exceptions are fundamental in languages such as Java, C#, Python, and C++, where they signal abnormal conditions, enforce API con-tracts, and help preserve correct execution. Because software must behave correctly in both normal and exceptional executions, specify-ing and testing exceptional behavior is critical to reliability [ 3, 21 ]. Yet exceptional behavior is often harder to observe than value-returning behavior [ 6, 18 ]: return values appear in ordinary ex-ecutions, whereas exceptions arise only under specific runtime conditions. Developers and testing tools therefore often rely on external artifacts, especially documentation, to understand when 
+
+and why exceptions should occur. In Java, Javadoc @throws clauses, including the synonymous @exception tag, provide one of the most structured forms of exception-related documentation. Similar mechanisms appear in other ecosystems, such as XML documen-tation in C#, Python docstrings, and contract-based specifications, making exceptional-behavior documentation a broader software-engineering concern. This makes testing exceptional behavior a central part of soft-ware validation [ 1 ]. A system should not only return correct values in normal executions, but also detect, signal, and propagate errors in abnormal ones. This requirement is captured through exception oracles : test-oracle specifications that state whether a test should expect an exception. In Java, such oracles are commonly encoded using JUnit idioms such as @Test(expected=...) in JUnit 4, as-sertThrows in JUnit 5, or explicit try–catch blocks, as shown in Listing 1 [ 14 , 15 ]. Similar constructs exist in other ecosystems, such as Python’s assertRaises and NUnit’s Assert.Throws [ 19 , 20 ]. Despite their importance, exception oracles remain labor-intensive to write, error-prone, and dependent on developers anticipating failure modes that may be only partially documented [3]. Documentation can help bridge this gap. Javadoc often states the conditions under which exceptions should occur, making it a natu-ral source for constructing exception oracles. For example, in List-ing 2 (Javadoc 1), the documentation for ListOrderedMap.remove 
+
+states that an IndexOutOfBoundsException should be thrown when the index is invalid. This directly suggests tests that pass invalid indices, such as −1 or an index equal to the map size, and expect an IndexOutOfBoundsException . Listing 2 (Javadoc 2) illustrates the same idea for a null-triggered exception. More gen-erally, when a Javadoc clause identifies the condition that triggers an exception, it provides actionable specification evidence that can be translated into concrete inputs and expected exceptional behav-ior. In this sense, Javadoc can support automated exception-oracle generation rather than merely describe exceptional behavior. arXiv:2608.00884v1 [cs.SE] 1 Aug 2026 ASE ’26, October 12–16, 2026, Munich, Germany Soneya Binta Hossain, Matthew B. Dwyer, and Tasfia Tasnim 
+
+Listing 1: Different ways of writing exception oracles in Java.                                                              
+
+> // (1) Using the JUnit 4@Test annotation @Test ( expected =IOException . class ) public void test0 () throws IOException {MyFileReader r=new MyFileReader (" none . txt "); r. open () ; }// (2) Using JUnit 5'sassertThrows @Test public void test1 () {assertThrows ( IOException . class , () -> {MyFileReader r=new MyFileReader (" none . txt "); r. open () ; }) ; }// (3) Using explicit try - catch with afail () @Test public void test2 () {try {MyFileReader r=new MyFileReader (" none . txt "); r. open () ; fail (" Expected IOException not thrown "); }catch ( IOException e) {// test passes if exception is thrown }}
+
+Recent TOG work has advanced from assertion-oriented learning approaches [ 24 ], to documentation-driven techniques for excep-tional behavior [ 2 , 23 ], to neural and LLM-based systems such as 
+
+TOGA , ChatAssert, TOGLL , and Doc2OracLL [ 5 , 7 , 11 , 13 ]. How-ever, the basis of reported exception-oracle performance remains unclear. Prior TOG work has mainly focused on assertion oracles or on treating documentation as a broad context source, leaving the drivers of exception-oracle prediction underspecified. This matters because high accuracy alone does not show whether a model used meaningful exception evidence, such as a documented precondition, or relied on recurring shortcut cues in code, documentation, or test prefixes. In this paper, we investigate what actually drives exception-oracle prediction in neural and LLM-based TOG. We answer this through a large-scale intervention-based study of three representa-tive TOG systems on three real-world Java datasets: two generated-test benchmarks (OE25 and Sf110) and OE25 dev , a newly curated benchmark of developer-written tests from 25 systems. We define 
+
+exception-oracle accuracy as an oracle-type prediction metric: for an exception-labeled instance, a prediction is correct when the instance is classified as Exception , not Assertion . This metric does not measure semantic equivalence, compilability, oracle style, or exact exception-type matching. Section 2.4 gives the formal definition. To identify the signals behind these predictions, we compare model behavior before and after removing Javadoc @throws clauses, and then apply attribution-guided substitution ablations with cue categorization across the test prefix, focal code, and documentation. Removing these exception clauses (ECs) causes no change or only very small drops in accuracy: the largest observed overall drop is 0.16 percentage points, and the largest drop among samples that originally contained exceptional-behavior clauses is 0.54 percentage points. This suggests that structured exception documentation is not the main driver. Instead, attribution-guided ablation shows that 
+
+Listing 2: Examples of Javadoc exception clauses and corre-sponding exception-oracle tests.                                                                                           
+
+> Javadoc (1) /* * *Removes the element at the specified index . *@param index the index of the object to remove *@return the removed value , or { @code null } if none existed *@throws IndexOutOfBoundsException if the index is invalid */ public void test0 () {resetEmpty () ; resetFull () ; final ListOrderedMap <K ,V > lom =getMap () ; assertThrows ( IndexOutOfBoundsException . class , () -> lom . remove ( -1) ); }Javadoc (2) /* * *Creates aparameterized type instance . *@param rawClass the raw class to create aparameterized type instance for *@param typeArguments the types used for parameterization *@return { @link ParameterizedType } *@throws NullPointerException if { @code rawClass } is { @code null } *@since 3.2 */ public void test1 () {final Class <? > rawClass =null ; final Map < TypeVariable <? > , Type > tvMap =Collections . emptyMap () ; assertThrows ( NullPointerException . class , () -> TypeUtils . parameterize ( rawClass , tvMap )); }
+
+models rely on alternative input signals. For TOGLL , correct predic-tions often flip after only 3–4 high-attribution substitutions and are dominated by structural cues such as newlines. For Doc2OracLL ,predictions are harder to flip, but still depend on distributed lexical cues rather than on @throws /@exception clauses alone. Overall, this work argues that LLM-assisted task automation should be evaluated beyond accuracy alone. For TOG, this means checking whether exception predictions are grounded in meaning-ful evidence—such as the triggering precondition, method under test, documentation, or feasible throw path. It also means using controlled contexts, diverse tests, hard negatives, and counterfac-tual cases to expose shortcut cues such as formatting patterns or recurring lexical tokens. 
+
+In summary, this paper makes the following contributions: 
+
+• We present a large-scale intervention-based study of the sig-nals that drive exception-oracle prediction in neural and LLM-based TOG. 
+
+• We introduce OE25 dev , a benchmark of developer-written Java tests that complements prior generated-test datasets with more realistic test structures and oracle patterns. 
+
+• We show that Javadoc @throws /@exception clauses have lim-ited effect, while alternative input cues play a much larger role in exception-oracle prediction. 
+
+• We derive practical guidance for future TOG systems: eval-uate beyond accuracy, control for shortcut cues, and require predictions to be grounded in exception-triggering evidence. Documentation vs. Code Patterns: What Drives LLM-Based Exception Oracle Generation? ASE ’26, October 12–16, 2026, Munich, Germany 1. Benchmarks and Inputs          
+
+> SF110
+> EvoSuite Tests
+> OE25
+> EvoSuite Tests
+> OE25 dev
+> developer-written tests from same subject systems
+> Each instance provides:
+> Test prefix +MUT +Javadoc
+> 2. TOG Systems
+> released fine-tuned models, preprocessing, decoding,
+> and inference used as is
+> TOGA
+> Neural Classifier
+> TOGLL
+> Generative LLM pipeline
+> Doc2OracLL
+> Documentation-aware LLM pipeline
+> Report sample size and exception-labeled
+> subset per method--dataset pair
+> 3. Baseline Prediction (RQ1)
+> Oracle-type decision
+> Exception vs. Assertion
+> ExcAcc = T pred / T e× 100
+> binary exception-vs-assertion accuracy
+> 4. Signal Interventions
+> RQ2: Remove Javadoc
+> @throws/@exception
+> rerun inference; report EC-removal effect
+> RQ3/RQ4: Attribution-guided cue
+> analysis
+> Gradient×Input → ranked tokens →
+> substitution flips
+> Substitution-flip analysis
+> record first flip step and first flip-causing
+> token
+> interpret as prediction sensitivity
+
+Figure 1: Overview of our approach. 
+
+## 2 Approach 
+
+Our goal is to identify which input signals drive exception-oracle prediction in neural and LLM-based TOG. In particular, we ask whether structured exception documentation—Javadoc @throws 
+
+clauses—provides the main predictive signal, or whether models rely more on recurring input cues. Figure 1 summarizes our pipeline; in this section, we discuss the benchmarks, TOG systems under study, signal analysis, and evaluation metrics. 
+
+## 2.1 Benchmarks 
+
+We evaluate three Java benchmarks. Each benchmark sample is represented as 
+
+𝑠 𝑖 = (𝑥 𝑖 , 𝑦 𝑖 , 𝑚 𝑖 ), 𝑥 𝑖 = ⟨𝑝 𝑖 , 𝜇 𝑖 , 𝑑 𝑖 ⟩. (1) Here, 𝑥 𝑖 is the model input, 𝑦 𝑖 is the ground-truth oracle-type label, and 𝑚 𝑖 stores metadata. The input 𝑥 𝑖 contains three components: the test prefix 𝑝 𝑖 , the method under test (MUT) 𝜇 𝑖 , and the associated Javadoc 𝑑 𝑖 . The test prefix is the test code retained after removing the oracle block; it includes setup statements and the call to the method under test 𝜇 𝑖 whose oracle type must be predicted. 
+
+SF110 [ 9 , 11 , 13 ]. SF110 consists of 110 real-world Java systems and was originally curated to evaluate EvoSuite. It has since been adopted in LLM-based TOG studies, including TOGLL and Doc2OracLL .We include SF110 to maintain comparability with these prior evalu-ations. SF110 contains 159,073 input samples; its test prefixes are generated by EvoSuite, while the focal code and documentation come from the original developer-written projects. 
+
+OE25 [ 8, 9, 11 , 12 ]. OE25 is a curated benchmark from 25 real-world Java systems: 17 Apache Commons projects and 8 additional GitHub projects, covering 56 Maven modules. Similar to SF110, its test prefixes are generated by EvoSuite, while the focal code and documentation are developer-written. The benchmark contains 223,557 samples and has been used by prior test-oracle generation studies for unseen inference [ 11 , 16 ]. We include OE25 because it provides a larger and more documentation-rich generated-test setting than SF110, while still providing the same input components required by the evaluated TOG systems described in Section 2.2. 
+
+OE25 dev (Our Contribution). OE25 dev is curated from developer-written tests in the same 25 systems as OE25: 17 Apache Com-mons projects and 8 GitHub projects across 56 Maven modules. Unlike SF110 and OE25, whose test prefixes are EvoSuite-generated, OE25 dev is mined from upstream project test suites authored and maintained by the original project contributors. EvoSuite-generated tests mostly follow consistent templates, and prior evaluations of 
+
+TOGA , TOGLL , and Doc2OracLL have largely relied on such gener-ated tests [ 5, 11 , 13 ]. OE25 dev lets us test whether signal patterns ob-served on generated-test benchmarks persist in developer-written tests that are more diverse and realistic. We identify 100,118 developer-written test methods. For each test, we remove the oracle, preserve the developer-written prefix, and recover the MUT and corresponding Javadoc. This work uses the Single variant because the evaluated TOG systems assume one test prefix and a single oracle (assertion or exception) per instance. The Single variant contains 77,299 dataset instances across six oracle categories: ASSERTION_ONLY (73,023), MUST_THROW (2,899), 
+
+FAIL_ONLY (107), MUST_NOT_THROW (694), IF_THROWN_ASSERT (257), and MUST_THROW_WITH_PROPERTIES (319). These categories cap-ture assertion-only tests, expected-exception tests, no-exception tests, assertions over caught exceptions, expected exceptions with property checks, and fail-based oracle patterns. Our analysis focuses on MUST_THROW because it maps directly to the binary exception-vs.-assertion decision supported by all three systems. The remaining categories, together with the Multi, Mixed, and Custom variants, are released for future work on richer oracle-generation settings that the evaluated systems do not uniformly support. 
+
+## 2.2 TOG Systems Under Study 
+
+We evaluate three representative TOG systems: TOGA [5 ], a neural classifier-based approach; TOGLL [11 ], a generative LLM-based pipeline that uses the test prefix, focal method, and documentation; and Doc2OracLL [ 13 ], a documentation-aware generative LLM pipeline. We select these systems because they are peer-reviewed Java TOG pipelines, cover both classifier-based and generative paradigms, operate over the input components needed for our study, and allow us to compare signal reliance across different model families and sizes. ASE ’26, October 12–16, 2026, Munich, Germany Soneya Binta Hossain, Matthew B. Dwyer, and Tasfia Tasnim 
+
+We use the released fine-tuned models, preprocessing steps, decoding settings, and inference protocols of each system as is —without modifying their original configurations—to preserve com-parability with prior work [ 4, 9 ]. Because the model sizes, token budgets, preprocessing steps, and released evaluation subsets vary, the number of samples processed by each method can differ across method–dataset pairs. We therefore report the sample size and exception-labeled subset for each method–dataset pair, and inter-pret comparisons within those reported evaluation sets. We also repeat each configuration three times to check run-to-run stability. 
+
+## 2.3 Signal Analysis 
+
+We analyze two signal groups: Javadoc exceptional-behavior clauses (ECs), namely @throws and @exception clauses, and recurring non-EC cues in the test prefix, MUT, and Javadoc. EC removal is applied to all three systems, while attribution-guided cue analysis is applied to the generative systems in RQ3 and RQ4 under their respective evaluation settings. To estimate the role of structured exception documentation, we remove all ECs from the Javadoc, keep the rest of the input unchanged, rerun inference, and measure the change in exception-oracle accuracy. To identify other cues, we apply Gradient ×Input attribution [ 22 ]to correctly predicted exception-oracle instances. We rank tokens by absolute attribution score and substitute ranked tokens one at a time until the prediction changes from Exception to a non-exception prediction, or until the substitution budget is reached. For each flipped instance, we also record the first flip-causing token and classify it as a structural token, a predefined semantic token, or an uncategorized lexical token. This measures prediction sensi-tivity and cue concentration, and helps identify whether correct predictions depend on meaningful evidence or recurring input cues. 
+
+## 2.4 Evaluation Metrics 
+
+We report three metrics: exception-oracle accuracy, EC-removal effect, and substitution-flip sensitivity. 
+
+Exception-oracle accuracy measures the first-stage oracle-type prediction problem. It is computed only over instances whose ground truth requires an exception oracle. If 𝑇 𝑒 is the number of exception-labeled instances and 𝑇 𝑝𝑟𝑒𝑑 is the number predicted as requiring an exception oracle, then: 
+
+ExcAcc = 𝑇 𝑝𝑟𝑒𝑑 
+
+𝑇 𝑒 
+
+× 100 . (2) A prediction is counted as correct when an exception-labeled instance is classified as Exception , not Assertion . This metric does not measure semantic equivalence, compilability, oracle style, or exact exception-type matching. 
+
+EC-removal effect measures how much exception-oracle accu-racy changes after removing Javadoc @throws /@exception clauses while keeping the rest of the input unchanged. We report this change in percentage points. We use Δ𝜇 for the change over all exception-labeled samples, and Δ𝐸𝐶 for the change over the subset of exception-labeled samples that originally contained ECs. Neg-ative values indicate that removing ECs reduces exception-oracle accuracy. 
+
+Substitution-flip sensitivity measures how many high-attribution tokens must be substituted before a correct exception prediction changes. For each correctly predicted exception instance, we sub-stitute ranked tokens until the prediction changes from Exception 
+
+to a non-exception prediction, or until the substitution budget is reached. We report the percentage of predictions that flip, the mean and median flip step, and the normalized percentage of eligible to-kens substituted before a flip. Lower flip steps or lower normalized percentages indicate more concentrated reliance on a small number of cues. For each flipped instance, we also record the first flip-causing token and classify it as structural, predefined semantic, or uncat-egorized lexical. This cue-type distribution helps distinguish pre-dictions driven by meaningful exception-related evidence from predictions driven by recurring structural or lexical patterns. 
+
+## 3 Experimental Study 
+
+We empirically study exception-oracle prediction along four dimen-sions: baseline exception-oracle accuracy (RQ1), the contribution of Javadoc exceptional-behavior clauses (ECs), namely @throws 
+
+clauses (RQ2), non-EC input cues that drive predictions (RQ3), and the generalizability of these cues across evaluated model families, sizes, and datasets (RQ4). 
+
+## 3.1 RQ1: Baseline exception-oracle accuracy. 
+
+We first establish the baseline accuracy of exception-oracle pre-diction. This step is necessary before analyzing which contextual signals drive exception-oracle decisions: we must first determine how accurately the released systems make the binary exception-vs.-assertion decision. We evaluate three representative TOG systems, 
+
+TOGA , TOGLL , and Doc2OracLL , on SF110, OE25, and OE25 dev .
+
+3.1.1 Experimental Setup. We collected the released replication artifacts for TOGA [4, 5], TOGLL [9, 11 ], and Doc2OracLL [13 ], and executed each method using its original evaluation protocol. 
+
+TOGA is evaluated using its released CodeBERT-based pipeline. 
+
+TOGLL uses the CodeParrot-110M configuration over the test prefix, method under test (MUT), and documentation. Doc2OracLL uses the CodeLlama-7B configuration over the test prefix, MUT, and documentation. Each method–dataset combination is run three times, yielding 
+
+9 × 3 = 27 executions. These repeated runs test run-to-run stability under a fixed pipeline. Since the systems use fixed fine-tuned check-points, preprocessing, decoding settings, and inference protocols, we expect little or no variation under the same execution setup. Table 1 confirms this expectation: all repeated executions within each method–dataset combination produce identical accuracies, yielding zero variance and zero standard deviation. This deterministic behavior should be interpreted as stability under our execution setup, not as a guarantee across all environ-ments. Changes in hardware, available GPU memory, batching, precision settings, context truncation, or inference configuration can change the processed inputs or final predictions. Therefore, the zero variance in Table 1 indicates reproducibility under our fixed setup. The SF110 sample counts differ across rows because the seen/un-seen setting is method-relative rather than dataset-global. TOGLL Documentation vs. Code Patterns: What Drives LLM-Based Exception Oracle Generation? ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Table 1: Exception-oracle prediction accuracy across TOG systems and datasets. Accuracy is computed only over exception-labeled instances and measures the binary exception-vs.-assertion decision. Sample counts report the method-specific evaluable subset. Run Accuracy reports accuracy for each of three executions; Mean/Var./SD report the mean, variance, and standard deviation of those executions.                                                
+
+> Dataset TOG System Evaluation Setting Evaluable Samples Exception Samples Run Accuracy (%) Mean / Var. / SD (%)
+> SF110  TOGA
+> CodeBERT Unseen 159,073 39,606 11.81 / 11.81 / 11.81 11.81 / 0 / 0
+> TOGLL
+> CodeParrot-110M Seen 7,767 1,902 100 / 100 / 100 100 / 0 / 0
+> Doc2OracLL
+> CodeLlama-7B Seen 2,810 721 100 / 100 / 100 100 / 0 / 0
+> OE25  TOGA
+> CodeBERT Unseen 223,557 21,082 18.66 / 18.66 / 18.66 18.66 / 0 / 0
+> TOGLL
+> CodeParrot-110M Unseen 223,557 19,533 99.98 / 99.98 / 99.98 99.98 / 0 / 0
+> Doc2OracLL
+> CodeLlama-7B Unseen 223,557 19,240 99.7 / 99.7 / 99.7 99.7 / 0 / 0
+> OE25 dev  TOGA
+> CodeBERT Unseen 77,299 2,899 36.36 / 36.36 / 36.36 36.36 / 0 / 0
+> TOGLL
+> CodeParrot-110M Unseen 77,299 2,722 100 / 100 / 100 100 / 0 / 0
+> Doc2OracLL
+> CodeLlama-7B Unseen 77,299 2,673 91.55 / 91.55 / 91.55 91.55 / 0 / 0
+
+and Doc2OracLL use the SF110 subsets exposed by their released seen-setting artifacts after method-specific preprocessing and fil-tering. TOGA is evaluated over the larger SF110 candidate pool exposed by its released unseen-setting pipeline. Thus, the differ-ent SF110 totals reflect different evaluable subsets produced by the released systems, not conflicting definitions of SF110. 
+
+3.1.2 Results and Analysis. Table 1 shows that exception-oracle accuracy is highly method-dependent. On SF110, TOGA achieves only 11.81% accuracy in the unseen setting. In contrast, TOGLL and 
+
+Doc2OracLL are evaluated in the seen setting and both achieve 100% accuracy. Because these SF110 rows use different evaluation settings and evaluable subsets, this comparison should be read descriptively rather than as a controlled head-to-head comparison. On OE25, both generative systems remain near-perfect in the unseen setting: TOGLL achieves 99.98% accuracy and Doc2OracLL 
+
+achieves 99.7%, while TOGA reaches only 18.66%. On OE25 dev ,which contains developer-written tests, TOGLL again achieves 100%, Doc2OracLL drops to 91.55%, and TOGA improves to 36.36%. 
+
+TOGA performs better on OE25 dev , possibly because it was fine-tuned on developer-written tests and this benchmark is closer to its training distribution; however, it still lags far behind the generative systems. Doc2OracLL performs worse on OE25 dev , possibly be-cause it was fine-tuned on EvoSuite-generated tests, while OE25 dev 
+
+contains developer-written tests with more diverse and less pre-dictable structures. We ran each method–dataset pair three times, computed exception-oracle accuracy for each run, and then reported the mean, variance, and standard deviation across the three runs. All repeated runs pro-duced identical accuracies, indicating that the released fine-tuned TOG pipelines are deterministic under our fixed inference setup. Overall, the generative systems achieve very high exception-oracle accuracy across both generated and developer-written bench-marks, while the released TOGA pipeline performs much worse on the unseen evaluations. Model size alone does not explain the gap: CodeParrot-110M is comparable in scale to CodeBERT, yet TOGLL 
+
+performs much better. The difference is more likely due to architec-ture, training objective, input formulation, and generation-based prediction. These results motivate the next research questions: if generative models can make exception-oracle decisions with near-perfect accuracy, we must determine which contextual signals they rely on to do so .
+
+RQ1 Finding: Exception-oracle prediction accuracy is stable under our fixed inference setup and highly method-dependent. For each method–dataset pair, the three re-peated executions produce identical accuracies. TOGLL 
+
+achieves near-perfect accuracy across all datasets: 100% on SF110, 99.98% on OE25, and 100% on OE25 dev . Doc2OracLL 
+
+also performs strongly, with 100% on SF110, 99.70% on OE25, and 91.55% on OE25 dev . In contrast, TOGA achieves only 11.81%, 18.66%, and 36.36% on the same datasets. This gap motivates our subsequent analysis of the signals used to make exception-oracle predictions. ASE ’26, October 12–16, 2026, Munich, Germany Soneya Binta Hossain, Matthew B. Dwyer, and Tasfia Tasnim 
+
+Table 2: Effect of removing Javadoc exceptional-behavior clauses (ECs) on exception-oracle prediction. Run Acc. reports the accuracy of each inference after EC removal. Mean/Var./SD are computed over the three runs. Δ𝜇 is the percentage-point difference between the no-EC mean and the RQ1 baseline mean; Δ𝐸𝐶 is measured only on samples that originally contain ECs.                                                                  
+
+> Dataset TOG System Exception Samples Samples w/ EC Run Acc. w/o EC (%) Mean / Var. / SD (%) Baseline (%)
+> 𝚫 𝝁
+> (pp)
+> 𝚫 𝑬 𝑪
+> (pp) SF110  TOGA
+> CodeBERT 39,591 6,631 11.81 / 11.81 / 11.81 11.81 / 0 / 0 11.81 00
+> TOGLL
+> CodeParrot-110M 1,902 339 100 / 100 / 100 100 / 0 / 0 100 00
+> Doc2OracLL
+> CodeLlama-7B 721 338 100 / 100 / 100 100 / 0 / 0 100 00
+> OE25  TOGA
+> CodeBERT 21,082 6,361 18.65 / 18.65 / 18.65 18.65 / 0 / 0 18.66 -0.01 -0.03
+> TOGLL
+> CodeParrot-110M 19,533 5,781 99.91 / 99.91 / 99.91 99.91 / 0 / 0 100.0 -0.09 -0.29
+> Doc2OracLL
+> CodeLlama-7B 19,231 5,655 99.59 / 99.59 / 99.59 99.59 / 0 / 0 99.75 -0.16 -0.54
+> OE25 dev  TOGA
+> CodeBERT 2,899 1,702 36.36 / 36.36 / 36.36 36.36 / 0 / 0 36.36 00
+> TOGLL
+> CodeParrot-110M 2,722 1,556 100.0 / 100.0 / 100.0 100.0 / 0 / 0 100.0 0.00 0
+> Doc2OracLL
+> CodeLlama-7B 2,673 1,507 91.55 / 91.55 / 91.55 91.55 / 0 / 0 91.62 -0.07 -0.23
+
+## 3.2 RQ2: Contribution of Javadoc @throws 
+
+## clauses 
+
+RQ1 showed that exception-oracle accuracy varies widely across TOG methods and benchmarks, from 11.81% to 100%. Since Javadoc 
+
+@throws clauses explicitly describe exceptional behavior as shown in Listings 2 and 1, we investigate whether these clauses explain the strong exception-oracle accuracy observed in some settings. 
+
+3.2.1 Experimental Setup. For each exception-oracle sample, we construct a counterfactual input by removing all Javadoc exceptional-behavior clauses (ECs), i.e., @throws /@exception clauses, while keeping the test prefix, focal method, and remaining documentation unchanged. We then re-run inference and compare the resulting accuracy with the RQ1 baseline. Table 2 reports the number of exception samples, the number of samples that originally contained ECs, the accuracy after EC removal, the baseline accuracy, and two differences: Δ𝜇 over all exception samples and Δ𝐸𝐶 only over sam-ples that originally contained ECs. As in RQ1, each configuration is run three times, and all runs produce identical accuracies. 
+
+3.2.2 Results and Analysis. Table 2 shows that ECs appear in only a subset of exception samples. In SF110, EC coverage ranges from 16.75% for TOGA to 46.88% for Doc2OracLL . The higher percent-age for Doc2OracLL is expected because its evaluated subset is documentation-rich, making ECs more likely to appear. In OE25, EC coverage is approximately 30% for all three systems, ranging from 29.4% for Doc2OracLL to 30.17% for TOGA . In OE25 dev , EC coverage is higher, ranging from 56.38% for Doc2OracLL to 58.71% for TOGA .Removing ECs has little effect on accuracy. On SF110, all three systems remain unchanged. On OE25, TOGA , TOGLL , and Doc2OracLL 
+
+change by only -0.01, -0.09, and -0.16 percentage points, respectively. On OE25 dev , TOGA and TOGLL are unchanged, while Doc2OracLL 
+
+drops by only -0.07 percentage points. Across all configurations, the largest observed Δ𝐸𝐶 is only -0.54 percentage points for Doc2OracLL 
+
+on OE25. Overall, removing Javadoc exceptional-behavior clauses (ECs) produces no change or only very small drops in exception-oracle accuracy. This suggests that ECs are not the primary driver of model predictions. Instead, the models appear to rely more heavily on other signals in the test prefix, focal method, and remaining documentation. Similar to RQ1, each method–dataset pair was run three times; we also report the mean, variance, and standard deviation. 
+
+RQ2 Finding: 
+
+Javadoc exceptional-behavior clauses provide only a weak auxiliary signal for exception-oracle prediction. Removing ECs causes no change or only small drops in accuracy, with the largest observed Δ𝜇 being -0.16 percentage points and the largest observed Δ𝐸𝐶 being -0.54 percentage points for 
+
+Doc2OracLL on OE25. 
+
+## 3.3 RQ3: What Drives Exception-Oracle Predictions? 
+
+RQ2 shows that removing Javadoc @throws clauses has little ef-fect on exception-oracle prediction. However, that intervention only reveals what the model does not rely on. It does not identify what actually drives the prediction. RQ3 therefore asks which parts of the input are necessary for a correct exception prediction and whether those cues represent meaningful evidence of exceptional behavior or incidental artifacts of the input representation. This distinction matters because a model can achieve high benchmark ac-curacy while relying on fragile cues that may disappear under small changes in formatting, documentation style, or test construction. Documentation vs. Code Patterns: What Drives LLM-Based Exception Oracle Generation? ASE ’26, October 12–16, 2026, Munich, Germany 
+
+3.3.1 Experimental Setup. We answer RQ3 with the five-stage pipeline as shown in Figure 2. We focus on TOGLL on OE25 because RQ1 shows that this model achieves near-perfect exception-oracle accuracy, while RQ2 shows that this accuracy is not explained by Javadoc @throws clauses. From the 20,841 OE25 exception-oracle candidates, we exclude 985 samples that exceed the model’s position-embedding limit. Among the remaining evaluable samples, TOGLL predicts 19,840 as exception oracles. The substitution analysis be-low uses the 19,805 samples that remain baseline-correct under the proxy prediction check at both analyzed layers.        
+
+> Attribution →Token Ranking →Ablation →Validation →
+> Categorization
+
+Figure 2: RQ3 analysis pipeline. Attribution. For each sample, we compute Gradient × Input attribution in a single backward pass, scoring each token’s contribu-tion to the model’s confidence in the correct Exception prediction. We compute attribution at the input-embedding layer and at layer 6. The input layer captures surface-level token influence, while layer 6 provides an intermediate checkpoint closer to the model’s decision process. 
+
+Token ranking. At each layer, we rank tokens independently by the absolute value of their attribution score. We exclude the final five token positions from candidacy because autoregressive models tend to assign high influence to tokens near the generation point regardless of their content. This prevents the ablation from measuring a trivial boundary-position artifact. 
+
+Substitution ablation. We then test whether predictions are sensitive to the ranked tokens. Starting from the highest-ranked token, we substitute one additional ranked token at each step with a generic placeholder and check whether the prediction changes from Exception to a non-exception prediction. We record the first substitution step that flips the prediction. If no flip occurs after 30 substitutions, the sample is marked as never flipped. 
+
+Validation. The substitution loop uses a fast single-token pre-diction check rather than full decoding. To validate this proxy, we compare it against the same beam-search decoding used in RQ1 and RQ2. We validate every detected accuracy flip and a random sample of 200 never-flipped cases from each layer. 
+
+Categorization. Finally, for every flipped sample, we identify the token whose substitution first caused the prediction to flip. We classify this flip-causing token as structural, predefined seman-tic, or uncategorized lexical. Structural tokens include whitespace, punctuation, braces, and comment markers; predefined semantic to-kens include exception-related, invalid-value, documentation, and domain-descriptive language. This yields intervention-based evi-dence about what the model’s correct prediction truly depends on. 
+
+3.3.2 Results and Analysis. 
+
+Correct predictions are fragile to a small number of substitutions. 
+
+Table 3 shows that most correct exception predictions can be flipped by substituting only a few high-attribution tokens. At layer 6, 19,190 of 19,805 baseline-correct samples flip within the 30-token budget, corresponding to 96.89%. The median flip step is only 4 tokens, and the mean is 6.04. The input-embedding layer is less concentrated: 77.40% of samples flip within 30 substitutions, with a median of 11 and a mean of 12.37. This difference suggests that layer 6 provides a more concen-trated view of the model’s exception decision. By that point, the prediction is concentrated in a smaller set of influential tokens. The median distance-from-end of the flip token is also large at both layers, 145 tokens for layer 6 and 147 for the input-embedding layer. Thus, the flips are not caused merely by tokens adjacent to the gen-eration point; they arise from influential tokens distributed earlier in the input. 
+
+Table 3: Necessity curve: how many top-ranked tokens must be substituted before a correct prediction flips, per layer. “Never flipped” samples exhausted the full 30-token budget in every case (min=max=30).                   
+
+> Statistic Layer 6 Input embed.
+> Baseline-correct (of 19,840) 19,805 (99.82%) 19,805 (99.82%) Flipped within 30 steps 19,190 (96.89%) 15,330 (77.40%) Never flipped 615 (3.11%) 4,475 (22.60%) Flip step – mean 6.04 12.37 Flip step – median 411 Flip step – std. dev. 5.24 7.40 Flip step – min / max 1 / 30 1 / 30 Median distance-from-end of flip token 145 147
+
+The fast flip proxy closely matches full beam-search decoding. 
+
+Table 4 validates the substitution proxy against full beam-search decoding. For detected flips, agreement is nearly exact: 99.98% at layer 6 and 99.97% at the input-embedding layer. Agreement is lower for never-flipped cases, 91.50% at layer 6 and 96.00% at the input layer, but still high. This means the proxy is reliable for identifying tokens whose substitution causes an accuracy flip, while the never-flipped category is slightly conservative. This validation is important because the rest of RQ3 depends on the identity of the flip-causing token. The high agreement for flipped cases supports using the proxy to categorize the signals that the model actually depends on. 
+
+Table 4: Validating the single-token flip proxy against full beam-search decoding.                       
+
+> Layer Direction 𝑛 checked 𝑛 agree % agree
+> Layer 6 Proxy-flipped 19,190 19,187 99.98% Layer 6 Proxy-never-flipped 200 183 91.50% Input embed. Proxy-flipped 15,330 15,325 99.97% Input embed. Proxy-never-flipped 200 192 96.00%
+
+Flip-causing tokens are overwhelmingly structural. Table 5 shows that the tokens that cause prediction flips are dominated by struc-tural artifacts rather than semantic exception evidence. At layer 6, 97.81% of flip-causing tokens are structural. Newlines alone account for 82.42% of all layer-6 flips, followed by tabs at 6.11%, semicolons and commas at 4.95%, and other punctuation at 2.40%. The input-embedding layer shows the same pattern, although less extremely: ASE ’26, October 12–16, 2026, Munich, Germany Soneya Binta Hossain, Matthew B. Dwyer, and Tasfia Tasnim 
+
+structural tokens account for 83.26% of flips, with newlines and tabs together accounting for 62.18%. The predefined semantic categories are much smaller. At layer 6, C1–C8 together account for only 0.44% of flip-causing tokens. Even after including uncategorized semantic tokens, Table 6 shows that semantic tokens account for only 2.19% of layer-6 flips. At the input-embedding layer, semantic tokens are more visible, accounting for 16.74%, but structural tokens still dominate. This pattern indicates that the model’s correct exception predictions are far more sensitive to formatting and syntactic structure than to explicit exception-related or value-related tokens. 
+
+Table 5: What causes a prediction to flip. Each row is the share of all flip-causing tokens that fall into that category, at each layer, over the full population (input embedding: 𝑛 =15,330 flips; layer 6: 𝑛 =19,190 flips). Structural rows are shaded.                                       
+
+> Category Layer 6 Input embed.
+> Newline ( \n )82.42% 42.94% Tab ( \t )6.11% 19.24% Semicolon / comma 4.95% 2.43% Other punctuation 2.40% 6.21% Uncategorized semantic 1.74% 12.92% Brace ( { } )1.53% 10.62% Comment marker 0.33% 1.28% C2 – Invalid values 0.17% 0.72% C1 – Exception related 0.13% 1.87% C7 – Docstring keywords 0.07% 0.44% Parenthesis 0.06% 0.55% C4 – Extract-value kw. 0.05% 0.46% C5 – Placeholder vars. 0.02% 0.12% C8 – Domain-descriptive 0.01% 0.04% C6 – I/O stream 0.01% 0.12% C3 – Value-altering 0.01% 0.05%
+> All structural (shaded rows) 97.81% 83.26% All predefined semantic (C1–C8) 0.44% 4.34%
+
+Table 6: Aggregate structural vs. semantic share of flip-causing tokens. The semantic row includes both predefined semantic categories and uncategorized semantic tokens. 
+
+Layer 6 Input embed. 
+
+Structural 97.81% (18,769/19,190) 83.26% (12,764/15,330) Semantic 2.19% (421/19,190) 16.74% (2,566/15,330) 
+
+The raw flip-causing tokens confirm the structural pattern. Ta-ble 7 gives the same conclusion at the individual-token level. At layer 6, the top flip-causing token is the newline token, respon-sible for 81.86% of all flips. The next most common tokens are tab, close-parenthesis plus semicolon, space plus open brace, and empty-call plus semicolon. These are layout and syntax markers, not exception-specific words. At the input-embedding layer, new-lines and tabs again dominate, followed by space plus open brace and close-parenthesis plus semicolon. The first clearly semantic token in the input-layer top ten is Throwable , and it accounts for only 1.01% of flips. This result sharpens the interpretation of RQ2. Removing @throws 
+
+clauses has little effect not because the model necessarily learned robust exception semantics, but because the prediction can be sup-ported by other recurring cues that remain in the input. Many of these cues are structural features of the generated test prefix, focal method, and documentation layout. The model’s high accuracy therefore reflects sensitivity to recurring input patterns, not only to meaningful exception-triggering evidence. 
+
+Table 7: Top 10 individual flip-causing tokens (raw, uncatego-rized), per layer. marks a leading space (BPE word-boundary marker).                                                                      
+
+> Layer 6 %Input embedding %Rank Token Description Token Description
+> 1\n newline 81.86 \n newline 42.56 2\t tab 6.11 \t tab 19.24 3); close-paren + semi. 4.65 ␣{ space + open-brace 10.47 4␣{ space + open-brace 1.39 ); close-paren + semi. 2.17 5(); empty call + semi. 1.06 ␣void void keyword 1.87 6\n␣␣␣ newline + indent (3sp) 0.43 (); empty call + semi. 1.38 7;semicolon 0.29 (( double open-paren 1.06 8"); close-quote + semi. 0.28 ␣Throwable Throwable type 1.01 9)); double close + semi. 0.27 () empty call 0.87 10 ␣␣␣ indent (3 spaces) 0.22 public keyword 0.85
+
+Interpretation. The RQ3 results show that the strongest causal signals are not necessarily the most semantically meaningful sig-nals. Tokens such as Throwable , throw , or invalid-value terms may provide genuine evidence of exceptional behavior, but they rarely cause flips in the layer-6 analysis. Instead, the model’s predictions are most fragile to substitutions of formatting and syntactic bound-ary tokens. This does not mean that newline characters are them-selves semantic explanations for exceptions. Rather, it suggests that TOGLL has learned to exploit regularities in how exception-oracle examples are formatted and structured. This finding is important for evaluation. A model that uses struc-tural regularities can appear highly accurate on a benchmark while relying on cues that may not transfer to differently formatted tests, developer-written tests, or alternative prompting formats. RQ3 therefore complements RQ2: Javadoc @throws clauses are not the primary driver, but the replacement signal is often not robust se-mantic evidence either. 
+
+RQ3 Finding: TOGLL’s correct exception-oracle predic-tions are highly sensitive to a small number of high-attribution tokens, especially at layer 6, where 96.89% of predictions flip within 30 substitutions and the median flip step is only 4. The flip-causing tokens are overwhelm-ingly structural: 97.81% at layer 6 and 83.26% at the input-embedding layer. Newlines alone account for 82.42% of layer-6 flips. In contrast, predefined semantic categories account for only 0.44% of layer-6 flips. Thus, TOGLL’s exception-oracle accuracy is driven more by recurring structural cues in the input than by explicit exception-related semantics. 
+
+## 3.4 RQ4: Does Signal-Cue Reliance Generalize? 
+
+RQ3 shows that TOGLL on OE25 is highly sensitive to a small number of high-attribution tokens, and that the first flip-causing Documentation vs. Code Patterns: What Drives LLM-Based Exception Oracle Generation? ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Table 8: Flip concentration across models and datasets at the middle layer. Tested samples are baseline-correct under the substitution proxy.                                   
+
+> Model / Dataset Processed Tested Flipped (%) Median step Median eligible subst. (%) IQR eligible subst. (%)
+> TOGLL / OE25 19,840 19,805 96.89 42.44 1.39–4.03
+> TOGLL / OE25 dev 2,773 2,773 98.77 31.84 0.82–3.70
+> Doc2OracLL / OE25 2,500 1,534 92.89 198 90.13 87.19–92.89
+> Doc2OracLL / OE25 dev 2,592 2,233 90.64 199 92.13 88.64–95.37
+
+tokens are overwhelmingly structural rather than explicit exception-related semantics. RQ4 asks whether this reliance is specific to one model and one generated-test dataset, or whether it persists across model families and more realistic test data. We therefore repeat the RQ3 analysis for TOGLL and Doc2OracLL on both OE25 and OE25 dev . This compares a smaller CodeParrot-110M model with a larger CodeLlama-7B model, and generated tests with developer-written tests. 
+
+3.4.1 Experimental Setup. For each model–dataset pair, we apply the same attribution-guided pipeline from RQ3: Gradient × Input attribution, layer ranking, substitution-flip analysis, and catego-rization of the first flip-causing token. Each analysis uses samples that the corresponding model predicts correctly as exception ora-cles and that remain baseline-correct under the fast proxy used for substitution testing. 
+
+Layer selection. For TOGLL , we reuse layer 6 from RQ3. For 
+
+Doc2OracLL , we select layer 16 after a layer sweep over 250 cor-rectly predicted exception-oracle samples. Layer 16 is the midpoint of CodeLlama-7B’s 32 layers and is the layer where top-attributed tokens most often fall into known semantic categories. We also analyze the input-embedding layer as a reference point, but report the middle-layer results as the main comparison. 
+
+Substitution budget. TOGLL uses the same 30-token substitu-tion budget as in RQ3. This budget is too small for Doc2OracLL :with only 30 substitutions, Doc2OracLL flips almost no predic-tions. A diagnostic sweep showed that Doc2OracLL predictions often require substituting a large fraction of eligible tokens before flipping. We therefore use a 500-token budget for Doc2OracLL ,stopping earlier when no eligible tokens remain. 
+
+Comparison metrics. Raw substitution counts are not directly comparable because input lengths differ across models and datasets. We therefore report both the median flip step and the percentage of each sample’s eligible tokens that must be substituted before the prediction flips. Lower percentages indicate concentrated reliance on a small number of cues; higher percentages indicate a more distributed decision. We also report the type of the first flip-causing token. Structural tokens include whitespace, punctuation, braces, parentheses, statement delimiters, and comment markers. Non-structural tokens include predefined semantic categories, such as exception-related, invalid-value, documentation-related, domain-descriptive, declaration-syntax, and literal-value tokens, as well as uncategorized lexical tokens. As in RQ3, flips are measured with the fast substitution proxy and the proxy is additionally checked with beam-search confirmation. 
+
+3.4.2 Results and Analysis. 
+
+Cue reliance generalizes, but concentration differs sharply. Table 8 shows that most correct predictions can be flipped within the cor-responding substitution budget for all four model–dataset pairs. Thus, cue reliance is not limited to TOGLL or to generated tests: both models depend on input cues. The difference is how concentrated that reliance is. TOGLL re-mains highly concentrated across both datasets. On OE25, the me-dian flip step is only 4 tokens, corresponding to 2.44% of eligible tokens. On OE25 dev , the median flip step is even smaller, 3 tokens, corresponding to 1.84% of eligible tokens. Thus, the concentrated reliance observed in RQ3 is not an artifact of generated tests; it also appears on developer-written tests for the same model. 
+
+Doc2OracLL behaves differently. Its predictions also flip in most cases, 92.89% on OE25 and 90.64% on OE25 dev , but the median flip step is about 200 tokens in both datasets. Normalized by input length, roughly 90% of eligible tokens must be substituted before the prediction changes. Therefore, Doc2OracLL is not insensitive to input cues, but its decision is much more distributed than TOGLL ’s. 
+
+Table 9: Aggregate type of first flip-causing token at the mid-dle layer. Non-structural includes predefined semantic and uncategorized lexical tokens.               
+
+> Model / Dataset Structural Non-structural
+> TOGLL / OE25 97.81% 2.19%
+> TOGLL / OE25 dev 93.61% 6.39%
+> Doc2OracLL / OE25 23.44% 76.56%
+> Doc2OracLL / OE25 dev 23.37% 76.63%
+
+The type of cue reliance changes across models. Table 9 compares the aggregate type of the first flip-causing token. TOGLL remains overwhelmingly structural on both datasets: 97.81% of flip-causing tokens are structural on OE25, and 93.61% are structural on OE25 dev .The developer-written benchmark reduces the structural share slightly, but structural tokens still dominate. Thus, making the test data more realistic does not remove TOGLL ’s structural shortcut pattern. 
+
+Doc2OracLL shows a different profile. Only 23.44% of its OE25 flip-causing tokens and 23.37% of its OE25 dev flip-causing tokens are structural. Most flip-causing tokens are non-structural lexical or se-mantic tokens. This does not mean that Doc2OracLL is necessarily grounded in exception semantics: many non-structural tokens are uncategorized lexical cues rather than clearly exception-triggering evidence. Still, the failure mode differs from TOGLL : the larger model does not rely primarily on formatting tokens. 
+
+Single-token dominance is specific to TOGLL. Table 10 explains why the two models should not be interpreted as relying on cues ASE ’26, October 12–16, 2026, Munich, Germany Soneya Binta Hossain, Matthew B. Dwyer, and Tasfia Tasnim 
+
+Table 10: Concentration of raw flip-causing tokens at the middle layer.                                      
+
+> Model / Dataset Unique flip tokens Top-1 share Top-3 share Top token Top-3 tokens
+> TOGLL / OE25 272 81.86% 92.62% \n \n ,\t ,);
+> TOGLL / OE25 dev 56 81.38% 91.64% \n \n ,\t ,new
+> Doc2OracLL / OE25 422 4.00% 11.37% ((,<0x0A> ,.
+> Doc2OracLL / OE25 dev 610 4.30% 10.97% <0x0A> <0x0A> ,.,(
+
+Table 11: Spearman rank correlation ( 𝜌 ) of cue distributions across generalization axes.                                     
+
+> Axis Comparison 𝝆
+> Cross-dataset, category TOGLL : OE25 vs. OE25 dev 0.720 Cross-dataset, category Doc2OracLL : OE25 vs. OE25 dev 0.734 Cross-dataset, raw token TOGLL : OE25 vs. OE25 dev -0.054, n.s. ( 𝑛 =299 )Cross-dataset, raw token Doc2OracLL : OE25 vs. OE25 dev -0.285, 𝑝 <0.0001 (𝑛 =868 )Cross-model, category OE25: TOGLL vs. Doc2OracLL 0.846 Cross-model, category OE25 dev :TOGLL vs. Doc2OracLL 0.825 Cross-layer, category TOGLL /OE25: input embedding vs. middle layer 0.832 Cross-layer, category TOGLL /OE25 dev : input embedding vs. middle layer 0.867 Cross-layer, category Doc2OracLL /OE25: input embedding vs. middle layer 0.993 Cross-layer, category Doc2OracLL /OE25 dev : input embedding vs. middle layer 1.000
+
+in the same way. For TOGLL , one raw token dominates the flips in both datasets. The top flip-causing token, newline, accounts for more than 81% of all flips on both OE25 and OE25 dev ; the top three tokens account for more than 91%. This is the same structural shortcut pattern found in RQ3. For Doc2OracLL , no comparable single-token shortcut appears. The top flip-causing token accounts for only 4.00% of flips on OE25 and 4.30% on OE25 dev ; the top three tokens account for only about 11%. The number of unique flip-causing tokens is also much larger: 422 on OE25 and 610 on OE25 dev , compared with 272 and 56 for 
+
+TOGLL . Thus, moving to the larger documentation-aware model reduces the extreme single-token structural dependence, but it does not remove reliance on recurring input cues. 
+
+Category-level patterns are stable, but raw tokens do not transfer. 
+
+Table 11 reports Spearman rank correlations over both category distributions and raw-token distributions. At the category level, cross-dataset correlations are moderate for both models: 𝜌 = 0.720 
+
+for TOGLL and 𝜌 = 0.734 for Doc2OracLL . This suggests that each model preserves a similar ordering of cue families across generated and developer-written tests. However, the raw-token correlations tell a different story. Across datasets, raw-token correlations are near zero or negative: 𝜌 =
+
+−0.054 for TOGLL and 𝜌 = −0.285 for Doc2OracLL . Thus, what generalizes is not the exact identity of the raw tokens, but the model-specific mode of reliance: TOGLL remains concentrated and structural, while Doc2OracLL remains distributed and lexical. The cross-model category correlations are also high, 𝜌 = 0.846 on OE25 and 𝜌 = 0.825 on OE25 dev , but these correlations should not be read as evidence that the two models behave the same way. They reflect similar coarse category rankings, not similar magnitudes. Tables 8–10 show the substantive difference: TOGLL is dominated by a few structural tokens, while Doc2OracLL spreads reliance across hundreds of lexical cues. 
+
+Interpretation. RQ4 refines the RQ3 conclusion. The broad phe-nomenon generalizes: correct exception-oracle predictions are sen-sitive to recurring input cues across both generated and developer-written tests, and across both TOGLL and Doc2OracLL . However, the form of that reliance changes across models. TOGLL relies on a highly concentrated structural shortcut, with newlines alone caus-ing most flips in both datasets. Doc2OracLL is harder to destabilize and does not rely on one dominant structural token; instead, its decision is distributed across many lexical cues. This has two implications. First, dataset realism alone is not suf-ficient to eliminate shortcut reliance: TOGLL shows the same struc-tural dominance on OE25 dev . Second, moving to a larger documentation-aware model changes the failure mode but does not eliminate cue re-liance. Doc2OracLL avoids the extreme newline-dominated short-cut observed in TOGLL , but its predictions still depend on recurring lexical patterns rather than demonstrably grounded exception se-mantics. 
+
+RQ4 Finding: Cue reliance generalizes, but its form is model-dependent. Across OE25 and OE25 dev , TOGLL flips after only 3–4 substitutions, with structural tokens causing 97.81% and 93.61% of flips. Doc2OracLL requires substitut-ing about 90% of eligible tokens, with reliance distributed across many non-structural lexical cues. Thus, developer-written tests do not eliminate shortcut reliance, and the larger model shifts the failure mode from concentrated structural dependence to distributed lexical dependence. 
+
+## 3.5 Threats to Validity 
+
+Internal validity. Our results depend on the released artifacts for 
+
+TOGA , TOGLL , and Doc2OracLL , and on our scripts for OE25 dev 
+
+construction, EC removal, attribution, substitution, cue categoriza-tion, and evaluation. Bugs in these scripts could affect reported accuracies, flip rates, or cue distributions. We mitigate this risk Documentation vs. Code Patterns: What Drives LLM-Based Exception Oracle Generation? ASE ’26, October 12–16, 2026, Munich, Germany 
+
+by cross-checking outputs against released artifacts and prior re-sults, repeating each method–dataset configuration under a fixed inference setup, and releasing our scripts and derived data. Our substitution analysis uses a fast flip proxy; we validate detected flips against beam-search decoding. 
+
+External validity. We study Java TOG systems on SF110, OE25, and OE25 dev . These datasets include generated and developer-written tests, but may not represent other languages, frameworks, docu-mentation practices, or projects with more complete exception specifications. We also evaluate released fine-tuned TOG systems, not proprietary API models or larger instruction-tuned models, which may rely on different signals. 
+
+Construct validity. Exception-oracle accuracy measures only the first-stage Exception -vs.-Assertion decision; it does not mea-sure semantic equivalence, compilability, oracle style, exact excep-tion type, or bug-finding usefulness. Similarly, attribution-guided substitution measures prediction sensitivity, not semantic program behavior. Perturbed inputs are not intended to remain executable, and the first flip-causing token is a diagnostic cue rather than a complete explanation. 
+
+Conclusion validity. The EC-removal effects are small, so we fo-cus on their consistency across methods and datasets rather than on isolated changes. The substitution-flip results are larger, but depend on the attribution method, analyzed layer, substitution budget, and cue taxonomy. Further studies with other models, prompts, format-ting transformations, and attribution methods would strengthen these conclusions. 
+
+## 4 Related Work 
+
+Prior work has studied test-oracle generation mainly by proposing generators or measuring end-to-end performance. Blasi et al. [ 2]derive exceptional-behavior oracles from Javadoc, while neural and LLM-based systems such as TOGA , ChatAssert, TOGLL , and 
+
+Doc2OracLL [ 5 , 7, 11 , 13 ] generate assertion and exception oracles using code, tests, and documentation. Recent studies also examine the usefulness of Javadoc or code context for TOG [ 13 , 17 ]. However, these works do not isolate what actually drives exception-oracle prediction: whether models rely on explicit exceptional-behavior clauses such as @throws , or on other recurring cues in the test prefix, code, and documentation. To our knowledge, this is the first large-scale intervention-based study of the signals behind exception-oracle prediction in neural and LLM-based TOG, com-bining @throws removal, attribution and ablation, and a developer-written benchmark to explain exception-oracle performance rather than only measure it. 
+
+## 5 Practical Implications 
+
+Our findings suggest that future TOG systems should be judged not only by whether they predict the right oracle type, but also by whether they use the right evidence . High exception-oracle accu-racy is insufficient when models remain accurate after removing 
+
+@throws /@exception clauses, the documentation signal that states when and why an exception should be thrown. Future LLM-based TOG methods should not pass large contexts uncritically. They should control which evidence is provided, per-turb non-semantic cues such as formatting and recurring lexical tokens, and verify whether the prediction follows from meaningful exception evidence rather than shortcut cues. Dataset realism and model scale alone are not enough: developer-written tests do not remove TOGLL ’s structural shortcut, and Doc2OracLL changes the failure mode from single-token structural dominance to distributed lexical reliance. Model design should be evidence-driven. A TOG system should first identify the exception-triggering precondition, relate it to the MUT signature, documentation, and feasible throw path, and then generate the oracle. Documentation should act as the specification signal; code and test-prefix cues should support that signal, not replace it. Training and evaluation should include diverse developer-written and generated tests, hard negatives, and counterfactual cases where frequent cues such as formatting patterns, exception names, or 
+
+null do not by themselves imply exceptions. Evaluation should also report cue-sensitivity diagnostics, such as flip rate, median flip step, eligible-token percentage, and first flip-causing token type. The goal is not only correct prediction, but prediction for the right reason. 
+
+## 6 Conclusion 
+
+We presented a large-scale intervention-based study of what drives exception-oracle prediction in neural and LLM-based TOG. Across 
+
+TOGA , TOGLL , and Doc2OracLL , and across SF110, OE25, and OE25 dev , removing Javadoc exceptional-behavior clauses has lit-tle effect on exception-oracle accuracy. Thus, structured excep-tion documentation is not the primary signal behind the strong exception-oracle performance reported by current TOG systems. Our attribution-guided substitution analysis shows what re-places that documentation signal. TOGLL correct predictions often flip after only a few substitutions and are dominated by structural cues such as newlines and formatting tokens, even on developer-written tests. Doc2OracLL is harder to flip and avoids a single dominant structural shortcut, but its predictions still depend on distributed lexical cues rather than demonstrably grounded ex-ception semantics. These findings challenge the interpretation of high exception-oracle accuracy as robust exception understanding. Future TOG systems should therefore be designed and evaluated for evidence grounding: predictions should follow from exception-triggering conditions, method behavior, and feasible throw paths, not from incidental formatting or recurring lexical patterns. 
+
+## 7 Data Availability 
+
+To support transparency and reproducibility, we release the artifact at https://doi.org/10.6084/m9.figshare.30110098 [10]. 
+
+## References          
+
+> [1] Earl T. Barr, Mark Harman, Phil McMinn, Muzammil Shahbaz, and Shin Yoo. 2015. The Oracle Problem in Software Testing: A Survey. IEEE Transactions on Software Engineering 41, 5 (2015), 507–525. doi:10.1109/TSE.2014.2372785 [2] Arianna Blasi, Alberto Goffi, Konstantin Kuznetsov, Alessandra Gorla, Michael D. Ernst, Mauro Pezzè, and Sergio Delgado Castellanos. 2018. Translating Code Comments to Procedure Specifications. In Proceedings of the 27th ACM SIGSOFT International Symposium on Software Testing and Analysis (Amsterdam, Nether-lands) (ISSTA 2018) . Association for Computing Machinery, New York, NY, USA, 242–253. doi:10.1145/3213846.3213872 [3] Bruno Cabral and Paulo Marques. 2007. Exception handling: A field study in java and. net. In European Conference on Object-Oriented Programming . Springer,
+
+ASE ’26, October 12–16, 2026, Munich, Germany Soneya Binta Hossain, Matthew B. Dwyer, and Tasfia Tasnim 
+
+151–175. [4] Elizabeth Dinella, Gabriel Ryan, Shuvendu K. Lahiri, and Todd Mytkowicz. 2022. 
+
+Replication Artifact for TOGA: A Neural Method for Test Oracle Generation . doi:10. 5281/zenodo.6210589 [5] Elizabeth Dinella, Gabriel Ryan, Todd Mytkowicz, and Shuvendu K. Lahiri. 2022. TOGA: a neural method for test oracle generation. In Proceedings of the 44th International Conference on Software Engineering (Pittsburgh, Pennsylvania) (ICSE ’22) . Association for Computing Machinery, New York, NY, USA, 2130–2141. doi:10.1145/3510003.3510141 [6] Chen Fu, Barbara G Ryder, Ana Milanova, and David Wonnacott. 2004. Testing of java web services for robustness. In Proceedings of the 2004 ACM SIGSOFT international symposium on Software testing and analysis . 23–34. [7] Ishrak Hayet, Adam Scott, and Marcelo d’Amorim. 2024. Chatassert: Llm-based test oracle generation with external tools assistance. IEEE Transactions on Software Engineering 51, 1 (2024), 305–319. [8] Soneya Binta Hossain. 2023. Artifact: Neural-Based Test Oracle Generation: A Large-scale Evaluation and Lessons Learned. (2 2023). doi:10.6084/m9.figshare. 21973091.v4 [9] Soneya Binta Hossain. 2025. Artifact: TOGLL: Correct and Strong Test Oracle-Generation with LLMs. (1 2025). doi:10.6084/m9.figshare.28282721.v3 [10] Soneya Binta Hossain. 2026. Artifact: ASE-2026 Dataset. (1 2026). doi:10.6084/ m9.figshare.30110098.v1 [11] Soneya Binta Hossain and Matthew B. Dwyer. 2025. TOGLL: Correct and Strong Test Oracle Generation with LLMS. In 2025 IEEE/ACM 47th International Con-ference on Software Engineering (ICSE) . 1475–1487. doi:10.1109/ICSE55347.2025. 00098 [12] Soneya Binta Hossain, Antonio Filieri, Matthew B. Dwyer, Sebastian Elbaum, and Willem Visser. 2023. Neural-Based Test Oracle Generation: A Large-Scale Evalua-tion and Lessons Learned. In Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering 
+
+(San Francisco, CA, USA) (ESEC/FSE 2023) . Association for Computing Machinery, New York, NY, USA, 120–132. doi:10.1145/3611643.3616265 [13] Soneya Binta Hossain, Raygan Taylor, and Matthew Dwyer. 2025. Doc2OracLL: Investigating the Impact of Documentation on LLM-Based Test Oracle Generation. 
+
+Proc. ACM Softw. Eng. 2, FSE, Article FSE084 (June 2025), 22 pages. doi:10.1145/ 3729354 [14] JUnit Team. 2021. JUnit 4 API: org.junit.Test. https://junit.org/junit4/javadoc/ latest/org/junit/Test.html. Accessed: 2026-07-31. [15] JUnit Team. 2025. JUnit 5 User Guide: Assertions.assertThrows. https://junit.org/ junit5/docs/current/user-guide/#writing-tests-assertions. Accessed: 2026-07-31. [16] Michael Konstantinou, Renzo Degiovanni, and Mike Papadakis. 2024. Do llms generate test oracles that capture the actual or the expected program behaviour? 
+
+arXiv preprint arXiv:2410.21136 (2024). [17] Davide Molinelli, Luca Di Grazia, Alberto Martin-Lopez, Michael D Ernst, and Mauro Pezzè. 2025. Do llms generate useful test oracles? an empirical study with an unbiased dataset. In 2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE, 278–290. [18] Tam The Nguyen, Phong Minh Vu, and Tung Thanh Nguyen. 2019. An empirical study of exception handling bugs and fixes. In Proceedings of the 2019 ACM Southeast Conference . 257–260. [19] NUnit. 2024. NUnit Documentation: Assert.Throws Method. https://nunit.org/. Accessed: 2025-09-11. [20] Python Software Foundation. 2024. unittest — Unit testing framework. https: //docs.python.org/3/library/unittest.html. Accessed: 2025-09-11. [21] Martin P Robillard and Gail C Murphy. 2003. Static analysis to support the evolution of exception structure in object-oriented systems. ACM Transactions on Software Engineering and Methodology (TOSEM) 12, 2 (2003), 191–221. [22] Avanti Shrikumar, Peyton Greenside, and Anshul Kundaje. 2017. Learning im-portant features through propagating activation differences. In International conference on machine learning . PMlR, 3145–3153. [23] Shin Hwei Tan, Darko Marinov, Lin Tan, and Gary T Leavens. 2012. @ tcomment: Testing javadoc comments to detect comment-code inconsistencies. In 2012 IEEE Fifth International Conference on Software Testing, Verification and Validation .IEEE, 260–269. [24] Cody Watson, Michele Tufano, Kevin Moran, Gabriele Bavota, and Denys Poshy-vanyk. 2020. On learning meaningful assert statements for unit test cases. In 
+
+Proceedings of the ACM/IEEE 42nd International Conference on Software Engineer-ing . 1398–1409. doi:10.1145/3377811.3380429 
+
+Received 2026-03-26; accepted 2026-06-18
