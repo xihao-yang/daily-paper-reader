@@ -1,0 +1,230 @@
+Title: Route-Align-Verify for Functional Correctness in Code Generation
+
+URL Source: https://arxiv.org/pdf/2608.03341v1
+
+Published Time: Wed, 05 Aug 2026 00:46:00 GMT
+
+Number of Pages: 7
+
+Markdown Content:
+# Route-Align-Verify for Functional Correctness in Code Generation 
+
+Erxue Zhou 1 Jingxiang Meng 2 Aofan Liu 3
+
+Abstract — Large language models (LLMs) have substantially improved code generation, yet achieving strong functional correctness remains difficult, especially on heterogeneous pro-gramming tasks where a single prompting strategy and a single direct output are often insufficient. In this paper, we present RAV, a lightweight and modular framework that improves code generation under a fixed backbone model through three coordi-nated stages: Route, which applies task-aware prompt routing before generation; Align, which reduces the mismatch between fine-tuning prompts and inference-time prompts via aligned LoRA adaptation; and Verify, which selects final outputs by executing multiple candidates against visible public tests. We evaluate RAV on the MBPP benchmark under both 
+
+sanitized and full settings. The full RAV pipeline achieves the best results among all evaluated configurations, reaching 0.8911 on MBPP Sanitized and 0.8520 on MBPP Full. Com-pared with the base model, this corresponds to improvements of 6.35 and 9.92 percentage points, respectively. A component-wise ablation further shows that task-aware routing and aligned adaptation become substantially more effective when coupled with execution-based verification. Additional robustness and contamination analyses support the reliability of the observed gains. Overall, the results suggest that meaningful improve-ments in code generation functional correctness can be obtained without modifying the backbone architecture itself, by jointly optimizing how tasks are prompted, how the model is adapted, and how final outputs are selected. 
+
+I. I NTRODUCTION 
+
+Large language models (LLMs) have become increas-ingly capable of synthesizing executable code from natural-language problem descriptions, docstrings, and partial im-plementations [1], [2], [3], [4]. This progress has been accompanied by execution-based benchmarks such as Hu-manEval and MBPP, which evaluate generated programs by whether they actually pass tests rather than merely appearing plausible at the surface level [1], [2]. Broader benchmarks such as APPS, stronger evaluation suites such as EvalPlus, and more recent contamination-aware benchmarks such as LiveCodeBench further highlight that functional correctness, rather than textual plausibility alone, is a central criterion for reliable code generation [5], [6], [7]. Despite rapid progress, achieving strong functional correctness remains difficult, especially on heterogeneous tasks that differ substantially in style, structure, and failure modes. A central challenge is that code-generation performance depends on more than the backbone model alone. First, different tasks often respond differently to prompting style: a              
+
+> 1Erxue Zhou is with the Software Engineering Institute, East China Normal University, Shanghai 200062, China
+
+51275902066@stu.ecnu.edu.cn 
+
+> 2University of Chicago.
+> 3Peking University.
+
+single generic prompt may be suboptimal for string manip-ulation, arithmetic reasoning, or edge-case-heavy problems [2], [8], [9]. Second, the effectiveness of adaptation is influenced by how training instructions are constructed and matched to downstream use, so a mismatch between fine-tuning prompts and inference-time prompts can weaken the benefit of specialization [8], [10], [9]. Third, even when a model is capable of producing a correct solution, that solution may not appear in the first sample, making one-shot decoding an inefficient way to exploit the model’s latent capability [1], [11], [12]. These observations suggest that improving functional correctness may require coordinated optimization across prompting , adaptation , and selection ,rather than relying on only one of them. Prior work has explored these directions largely in isola-tion. Code-specialized pretraining and instruction tuning im-prove code generation by eliciting behaviors better matched to downstream tasks, as shown by systems such as Wizard-Coder, Magicoder, StarCoder, and Code Llama [8], [10], [3], [4]. Parameter-efficient adaptation methods such as LoRA make such specialization practical without updating all back-bone parameters [13]. At test time, execution-aware methods such as CodeT and Self-Debug show that generating multiple candidates and leveraging execution signals can substantially improve final correctness [12], [14]; related large-scale sam-pling and filtering strategies have also proved effective in systems such as AlphaCode [11]. However, these directions are typically studied as separate techniques rather than as components of a coordinated pipeline. In particular, the interaction among task-aware prompting , training–inference prompt alignment , and lightweight execution-based selection 
+
+remains underexplored. In this paper, we propose RAV , short for Route-Align-Verify , a simple modular framework for improving code generation under a fixed backbone model. The framework consists of three stages. Route applies lightweight task-aware prompt routing before generation. Align fine-tunes the model using prompts rewritten to better match the routed prompt style used at test time. Verify samples multiple candidate programs and selects a final output using execution-based verification on visible public tests. Rather than modifying the backbone architecture itself, RAV aims to improve functional correctness by coordinating how tasks are asked, how the model is adapted, and how outputs are selected. We evaluate RAV on MBPP under both sanitized 
+
+and full settings. The full RAV pipeline achieves the best performance among the evaluated configurations, improving pass@1 from 0.8276 to 0.8911 on MBPP Sanitized and from 0.7528 to 0.8520 on MBPP Full. A component-wise ablation arXiv:2608.03341v1 [cs.SE] 4 Aug 2026 further shows that routing and aligned adaptation alone provide only limited direct gains, but become substantially more effective when coupled with verification. This empirical pattern suggests that Route and Align primarily improve the quality of the candidate pool, while Verify converts that advantage into stronger final functional correctness. The main contributions of this paper are as follows:  
+
+> •
+
+We propose RAV , a modular Route-Align-Verify frame-work that improves code generation functional correct-ness without modifying the backbone architecture.  
+
+> •
+
+We introduce a practical training–inference prompt alignment strategy based on aligned LoRA adaptation, which reduces mismatch between fine-tuning prompts and routed prompts at test time.  
+
+> •
+
+We present a component-wise empirical study on MBPP showing that task-aware routing, aligned adapta-tion, and execution-based verification are most effective when used jointly.  
+
+> •
+
+We provide robustness and contamination analyses 
+
+that support the reliability of the observed gains. II. R ELATED WORK 
+
+A. Code Generation and Functional Correctness Evaluation 
+
+Large language models have shown strong capability in program synthesis and code completion, with early large-scale studies demonstrating that model scale and code-specific pretraining can substantially improve executable code generation [1], [2]. Benchmark design has played a cen-tral role in this progress. HumanEval introduced execution-based evaluation for docstring-to-function synthesis [1], while MBPP focuses on short Python programming tasks and has become a standard benchmark for measuring functional correctness under test execution [2]. Beyond these relatively compact benchmarks, APPS broadens the evaluation space to more diverse and challenging natural-language-to-code problems, further highlighting the importance of execution-based assessment for code generation systems [5]. Recent work has also shown that reported performance can be sensitive to the adequacy of benchmark test suites. EvalPlus revisits widely used code-generation benchmarks by augmenting them with substantially stronger tests and shows that limited test coverage can overestimate model capability [6]. Motivated by this evaluation perspective, our work is positioned squarely in the functional-correctness setting. Rather than introducing a new benchmark or a new backbone architecture, we study how to improve pass@1 on MBPP through a modular generation pipeline. 
+
+B. Instruction Tuning and Parameter-Efficient Adaptation for Code LLMs 
+
+A major direction in code LLM research is to im-prove downstream performance through instruction tuning, synthetic data construction, and code-specialized training. WizardCoder adapts Evol-Instruct to the code domain and shows that instruction tuning can substantially improve code-generation performance across several benchmarks [8]. Magicoder further demonstrates the effectiveness of synthetic code instruction data built from open-source snippets, nar-rowing the gap between open-source and stronger proprietary code models [10]. More recently, DeepSeek-Coder shows that strong open code models can also benefit from large-scale code pretraining together with instruction-oriented vari-ants for downstream use [9]. Taken together, these works suggest that code generation quality depends not only on model scale, but also on how training instructions and code data are constructed. At the same time, parameter-efficient adaptation methods have become a practical way to specialize large models with-out updating all backbone parameters. LoRA is a particularly influential approach, freezing the pretrained model weights and learning low-rank updates for downstream adaptation [13]. QLoRA further improves adaptation efficiency by com-bining quantization with LoRA, making high-quality fine-tuning feasible under tighter hardware constraints [15]. In our setting, we adopt LoRA not merely as a memory-saving fine-tuning tool, but as a mechanism for prompt alignment :the adapter is trained on prompts rewritten to better match the routed prompt style later used during inference. Compared with prior instruction-tuning work, our contri-bution is narrower but more targeted. We do not propose a new synthetic data pipeline, a new backbone model, or a new adaptation method. Instead, we emphasize the practical importance of reducing the mismatch between fine-tuning prompts and test-time prompts inside a larger code-generation pipeline. 
+
+C. Prompting, Verification, and Test-Time Improvement 
+
+Beyond model training, many recent works improve code generation at inference time. Prompt design has been shown to meaningfully affect code generation quality, especially on diverse tasks where a single prompt style may be subop-timal [2], [8], [9]. In parallel, multi-sample decoding and behavioral filtering exploit the fact that correct solutions may exist among multiple candidates even when the first sample is wrong. Codex reports substantial gains from re-peated sampling [1], and AlphaCode further demonstrates the effectiveness of large-scale sampling followed by filtering based on program behavior [11]. Execution-aware methods make this idea more explicit. CodeT reranks model-generated programs using generated tests, showing that test-based selection can significantly improve final correctness [12]. Self-Debug teaches models to debug or revise generated programs using execution feed-back, achieving substantial gains on code-generation tasks including MBPP [14]. More generally, iterative refinement frameworks such as Self-Refine demonstrate that large mod-els can improve outputs through feedback-driven refinement at test time [16]. Our Verify stage is most closely related to execution-based selection methods such as CodeT, but it is intentionally lightweight: instead of generating new tests or running a full iterative debugging loop, we use the visible public tests already available in MBPP to rank candidates. More impor-tantly, our work studies verification together with task-aware routing and prompt-aligned adaptation. In this sense, RAV differs from prior methods that focus primarily on either prompting, training, or test-time refinement in isolation. Our goal is to show that these stages can interact constructively within a single modular framework. III. M ETHOD 
+
+A. Problem Setting 
+
+We study code generation under a fixed backbone lan-guage model and aim to improve functional correctness on benchmark tasks. Let a programming task be denoted by x,where x may include a natural-language problem description, a function signature, a docstring, and visible public tests. Given x, the goal is to generate a Python program c that passes the benchmark evaluation. In this work, we focus on the MBPP benchmark, a collec-tion of short Python programming tasks evaluated under two commonly used settings: sanitized and full . Our main metric is the success rate of the final returned program under benchmark execution. When exactly one final completion is submitted per task, we refer to this quantity as pass@1 by convention. We retain this terminology for consistency with prior code-generation evaluation practice, even though some settings first generate multiple candidates and then select one final program. We propose RAV , short for Route-Align-Verify , a modu-lar framework that improves code generation at three stages: 1) Route : choose a task-aware prompt template before generation; 2) Align : fine-tune the model using prompts that better match the inference-time routed prompts; 3) Verify : sample multiple candidate programs and select one using lightweight execution-based verification. The central hypothesis is that functional correctness can be improved without changing the backbone architecture if the model is (i) prompted in a task-aware way, (ii) adapted to the same prompt style used at test time, and (iii) allowed to select from multiple candidates using inexpensive execution signals. 
+
+B. Framework Overview 
+
+The overall architecture of RAV is shown in Fig. 1. Given an input task x, the framework proceeds as follows: 1) A router Rtest (·) maps the raw task to a routed prompt 
+
+p = Rtest (x). (1) 2) A generator G, parameterized by a backbone model M
+
+and an optional aligned LoRA adapter A, samples one or more candidate programs: 
+
+C (x) = {c1, c2, . . . , cn}, ci ∼ G(M; A, p). (2) 3) If verification is disabled, the system returns the first sampled candidate: ˆc = c1. (3) 4) If verification is enabled, a verifier V scores each candidate and selects the best one: ˆc = arg max  
+
+> ci∈C(x)
+
+V (ci, x). (4) This definition is important for interpreting the exper-iments. In particular, settings with Verify = off and 
+
+n > 1 should be understood as multi-sample generation without execution-based reranking under a first-sample return policy , rather than as best-of-n decoding. Under this implementation, different subsets of Route, Align, and Verify can be combined to form a component-wise ablation of the overall framework. 
+
+1) Module Summary: C. Backbone Model and Aligned LoRA 
+
+All experiments use the same backbone model, Qwen2.5-Coder-7B-Instruct . To adapt the model without modifying the full backbone parameters, we adopt LoRA for parameter-efficient supervised fine-tuning. The backbone weights re-main frozen while only low-rank update matrices are learned. In the main setting of this paper, we use an aligned LoRA 
+
+adapter. The core idea is to reduce the mismatch between the prompts used during fine-tuning and the prompts used at inference time. Rather than training on generic instruction prompts and testing on routed prompts, we rewrite the training inputs into the same routed style expected during inference. This makes the adapter better matched to the actual prompting regime used by the full system. Let the backbone be M and the aligned LoRA adapter be 
+
+A. We denote the routed generator by 
+
+Gbase (p) = G(M; ∅, p), Galign (p) = G(M; A, p), (5) where ∅ means no adapter is attached. 
+
+1) Aligned LoRA Training Configuration: D. Route: Task-Aware Prompt Routing 
+
+A single generic prompt is often insufficient for het-erogeneous code-generation tasks. MBPP contains diverse problem types, including string manipulation, arithmetic rea-soning, and tasks with explicit corner cases. We therefore introduce a lightweight router that converts each raw task into a more suitable prompt template using task heuristics. For an input task x, the router outputs a prompt template index r and a routed prompt 
+
+r = ρ(x), p = Rtest (x; r). (6) 
+
+1) MBPP Router: For MBPP, the router uses lexical and task-structure cues to dispatch tasks into several prompt styles:  
+
+> •
+
+string relaxed : for string-heavy tasks, triggered by key-words such as substring , palindrome , and similar text-processing cues;  
+
+> •
+
+algo relaxed : for algorithmic or math-oriented tasks, triggered by keywords such as prime , gcd , and other arithmetic patterns;  
+
+> •
+
+edge relaxed : for tasks with explicit edge-case hints or relatively dense test descriptions; Fig. 1. Overview of the Route-Align-Verify (RAV) framework. The upper branch shows aligned LoRA fine-tuning with routed-style prompts. The lower branch shows the inference pipeline, including task-aware prompt routing and execution-based candidate selection. 
+
+Module Stage Purpose Main signal 
+
+Route Before generation Choose task-suitable prompt Task keywords, docstrings Align Training Reduce prompt mismatch Routed prompt rewriting Verify After generation Select a better candidate Public-test execution score   
+
+> TABLE I SUMMARY OF THE THREE RAV COMPONENTS .
+
+Item Setting 
+
+Base model Qwen2.5-Coder-7B-Instruct Fine-tuning type LoRA (rank 16, target all )Cutoff length 1024 Max samples 12000 Learning rate 8 × 10 −5
+
+Epochs / Scheduler 1.0 / cosine Precision bf16    
+
+> TABLE II TRAINING CONFIGURATION OF THE ALIGNED LORA ADAPTER USED IN THE MAIN EXPERIMENTS .
+> •
+
+default : a fallback prompt used when no specialized trigger is activated. The router is intentionally lightweight. Its goal is not to solve the task itself, but to choose a more appropriate prompting style before the model generates code. 
+
+E. Align: Training–Inference Prompt Alignment 
+
+The purpose of Align is to reduce the distribution gap between fine-tuning prompts and inference-time routed prompts. Let the original supervised training set be 
+
+D = {(xi, yi)}Ni=1, (7) where xi is the training input and yi is the reference program. Instead of directly fine-tuning on xi, we construct an aligned dataset 
+
+D′ = {(Rtrain (xi), yi)}Ni=1, (8) where Rtrain (·) is a training-time rewriting rule designed to approximate the routed prompt style used at inference time. Conceptually, Align does not add a new reasoning module at test time. Rather, it changes what the adapter has learned to respond to. This makes the generator more compatible with the routed prompts used by Route and improves the quality of the candidate pool supplied to the downstream verifier. 
+
+F. Verify: Execution-Based Candidate Selection 
+
+Given a routed prompt p, the generator produces a candi-date pool 
+
+C (x) = {c1, c2, . . . , cn}. (9) For MBPP, visible public tests are available together with the task description. We therefore use lightweight execution-based verification to score each candidate against these public tests. Let T (x) denote the set of visible public tests for task x.The verification score of candidate ci is defined as 
+
+V (ci, x) = ∑ 
+
+> t∈T(x)
+
+1[ci passes t], (10) where 1[·] is the indicator function. The final selected pro-gram is ˆc = arg max  
+
+> ci∈C(x)
+
+V (ci, x). (11) If ties occur, we apply a weak simplicity prior by preferring shorter code. This verifier is deliberately lightweight: it does not require formal specification or expensive search. Instead, it uses the public tests already available in MBPP to rank candidates and improve the probability that the final returned program is functionally correct. 
+
+G. Complexity and Inference Cost 
+
+Routing adds negligible overhead because it only applies simple task heuristics before generation. Aligned LoRA does not introduce a separate test-time module beyond at-taching the learned adapter. The main additional inference cost comes from generating multiple candidates and, when enabled, executing them on public tests. Let G denote the cost of generating one candidate and 
+
+E denote the cost of executing one candidate on the public tests. Then the overall test-time cost is 
+
+O(nG + 1[Verify ] · nE ) , (12) where n is the number of sampled candidates. In practice, this makes RAV a modular accuracy–cost tradeoff: better perfor-mance can be obtained by verification over a candidate pool, while the underlying model architecture remains unchanged. 
+
+H. Summary 
+
+RAV improves code generation through three coordinated interventions: Route changes how tasks are prompted, Align 
+
+changes how the model is adapted to those prompts, and Ver-ify changes how the final output is selected from generated candidates. Together, these components provide a practical and reproducible way to improve functional correctness on MBPP without modifying the backbone architecture itself. IV. E XPERIMENTS 
+
+A. Experimental Setup 1) Benchmark and Metric: We evaluate the proposed method on the MBPP benchmark under two commonly used settings: MBPP Sanitized and MBPP Full . Performance is measured by pass@1 , i.e., the proportion of tasks for which the final returned program passes the benchmark tests. This metric directly reflects functional correctness and is therefore appropriate for evaluating code generation systems. 
+
+2) Backbone Model and Environment: All experiments utilize the Qwen2.5-Coder-7B-Instruct backbone. The eval-uation was conducted on an NVIDIA GeForce RTX 5090 GPU (32GB VRAM, Driver 580.105.08) using Python 3.11.14 on Linux 5.15.0. 
+
+3) Compared Configurations: To analyze the role of each component, we evaluate several representative combinations of Route , Align , and Verify : 
+
+> •
+
+Base : the backbone model without routing, aligned adaptation, or verification.  
+
+> •
+
+Route + Verify : task-aware routing combined with execution-based verification.  
+
+> •
+
+Align + Verify : aligned LoRA combined with execution-based verification.  
+
+> •
+
+Route + Align : routing and aligned LoRA without verification.  
+
+> •
+
+Full RAV : the complete system with Route + Align + Verify .Since not all individual component toggles are available in the current experiment matrix, we report these results as a 
+
+partial component-wise ablation rather than a full factorial ablation. 
+
+B. Component-wise Ablation on MBPP 
+
+Table III presents the main results as a component-wise ablation study. The full RAV pipeline achieves the best performance on both MBPP settings, reaching 0.8911 on MBPP Sanitized and 0.8520 on MBPP Full. Several observations can be drawn from Table III. First, both Route + Verify and Align + Verify substantially out-perform the base model, indicating that either routing or aligned adaptation can provide a more favorable candidate pool when coupled with execution-based selection. Second, 
+
+Route + Align without verification yields only a modest improvement over the base model, suggesting that better prompting and better adaptation alone do not automatically translate into large pass@1 gains when the system directly returns a sampled candidate. Third, the full RAV configura-tion consistently exceeds both Route + Verify and Align + Verify , indicating that Route and Align are complementary under the Verify stage rather than redundant. Compared with the base model, Full RAV improves pass@1 by 6.35 points on MBPP Sanitized and by 9.92 
+
+points on MBPP Full. These gains show that the full pipeline provides a clear practical improvement over the plain back-bone. 
+
+C. Robustness Analysis 
+
+To assess stability, we further performed three repeated runs on 120-task subsets. On the MBPP Full split, the ob-served improvement remained stable, with a 95% confidence interval of [0.0250 , 0.1417 ]. On the MBPP Sanitized split, the trend remained positive, with a 95% confidence interval of [−0.0194 , 0.0722 ], although it crossed zero. Therefore, the robustness evidence is stronger on MBPP Full, while the Sanitized split should be interpreted more cautiously as showing a positive but less statistically stable trend under repeated subset evaluation. 
+
+D. Contamination Analysis 
+
+Finally, we conducted a contamination analysis using token-set Jaccard similarity: 
+
+J(b, d) = |T (b) ∩ T (d)||T (b) ∪ T (d)| , (13) where T (·) denotes the token set of a benchmark instance or a training example. Across all training–benchmark pairs, both exact overlap and fuzzy overlap with J ≥ 0.8 remained zero. This result reduces concerns that the observed gains are caused by prompt-level leakage or near-duplicate contamina-tion between the training data and the evaluation benchmark. TABLE III PARTIAL ABLATION STUDY OF RAV COMPONENTS ON MBPP. ∆ DENOTES THE ABSOLUTE IMPROVEMENT OVER THE BASE MODEL ON MBPP F ULL .BEST RESULTS ARE SHOWN IN BOLD .
+
+Configuration Route Align Verify Sanitized Full ∆ Full Base 0.8276 0.7528 –Route + Verify ✓ ✓ 0.8794 0.8500 +0.0972 Align + Verify ✓ ✓ 0.8833 0.8460 +0.0932 Route + Align ✓ ✓ 0.8366 0.7640 +0.0112 Full RAV ✓ ✓ ✓ 0.8911 0.8520 +0.0992 
+
+E. Discussion 
+
+The results suggest that Route and Align help produce a candidate pool that is more favorable to correct solutions, but their effect becomes much more visible when combined with 
+
+Verify . In other words, the main value of routing and aligned adaptation is not merely to improve a single direct output, but to increase the likelihood that correct or near-correct candidates appear in the generated pool. Verify can then exploit this improved pool and select a better final program. This interpretation is consistent with the empirical pattern in Table III: the Route + Align configuration without verifi-cation yields only limited gains, whereas the verified variants produce much larger improvements. Therefore, the advantage of RAV lies in the interaction among its components rather than in any single module alone. Route and Align reshape the candidate distribution, and Verify converts this advantage into stronger final pass@1 on MBPP. V. C ONCLUSION 
+
+This paper presented RAV , a modular framework for im-proving code generation functional correctness under a fixed backbone model. RAV combines three lightweight and com-plementary interventions: Route , which applies task-aware prompt routing before generation; Align , which reduces the mismatch between fine-tuning prompts and inference-time prompts through aligned LoRA adaptation; and Verify , which selects final outputs using execution-based verification over generated candidates. Experiments on MBPP demonstrated that the full RAV pipeline achieves the best performance among all evaluated configurations, reaching 0.8911 on MBPP Sanitized and 
+
+0.8520 on MBPP Full. Compared with the base model, this corresponds to improvements of 6.35 and 9.92 per-centage points, respectively. The component-wise ablation further suggests that Route and Align are most effective when combined with Verify: prompt routing and aligned adaptation help produce a more favorable candidate pool, while verification converts this advantage into stronger final pass@1. Additional analyses support the reliability of these find-ings. Repeated subset evaluation showed stronger stability on MBPP Full and a positive, though less statistically stable, trend on MBPP Sanitized. Moreover, contamination analysis found zero exact overlap and zero high-similarity overlap be-tween training data and benchmark tasks, reducing concerns that the observed gains are due to prompt-level leakage. Overall, the results indicate that functional correctness can be improved without modifying the backbone architecture itself. Instead, substantial gains can be obtained by coordi-nating how tasks are prompted , how the model is adapted ,and how final outputs are selected . As future work, a more complete factorial ablation, broader benchmark coverage, and stronger verification signals could further clarify the contribution and generality of the proposed framework. REFERENCES [1] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. de Oliveira Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph, G. Brockman, A. Ray, R. Puri, G. Krueger, M. Petrov, H. Khlaaf, G. Sastry, P. Mishkin, B. Chan, S. Gray, N. Ryder, M. Pavlov, A. Power, L. Kaiser, M. Bavar-ian, C. Winter, P. Tillet, F. P. Such, D. Cummings, M. Plappert, F. Chantzis, E. Barnes, A. Herbert-Voss, W. H. Guss, A. Nichol, A. Paino, N. Tezak, J. Tang, I. Babuschkin, S. Balaji, S. Jain, W. Saunders, C. Hesse, A. N. Carr, J. Leike, J. Achiam, V. Misra, E. Morikawa, A. Radford, M. Knight, M. Brundage, M. Murati, K. Mayer, P. Welinder, B. McGrew, D. Amodei, S. McCandlish, I. Sutskever, and W. Zaremba, “Evaluating large language models trained on code,” arXiv preprint arXiv:2107.03374 , 2021. [2] J. Austin, A. Odena, M. Nye, M. Bosma, H. Michalewski, D. Dohan, E. Jiang, C. Cai, M. Terry, Q. Le, and C. Sutton, “Program synthesis with large language models,” arXiv preprint arXiv:2108.07732 , 2021. [3] R. Li, L. Ben Allal, Y. Zi, N. Muennighoff, D. Kocetkov, C. Mou, M. Marone, C. Akiki, J. Li, J. Chim et al. , “Starcoder: may the source be with you!” arXiv preprint arXiv:2305.06161 , 2023. [4] B. Rozi` ere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan, Y. Adi, J. Liu, R. Sauvestre, T. Remez et al. , “Code llama: Open foundation models for code,” arXiv preprint arXiv:2308.12950 , 2023. [5] D. Hendrycks, S. Basart, S. Kadavath, M. Mazeika, A. Arora, E. Guo, C. Burns, S. Puranik, H. He, D. Song, and J. Steinhardt, “Measuring coding challenge competence with APPS,” arXiv preprint arXiv:2105.09938 , 2021. [6] J. Liu, C. S. Xia, Y. Wang, and L. Zhang, “Is your code generated by chatgpt really correct? rigorous evaluation of large language models for code generation,” arXiv preprint arXiv:2305.01210 , 2023. [7] N. Jain, K. Han, A. Gu, W.-D. Li, F. Yan, T. Zhang, S. Wang, A. Solar-Lezama, K. Sen, and I. Stoica, “Livecodebench: Holistic and contamination free evaluation of large language models for code,” 
+
+arXiv preprint arXiv:2403.07974 , 2024. [8] Z. Luo, C. Xu, P. Zhao, Q. Sun, X. Geng, W. Hu, C. Tao, J. Ma, Q. Lin, and D. Jiang, “Wizardcoder: Empowering code large language models with evol-instruct,” arXiv preprint arXiv:2306.08568 , 2023. [9] D. Guo, Q. Zhu, D. Yang, Z. Xie, K. Dong, W. Zhang, G. Chen, X. Bi, Y. Wu, Y. K. Li, F. Luo, Y. Xiong, and W. Liang, “Deepseek-coder: When the large language model meets programming – the rise of code intelligence,” arXiv preprint arXiv:2401.14196 , 2024. [10] Y. Wei, Z. Wang, J. Liu, Y. Ding, and L. Zhang, “Magicoder: Source code is all you need,” arXiv preprint arXiv:2312.02120 , 2023. [11] Y. Li, D. Choi, J. Chung, N. Kushman, J. Schrittwieser, R. Leblond, T. Eccles, J. Keeling, F. Gimeno, A. Dal Lago, T. Hubert, P. Choy, C. de Masson d’Autume, I. Babuschkin, X. Chen, P.-S. Huang, J. Welbl, S. Gowal, A. Cherepanov, J. Molloy, D. J. Mankowitz, E. S. Robson, P. Kohli, N. de Freitas, K. Kavukcuoglu, and O. Vinyals, “Competition-level code generation with AlphaCode,” arXiv preprint arXiv:2203.07814 , 2022. [12] B. Chen, F. Zhang, A. Nguyen, D. Zan, Z. Lin, J.-G. Lou, and W. Chen, “Codet: Code generation with generated tests,” arXiv preprint arXiv:2207.10397 , 2022. [13] E. J. Hu, Y. Shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang, and W. Chen, “Lora: Low-rank adaptation of large language models,” 
+
+arXiv preprint arXiv:2106.09685 , 2021. [14] X. Chen, M. Lin, N. Sch¨ arli, and D. Zhou, “Teaching large language models to self-debug,” arXiv preprint arXiv:2304.05128 , 2023. [15] T. Dettmers, A. Pagnoni, A. Holtzman, and L. Zettlemoyer, “QLoRA: Efficient finetuning of quantized LLMs,” arXiv preprint arXiv:2305.14314 , 2023. [16] A. Madaan, N. Tandon, P. Clark, Y. Yang et al. , “Self-refine: Itera-tive refinement with self-feedback,” arXiv preprint arXiv:2303.17651 ,2023.

@@ -1,0 +1,606 @@
+Title: Don't Regenerate, Debug: A Domain-Specific Agent for Repairing Near-Miss Hardware Operators
+
+URL Source: https://arxiv.org/pdf/2608.02712v1
+
+Published Time: Wed, 05 Aug 2026 00:04:02 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# Don’t Regenerate, Debug: A Domain-Specific Agent for Repairing Near-Miss Hardware Operators 
+
+## Yansong Sun 1∗, Shenxiu Wu 1∗, Siyuan Chen 1, Runlin Hou 1, Junhao Qiu 1, Junming Cao 2,Shudi Shao 2, Zhichao Lu 1†, Qingfu Zhang 1†
+
+> 1
+
+Department of Computer Science, City University of Hong Kong 
+
+> 2
+
+Application Software Engineering Lab, Huawei Technologies Ltd. yansonsun3-c@my.cityu.edu.hk, zhichao.lu@cityu.edu.hk, qingfu.zhang@cityu.edu.hk 
+
+Abstract 
+
+Kernel generation for hardware accelerators such as GPUs and NPUs has become a proving ground for large language models (LLMs), and state-of-the-art systems raise correctness through pipelines that couple LLMs with agentic reinforce-ment learning and evolutionary search. Such pipelines gener-ate, compile, and execute large numbers of candidate kernels, discarding most of them and forgoing the opportunity to distill failures into reusable knowledge. Many discarded candidates are near-miss operators that compile and run but fail numeri-cal validation; each embodies genuine domain knowledge and a nontrivial investment in LLM inference, cross-compilation, and hardware execution. We argue for a paradigm shift: rather than regenerate, debug . Debugging is far more constrained than generating from scratch: the search space is small and feedback is dense. We present a domain-specific debug agent that addresses three core challenges in autonomous repair: mitigating knowledge scarcity through retrieved patterns and diagnostic instrumentation, ensuring integrity through anti-cheat detection and full-coverage evaluation, and controlling cost via convergence guards and bounded iteration. Debug-ging serves two complementary roles: it extends the capa-bility frontier by recovering operators that repeated regen-eration fails to produce, and it lowers cost per deliverable operator. Debug Pass@1 achieves 66.7% versus Regenerate Avg Pass@1’s 25.9% and Regenerate Pass@3’s 40.7%, while consuming 92.8% fewer tokens per success than three-trial regeneration. Component ablations show that the knowledge base drives recovery, while integrity gates reject 12.5–33.3% of the successes the workflow itself accepted. 
+
+## Introduction 
+
+Large language models have made significant strides in hard-ware accelerator kernel generation, yet a fundamental gap persists between compilation success and functional correct-ness. On CUDA, the best-represented GPU programming language in LLM pretraining corpora, state-of-the-art mod-els compile above 90% but are functionally correct only 49– 86% of the time, a gap that widens with task complexity (Zhu et al. 2026; Wen et al. 2025). This gap is not a CUDA artifact, and it widens as training-data resources shrink: entire Triton task categories such as quantization achieve zero functional 
+
+> ∗
+
+These authors contributed equally. 
+
+> †
+
+Corresponding authors. 
+
+correctness despite non-trivial compilation rates (Wang et al. 2026); on Google’s TPU/Pallas platform, models compile near-perfectly (up to 99.6%) yet achieve only 2.8–8.4% func-tional correctness (Wen et al. 2025); and on lower-resource platforms such as Intel’s SYCL and Moore Threads’ MUSA, practical correctness requires either dozens of evolutionary iterations or specialized training (Wiedemann et al. 2026; Cheng et al. 2026). Each compiled-but-failing kernel repre-sents sunk investment in LLM inference, cross-compilation, and hardware execution, yet current pipelines insufficiently exploit these near-miss candidates for systematic repair. Each such near-miss operator embodies correct API usage, reasonable tiling strategies, and valid memory management, representing genuine domain knowledge and nontrivial com-putational investment. We therefore argue for a complemen-tary paradigm: rather than regenerate, debug . Debugging a 
+
+near-miss operator is far more constrained than generation from scratch: structure fixed, failure localized, validation pro-vides dense feedback at each iteration. Convergence there-fore requires fewer trials and tokens, and each repair distills reusable patterns for future repairs, and the setting matches how production bugs are actually addressed, since they can-not be resolved by regenerating from scratch. However, autonomous debug in low-resource domains faces three hazards. (1) Knowledge scarcity : domains un-derrepresented in pretraining lack implicit debugging knowl-edge. Direct AscendC generation yields at most 2.5% func-tional correctness (Wen et al. 2025). (2) Integrity haz-ards : agents under pressure can satisfy validation dishon-estly through reward hacking, inadequate test coverage, or degeneration to slower fallbacks (Li et al. 2026; Sarkar 2026; Chatterjee et al. 2026; Baronio et al. 2025; Lange et al. 2025). (3) Cost control : loops can cycle indefinitely without con-vergence (Zhou et al. 2026). To address these hazards, an engine-orchestrated archi-tecture is presented: the engine owns validation, forensics, and integrity checking; the agent operates only during re-pair with no acceptance authority. Five mechanisms address the hazards: knowledge base and diagnostic instrumentation (knowledge scarcity), anti-cheat detection and full-coverage evaluation (integrity), convergence guards (cost control). We ablate each in turn, and report where the evidence supports the design and where it does not. arXiv:2608.02712v1 [cs.SE] 3 Aug 2026 Baseline (fails validation)    
+
+> acc.SetValue(i, acc.GetValue(i)+acc.GetValue(i-1));
+> Repaired (passes validation)
+> float sum=acc.GetValue(i) +acc.GetValue(i-1); half r=(half)sum; acc.SetValue(i, (float)r);
+
+Table 1: Real AscendC cumsum operator from our preci-sion tuning. The baseline’s pure-FP32 accumulation diverges from the CANN reference; a three-line per-step FP16 round-ing fix recovers correctness. We instantiate this on AscendC for Huawei’s Ascend NPUs, where these hazards manifest acutely. Even DSL-guided approaches achieving 90.4% on simple benchmarks (Wen et al. 2026) leave substantial residual failures: our 27 near-miss operators from NPUKernelBench all passed CANNBot’s sophisticated generation yet failed numeri-cal validation. AscendC exemplifies low-resource domains (scarce data, strict hardware constraints such as explicit mem-ory and queue sync, limited tooling) where the three hazards are empirical bottlenecks. AscendC thus serves as a repre-sentative hardest-case setting, and our findings suggest the approach may extend to other low-resource accelerators. Experiments on this operator set show Debug Pass@1 reaching 66.7%, meaning numerically correct without kernel bypass and backed by full-coverage evidence, versus Regen-erate Avg Pass@1’s 25.9% and Regenerate Pass@3’s 40.7%, at 92.8% lower token cost per success. Debug recovers 11 operators that all three regeneration trials fail to produce, and leads CANNBot’s precision-debug mode by 22.2pp under a matched protocol. Our integrity gates, meanwhile, reject re-pairs the workflow itself had accepted: raw pass rate without them overstates deliverable success. Our contributions: 
+
+• We validate the debug-over-regenerate paradigm for low-resource kernels, demonstrating recovery of operators re-generation cannot reach while consuming fewer tokens. 
+
+• We present an engine-orchestrated architecture with five mechanisms addressing knowledge scarcity, integrity hazards, and cost control. 
+
+• Ablation separates recovery from integrity effects: remov-ing the knowledge base lowers Pass@1 and raises tokens per success, while anti-cheat and full-coverage evaluation reject unsupported repairs. Trustworthy delivery, not raw pass rate, is the right objective. 
+
+## Related Works 
+
+LLM-Based Code Generation and Debugging 
+
+A growing body of work equips LLMs to debug rather than merely generate code. InspectCoder (Wang et al. 2025) uses dynamic analysis to drive program repair via interactive de-bugging, reporting substantial gains over static approaches. Agentless (Xia et al. 2024) shows that a simple localize– repair–validate pipeline can rival more elaborate autonomous agents on SWE-bench. CT-Repair (Huang, Xu, and Zhang 2026) drives agentic repair with execution evidence, com-pressing runtime traces into queryable graphs for multi-agent localization on Defects4J. These works establish that struc-tured feedback and validation are central to LLM debugging. We inherit both principles but move to the hardware-kernel domain, where the feedback is numerical deviation, the vali-dation is on-device execution, and the evidence is a forensic trace of intermediate kernel state. 
+
+Hardware Kernel Generation 
+
+On the AscendC/Ascend platform, AscendCraft (Wen et al. 2026) achieves state-of-the-art results through DSL-guided transcompilation, in sharp contrast to the near-zero rate of direct generation. CANNBot (Huawei CANN Team 2026), Huawei’s official agent suite for CANN development, bun-dles operator generation and precision-debug workflows; we adopt it as our baseline. Cross-platform benchmarks quan-tify the difficulty: MultiKernelBench (Wen et al. 2025) and NPUKernelBench (Cao et al. 2026) report Pass@1 below 2.5% on AscendC, with API unfamiliarity as the dominant failure mode. On GPUs, GPU Kernel Scientist (Andrews and Witteveen 2025) and CudaForge (Zhang et al. 2025) explore iterative, feedback-driven optimization, and several systems already refine failing candidates in-loop by feeding compiler errors back between passes (Dai et al. 2026; Wen et al. 2026), yet they stop at compilation and leave numerical failures unaddressed. CUDABeaver (Li et al. 2026) bench-marks automated CUDA debugging and documents “repair by degeneration.” SkillEvolver (Zhang et al. 2026) evolves a skill library with auditor checks against contamination from spurious successes, a concern our knowledge-base ingestion shares: we require full-coverage validation with high match rates, or explicit compatibility-mode acceptance when com-prehensive evaluation is unavailable. We differ by repairing abandoned near-miss candidates post-hoc, certifying output with engine-owned validation and anti-cheat detection rather than scalar feedback alone. These directions leave a gap at their intersection. Kernel-focused systems advance generation and optimization but treat numerically failing candidates as disposable; general-purpose repair fixes high-level code but faces none of the low-resource constraints, hardware-execution dependencies, or reward-hacking surface intrinsic to a validation-driven kernel loop. Our work occupies this intersection, repairing operators that compile and run yet fail numerical validation, and consequently must supply the anti-cheat and engine-owned validation that neither line of work requires. 
+
+## The AscendC Debug Challenge 
+
+The AscendC Programming Model 
+
+AscendC is Huawei’s C++ programming model for Ascend NPUs, exposing a tile-based, queue-driven execution model in which the developer explicitly manages data movement be-tween Global Memory (GM) and the on-chip Unified Buffer (UB), tiling along problem dimensions, and a three-stage Near-Miss Candidate 
+
+> AscendC source
+> spec + ref
+> Build / import PASS
+> NPU launch PASS
+> Numerical check
+> FAIL
+
+AscendC Debug Agent Workflow                    
+
+> Convergence Control
+> attempt / turn budgets
+> Bounded Execution
+> wall clock / no-progress guard
+> Versioned State
+> baseline / current-best / evidence
+> 1Baseline 2Collect Evidence 3Repair 4Validate 5Decide
+> Orchestration Engine
+> Baseline & Snapshot
+> evaluate original save source + metrics
+> Forensics
+> runtime + mismatch diagnostic evidence
+> Structured KB
+> retrieve repair patterns record stable entry IDs
+> frozen in formal evaluation
+> Validation Control
+> receive + dispatch store objective record
+> Checkpoint
+> or Rollback
+> update
+> or restore
+> Evidence Gate-V
+> LLM Repair Worker
+> Evidence Package
+> forensics + KB hits current-best state
+> Audit Diagnose Patch
+> On-Demand Probe
+> Inspect states
+> Patched Source
+> kernel-only change
+> no validation authority
+> Ascend Runtime and NPU
+> Baseline Evaluation
+> Compile / Import NPU Execute Compare objective result
+> Diagnostic Probe
+> capture intermediate states
+> restore clean source
+> Objective Validation
+> Compile / Import NPU Execute Compare objective record
+> Acceptance Checks
+> Integrity scan
+> Coverage / full eval
+> current best
+> qualified near-miss
+> original source dispatch intermediate evidence
+> CONTINUE: current-best + latest evidence + direction memory
+> PASS
+> Accepted Repair
+> Corrected kernel
+> required checks PASS
+> integrity CLEAN
+> coverage evidence recorded
+> STOP
+> Bounded Stop
+> budget exhausted or unsupported failure
+> checkpoint saved
+> main workflow optional probe evidence CONTINUE feedback
+
+Figure 1: AscendC Debug Agent overview. Given a near-miss operator that compiles but fails numerical validation, the agent produces a repaired kernel through a three-stage loop (forensics → diagnose-and-fix → validate), with baseline entry and decision selection. The orchestration engine owns validation, forensics, and integrity checking, while five mechanisms (knowledge base, diagnostic instrumentation, anti-cheat detection, full-coverage evaluation, and convergence guards) guide and bound the loop. CopyIn–Compute–CopyOut pipeline synchronized through queues. Correctness depends on subtle interactions among dtype handling (e.g., FP16 accumulation precision), mem-ory alignment, tiling boundaries, and API contracts that are poorly represented in LLM pretraining corpora. The combi-nation of (1) an unfamiliar low-level API, (2) strict hardware constraints, and (3) scarce training data explains both the near-zero one-shot success rate and, crucially, the prevalence of near-miss failures that motivate our approach. 
+
+Problem Formulation 
+
+We formalize the debug task as follows. Given a buggy As-cendC kernel Kbuggy ← LLM (S) generated from specifi-cation S, which compiles successfully on hardware h but fails numerical validation against reference implementation 
+
+R over test suite T , a debug procedure maps it to a repaired kernel: 
+
+Kfixed = Debug( Kbuggy , S, R, T , h ; D), (1) where Kbuggy , S, R, T , h define the problem instance, and 
+
+D denotes the diagnostic evidence available to the agent (operator source, compilation logs, NPU execution traces, and numerical-deviation metrics). The output Kfixed must satisfy, with τ the numerical tolerance: 
+
+• Validate (Kfixed , R, Text , τ ) = true (correctness over the extended test suite); 
+
+• Kfixed |= S (semantic consistency); 
+
+• Compile (Kfixed , h ) = success (hardware feasibility). Table 1 illustrates one representative instance. A generated cumsum kernel compiles, launches, and produces output of the correct shape; its results are comparable to the reference but do not clear the validation threshold. The root cause is subtle: the baseline accumulates partial sums in pure FP32, but the CANN reference uses FP16 arithmetic with per-step rounding. The numerical divergence compounds along the reduction axis. The fix introduces explicit per-step FP16 rounding to match the reference’s arithmetic. Discarding this operator wastes all prior investment; recognizing and apply-ing the precision-alignment pattern recovers it in a single repair. 
+
+Why Autonomous Repair Is Hard 
+
+Building such a system is non-trivial: on AscendC, the three hazards introduced above take domain-specific forms that a generic repair agent cannot handle. (1) Knowledge scarcity : trained predominantly on CUDA corpora (Wen et al. 2025), LLMs import idioms invalid on Ascend, such as assuming coalesced global-memory access where As-cendC mandates explicit DataCopy over 32-byte-aligned UB tiles, or missing that FP16 accumulation must round per step to match the CANN reference. Such pitfalls are absent from pretraining corpora, so an unguided agent rediscovers them by trial and error. (2) Integrity hazards : the Python-wrapper/C++-kernel split unique to the AscendC toolchain lets an agent route computation through the host wrapper (calling at:: operators) so validation passes while the NPU kernel stays wrong, a bypass invisible to scalar pass/fail feed-back. (3) Cost control : precision tuning explores many near-identical dtype and rounding variants, so an unguarded loop readily oscillates or degrades a partially-correct kernel, burn-ing scarce NPU cycles without progress. System Design 
+
+As illustrated in Figure 1, our system separates evidence generation from repair execution through a deterministic or-chestration engine. The engine runs a three-stage loop of forensics (compiles and profiles the kernel), diagnosis-and-fix (invokes the LLM agent), and validation (re-executes to certify correctness), repeating until the kernel passes, a con-vergence guard triggers, or a budget limit is reached. We deploy five mechanisms across the Guidance, Integrity, and Control layers, built on a foundational orchestration en-gine, to address the three hazards: knowledge retrieval and diagnostic instrumentation (Guidance Layer) mitigate knowl-edge scarcity; anti-cheat detection and full-coverage evalu-ation (Integrity Layer) counter integrity hazards; and con-vergence guards (Control Layer) enforce cost control. Each is ablated in turn, holding the remaining mechanisms fixed, so that each arm isolates one design claim for experimental validation. 
+
+Orchestration Layer: Deterministic State Machine and Evidence Ownership 
+
+The Orchestration Engine decides each transition determin-istically from control state reconstructed out of a persistent event log, so every run is auditable and can resume from any interruption. Three phases belong to the engine rather than the agent: forensics generation, validation against the refer-ence, and integrity checking on every candidate. The repair worker may run local diagnostics, but only engine-dispatched validation produces acceptance decisions. 
+
+Guidance Layer: Knowledge Retrieval and Diagnostic Instrumentation 
+
+Low-resource domains like AscendC lack the implicit de-bugging knowledge LLMs possess for well-represented lan-guages. To compensate, we equip the agent with two guid-ance mechanisms that surface domain-specific patterns and localize failure root causes without requiring the LLM to rediscover them from scratch. 
+
+Structured knowledge base with auto-ingestion. Debug patterns recur across operators: for instance, “FP16 accumu-lation must round per step to match the CANN reference” is a hardware-specific fact absent from pretraining corpora but applicable to any reduction kernel. We maintain a JSON-structured knowledge base retrieved deterministically after forensics, keyed by failure type and operator category (e.g., 
+
+precision_failed × reduction ) so the agent sees only relevant patterns. Ingestion is quality-gated (Figure 2, top-left): only patterns with high match rates and clean in-tegrity history are admitted, which does not certify complete correctness. 
+
+Diagnostic instrumentation. Precision failures often present as diffuse numerical deviation that does not local-ize where divergence originates. The agent can then request that the engine instrument the kernel with multi-level tensor statistics at pipeline boundaries and re-run forensics. Be-cause instrumentation costs agent turns and forensics cycles, the first iteration proceeds without it, and it applies only if that attempt fails (Figure 2, bottom-left). 
+
+Integrity Layer: Anti-Cheat Detection and Full-Coverage Evaluation 
+
+Agents under validation pressure can satisfy it dishonestly. We deploy two mechanisms that distinguish genuine repairs from reward-hacked ones. 
+
+Anti-cheat detection. To catch the kernel-bypass hazard above, this integrity gate combines two checks, both recom-puted by the engine on every validation: (1) Wrapper vali-dation inspects the Python adapter for fallback computation patterns, detecting calls to reference operators or elimination of the custom kernel path; (2) kernel-source scanning detects forbidden host fallback ( at:: /torch:: calls, tensor meth-ods) and verifies the presence of a recognized custom-kernel launch site. Crucially, verdicts are recomputed against pre-iteration baseline snapshots. A repair is accepted only when this integrity verdict is clean (Figure 2, top-right). Bypassing repairs are marked wrapper-assisted and rejected: numeri-cally correct, but failing integrity checks. 
+
+Full-coverage evaluation. A repair may pass a lightweight validation subset yet fail on the operator’s complete shape/dtype/batch-size test matrix. To prevent false posi-tives, we assign distinct roles to the two case sets NPUK-ernelBench provides per operator: the lightweight set drives fast iterative debugging, while the extended set (spanning the operator’s full specification) certifies the final repair. When a repair passes the lightweight set, the engine escalates to full-coverage re-validation (Figure 2, bottom-right) and persists the resulting evidence (per-case pass/fail, numerical match rates, execution logs) as an immutable artifact. Only repairs backed by such full-coverage evidence, or whose lightweight set already is the complete set, are certified to pass. 
+
+Control Layer: Convergence Guards and Budget Enforcement 
+
+Unbounded agent loops can oscillate between failed states, resubmit near-identical repairs, or degrade a partially work-ing kernel, consuming scarce NPU cycles and LLM tokens without progress. The engine therefore owns every loop deci-sion, and we separate what it enforces unconditionally from what it decides adaptively. 
+
+Hard bounds. Four nested counters bound execution re-gardless of what the agent reports: 240 agent turns per ses-sion, 600 turns per task across all attempts, 5 repair rounds with per-failure-type sub-caps (3 for build errors, 5 for preci-sion failures) so one error mode cannot exhaust the budget, and a wall-clock timeout. All are counted in the persistent event log, making them crash-safe, and all are expressed in turns rather than cost, so they do not drift when the back-ing model changes. Together with the validation gates, these bounds are a precondition for operating the harness at all: an agent able to negotiate its own termination could stop early on hard cases to inflate aggregate metrics. They are held fixed in every configuration we report, including all ab-lations, since removing them yields a non-terminating loop rather than a comparable arm. 
+
+State continuity. The engine snapshots the highest-scoring kernel after each validation and atomically restores it when two consecutive attempts fail to beat it (Figure 2, top-middle), so repair resumes from the best-known state rather than the most recent one. It also injects prior fix types and verdicts into each prompt, forbidding directions already recorded as stagnant or regressed, and logs which retrieved knowledge-base entries were applied, yielding an auditable trail from evidence to fix. 
+
+Adaptive scheduling. Within the hard bounds, a bundle of semantic rules decides when continuing is no longer productive: near-pass and fp16-ceiling detection, oscillation and same-direction stagnation detection, full-coverage non-improvement, and degenerate-round early stopping. A com-panion budget starts each task at 480 turns. The remaining hard allowance is released only when objective evidence shows real progress, namely a promoted best checkpoint or a full-coverage run passing 90% of cases. A stalled task therefore never reaches the full allowance. This bundle is the one control component our ablation removes: unlike the hard bounds, it encodes judgments about progress and can be removed without breaking termination. 
+
+## Experiments 
+
+Experimental Setup 
+
+Operator Cohort. We evaluate on 27 frozen near-miss As-cendC operators from NPUKernelBench (Cao et al. 2026), a comprehensive benchmark for NPU kernel generation. These operators passed CANNBot’s generation pipeline (compila-tion and execution) but failed numerical validation. The co-hort spans L1 (8), L2 (9), L3 (6), and Advanced/L5–L7 (4) difficulty strata. All operators are held fixed across compar-isons. 
+
+Evaluation Protocol. A result passes only when it clears: (1) complete test suite across all shapes/dtypes, (2) numerical validation within tolerance, and (3) integrity checks verifying no host-fallback bypass and the presence of a recognized custom-kernel launch site. 
+
+Methods Compared. We compare Debug-Agent against CANNBot’s (Huawei CANN Team 2026) Regenerate mode. CANNBot is Huawei’s official agent suite for CANN devel-opment, bundling state-of-the-art generation and precision-debug workflows with internal multi-round refinement. We run CANNBot in Regenerate mode: three independent tri-als per operator, each starting from fresh specification with-out access to prior trial outputs. Debug-Agent executes one repair task per operator, reusing the near-miss imple-mentation from CANNBot’s generation. We further com-pare against CANNBot’s precision-debug mode, its pub-lic ascendc-precision-debug workflow. All exper-iments use Qwen3.8-Max-Preview (1M context), with an additional Kimi K3 run in the precision-debug comparison.                              
+
+> Stratum nD_Pass@1 R_Avg@1 R_Pass@3 ∆pp D/R
+> L1 875.0% 12.5% 25.0% +50.0 5/1 L2 933.3% 11.1% 33.3% 0.0 2/2 L3 683.3% 38.9% 50.0% +33.3 3/1 Adv 4100% 66.7% 75.0% +25.0 1/0
+> Overall 27 66.7% 25.9% 40.7% +25.9 11/4
+
+Table 2: Capability by difficulty. D_Pass@1 = Debug Pass@1, R_Avg@1 = Regenerate Avg Pass@1, R_Pass@3 = Regenerate Pass@3, ∆pp = D_Pass@1 minus R_Pass@3 in percentage points, D/R = exclusive successes (Debug-only / Regen-only), Adv = Advanced (L5–L7).                          
+
+> Method Pass@1 Unc/op All/op Unc/succ All/succ D_Pass@1 66.7% 0.247M 18.96M 0.371M 28.44M
+> R_Avg@1 25.9% 0.435M 53.98M 1.678M 208.22M (1.76 ×)(2.85 ×)(4.52 ×)(7.32 ×)R_Pass@3 40.7% 1.305M 161.95M 3.203M 397.50M (5.28 ×)(8.54 ×)(8.63 ×)(13.98 ×)
+
+Table 3: Efficiency by outcome. D_Pass@1 = Debug Pass@1, R_Avg@1 / R_Pass@3 = Regenerate Avg/Pass@3, Unc = uncached tokens, All = all tokens (incl. cache), /op = per operator, /succ = per success. Parenthesized multipliers show cost relative to Debug. M = million tokens. 
+
+Debug vs. Regenerate: Capability and Efficiency 
+
+We investigate whether targeted repair recovers more oper-ators than fresh regeneration (RQ1), and whether it reaches equivalent or better pass rates with fewer tokens (RQ2). 
+
+Metrics. We report Debug Pass@1 (single-run success), 
+
+Regenerate Avg Pass@1 (averaged over 81 runs: 27 oper-ators × 3 trials), and Regenerate Pass@3 (operator-level: any trial succeeds). 
+
+RQ1: Does Debug Extend Recoverable Boundary? Ta-ble 2 stratifies pass rates by task difficulty. Debug Pass@1 achieves 66.7% (18/27) versus Regenerate Pass@3’s 40.7% (11/27), a +25.9pp advantage. The two sets overlap on only 7 operators: 11 succeed under Debug alone, and 4 under Re-generate alone. These results demonstrate that single-trial tar-geted repair extends the recoverable boundary beyond multi-round fresh regeneration from state-of-the-art pipelines. 
+
+RQ2: Does Debug Achieve Higher Token Efficiency? Ta-ble 3 reports token consumption normalized per operator and per success. Debug Pass@1 uses 0.247M uncached to-kens/op versus Regenerate Avg Pass@1’s 0.435M (1.76 ×)and Pass@3’s 1.305M (5.28 ×). Per-success normalization amplifies these ratios: Debug requires 0.371M uncached to-kens/success versus 1.678M (4.52 ×) and 3.203M (8.63 ×)for Regenerate, corresponding to 78% and 88% reductions. Including cache tokens, Debug achieves 86.3% and 92.8% cost reductions versus Regenerate Avg Pass@1 and Pass@3. By reusing near-miss implementations through state-continuous repair, Debug-Agent recovers more operators than repeated fresh regeneration while significantly reducing Compatibility mode 
+
+> Full coverage unavailable
+> Use evidence No acceptance authority
+> NO
+> First attempt?
+> Deployment write-back only
+
+Validation escalation 
+
+> Frozen KB
+> NO
+> Yes
+
+State-continuous repair Knowledge ingestion Diagnostic instrumentation 
+
+> Hash recorded write-back off
+
+Trusted acceptance   
+
+> Current best
+> Versioned source
+> LLM repair
+> Kernel-only patch
+> Validation
+> Engine-owned run/build compare
+> New best?
+> Best checkpoint
+> promote candidate
+> Roll back
+> restore current best
+> All checks pass?
+> Integrity CLEAN Full-coverage PASS Numerical pass
+> Acceptance checks
+> Accepted repair
+> Trustworthy Deliverable
+> Retry
+> Or stop
+> Yes
+> LLM repair
+> diagnose kernel patch
+> Engine forensics
+> Compile / run Runtime evidence
+> Instrumentation
+> Diagnostic statistics Rerun forensics
+> Retrieve
+> Failure type + op
+> Evidence
+> Stable entry IDs
+> LLM repair
+> Candidate
+> Pattern + Provenance
+> Workflow success Clean integrity history Match >= 0.95 With full-coverage evidence
+> Knowledge admission gate Admit pattern
+> Guidance only Not repair certification
+> Light set PASS?
+> NO
+> Yes Patched source Full-coverage eval
+> all shapes / dtypes
+> Outcome
+> PASS: Accept FAIL: retry
+> Next attempt
+> Lightweight set
+> Fast validation
+
+Figure 2: Engine-owned mechanisms in detail. Top-left , knowledge base ingestion: a candidate pattern is admitted only when it reaches a 0.95 match rate under full-coverage evidence and a clean integrity history. Top-middle , state-continuous repair: the engine keeps the highest-scoring kernel and, after two consecutive non-improving attempts, rolls back to it. Top-right , trusted acceptance: a repair is accepted only if it passes the numerical, full-coverage, and integrity checks. Bottom-left , diagnostic instrumentation: the first attempt skips instrumentation, and only a failed attempt triggers tensor-statistic probes and re-profiling. 
+
+Bottom-right , validation escalation: a lightweight pass triggers full-coverage evaluation across all shapes and dtypes. token cost. Because Regenerate Avg Pass@1 is a run-level average rather than an operator-level binary outcome, a sin-gle McNemar test is undefined for it; we therefore compare Debug-Agent against each independent trial, obtaining ex-act two-sided p = 0 .0129 , 0.0024 , and 0.0129 , all below the Bonferroni threshold of 0.05 /3 = 0 .0167 . These results demonstrate that targeted repair shifts the economic bound-ary of kernel failure recovery, turning kernel repair from a cost-prohibitive retry process into a viable production-scale strategy. 
+
+Comparison with CANNBot Precision-Debug 
+
+RQ3: Does Debug Beat a Matched Precision-Debug Base-line? We also compare Debug-Agent against CANNBot’s precision-debug mode, the vendor’s dedicated repair work-flow, along the same two dimensions. Both methods start from identical frozen failing implementations and initial evidence, run under a matched budget on Qwen3.8-Max-Preview, and are judged by the same external full-eval and integrity protocol, yielding 27 paired Pass@1 outcomes. Debug-Agent recovers more operators (Table 4(a)): 18/27 (66.7%) versus 12/27 (44.4%), a +22.2pp overall margin, and the gap stays positive in all three sampled base strata (+37.5, +11.1, +33.3pp on L1–L3; both solve all four Advanced op-erators). Of the paired outcomes, 10 repairs are shared, 8 are Debug-only, and 2 are baseline-only. A supplementary Kimi K3 run yields a consistent +18.5pp margin (21/27 vs. 16/27); neither comparison reaches significance ( p = 0 .109 , 0.180 ), but the direction holds across backbones. On efficiency (Table 4(b)), precision-debug uses 17.7% fewer uncached tokens per operator (0.204M vs. 0.247M) but 1.98 × more all-tokens, carrying a heavier cache load. Normalized by success, its uncached and all-token costs reach 1.24 × and 2.97 × those of Debug-Agent; Debug-Agent delivers each trustworthy repair with 66.3% fewer all-tokens, achieving higher end-to-end token efficiency through a higher pass rate and lower cache burden. 
+
+Nominal Complexity vs. Empirical Difficulty. Both agents solve all 4 Advanced operators, but achieve only 33.3% and 22.2% strict success on L2. Our coverage audit reveals that Advanced tasks contain only 5–10 fully exposed cases, whereas L2 tasks expand from 10 task-side cases to 49–58 full-evaluation cases with substantially broader shape coverage. Several L2 candidates fail on only one additional full-evaluation case. Although descriptive due to the small Advanced subset, this result shows that nominal structural complexity alone is insufficient to characterize debugging difficulty; evaluation coverage and task-to-full distribution shift must also be considered. 
+
+Ablation Study 
+
+RQ4: Which components make repair effective and trust-worthy? We ablate the five mechanisms on the same 27 op-erators, using Pass@1 as the success endpoint. Because the mechanisms target different failure modes, Table 5 groups arms by each one’s estimand rather than a single leader-board: guidance is judged by recovery and token efficiency, integrity gates by how many workflow-accepted repairs they reject, and convergence control by long failures and token burden. 
+
+Guidance. Removing the knowledge base drops Pass@1 from 18/27 to 13/27, with the paired direction favoring Full (8 operators succeed only with the KB, 3 only without). All tokens per success rise from 28.44M to 45.01M (1.58 ×), the clearest evidence that retrieved domain knowledge improves (a) Capability by difficulty Stratum n D_Pass@1 CBD_Pass@1 ∆pp D/CBD                                            
+
+> L1 875.0% 37.5% +37.5 3/0 L2 933.3% 22.2% +11.1 2/1 L3 683.3% 50.0% +33.3 3/1 Adv 4100% 100% 0.0 0/0
+> Overall 27 66.7% 44.4% +22.2 8/2 (b) Efficiency by outcome Method Pass@1 Unc/op All/op Unc/s All/s D66.7% 0.247M 18.96M 0.371M 28.44M
+> CBD 44.4% 0.204M 37.53M 0.458M 84.45M (0.82 ×)(1.98 ×)(1.24 ×)(2.97 ×)
+
+Table 4: Debug-Agent (D) vs. CANNBot precision-debug (CBD) under a matched same-model repair protocol on 27 near-miss operators. (a) ∆pp = D minus CBD; D/CBD = ex-clusive successes; Adv = L5–L7. (b) Unc/All = uncached/all tokens; /op, /s = per operator, per Pass@1 success; parenthe-sized values are CBD relative to D. M = million. both recovery and system-level token efficiency. Removing diagnostic evidence (engine forensics and instrumentation together) lowers Pass@1 to 15/27. Full spends more un-cached tokens per operator, yet its higher success count yields lower all-tokens per success than the ablated arm (28.44M vs. 32.30M), suggesting diagnostic evidence trades single-task inference overhead for higher success yield through a mechanism that warrants further study. 
+
+Integrity. Disabling anti-cheat leaves 16 arm-local suc-cesses, but 2 numerically passing repairs use wrapper-assisted computation, so only 14 reach Pass@1. Disabling full-coverage evaluation leaves 18 compact-set successes, of which 3 fail on the extended suite and 3 lack valid full-coverage evidence, leaving 12. The two gates thus reject 12.5% and 33.3% of arm-local successes: they are not merely audit logging but the mechanisms that keep locally-passing repairs from being reported as trustworthy. 
+
+Convergence control. This arm removes the adaptive bun-dle only, that is, six semantic early-stopping rules together with the evidence-gated soft budget, so every task runs on the 600-turn hard ceiling from its first session. The per-session cap, attempt caps, wall-clock timeout, validation gates, and best-checkpoint rollback are identical in both configurations. Within those bounds, the bundle shows no measurable bene-fit on this cohort: Pass@1 is unchanged at 18/27, with no rise in long failures (4 to 3) or token cost. Since the hard bounds serve as a structural requirement rather than an empirically validated gain, we treat the present thresholds as requiring calibration. Because the arm removes the rules and the soft budget jointly, it does not attribute this result to either alone. 
+
+## Conclusion 
+
+We argued that near-miss AscendC operators should be re-paired rather than regenerated, and presented an engine-orchestrated debug agent that makes autonomous repair                                                
+
+> (a) Guidance mechanisms Config Pass@1 ∆pp F/A Unc/s All/s Full 18/27 ––0.371M 28.44M
+> −KB 13/27 −18.5 8/3 0.490M 45.01M
+> −Diagnostic 15/27 −11.1 4/1 0.357M 32.30M
+> (b) Integrity gates Gate removed Arm-local Pass@1 Unsup. Risk
+> Anti-cheat 16/27 14/27 2/16 12.5% Full-eval †18/27 12/27 6/18 33.3%
+> (c) Convergence control Config Pass@1 LF Unc/op All/op All/s
+> Full 18/27 40.247M 18.96M 28.44M
+> −Adapt. sched 18/27 30.165M 13.60M 20.40M
+
+Table 5: Component ablation on 27 AscendC near-miss oper-ators, grouped by each arm’s estimand. Pass@1 requires the full numerical suite plus a clean integrity review. F/A : Full-only/Ablation-only Pass@1 successes. Arm-local : successes the workflow accepts within the arm; Unsup. : arm-local suc-cesses not upheld by external validation, i.e., false positives of the arm’s own judgment; Risk : Unsup./Arm-local. Unc /All :uncached/all tokens; /op , /s : per operator, per success. Adapt. sched : adaptive scheduling. LF : long failures, operators that consumed more turns or tokens than the Full arm’s 75th percentile and still did not reach Pass@1, so they measure wasted effort rather than failure count. Hard turn/attempt bounds and validation gates are identical across all arms. Bold marks the best within each panel. †no_fulleval is a matched shadow rebuilt from the Full trajectory at its first compact objective pass, not an independent run. bounded and auditable. On 27 frozen near-miss operators, single-trial repair reached 66.7% Pass@1 against 40.7% for three regeneration trials at 92.8% lower token cost per suc-cess, and outperformed each single regeneration trial under exact McNemar tests that survive Bonferroni correction. Our ablation separates three roles. Retrieved domain knowledge is what drives recovery: removing the knowledge base costs five operators and raises all-tokens per success by 58%, the clearest case of a mechanism that improves capabil-ity and cost together. The integrity gates instead govern what may be counted, rejecting 12.5% and 33.3% of the repairs the workflow itself had accepted; without them the rates above would have been reported higher, and wrong. The adaptive scheduling bundle we pre-registered showed no measurable benefit on this cohort, although the hard bounds it operates within remain a precondition for bounded execution. The architecture rests on engine-owned validation, quality-gated knowledge accumulation, and deterministic bounds. These are properties of low-resource domains rather than of AscendC, though transfer remains untested. Our cover-age audit further separates implementation complexity from evaluation-coverage complexity, a distinction we suggest fu-ture precision-debugging benchmarks report apart. References 
+
+Andrews, M.; and Witteveen, S. 2025. GPU Kernel Scientist: An LLM-Driven Framework for Iterative Kernel Optimiza-tion. arXiv:2506.20807. Baronio, C.; Marsella, P.; Pan, B.; Guo, S.; and Alberti, S. 2025. Kevin: Multi-turn rl for generating cuda kernels. arXiv preprint arXiv:2507.11948 .Cao, X.; Zhai, J.; Li, P.; Hu, Z.; Yan, C.; Mu, B.; Fang, G.; She, B.; Li, J.; Su, Y.; Tao, D.; Huang, X.; Xu, F.; Yang, F.; Lu, Y.; Wang, C.-D.; Lu, Y.; Xue, W.; Zhou, B.; and Tian, Y. 2026. AscendKernelGen: A Systematic Study of LLM-Based Kernel Generation for Neural Processing Units. arXiv:2601.07160. Chatterjee, B.; Zagieboylo, D.; Damani, S.; Hari, S.; and Kozyrakis, C. 2026. ProofWright: Towards Agentic Formal Verification of CUDA. arXiv:2511.12294. Cheng, K.; Lu, S.; Liao, S.; Li, T.; Zhang, Y.; Yang, D.; Lv, Q.; Wang, H.; Chen, Z.; and Tang, Y. 2026. MusaCoder: Native GPU Kernel Generation with Full-Stack Training on Moore Threads GPU. arXiv preprint arXiv:2606.04847 .Dai, W.; Wu, H.; Yu, Q.; Gao, H.-a.; Li, J.; Jiang, C.; Lou, W.; Song, Y.; Yu, H.; Chen, J.; et al. 2026. Cuda agent: Large-scale agentic rl for high-performance cuda kernel generation. 
+
+arXiv preprint arXiv:2602.24286 .Huang, Z.; Xu, L.; and Zhang, H. 2026. Multi-Perspective Agentic Program Repair via Code Property Graphs and Tem-poral Execution Graphs. arXiv:2607.12605. Huawei CANN Team. 2026. CANNBot: Ascend C Operator Generation and Precision-Debug Toolchain. https://gitcode. com/cann/cannbot-skills.git. Official CANN repository. Ac-cessed: 2026-07-24. Lange, R. T.; Sun, Q.; Prasad, A.; Faldor, M.; Tang, Y.; and Ha, D. 2025. Towards robust agentic cuda kernel benchmarking, verification, and optimization. arXiv preprint arXiv:2509.14279 .Li, S.; Chen, H.; Fazzini, M.; and Ding, C. 2026. CUD-ABeaver: Benchmarking LLM-Based Automated CUDA Debugging. arXiv:2605.08455. Sarkar, D. 2026. The Correctness Illusion in LLM-Generated GPU Kernels. arXiv:2606.20128. Wang, H.; Zhang, J.; Jiang, K.; Wang, H.; Chen, J.; and Zhu, J. 2026. KernelBenchX: A comprehensive benchmark for evaluating LLM-generated GPU kernels. arXiv preprint arXiv:2605.04956 .Wang, Y.; Zhang, Y.; Li, G.; Zhi, C.; Li, B.; Huang, F.; Li, Y.; and Deng, S. 2025. InspectCoder: Dynamic Analysis-Enabled Self Repair through Interactive LLM-Debugger Col-laboration. arXiv:2510.18327. Wen, Z.; Shao, S.; Li, Z.; Ge, Y.; Xu, T.; Lin, Y.; and Zhang, T. 2026. AscendCraft: Automatic Ascend NPU Kernel Genera-tion via DSL-Guided Transcompilation. arXiv:2601.22760. Wen, Z.; Zhang, Y.; Li, Z.; Liu, Z.; Xie, L.; and Zhang, T. 2025. MultiKernelBench: A Multi-Platform Benchmark for Kernel Generation. arXiv:2507.17773. Wiedemann, N.; Leboutet, Q.; Paulitsch, M.; Wofk, D.; and Ummenhofer, B. 2026. KernelFoundry: Hardware-aware evolutionary GPU kernel optimization. arXiv preprint arXiv:2603.12440 .Xia, C. S.; Deng, Y.; Dunn, S.; and Zhang, L. 2024. Agentless: Demystifying LLM-based Software Engineering Agents. arXiv:2407.01489. Zhang, G.; Zhu, E.; Zhou, J.; Jia, C.; and Wang, H. 2026. SkillEvolver: Skill Learning as a Meta-Skill. arXiv:2605.10500. Zhang, Z.; Wang, R.; Li, S.; Luo, Y.; Hong, M.; and Ding, C. 2025. CudaForge: An Agent Framework with Hardware Feedback for CUDA Kernel Optimization. arXiv:2511.01884. Zhou, C.; Chai, H.; Chen, W.; Guo, Z.; Shan, R.; Song, Y.; Xu, T.; Yang, Y.; Yu, A.; Zhang, W.; et al. 2026. Externalization in LLM Agents: A Unified Review of Memory, Skills, Protocols and Harness Engineering. arXiv preprint arXiv:2604.08224 .Zhu, J.; Chen, W.; Fan, Q.; Ren, Z.; Wu, J.; Chai, X. Z.; Rungrueangwutthinon, C.; Ma, Y.; and Zou, A. 2026. CUD-ABench: Benchmarking LLMs for Text-to-CUDA Genera-tion. arXiv:2603.02236. Appendix 
+
+for “Don’t Regenerate, Debug: A Domain-Specific Agent for Repairing Near-Miss Hardware Operators” This document provides the experimental protocols, per-operator outcomes, paired statistics, token-accounting de-tails, final integrity results, and component-ablation evidence corresponding to RQ1–RQ4 in the main paper. All extended results use the same success definition, endpoints, and statis-tical units as the main paper. 
+
+## S1. Scope and Notation 
+
+We use the following abbreviations throughout: 
+
+• D: Debug-Agent. 
+
+• R1–R3 : three independent fresh-regeneration trials. 
+
+• CBD : CANNBot precision-debug. 
+
+• Q: Qwen3.8-Max-Preview with a 1M-token context. 
+
+• K: Kimi K3 with a 1M-token context. 
+
+• Unc. tokens : input plus output tokens. 
+
+• All tokens : input, output, cache-creation, and cache-read tokens. 
+
+• Pass@1 : one operator-level end-to-end task produces a candidate that passes the complete numerical evaluation and the final integrity criterion. The statistical unit for method comparisons is an operator-level end-to-end task, not an internal repair attempt. Internal attempts share state and are not independent samples. For RQ3, the same 27 operators form repeated blocks in a bal-anced 2×2 factorial design with method (D versus CBD) and model (Q versus K) as the two factors. Each operator con-tributes one end-to-end observation to each of the four cells; there is no additional technical replicate within an operator-cell. 
+
+## S2. Common Experimental Protocol 
+
+S2.1 Frozen cohort 
+
+All primary experiments use the same 27 frozen near-miss AscendC operators. Each initial implementation had already compiled and executed in the upstream generation workflow but failed numerical validation. The cohort contains 8 L1, 9 L2, 6 L3, and 4 Advanced operators (two L5, one L6, and one L7). L5–L7 are combined only for display because their individual denominators are small. The cohort and initial candidates were frozen before the compared outcomes were produced. No operator was re-moved based on a method’s final result. 
+
+S2.2 Pass@1 criterion 
+
+Throughout this appendix, Pass@1 refers to one end-to-end task/run per operator. A task may contain multiple state-sharing diagnosis and repair rounds; it is not a single sampled completion. Pass@1 requires all of the following: 1. a materialized and executable candidate exists; 2. an external full-coverage evaluation completes; 3. every required numerical case passes the benchmark tol-erance; 4. the final integrity check confirms a real path from 
+
+ModelNew.forward through the extension binding, tiling, and custom AscendC kernel launch; 5. no framework/reference implementation performs the tar-get computation, and no golden-output cache, monkey patch, dynamic Python execution, or case-manifest spe-cialization substitutes for the kernel. Compact success or automatic anti-cheat CLEAN alone is insufficient. Attempt 0 omits probes unless NaN/Inf forensics triggers localization. 
+
+S2.3 Final integrity criterion 
+
+We distinguish the in-loop anti-cheat mechanism from the post-hoc integrity endpoint used for reported outcomes. One final criterion is applied to every full-eval passing candidate: 1. trace the executable path from the Python model to the custom kernel; 2. distinguish metadata/allocation calls from target compu-tation; 3. reject host-side or framework-side implementations of the target semantics; 4. record a final integrity verdict for every candidate. Static checks first flag suspicious candidates. The cur-rent scanner assumes a fixed Python-wrapper, binding, and launch layout and does not fully cover direct kernel invoca-tion, launches in .asc files, split registration and launch, or ATen calls used only for shape, dtype, allocation, tiling, and workspace management. Ambiguous flags are there-fore resolved against source evidence under the fixed cri-terion above, applied identically to every method; auto-matic compatibility-aware anti-cheat verdicts are interme-diate diagnostics rather than the reported endpoint. Un-der the automatic compatibility-aware anti-cheat verdict, 12 full-evaluation-passing candidates were initially classified as 
+
+CHEAT but received a final CLEAN integrity verdict under the fixed source-evidence criterion (11 Regenerate runs and one Debug-Agent task), while one Debug-Agent candidate is confirmed as an integrity violation. The resulting Debug-Agent-minus-Regenerate Pass@3 gap is +25.9 pp, compared with +33.3 pp under the automatic compatibility-aware anti-cheat verdict. 
+
+S2.4 Token accounting 
+
+The primary cost endpoint is provider-reported token vol-ume. For each operator, primary accounting covers the end-to-end task run that produces its reported terminal outcome; earlier runs terminated by infrastructure or provider inter-ruptions are retained separately as stability records. Within the reported run, we aggregate input, output, cache-creation, and cache-read fields, deduplicate records by session, agent, and message identity, and include non-Pass@1 operators in the cost numerator. We report: 
+
+• tokens per attempted operator: total arm cost divided by 27; Regenerate result Operators Fraction 0/3 successful trials 16 59.3% 1/3 successful trials 5 18.5% 2/3 successful trials 2 7.4% 3/3 successful trials 4 14.8% 
+
+Table 6: Distribution of successful regeneration trials per operator. 
+
+• tokens per Pass@1: total arm cost divided by the number of Pass@1 outcomes. For Regenerate Pass@3, all three trials are included in the numerator. CLI pricing fields are subscription-credit proxies rather than auditable invoices and are therefore excluded from the paper’s primary cost claims. 
+
+S2.5 Statistical tests 
+
+Paired binary outcomes use two-sided exact McNemar tests. Paired risk-difference intervals use 100,000 operator-level bootstrap resamples with a fixed seed. Marginal Wilson in-tervals are descriptive only. Because the cohort contains 27 operators, non-significant paired comparisons are reported as directional evidence. 
+
+## S3. RQ1–RQ2: Debug-Agent versus Fresh Regeneration 
+
+S3.1 Protocol 
+
+Debug-Agent receives the frozen near-miss implementation and its failure evidence, and runs one state-continuous repair task per operator. Regenerate discards that candidate and runs three independent trials from the fresh operator specifi-cation. Regenerate trials use independent workspaces and do not observe other trial outputs. Both methods use Qwen3.8-Max-Preview and the same external full-eval and integrity endpoint. This comparison deliberately evaluates two different re-covery strategies: repairing sunk work versus discarding and regenerating it. Their internal control structures differ by design; the comparison is at the level of end-to-end effec-tiveness and cost under each declared budget. 
+
+S3.2 Regeneration stability 
+
+Tables 6 and 7 summarize regeneration stability at the oper-ator and run levels, respectively. Only BatchMatmul , MatmulTransB ,
+
+scatter_elements_v2 , and UnfoldGrad suc-ceed in all three regeneration trials. Repetition raises the number of operators solved from an average of 7 per trial to 11 under Pass@3, but does not eliminate trial variance. 
+
+S3.3 Paired inference 
+
+Regenerate Avg. Pass@1 is a run-level average over 81 runs and is not a 27-dimensional binary outcome. We there-fore compare Debug-Agent separately with each regeneration       
+
+> Run-level endpoint Pass@1 outcomes Regenerate trial 1 8/27 (29.6%) Regenerate trial 2 5/27 (18.5%) Regenerate trial 3 8/27 (29.6%) Regenerate Avg. Pass@1 21/81 (25.9%) Regenerate Pass@3 11/27 (40.7%)
+
+Table 7: Run-level regeneration endpoints. Avg. Pass@1 pools all 81 independent runs; Pass@3 counts an operator if any of its three trials passes. trial; the resulting paired counts and exact tests are reported in Table 8. All three values are below the Bonferroni threshold 
+
+0.05 /3 = 0 .0167 . Each comparison pairs one Debug-Agent task with one regeneration trial. Because the same Debug-Agent outcome vector enters all three tests, they are three correlated views of one result rather than three independent replications. The operator-level comparison against the complete three-trial Pass@3 budget has 7 shared successes, 11 Debug-only successes, 4 Regenerate-only successes, and 5 shared fail-ures. The discordant 11:4 split gives a paired odds ratio of 2.75 and a two-sided exact McNemar p = 0 .1185 . The paired difference against each individual regeneration trial is signif-icant after Bonferroni correction; the contrast against the complete three-trial Pass@3 budget is directionally consis-tent but not significant. 
+
+S3.4 Complete per-operator matrix 
+
+P/x denotes precision failure with x% matched cases; R/-
+
+denotes runtime, import, or load failure without a valid match rate; C/x denotes a confirmed integrity violation. Pass de-notes Pass@1. Table 9 reports the complete operator-level outcomes un-derlying the aggregate comparisons. The Cumsum example in Table 1 of the main paper comes from a separate precision-alignment demonstration batch, not from the frozen 27-operator cohort reported here. In this cohort, Cumsum is counted as a failure for D and all three Regenerate trials. 
+
+S3.5 Failure and near-miss analysis 
+
+Table 10 decomposes terminal outcomes into success, preci-sion failure, runtime failure, and confirmed integrity viola-tion. For an exploratory diagnosis, we define a near miss only among Pass@1 failures that execute enough full-eval cases to produce a match rate. Table 11 summarizes these valid failed outcomes. The regeneration row selects the best failure among up to three trials and therefore gives Regenerate an additional se-lection advantage. Two of the 16 Regenerate Pass@3 failures have only runtime failures and no meaningful match rate. Comparison Both pass D only R only Both fail Exact p
+
+D vs. R1 6 12 2 7 0.0129 D vs. R2 3 15 2 7 0.00235 D vs. R3 6 12 2 7 0.0129 
+
+Table 8: Paired exact McNemar comparisons between Debug-Agent and each regeneration trial. 
+
+Level Operator D R1 R2 R3 L1 Add Pass P/78.0 R/– R/– L1 Cumsum R/– P/43.1 P/0.0 R/– L1 Sum Pass R/– R/– R/– L1 LayerNorm Pass Pass P/88.3 Pass L1 AdamW Pass R/– R/– P/0.0 L1 EmbeddingDenseBackward Pass R/– R/– P/0.0 L1 NLLLoss Pass P/60.0 R/– R/– L1 IOU P/53.3 Pass P/13.3 P/13.3 L2 GroupNormSwish Pass P/94.0 P/96.0 Pass L2 MoeInitRouting C/100.0 P/0.0 P/0.0 R/– L2 MoeFinalizeRouting P/98.0 R/– Pass P/94.0 L2 DequantSwigluQuant P/98.0 R/– P/98.0 Pass L2 FusedRopeWithQkNormAndKvCacheUpdate P/0.0 P/98.3 P/98.3 R/– L2 HyenaFftSizePaddingRfft Pass R/– P/61.2 P/30.0 L2 MaskedSoftmaxWithAttentionDropoutBackward P/98.0 P/52.9 R/– P/0.0 L2 TanhGatedResidualAddBackward Pass P/74.0 P/74.0 P/82.0 L2 TimeDecayExponentialStabilization P/52.0 P/58.0 P/74.0 P/60.0 L3 BatchMatmul P/64.7 Pass Pass Pass L3 MatmulTransA Pass Pass P/62.0 R/– L3 MatmulTransB Pass Pass Pass Pass L3 ConvStandard1d Pass R/– R/– R/– L3 ConvStandard3d Pass P/0.0 R/– P/0.0 L3 ConvDepthwise2d Pass P/0.0 P/0.0 P/0.0 L5 inplace_index_add_with_sorted Pass Pass P/60.0 Pass L5 scatter_elements_v2 Pass Pass Pass Pass L6 UnfoldGrad Pass Pass Pass Pass L7 NormRopeConcat Pass R/– P/50.0 P/0.0 
+
+Table 9: Complete per-operator outcome matrix for Debug-Agent and three regeneration trials. P/x is a precision failure with x percent matched cases; R/– is a runtime, import, or load failure; C/x is a confirmed integrity violation. 
+
+Method and unit Pass@1 Precision failure Runtime failure Confirmed integrity violation Total Debug-Agent tasks 18 7 1 1 27 Regenerate runs 21 36 24 0 81 
+
+Table 10: Failure-category decomposition across Debug-Agent tasks and independent regeneration runs.                   
+
+> Scope Valid failed outcomes Median match IQR At least 80% At least 90% At least 95% D failures, excluding confirmed integrity violation 764.7% 52.7–98.0% 333R Pass@3 failures, best failed trial 14 51.5% 0.0–70.8% 211
+
+Table 11: Exploratory match-rate summary among failed outcomes with valid full-evaluation case results. 
+
+S3.6 Full token decomposition 
+
+Table 12 reports the complete token decomposition, and Ta-ble 13 presents the corresponding outcome-normalized effi-ciency measures. The Pass@3 row includes all 81 trials, including failed trials. Compared with the complete three-trial regenera-Metric D: 27 tasks R: 81 trials R/D Turns 5,340 7,340 1.37x Input tokens 232,824 6,435,922 27.64x Output tokens 6,443,513 28,791,637 4.47x Cache-creation tokens 12,213,470 318,048,146 26.04x Cache-read tokens 493,011,671 4,019,255,358 8.15x Uncached tokens 6,676,337 35,227,559 5.28x All tokens 511,901,478 4,372,531,063 8.54x 
+
+Table 12: Full token decomposition. Uncached tokens are input plus output tokens; all tokens additionally include cache creation and cache reads.                 
+
+> Method and budget Unc./operator All/operator Unc./Pass@1 All/Pass@1 D Pass@1 0.247M 18.96M 0.371M 28.44M R Avg. Pass@1 0.435M 53.98M 1.678M 208.22M R Pass@3 1.305M 161.95M 3.203M 397.50M
+
+Table 13: Outcome-normalized token efficiency. Failed runs remain in the cost numerator. tion budget, Debug-Agent uses 92.8% fewer all tokens per Pass@1. 
+
+## S4. RQ3: Method × Model Factorial Comparison with CANNBot Precision-Debug 
+
+S4.1 Balanced 2 × 2 protocol 
+
+The two factors are method {D, CBD } and model {Q, K},yielding four balanced cells: D-Q, D-K, CBD-Q, and CBD-K. All cells use the same frozen 27-operator cohort, starting implementations, attempt-0 evidence, repair-only constraint, 1M context, maximum effort, turn and task budgets, wall-time cap, full-evaluation endpoint, and the final integrity criterion. The execution environment and evaluation protocol are held fixed across cells; only the assigned method and model vary. The complete factorial control protocol is summarized in Table 14. Infrastructure/provider interruptions retain the same workspace and session and are not reclassified as model failures. The 12 h per-invocation timeout is a defensive ceiling against non-terminating sessions and did not determine any reported terminal outcome. 
+
+S4.2 Qwen cell contrast 
+
+Table 15 reports the paired capability comparison within the Qwen model cell. The observed gap is +22.2 pp on this fixed cohort, with the paired bootstrap interval touching zero. 
+
+S4.3 Factorial capability results 
+
+We analyze all four cells symmetrically as an operator-blocked 2 × 2 factorial experiment. The Qwen and Kimi cells differ only in the model factor, while D and CBD differ only in the method factor. Table 16 reports Pass@1 by benchmark stratum, while Table 17 gives the pre-specified paired cell contrasts. For Pass@1, we define the method main effect as the average D-minus-CBD difference across the two models, the model main effect as the average K-minus-Q difference across the two methods, and the interaction as the difference between the two method contrasts: 
+
+∆method = 12 [( DQ − CBD Q) + ( DK − CBD K )] ,
+
+∆model = 12 [( DK − DQ) + ( CBD K − CBD Q)] ,
+
+∆interaction = ( DK − CBD K ) − (DQ − CBD Q).
+
+The resulting descriptive factorial effects are summarized in Table 18. The positive method main effect reflects higher observed success for Debug-Agent after averaging over the two mod-els. The positive model main effect reflects higher observed success with Kimi after averaging over the two methods. The observed interaction is small relative to both main effects: Debug-Agent leads by 22.2 pp under Qwen and 18.5 pp un-der Kimi, while Kimi improves D by 11.1 pp and CBD by 14.8 pp. Thus, the method advantage is directionally stable across models rather than being driven by one model cell. The exact McNemar tests above quantify the four pre-specified paired cell contrasts; none alone reaches p < 0.05 .The factorial estimates are descriptive operator-blocked ef-fects on this fixed cohort. The model gain is concentrated on L2, and CBD decreases from 3/6 to 2/6 on L3. 
+
+S4.4 Factorial token efficiency 
+
+Table 19 reports token efficiency in all four cells, and Table 20 gives the within-model CANNBot-to-Debug-Agent ratios. Within Qwen, CBD uses 17.7% fewer uncached tokens per operator, while its all tokens per operator and all tokens per Pass@1 are 1.98x and 2.97x those of Debug-Agent, re-spectively. Under Kimi, the corresponding all-token ratios Attribute Factorial control Operator blocks Same 27 frozen near-miss operators in all four cells Methods Debug-Agent; CANNBot precision-debug Models Qwen3.8-Max-Preview; Kimi K3 Runs One end-to-end run per operator-cell Starting implementation Identical frozen failing implementation Initial evidence Identical frozen attempt-0 evidence Allowed behavior Repair the existing project; fresh regeneration prohibited Context / effort 1M / max Per-call cap 240 turns Task soft / hard cap 480 / 600 turns Repair attempts / operator task At most 5 Wall-time cap 12 h per engine invocation (defensive ceiling) Endpoint Full-eval + final integrity criterion 
+
+Table 14: Controlled protocol for the balanced method-by-model comparison.           
+
+> Statistic Result Debug-Agent Pass@1 18/27 (66.7%) CANNBot precision-debug Pass@1 12/27 (44.4%) Observed paired risk difference +22.2 pp Paired bootstrap 95% interval [0.0, 44.4] pp Both pass / both fail 10 / 7 D only / CBD only 8 / 2 Paired odds ratio 4.00 Exact McNemar p0.1094
+
+Table 15: Paired Qwen comparison between Debug-Agent and CANNBot precision-debug.                               
+
+> Stratum nD-Q D-K CBD-Q CBD-K L1 86/8 6/8 3/8 4/8 L2 93/9 6/9 2/9 6/9 L3 65/6 5/6 3/6 2/6 Advanced 44/4 4/4 4/4 4/4
+> Overall 27 18/27 21/27 12/27 16/27
+
+Table 16: Pass@1 across the balanced method-by-model cells, stratified by benchmark difficulty.                 
+
+> Comparison Shared passes A only / B only Exact p
+> D-Q vs. CBD-Q 10 8 / 2 0.109 D-K vs. CBD-K 14 7 / 2 0.180 D-K vs. D-Q 17 4 / 1 0.375 CBD-K vs. CBD-Q 11 5 / 1 0.219
+
+Table 17: Pre-specified paired contrasts among the four method-by-model cells. are 4.54x and 5.96x. The method-efficiency direction there-fore repeats in both model strata. Provider cache accounting differs across models, so cross-model token totals are exe-cution volumes rather than a common monetary measure;       
+
+> Factorial effect on Pass@1 Estimate Method main effect: D minus CBD +20.4 pp
+> Model main effect: K minus Q +13.0 pp
+> Method ×model interaction -3.7 pp
+
+Table 18: Observed descriptive factorial effects on Pass@1. the model-stratified method ratios are the factorial efficiency contrasts used here. 
+
+S4.5 Complete Qwen per-operator matrix 
+
+V/x denotes an integrity violation, optionally with a numer-ical match rate. P+V and R+V denote a numerical/runtime failure with an additional integrity violation. The complete Qwen operator-level comparison is reported in Table 21. Among 13 numerically passing CBD-Q candidates, one (Add ) materializes broadcasting in the framework adapter for 32/50 frozen cases and is excluded under the same con-servative integrity rule used for Regenerate. The remaining 12 reach Pass@1. Three automatic anti-cheat CHEAT labels do not remain in the final results; all three candidates already failed full-eval, so this does not increase the success numer-ator. Every reference model.py remains byte-identical to the frozen input. 
+
+S4.6 Complete Kimi Pass@1 matrix 
+
+The corresponding Kimi operator-level comparison is re-ported in Table 22. This matrix yields 14 shared passes, seven D-K-only passes, two CBD-K-only passes, and four shared failures, matching the paired counts in S4.3. 
+
+## S5. RQ4: Component Ablations 
+
+S5.1 Operational meaning of each arm 
+
+Table 23 defines the mechanism removed and the controls retained in each ablation configuration. Arm Pass@1 Unc./operator All/operator Unc./Pass@1 All/Pass@1 D-Q 18/27 0.247M 18.96M 0.371M 28.44M D-K 21/27 0.376M 7.505M 0.483M 9.649M CBD-Q 12/27 0.204M 37.53M 0.458M 84.45M CBD-K 16/27 0.717M 34.09M 1.209M 57.52M 
+
+Table 19: Token efficiency across the four method-by-model cells. 
+
+Model CBD/D Unc./operator CBD/D All/operator CBD/D Unc./success CBD/D All/success Qwen 0.82x 1.98x 1.24x 2.97x Kimi 1.91x 4.54x 2.50x 5.96x 
+
+Table 20: Within-model CANNBot-to-Debug-Agent token ratios. 
+
+Level Operator D-Q CBD-Q Paired outcome L1 Add Pass V/100.0 D only L1 Cumsum R/– R/– Both fail L1 Sum Pass Pass Both pass L1 LayerNorm Pass P/13.3 D only L1 AdamW Pass R/– D only L1 EmbeddingDenseBackward Pass Pass Both pass L1 NLLLoss Pass Pass Both pass L1 IOU P/53.3 P/13.3 Both fail L2 GroupNormSwish Pass R/– D only L2 MoeInitRouting V/100.0 R/– Both fail L2 MoeFinalizeRouting P/98.0 P/98.0 Both fail L2 DequantSwigluQuant P/98.0 P/80.0 Both fail L2 FusedRopeWithQkNormAndKvCacheUpdate P/0.0 Pass CBD only L2 HyenaFftSizePaddingRfft Pass Pass Both pass L2 MaskedSoftmaxWithAttentionDropoutBackward P/98.0 P+V/45.1 Both fail L2 TanhGatedResidualAddBackward Pass P/98.0 D only L2 TimeDecayExponentialStabilization P/52.0 P/36.0 Both fail L3 BatchMatmul P/64.7 Pass CBD only L3 MatmulTransA Pass Pass Both pass L3 MatmulTransB Pass Pass Both pass L3 ConvStandard1d Pass P/0.0 D only L3 ConvStandard3d Pass R+V/– D only L3 ConvDepthwise2d Pass P/0.0 D only L5 inplace_index_add_with_sorted Pass Pass Both pass L5 scatter_elements_v2 Pass Pass Both pass L6 UnfoldGrad Pass Pass Both pass L7 NormRopeConcat Pass Pass Both pass 
+
+Table 21: Complete Qwen per-operator Pass@1 matrix for Debug-Agent and CANNBot precision-debug. 
+
+-Diagnostic removes the structured diagnostic-evidence capability as a unit: deterministic forensics, the KB search that consumes this evidence, and tensor-statistic instrumentation. Its estimand is the net effect of the whole capability; attribution to forensics, probing, or KB search in-dividually is out of scope. -Adaptive scheduling is also a bundle. The hard execution bounds remain active, so this arm does not test unbounded execution.  
+
+> †
+
+-Full-eval is a matched shadow reconstructed from the Full trajectory at its first compact objective pass; it is not an independent run. 
+
+S5.2 Paired Pass@1 
+
+Table 24 reports the paired Pass@1 comparison between Full and each ablation arm. The first four real ablation comparisons all have intervals including zero and are read as directional on this cohort. The -Full-eval p-value is descriptive only because the shadow shares its trajectory with Full. 
+
+S5.3 Token burden and long failures 
+
+Table 25 reports outcome-normalized token burden and long-failure counts across configurations. Level Operator D-K CBD-K Paired outcome L1 Add Pass - D only L1 Cumsum - - Both fail L1 Sum Pass Pass Both pass L1 LayerNorm Pass Pass Both pass L1 AdamW - - Both fail L1 EmbeddingDenseBackward Pass Pass Both pass L1 NLLLoss Pass Pass Both pass L1 IOU Pass - D only L2 GroupNormSwish Pass Pass Both pass L2 MoeInitRouting - - Both fail L2 MoeFinalizeRouting - Pass CBD only L2 DequantSwigluQuant Pass - D only L2 FusedRopeWithQkNormAndKvCacheUpdate Pass Pass Both pass L2 HyenaFftSizePaddingRfft Pass Pass Both pass L2 MaskedSoftmaxWithAttentionDropoutBackward Pass - D only L2 TanhGatedResidualAddBackward Pass Pass Both pass L2 TimeDecayExponentialStabilization - Pass CBD only L3 BatchMatmul - - Both fail L3 MatmulTransA Pass Pass Both pass L3 MatmulTransB Pass Pass Both pass L3 ConvStandard1d Pass - D only L3 ConvStandard3d Pass - D only L3 ConvDepthwise2d Pass - D only L5 inplace_index_add_with_sorted Pass Pass Both pass L5 scatter_elements_v2 Pass Pass Both pass L6 UnfoldGrad Pass Pass Both pass L7 NormRopeConcat Pass Pass Both pass 
+
+Table 22: Complete Kimi per-operator Pass@1 matrix for Debug-Agent and CANNBot precision-debug. 
+
+Configuration Removed Retained Full Nothing All five mechanisms and hard bounds -KB Structured retrieval/injection Forensics, probes, gates, scheduling, hard bounds -Diagnostic Forensics, dependent KB search, and diagnostic tensor-statistic instrumentation Validation, integrity gates, scheduling, hard bounds -Adaptive schedul-ing Six semantic early-stop rules and evidence-gated soft budget 600-turn hard ceiling, per-call/attempt caps, timeout, validation, checkpoint/rollback -Anti-cheat Integrity acceptance gate Numerical evaluation and all other mechanisms -Full-eval † Full-coverage acceptance gate at first compact pass Compact objective result and integrity evidence avail-able at that trajectory point 
+
+Table 23: Operational definition of each component-ablation configuration. 
+
+Arm vs. Full Pass@1 Full only / Arm only ∆ pp Paired bootstrap 95% interval Exact p
+
+Full 18/27 (66.7%) – – – –-KB 13/27 (48.1%) 8 / 3 -18.5 [-40.7, +3.7] 0.2266 -Diagnostic 15/27 (55.6%) 4 / 1 -11.1 [-25.9, +3.7] 0.3750 -Adaptive scheduling 18/27 (66.7%) 4 / 4 0.0 [-22.2, +22.2] 1.0000 -Anti-cheat 14/27 (51.9%) 6 / 2 -14.8 [-33.3, +3.7] 0.2891 -Full-eval † 12/27 (44.4%) 6 / 0 -22.2 [-37.0, -7.4] 0.0312 
+
+Table 24: Paired Pass@1 comparisons between Full and each ablation arm. A long failure is a non-Pass@1 outcome whose burden reaches at least two of the three Full-arm 75th-percentile thresholds for turns, all tokens, and the recorded cost proxy. The Full-arm thresholds are frozen and applied unchanged Configuration Unc./operator All/operator Unc./Pass@1 All/Pass@1 Long failures Full 0.247M 18.96M 0.371M 28.44M 4-KB 0.236M 21.67M 0.490M 45.01M 5-Diagnostic 0.198M 17.94M 0.357M 32.30M 4-Adaptive scheduling 0.165M 13.60M 0.247M 20.40M 3-Anti-cheat 0.169M 14.85M 0.325M 28.64M 3-Full-eval † 0.213M 16.41M 0.480M 36.92M 5
+
+Table 25: Token burden and long-failure counts across component-ablation configurations. to every arm. Removing the KB lowers raw uncached tokens per at-tempted operator slightly but reduces Pass@1 enough that all tokens per Pass@1 rise by 58%. This is the clearest ob-served capability-efficiency alignment. By contrast, the cur-rent adaptive-scheduling bundle shows no measured benefit: Pass@1 is unchanged, long failures do not increase, and observed token burden is lower without it. Because the arm jointly removes semantic rules and the soft budget, and execu-tion windows are not perfectly matched, this result indicates that the current thresholds require calibration. 
+
+S5.4 Common-success cost sensitivity 
+
+To reduce confounding from different success sets, we com-pare only operators that reach Pass@1 under both Full and the corresponding arm. Table 26 reports this common-success sensitivity analysis. Positive values mean that the ablation arm consumes more. Successful subsets and execution windows differ across arms, and the integrity arms change acceptance rather than the re-pair computation alone, so these figures are sensitivity statis-tics. 
+
+S5.5 Complete Pass@1 matrix 
+
+P denotes Pass@1; - denotes failure or insufficient evidence. Table 27 reports the complete operator-level Pass@1 ma-trix across Full and the five ablations. Non-monotonic per-operator outcomes are expected under stochastic repair. Aggregate differences must therefore be interpreted together with discordant pairs and uncertainty intervals. 
+
+S5.6 Integrity-gate decomposition 
+
+Table 28 separates arm-local acceptance from the final Pass@1 endpoint for the two integrity-gate ablations. The two anti-cheat rejections are ConvStandard3d ,which performs ATen CPU preprocessing/padding, and 
+
+scatter_elements_v2 , which uses ATen for data-dependent shape inference. At the first compact objective pass in the Full trajectory, MoeInitRouting , MatmulTransB , and 
+
+ConvStandard3d fail the extended suite. NLLLoss ,
+
+GroupNormSwish , and DequantSwigluQuant lack a valid full-coverage result at that shadow point because the corresponding full-eval crashes. All three later obtain valid post-hoc full-coverage evidence in the primary Full experi-ment. They are counted as unsupported at the shadow point rather than as confirmed numerical failures. 
+
+## S6. Evaluation Coverage and Integrity Audit 
+
+S6.1 Evaluation coverage versus nominal level 
+
+The four Advanced operators expose only 5–10 full-evaluation cases, while several L2 operators expand from 10 task-side cases to 49–58 full-evaluation cases with broader shape coverage. Several L2 candidates fail on only one addi-tional full-eval case. Therefore, benchmark level and imple-mentation complexity do not fully capture evaluation diffi-culty; task-to-full coverage shift is an additional axis. 
+
+S6.2 Primary-result completeness 
+
+Table 29 summarizes evidence completeness for the primary Debug-Agent and Regenerate results. For Debug-Agent Qwen, 19 candidates pass full-eval, 18 reach final Pass@1, and one is excluded. For Regenerate, 21 runs pass full-eval and all 21 reach final Pass@1. The same final integrity criterion is applied to both methods. 
+
+## S7. Reproducibility Checklist 
+
+The reproducibility record for these results is organized around the following artifacts: 1. a frozen 27-operator manifest with difficulty level, com-pact/full case counts, coverage-equivalence status, and compact/full case-set hashes; 2. redacted model, context, effort, turn, attempt, timeout, and evaluator configuration; 3. a run manifest mapping each candidate ID to its result row and task/trial identity; 4. post-hoc full-eval summaries, automatic compatibility-aware anti-cheat verdicts, final integrity verdicts for every candidate, and available source-level resolution metadata; 5. per-candidate token aggregates and aggrega-tion/deduplication code; 6. paired-outcome, bootstrap, Wilson-interval, and exact-McNemar scripts; 7. the derived no-full-eval shadow script, including the first compact-pass selection rule; 8. a script reproducing the reported headline counts and statistics from these structured inputs. All 27 Full tasks have terminal status, post-hoc numerical evidence, token aggregates, and final integrity verdicts. Arm vs. Full Common Pass@1 Mean turns Mean all tokens Mean cost proxy -KB 10 +23.0% +27.4% +15.5% -Diagnostic 14 -14.4% +9.1% -5.3% -Adaptive scheduling 14 -28.0% -25.6% -29.6% -Anti-cheat 12 -30.6% -37.8% -39.4% -Full-eval † 12 0.0% 0.0% 0.0% 
+
+Table 26: Common-success cost sensitivity. Each row is restricted to operators that pass in both Full and the compared arm. 
+
+Operator Full -KB -Diag. -Sched. -AC -FE †
+
+L1-003 Add P P P P P PL1-005 Cumsum - - - - - -L1-007 Sum P P P P P PL1-010 LayerNorm P P P P P PL1-017 AdamW P P P P - -L1-024 EmbeddingDenseBackward P P P P P PL1-025 NLLLoss P - - P - -L1-031 IOU - - P P P -L2-002 GroupNormSwish P - - - P -L2-005 MoeInitRouting - - - - - -L2-006 MoeFinalizeRouting - P - P - -L2-011 DequantSwigluQuant - - - - - -L2-020 FusedRopeWithQkNormAndKvCache-Update - P - P P -L2-023 HyenaFftSizePaddingRfft P P P - P PL2-025 MaskedSoftmaxWithAttentionDropout-Backward - P - P - -L2-029 TanhGatedResidualAddBackward P - - P - -L2-030 TimeDecayExponentialStabilization - - - - - -L3-001 BatchMatmul - - - - - -L3-004 MatmulTransA P P P P P PL3-005 MatmulTransB P - P P P -L3-006 ConvStandard1d P - P - P PL3-008 ConvStandard3d P - - P - -L3-009 ConvDepthwise2d P - P P P PL5-005 inplace_index_add_with_sorted P P P P P PL5-010 scatter_elements_v2 P - P - - PL6-021 UnfoldGrad P P P P P PL7-004 NormRopeConcat P P P P - P
+
+Table 27: Complete per-operator Pass@1 matrix for Full and five component ablations. 
+
+Gate removed Arm-local successes Pass@1 Confirmed rejection Missing valid full-coverage evidence Unsupported-success risk Anti-cheat 16 14 2 wrapper-assisted candidates 0 2/16 (12.5%) Full-eval † 18 12 3 extended-suite failures 3 full-eval crashes at the shadow point 6/18 (33.3%) 
+
+Table 28: Integrity-gate decomposition. Arm-local success is the success count under the ablated arm’s own acceptance rule. The packaged artifacts satisfy the following consistency checks:        
+
+> •Debug-Agent Qwen: 18 Pass@1 outcomes
+> •Regenerate Qwen: 21/81 run successes; 11/27 Pass@3
+> •CANNBot precision-debug Qwen: 12 Pass@1 outcomes
+> •Full / -KB / -Diagnostic / -Adaptive scheduling: 18 / 13 / 15 / 18
+> •No duplicate task-trial identifiers
+> •All primary candidates have full-eval and integrity evidence
+> •No provider credentials or absolute infrastructure paths
+
+## S8. Limitations and Claim Boundaries 
+
+1. The cohort contains 27 near-miss operators from one NPU programming ecosystem. Transfer to other hardware and languages remains untested. 2. Debug-Agent has one end-to-end task per operator, whereas Regenerate has three independent trials. Internal Check Debug-Agent Qwen Regenerate Qwen Frozen operators 27/27 27/27 Terminal tasks/runs 27/27 81/81 Materialized candidates 27/27 81/81 Independent post-hoc full-eval 27/27 81/81 Final integrity verdict 27/27 81/81 Cross-arm contamination detected 0 0
+
+Table 29: Primary-result evidence completeness for Debug-Agent and regeneration. Debug attempts share state and cannot be reinterpreted as independent samples. 3. Debug-Agent versus Regenerate Pass@3 and Debug-Agent versus CBD do not reach p < 0.05 under operator-level exact McNemar tests. Their paired advantages are directional observations on this cohort. 4. L5–L7 contain only four operators. Their 100% observed success is descriptive and does not establish a general advantage on advanced tasks. 5. RQ3 is a balanced, operator-blocked method × model fac-torial experiment with a fixed environment and one run per operator-cell. The 27 operators provide the matched blocks, but there is no additional technical replication within an operator-cell; the interaction estimate is there-fore reported descriptively alongside the pre-specified paired cell contrasts. 6. -Diagnostic and -Adaptive scheduling are bundled ablations. Their outcomes cannot be assigned to one subcomponent. 7. -Full-eval is a matched shadow from the Full trajec-tory. It estimates the acceptance risk of stopping at the first compact pass, but is not an independent run. 8. The same final integrity criterion is applied symmetrically to every candidate; automatic anti-cheat and final verdicts are retained as separate evidence layers, together with available source-level resolution metadata. 9. Token fields are provider-reported execution volumes. Within-model ratios are comparable; cross-provider to-ken totals and pricing proxies are not treated as auditable monetary cost. 10. The primary ablation cost uses the end-to-end task run that produces each operator’s reported terminal outcome, following the predeclared task-level metric. Earlier runs terminated by infrastructure or provider interruptions are retained for stability diagnosis but excluded from the pri-mary operator cost. 
+
+## S9. Summary of Supported Conclusions 
+
+The extended evidence supports four calibrated conclusions: 1. A single state-continuous Debug-Agent task recovers 18/27 operators, compared with an average single-trial regeneration success of 21/81 and an operator-level three-trial Pass@3 of 11/27. It solves 11 operators that all regen-eration trials miss, while Regenerate has four exclusive successes. 2. Debug-Agent reduces all tokens per Pass@1 by 92.8% relative to the full three-trial regeneration budget. In the method × model factorial, its all-token efficiency advan-tage over CANNBot precision-debug repeats within both Qwen and Kimi. CBD-Q has lower uncached-token vol-ume per operator, while Debug-Agent has lower all-token volume per operator and per Pass@1 in both model strata. 3. The balanced 2 × 2 factorial yields a +20.4 pp ob-served method main effect for Debug-Agent, a +13.0 pp model main effect for Kimi, and a -3.7 pp method-by-model interaction. Debug-Agent obtains 18/27 versus 12/27 Pass@1 outcomes under Qwen and 21/27 versus 16/27 under Kimi. The small observed interaction indi-cates a directionally stable method advantage across the two models, while the individual paired contrasts remain non-significant at p < 0.05 .4. The ablation evidence shows distinct outcome patterns when different capabilities are removed: removing re-trieved knowledge is associated with the clearest decrease in recovery and token efficiency; removing diagnostic ev-idence corresponds to a weaker degradation; removing anti-cheat or full-coverage evaluation is associated with accepting unsupported successes; and removing the cur-rent adaptive-scheduling thresholds produces no measur-able degradation on this cohort.

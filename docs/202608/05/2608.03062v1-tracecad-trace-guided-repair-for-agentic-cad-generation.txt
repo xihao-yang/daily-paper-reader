@@ -1,0 +1,624 @@
+Title: TraceCAD: Trace-Guided Repair for Agentic CAD Generation
+
+URL Source: https://arxiv.org/pdf/2608.03062v1
+
+Published Time: Wed, 05 Aug 2026 00:26:56 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# TraceCAD: Trace-Guided Repair for Agentic CAD Generation 
+
+# Fengxiao Fan ∗, Jingzhe Ni ∗, Fan Sang, Xiaolong Yin, Yu Liu, Ruofeng Tong, Min Tang, Peng Du †
+
+Zhejiang University, China dp@zju.edu.cn 
+
+Abstract 
+
+LLM-based CAD agents produce executable parametric pro-grams, but their correction loops may lose evidence about satisfied requirements, faulty operations, and prior repairs. We introduce TraceCAD, a recovery layer that links re-quested features, modeling steps, failure evidence, and can-didate outcomes as persistent state. TraceCAD diagnoses likely faulty operations, searches bounded edits in their de-pendency regions, validates candidates through execution and preservation checks, and retains successful and failed repair outcomes in reusable skill memory. On DeepCAD-derived benchmarks with 200-model ablations and a 1K-model com-parison, TraceCAD achieves competitive geometric quality in terms of IoU, Chamfer distance, and Hausdorff distance. Re-moving persistent state nearly halves recovery score; removing localized search more than doubles geometric regression and doubles code-agent invocations. Initializing the skill store on disjoint training models further reduces retries, token cost, and latency. These results demonstrate that persistent, local-ized, and reusable recovery improves final CAD quality and repair reliability. 
+
+# Introduction 
+
+Computer-aided design (CAD) generation is shifting from one-shot shape synthesis toward executable modeling. Re-cent systems produce editable construction programs from text, images, sketches, or point clouds (Willis et al. 2021; Wu, Xiao, and Zheng 2021; Xu et al. 2022; Khan et al. 2024; Li et al. 2025a; Govindarajan et al. 2026). Code-based meth-ods generate executable CAD scripts that can be rendered, inspected, and iteratively revised (Guan et al. 2025). A nearly correct program may still fail because of an in-correct API call, invalid parameter, unstable operation order, missing feature, or rendered mismatch. Agentic systems use execution logs, visual feedback, and CAD-specific tools to revise such outputs (Alrashedy et al. 2025; Mallis et al. 2025; Li et al. 2026; Zhou, Gupta, and Camba 2026; Zhou, Camba, and Company 2026; Barkley, Loghmani, and Barati Fari-mani 2026). When this evidence remains only in the current prompt, however, later attempts may not explicitly expose which requirements were satisfied, which operation failed, or which patch should inform future tasks. 
+
+> ∗
+
+These authors contributed equally. 
+
+> †
+
+Corresponding author. 
+
+CAD programs are structured around modeling opera-tions, and many failures are local even when their visual effects are global. Recovery should therefore identify a likely responsible step, restrict edits to nearby dependencies, and verify that previously correct features remain unchanged. Un-constrained regeneration can instead rewrite valid geometry and obscure why a repair worked. We propose TraceCAD, a persistent recovery layer for ex-ecutable CAD agents. It records feature status together with execution, visual, and repair evidence; diagnoses a likely faulty modeling step and evaluates bounded patches with preservation checks; and converts promoted trajectories into repair skills whose successful and failed reuse outcomes in-form later search. TraceCAD complements rather than re-places the underlying generator. Figure 1 illustrates the range of executable CAD models produced by TraceCAD, from individual mechanical parts to more complex multi-component mechanisms. Our contribu-tions are: 
+
+• We formulate persistent recovery state for CAD agents, keeping requirements, modeling steps, failures, and repair outcomes inspectable across the correction loop. 
+
+• We introduce localized repair search for executable CAD programs, combining step-level diagnosis, bounded edit regions, and execute-and-check promotion. 
+
+• We integrate repair-skill memory into the recovery loop and evaluate both final CAD quality and repair behav-ior, including recovery score, geometric regression, edit locality, and skill reuse. 
+
+# Related Work 
+
+This section reviews three areas related to our work: para-metric CAD generation, tool-augmented CAD agents, and program repair with agent memory. 
+
+## Parametric CAD Generation 
+
+Learning-based CAD generation commonly represents a model as a sequence of construction operations. Fusion 360 Gallery and DeepCAD established datasets and sequence models for editable histories (Willis et al. 2021; Wu, Xiao, and Zheng 2021). Later work improves sketch/extrusion structure, hierarchical priors, and boundary-representation generation (Xu et al. 2022, 2023; Guo et al. 2022; Xu et al. arXiv:2608.03062v1 [cs.AI] 4 Aug 2026 Figure 1: Representative CAD outputs produced by TraceCAD, spanning diverse mechanical parts and multi-component mechanisms. 2024). Image-, point-cloud-, and diffusion-based methods further extend structured CAD reconstruction (Ma et al. 2024; Zhang et al. 2025a; Li et al. 2025b; Chen et al. 2025). Text2CAD maps descriptions to sequential CAD pro-grams, while CAD-Llama and CADmium adapt language models for command generation (Khan et al. 2024; Li et al. 2025a; Govindarajan et al. 2026). CAD-Recode reconstructs code from point clouds, while CAD-Coder generates exe-cutable scripts from text (Rukhovich et al. 2025; Guan et al. 2025). These methods focus primarily on initial generation. TraceCAD instead studies how an agent represents and re-pairs residual failures after proposing a program. 
+
+## Agentic CAD Modeling 
+
+Tool-augmented CAD agents connect LLM reasoning to executable modeling and feedback. CADCodeVerify and CAD-Assistant use visual verification or CAD-specific tools to iteratively improve executable models (Alrashedy et al. 2025; Mallis et al. 2025). Seek-CAD, CADDesigner, and CADSmith study self-refinement, general-purpose agents, and programmatic geometric validation (Li et al. 2026; Fan et al. 2026; Barkley, Loghmani, and Barati Farimani 2026). Prompt2CAD and CADialogue support conversational gen-eration and refinement through textual, visual, or human feedback (Zhou, Gupta, and Camba 2026; Zhou, Camba, and Company 2026). FlexCAD and CADFusion further ex-plore controllable generation and visual feedback for CAD geometry (Zhang et al. 2025b; Wang et al. 2025). Recent systems extend this direction through iterative interaction, solver-grounded operation skills, and expert-derived indus-trial skills (Hu et al. 2026; Liu et al. 2026; Xu et al. 2026). These systems establish closed-loop CAD interaction. TraceCAD focuses on the complementary problem of rep-resenting recovery across attempts and tasks: it ties require-ments and failure evidence to local modeling steps, preserved features, candidate outcomes, and reusable repair skills. 
+
+## Program Repair and Agent Memory 
+
+Automated program repair localizes faults, generates patches, and validates them against tests (Le Goues et al. 2012; Liu et al. 2019; Xia, Wei, and Zhang 2023). LLM agents similarly use reasoning-action traces, tool observa-tions, and self-refinement (Yao et al. 2023; Madaan et al. 2023). CAD requires broader validation than compilation or unit tests: a patch must execute, produce a valid artifact, satisfy geometric intent, and preserve unrelated features. An executable CAD patch can still delete a requested fea-ture, while a global rewrite can discard valid construction history. TraceCAD adapts repair to structured design revision by coupling every attempt with step-level evidence, preser-vation checks, and reuse statistics. It is designed to make the recovery path local, inspectable, and reusable across tasks. 
+
+# Method 
+
+TraceCAD wraps an executable CAD agent with the recov-ery loop in Figure 2. It instruments generated code, records execution and visual evidence, diagnoses a likely faulty mod-eling step, evaluates local patches, and converts promoted repairs into reusable experience. The key abstraction is a persistent link between requested features, modeling steps, failure evidence, and candidate outcomes. Repair is represented as a local, evidence-backed edit rather than another generation attempt. Persistent records capture what must be preserved, which operation is sus-pected, which candidates were tested, and why a patch was promoted. Later decisions can therefore target the sus-pected operation without reconstructing correct geometry from prompt history. 
+
+## Problem Formulation 
+
+Let q be a CAD requirement, p a generated program, and 
+
+F = {(fj , z j )} the persistent feature state, where zj records the current lifecycle state of requested feature fj . Execution yields report e, artifacts a, visual feedback v, and step trace Figure 2: Overview of TraceCAD. Given a text or multimodal CAD requirement, the agent refines the request, generates executable modeling code, and evaluates the result through execution and visual feedback. When a failure remains, TraceCAD records requirement, execution, and visual evidence as persistent recovery state, uses it to diagnose the faulty modeling step, evaluates bounded local repairs, and converts promoted repair trajectories into reusable repair-skill memory. 
+
+T . A run succeeds when the program executes, exports the expected artifacts, and passes visual verification. Otherwise, TraceCAD searches for 
+
+c⋆ = arg max  
+
+> c∈B (C,d,R, K,β )
+
+S(c; q, p, F, e, a, v, T ), (1) where C is the set of proposed patches, diagnosis d identifies the likely faulty step, R bounds editable code, skill store K
+
+supplies prior repairs, and β limits search. The operator B
+
+restricts C to the diagnosed region and available budget. S
+
+ranks the remaining candidates by execution, exported arti-facts, absence of failed steps, edit locality, and visual score. Execution is mandatory, and available visual evidence must support the intended change without unintended damage. If no candidate passes, the system retains the current program and retries within budget before returning a failure report. 
+
+## Persistent Recovery State 
+
+The recovery record has two anchors. Feature state F repre-sents obligations such as bodies, patterns, edge treatments, and exports; each feature stores its lifecycle state, supporting evidence, related modeling scopes, and open questions. Step state aligns code with CAD intent by instrumenting feature-level regions:      
+
+> with cad_step("mounting_holes", intent="cut four corner mounting holes", step_type="hole_pattern"): ...
+
+Definition 1 (StepTrace) . For a program p decomposed into scopes {si}ni=1 , a StepTrace is the ordered trace 
+
+T = ⟨r1, . . . , r n⟩,
+
+where ri records a scope’s identity, intent, execution status, timing, and exception evidence. 
+
+Tracebacks thus identify modeling operations rather than only source lines. Export status, visual feedback, and can-didate outcomes update the same record. An open feature can point to its intended steps, while a failed step explains why the feature remains incomplete or unstable. This bidirec-tional link lets later repairs preserve verified features instead of reconstructing state from prompt history. 
+
+## Localized Repair Search 
+
+Execution failures often identify a failed CAD step directly; visual failures are attributed to candidate steps by the vision model using feature names, spatial descriptions, and recorded intents. The diagnosis records its evidence and a repair family (e.g., API misuse, invalid parameter, missing feature, opera-tion order, topology, export, or visual mismatch). Because geometry flows across operations, TraceCAD builds a dependency graph from variables defined and used by each step. For suspected step s, the initial repair region is 
+
+Rh(s) = {s} ∪ Upstream (s, h ), (2) where h is a small hop budget. Downstream consumers are checked after patching rather than automatically included, Figure 3: Repair-skill lifecycle. A failure trajectory is di-agnosed through bounded candidate evaluation; an eligible promoted trajectory may induce a repair skill, whose later reuse outcomes update its statistics. which prevents a shared base shape from making every edit global. Retrieved skills and progressively disclosed API docu-mentation guide candidate generation. Lightweight checks seed interface fixes; the LLM handles semantic edits such as adding a pattern or reordering operations. Each proposal includes its target scope and rationale and is preferably an ex-act text edit or single-step replacement; full-program repair is used only when a local expression is impossible. Candidates are evaluated as complete programs. Execu-tion and required export are hard constraints. Among ex-ecutable candidates, feature state and visual feedback test the intended semantics, while shape-delta evidence detects damage to salient unrelated geometry. The selector favors fewer changed CAD step scopes and promotes a patch only when execution, semantic, preservation, and locality evi-dence agree. This prevents “repairs” that merely delete a difficult feature or rewrite the design. 
+
+## Repair Skill Memory 
+
+Each promoted trajectory records the failed program, diag-nosis, attempted candidates, accepted patch, and promotion evidence. An eligible promoted trajectory may then induce a reusable skill: 
+
+k = ( σ, d, π, τ, ϵ, u ). (3) The fields separate when a skill applies from what it rec-ommends and how its reliability is assessed. Specifically, σ
+
+serves as the retrieval key by describing the circumstances of a failure, including its error terms, implicated step type, re-pair family, visual symptom, and local context. d abstracts the case-specific diagnosis into a transferable failure cause. Pol-icy π specifies how a candidate should be repaired and which constraints it must respect, while template τ instantiates that policy as a minimal reusable patch pattern. Evidence ϵ bun-dles the execution, artifact, visual, and shape-delta checks that justified promotion. Finally, u records retrieval and suc-cessful or failed reuse so that later ranking can favor reliable skills. Figure 3 summarizes the full lifecycle from failure di-agnosis and bounded candidate evaluation through patch pro-motion, skill induction, future retrieval, and reuse-statistics updates. At a new failure, the system retrieves skills using σ
+
+and the current step context, with u affecting their ranking. Reuse counts as successful only when a retrieved skill con-tributes to a promoted repair. Failed execution, wrong-region edits, preservation violations, and regressions are retained as negative evidence and reduce later ranking. Algorithm 1 summarizes one bounded repair invocation within the overall recovery loop. Recovery begins only after initial generation, so the framework can wrap different CAD generators without changing their decoding procedure. State and skills influence diagnosis and candidate generation, but every reused repair must still pass task-specific validation. 
+
+# System 
+
+## Agent Runtime 
+
+TraceCAD is implemented as a two-agent workflow around executable Python CAD programs. The main agent refines text, image, or mixed input into a task specification and ini-tializes feature coverage. This state tracks the lifecycle, ev-idence, and related modeling steps of requested structures. The code agent receives the specification and current fea-ture state, retrieves the required SimpleCADAPI documenta-tion (Fan et al. 2026), and generates a program instrumented with CAD step scopes. Before execution, a lightweight AST preflight detects com-mon interface errors, including missing exports, unsupported keyword arguments, and incorrect instrumentation imports. The executor then runs the program, records its StepTrace, and exports artifacts when possible. Renderable artifacts are passed to a vision model that estimates their semantic agree-ment with the request; this judgment is heuristic rather than a formal geometric guarantee. The execution report, trace, rendered feedback, and updated feature coverage return to the main agent. The run terminates after successful execution and export, provided that visual verification also passes. Otherwise, the code agent invokes Algorithm 1: it retrieves relevant skills, diagnoses a likely faulty step, builds a bounded dependency region, generates patches, and executes each candidate inde-pendently. This separation keeps requirement coverage and visual intent in the main-agent context while API signatures, code edits, traces, and candidate outcomes remain in the code-agent context. During multi-round interactions, the runtime retains recent history, compresses older tool output, and reintroduces the latest feature state, execution evidence, visual report, and patch outcomes before each decision. This keeps the active context compact and focused on the current recovery state, limiting token growth and distraction from stale or redundant tool output. 
+
+## Progressive API Grounding 
+
+SimpleCADAPI is a specialized modeling interface, so the agent is given explicit API grounding during generation and repair rather than relying on possible pretraining ex-posure. CADDesigner retrieves SimpleCADAPI documen-tation through RAGFlow and injects the retrieved passages into the agent context (Fan et al. 2026); TraceCAD instead Algorithm 1 TraceCAD repair loop after initial code generation 
+
+Require: Requirement q, generated program p, skill store K, budget β 
+
+> 1:
+
+Initialize feature state F 
+
+> 2:
+
+Run API preflight and execute p with CAD step instrumentation to obtain e, T, a  
+
+> 3:
+
+Run visual checks when artifacts are renderable to obtain feedback v; update F 
+
+> 4:
+
+if e succeeds, expected artifacts are exported, and visual verification passes then  
+
+> 5:
+
+return p 
+
+> 6:
+
+end if  
+
+> 7:
+
+Retrieve relevant skills Kr ← SearchSkills (K, F, e, v, T ) 
+
+> 8:
+
+Diagnose d ← Diagnose (q, p, F, e, v, T, Kr ) 
+
+> 9:
+
+Build repair region R ← RepairRegion (p, d, T ) 
+
+> 10:
+
+Generate and bound candidates Cb ← B (Generate (q, p, d, R, Kr ), d, R, K, β ) 
+
+> 11:
+
+for all c ∈ C b do  
+
+> 12:
+
+Apply and execute c; score execution, artifact export, feature repair, visual evidence, preservation, and locality  
+
+> 13:
+
+end for  
+
+> 14:
+
+Select the best promotable candidate c⋆, if one exists  
+
+> 15:
+
+if a promotable c⋆ exists then  
+
+> 16:
+
+Update F , record the trajectory, induce or update its skill, and return repaired program  
+
+> 17:
+
+else  
+
+> 18:
+
+return diagnosis and candidate outcomes  
+
+> 19:
+
+end if          
+
+> Record Runtime role Feature coverage Tracks feature lifecycle states, evidence, related steps, and open questions. StepTrace trace Stores step intent, status, exception, and timing. Execution/visual re-ports Capture program outcome, artifacts, views, and semantic feedback. Candidate reports Record edit scope, execution result, and rejection cause. Shape delta Checks intended edits and unintended geometric changes. Repair skills Store failure signatures, policies, tem-plates, evidence, and reuse statistics.
+
+Table 1: Structured evidence maintained during generation and repair. exposes the same API knowledge through a compact lo-cal skill. Common operations and usage constraints form its entry point, while detailed signatures, examples, and mod-eling notes are disclosed only when a requested operation needs them. The same mechanism grounds repair candidates, avoiding a long static API prompt while keeping local edits consistent with the evaluation backend. 
+
+## Runtime Evidence and Records 
+
+Each attempt produces the structured records summarized in Table 1, rather than only a conversational transcript. Ex-ecution reports identify the failed CAD step, exception, ex-ports, and timing. Visual reports describe missing features, distorted proportions, or incorrect layout. Candidate reports record the patch mode, changed scope, execution result, and rejection cause. Shape-delta inspection asks the vision model to compare rendered artifacts before and after repair and re-port intended and unintended changes; it does not constitute exact geometric equivalence testing. The promotion rule consumes these records jointly. Ex-ecution is mandatory, and ranking favors expected exports and edits near the diagnosed region. When renderings are available, a separate visual gate requires evidence of im-provement without reported unintended changes. Rejected candidates remain useful because they expose misdiagnosis, unsafe edit scope, or an unreliable retrieved skill. Together, these records make promotion decisions auditable and pre-serve the evidence needed to analyze recovery behavior. 
+
+# Experiments 
+
+## Setup 
+
+TraceCAD is implemented in Python 3.12 and evaluated on a 16-core Intel workstation. All variants share the Sim-pleCADAPI backend, executor, renderer, documentation, retry budget, and metric scripts. The main and code agents use gemini-3.1-pro-preview; visual feedback, candidate scor-ing, and shape-delta inspection use gemini-3-flash-preview. The main agent uses temperature 0.1, while code- and vision-model calls use task-specific temperatures from 0.0 to 0.2. The active context retains the four most recent interaction blocks, each comprising an assistant response and its as-sociated tool results, and compacts older tool output. Each bounded repair region evaluates at most three candidates spanning at most two target steps; the region starts at one upstream hop and may expand once to two hops. Skill re-trieval returns at most five matches based on signature, step context, and prior reuse outcomes. When visual evidence is available, promotion requires either a passing shape-delta judgment with no reported unintended changes or a visual-score improvement of at least five points. We construct benchmarks from DeepCAD (Wu, Xiao, and Zheng 2021), removing duplicates and keeping training and test models disjoint as in SkexGen (Xu et al. 2022). Following Geometry Repair Task and Efficiency Variant IoU ↑ CD ↓ HD ↓ Rec. ↑ Reg. ↓ Scope ↓ Reuse ↑ AVG Re ↓ Tokens (K) ↓ Latency (s) ↓                                                            
+
+> w/o persistent recovery state 0.3328 15.77 0.2146 0.4872 0.5299 0.4650 20.6% 2.3 137.9 384.6 w/o localized repair search 0.3452 17.00 0.2175 0.4865 0.7296 ––3.0 137.1 393.7 w/o visual feedback 0.3170 18.98 0.2204 0.7843 –0.4875 9.8% 1.4 78.2 209.2 w/o skill store 0.3533 15.26 0.2193 0.4583 0.4795 0.6250 –1.9 104.6 278.9 TraceCAD full (cold-start) 0.3639 10.92 0.2002 0.9167 0.3456 0.3899 31.7% 1.5 103.6 240.8 TraceCAD full (warm-up) 0.3627 10.19 0.1872 0.8438 0.3460 0.3056 42.9% 1.2 70.3 177.7
+
+Table 2: Ablation results on the 200-model subset, covering final geometry, repair behavior, and inference efficiency. A dash indicates that the required evidence is absent for that ablation, such as no promoted local candidate, no skill retrieval, or no post-export repair transition. the CADDesigner (Fan et al. 2026) protocol, we construct a stratified 200-model subset for ablations and a randomly sampled 1K-model subset for comparison. Each has a fixed-view rendering, from which we generate a shape-only text description with GPT-5.5 to avoid mismatches in the original text annotations. Test cases are used only for evaluation and are disjoint from any training models used to initialize repair skills. 
+
+## Metrics 
+
+We evaluate three complementary aspects of each method: final geometry, repair behavior, and task-level efficiency. For geometric fidelity, we report Intersection over Union (IoU), Chamfer Distance (CD), and Hausdorff Distance (HD). IoU measures volumetric overlap, and HD captures the worst-case point-set discrepancy. CD values in the tables are multiplied by 10 3 for readability. All meshes and sampled point clouds are normalized to fit within the canonical cube 
+
+[−0.5, 0.5] 3. For pairwise comparison, the generated shape is rigidly aligned to the reference shape using Iterative Clos-est Point (ICP). IoU is computed as volumetric BRep overlap after alignment. CD and HD are computed from 2048 points uniformly sampled from each mesh surface. For repair evaluation, Recovery Score (Rec.) weights a successful recovery by the inverse number of subsequent code-agent invocations and assigns an unrecovered failure zero. Regression (Reg.) measures reference-inconsistent ge-ometric change introduced by repair, including lost initially correct geometry and newly added erroneous geometry. Re-pair Scope Ratio (Scope) is the fraction of CAD step scopes modified by a promoted repair. Repair-Skill Reuse Precision (Reuse) is the fraction of retrieved skills contributing to pro-moted successful repairs. For task-level efficiency, Success Rate (SUC) requires a successful final task with exported STEP and STL artifacts within the retry budget. Average Retry Count (AVG Re) is the mean number of code-agent invocations before termina-tion, including the initial generation and later repair attempts. Token Cost (Tokens) measures total model tokens, and End-to-End Latency (Latency) measures elapsed time from task submission to termination.                     
+
+> Input IoU ↑CD ↓HD ↓SUC ↑AVG Re ↓
+> Text only 0.3639 10.92 0.2002 100.0% 1.5
+> Image only 0.3865 15.38 0.2108 100.0% 2.0 Text + Image 0.4020 10.02 0.1838 100.0% 2.2
+
+Table 3: Input-modality ablation on the 200-model subset. 
+
+## Ablations 
+
+We use ablations to separate the effects of recovery state, lo-calized repair search, visual feedback, and repair-skill reuse. The cold-start setting begins with an empty repair-skill store; eligible promoted trajectories may induce skills online, and those skills may be reused by later tasks in the same eval-uation run. The state ablation removes structured feature and step evidence; the search ablation removes bounded lo-cal candidate search and execute-and-promote selection; the skill ablation disables retrieval and induction. The visual-feedback ablation removes rendered semantic evidence from diagnosis and repair validation, isolating the contribution of visual agreement beyond executable CAD feedback. A warm-up variant initializes the store on 1K disjoint training models before evaluation. All variants use text-only input. Table 2 shows that the components play distinct roles. Warm-up primarily improves efficiency, while its higher Reuse and lower Scope suggest that transferred experience guides repairs toward smaller, more applicable edits. Persis-tent state and localized search are central to reliable recov-ery: removing either nearly halves Rec., and removing local search additionally produces the most repair attempts and the largest Reg., indicating that bounded candidate evaluation helps avoid broad, damaging revisions. The skill-store abla-tion yields the lowest Rec. and the broadest repair scope, sup-porting the value of retaining successful repair experience. Finally, removing visual feedback reduces cost but produces the weakest geometry, exposing a trade-off between early termination and faithful validation. 
+
+Input Modality Table 3 evaluates TraceCAD under differ-ent input modalities as an auxiliary ablation on the 200-model subset. Image-only input improves IoU over text-only input, suggesting that visual input helps recover global silhouette, proportions, and component layout, but its CD and HD are slightly worse because a single rendering can leave fine de-Method IoU ↑ CD ↓ HD ↓ SUC ↑                
+
+> Text2CAD 0.1141 51.46 0.3414 99.4% CADCodeVerify 0.3136 23.74 0.2341 95.3% CADDesigner 0.3610 19.55 0.1966 100.0%
+> TraceCAD full (cold-start) 0.3837 14.43 0.1872 100.0%
+
+Table 4: Comparison on the 1K-model test subset. 
+
+Figure 4: Qualitative results under identical prompts for a gear, vase, impeller, and screw. tails or hidden topology ambiguous. Text and image together give the best geometry, reaching 0.4020 IoU, 10.02 CD, and 0.1838 HD. This indicates that text identifies intended fea-tures and functions, while the image constrains their spatial arrangement. The multimodal gain comes with additional re-covery overhead, increasing AVG Re from 1.5 to 2.2, which suggests that stricter or ambiguous visual feedback can trig-ger extra repair attempts. 
+
+## Comparison with Existing Methods 
+
+We compare TraceCAD with three representative text-conditioned CAD generation methods on the 1K-model sub-set using the same evaluation scripts. Text2CAD (Khan et al. 2024) is a learning-based model that maps text to sequential CAD programs. CADCodeVerify (Alrashedy et al. 2025) is an agentic baseline that iteratively validates and revises gen-erated CAD code using visual-language feedback. CADDe-signer (Fan et al. 2026) is a general-purpose ReAct agent that combines requirement refinement, retrieval-grounded code generation, execution, and visual feedback. We reproduce all baselines under the same benchmark protocol; the two agen-tic baselines use the same backend model configuration as TraceCAD for a controlled comparison. Table 4 shows that TraceCAD full (cold-start) achieves the strongest overall geometric fidelity among the compared methods. Text2CAD remains highly executable but is less faithful in this abstract text-conditioned setting, while CAD-CodeVerify improves on Text2CAD but still trails TraceCAD geometrically. CADDesigner is the strongest baseline; both CADDesigner and TraceCAD successfully complete all eval-uated cases, while TraceCAD achieves higher geometric fi-delity. Sharing the evaluation protocol across methods and controlling the backend for the agentic baselines reduces these sources of variation and focuses the comparison on recovery design. Figure 4 provides representative visual examples behind the aggregate geometry scores. All three methods recover the intended part categories, but the baselines simplify some local construction details: CADCodeVerify produces block-like gear teeth and nearly straight impeller ribs, while CAD-Designer captures more of the curved geometry but shows less consistent feature proportions. TraceCAD more con-sistently preserves the prompt-specified local features, in-cluding the central gear bore, hollow flared vase opening, curved impeller blades connected by a continuous outer rim, and threaded shaft with a centered slot, while maintaining the global part structure. This pattern reflects TraceCAD’s stronger ability to preserve local CAD features and is consis-tent with its higher overall geometric fidelity. 
+
+# Discussion and Limitations 
+
+TraceCAD targets residual failures after initial generation, using persistent state, localized search, and skill memory to address API errors, kernel failures, missing features, ordering problems, and edit regressions. This framing exposes behavior hidden by final-shape met-rics. Recovery records distinguish fixing the intended defect from finding another executable program. The distinction matters in CAD because syntactically valid outputs can re-main semantically incomplete or lose editable construction history. Several limitations remain. Diagnosis depends on mean-ingful program structure, so poorly decomposed code makes step attribution ambiguous. Rendered feedback and shape-delta judgments are model-based semantic evidence rather than formal geometric proof. Sparse promoted trajectories can make skills overly specific. Moreover, online cold-start accumulation makes reuse sensitive to task order and parallel scheduling; held-out reuse should therefore be reported with its evaluation order and evidence coverage. Future work should recover step boundaries automatically, combine local and global repair policies, strengthen geomet-ric validators, and learn skill retrieval from broader repair histories. 
+
+# Conclusion 
+
+We introduced TraceCAD, a persistent recovery framework for agentic CAD generation. It records correction as in-spectable state, uses that state for localized repair search, and converts promoted repairs into reusable skills. The eval-uation measures both final CAD quality and the recovery process, including recovery quality, locality, geometric re-gression, and reuse. The contribution is recovery rather than one-shot genera-tion alone. Rejected candidates and failed skill reuse remain as negative evidence that can down-rank unreliable skills in later searches. The results suggest that improvements to CAD generators and validators can be complemented by explicit state for the failures that remain. References 
+
+Alrashedy, K.; Tambwekar, P.; Zaidi, Z. H.; Langwasser, M.; Xu, W.; and Gombolay, M. 2025. Generating CAD Code with Vision-Language Models for 3D Designs. In International Conference on Learning Representations .Barkley, J.; Loghmani, R.; and Barati Farimani, A. 2026. CADSmith: Multi-Agent CAD Generation with Program-matic Geometric Validation. arXiv:2603.26512. Chen, C.; Wei, J.; Chen, T.; Zhang, C.; Yang, X.; Zhang, S.; Yang, B.; Foo, C.-S.; Lin, G.; Huang, Q.; and Liu, F. 2025. CADCrafter: Generating Computer-Aided Design Models from Unconstrained Images. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition .Fan, F.; Ni, J.; Yin, X.; Wang, S.; Lu, X.; Zou, Q.; Tong, R.; Tang, M.; and Du, P. 2026. CADDesigner: Conceptual CAD Model Generation with a General-Purpose Agent. Computer-Aided Design , 198: 104087. Govindarajan, P.; Baldelli, D.; Pathak, J.; Fournier, Q.; and Chandar, S. 2026. CADmium: Fine-Tuning Code Language Models for Text-Driven Sequential CAD Design. Transac-tions on Machine Learning Research .Guan, Y.; Wang, X.; Xing, X.; Zhang, J.; Xu, D.; and Yu, Q. 2025. CAD-Coder: Text-to-CAD Generation with Chain-of-Thought and Geometric Reward. In Advances in Neural Information Processing Systems , volume 38. Guo, H.; Liu, S.; Pan, H.; Liu, Y.; Tong, X.; and Guo, B. 2022. ComplexGen: CAD Reconstruction by B-rep Chain Complex Generation. ACM Transactions on Graphics , 41(4): 1–18. Hu, T.; Ai, J.; Wen, L.; Li, X.; Zou, S.; Li, S.; Deng, N.; Cai, X.; Zhou, H.; Cai, P.; Fu, D.; Yang, Y.; Zhang, H.; Shi, B.; and Yang, X. 2026. IterCAD: An Iterative Multimodal Agent for Visually-Grounded CAD Generation and Editing. arXiv:2606.13368. Khan, M. S.; Sinha, S.; Sheikh, T. U.; Stricker, D.; Ali, S. A.; and Afzal, M. Z. 2024. Text2CAD: Generating Sequential CAD Designs from Beginner-to-Expert Level Text Prompts. In Advances in Neural Information Processing Systems , vol-ume 37, 7552–7579. Le Goues, C.; Nguyen, T.; Forrest, S.; and Weimer, W. 2012. GenProg: A Generic Method for Automatic Software Repair. 
+
+IEEE Transactions on Software Engineering , 38(1): 54–72. Li, J.; Ma, W.; Li, X.; Lou, Y.; Zhou, G.; and Zhou, X. 2025a. CAD-Llama: Leveraging Large Language Models for Computer-Aided Design Parametric 3D Model Generation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 18563–18573. Li, X.; Li, J.; Song, Y.; Lou, Y.; and Zhou, X. 2026. Seek-CAD: A Self-Refined Generative Modeling for 3D Paramet-ric CAD Using Local Inference via DeepSeek. In Interna-tional Conference on Learning Representations .Li, Y.; Lin, C.; Liu, Y.; Long, X.; Zhang, C.; Wang, N.; Li, X.; Wang, W.; and Guo, X. 2025b. CADDreamer: CAD Object Generation from Single-View Images. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition .Liu, F.; Zhou, H.; Hao, F.; and Yang, L. 2026. Embodied CAD: Solver-Grounded LLM Agents for Parametric B-Rep Assembly Modeling. arXiv:2606.31252. Liu, K.; Koyuncu, A.; Kim, D.; and Bissyande, T. F. 2019. TBar: Revisiting Template-Based Automated Program Re-pair. In Proceedings of the 28th ACM SIGSOFT International Symposium on Software Testing and Analysis , 31–42. Ma, W.; Chen, S.; Lou, Y.; Li, X.; and Zhou, X. 2024. Draw Step by Step: Reconstructing CAD Construction Sequences from Point Clouds via Multimodal Diffusion. In Proceed-ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 27154–27163. Madaan, A.; Tandon, N.; Gupta, P.; Hallinan, S.; Gao, L.; Wiegreffe, S.; Alon, U.; Dziri, N.; Prabhumoye, S.; Yang, Y.; et al. 2023. Self-Refine: Iterative Refinement with Self-Feedback. In Advances in Neural Information Processing Systems , volume 36, 46534–46594. Mallis, D.; Karadeniz, A. S.; Cavada, S.; Rukhovich, D.; Foteinopoulou, N.; Cherenkova, K.; Kacem, A.; and Aouada, D. 2025. CAD-Assistant: Tool-Augmented VLLMs as Generic CAD Task Solvers. In Proceedings of the IEEE/CVF International Conference on Computer Vision , 7284–7294. Rukhovich, D.; Dupont, E.; Mallis, D.; Cherenkova, K.; Kacem, A.; and Aouada, D. 2025. CAD-Recode: Reverse Engineering CAD Code from Point Clouds. In Proceedings of the IEEE/CVF International Conference on Computer Vi-sion , 9801–9811. Wang, R.; Yuan, Y.; Sun, S.; and Bian, J. 2025. Text-to-CAD Generation Through Infusing Visual Feedback in Large Lan-guage Models. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceed-ings of Machine Learning Research , 65326–65345. Willis, K. D. D.; Pu, Y.; Luo, J.; Chu, H.; Du, T.; Lambourne, J. G.; Solar-Lezama, A.; and Matusik, W. 2021. Fusion 360 Gallery: A Dataset and Environment for Programmatic CAD Construction from Human Design Sequences. ACM Transactions on Graphics , 40(4). Wu, R.; Xiao, C.; and Zheng, C. 2021. DeepCAD: A Deep Generative Network for Computer-Aided Design Models. In 
+
+Proceedings of the IEEE/CVF International Conference on Computer Vision , 6772–6782. Xia, C. S.; Wei, Y.; and Zhang, L. 2023. Automated Program Repair in the Era of Large Pre-Trained Language Models. In 
+
+Proceedings of the 45th IEEE/ACM International Confer-ence on Software Engineering , 1482–1494. Xu, X.; Jayaraman, P. K.; Lambourne, J. G.; Willis, K. D. D.; and Furukawa, Y. 2023. Hierarchical Neural Coding for Controllable CAD Model Generation. In Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research , 38443– 38461. Xu, X.; Lambourne, J.; Jayaraman, P.; Wang, Z.; Willis, K.; and Furukawa, Y. 2024. BrepGen: A B-rep Generative Dif-fusion Model with Structured Latent Geometry. ACM Trans-actions on Graphics , 43(4): 1–14. Xu, X.; Willis, K. D. D.; Lambourne, J. G.; Cheng, C.-Y.; Jayaraman, P. K.; and Furukawa, Y. 2022. SkexGen: Autoregressive Generation of CAD Construction Sequences with Disentangled Codebooks. In International Conference on Machine Learning , 24698–24724. Xu, Y.; Wu, Q.; Li, X.; Bin, Y.; Yao, Q.; Gu, J.; Wang, G.; Lv, W.; Yang, H.; Luo, W.; Xiang, J.; Chen, Y.; and Chen, S. 2026. ArtisanCAD: An Industrial-Level CAD Agent with Expert-Grounded Knowledge Distillation. arXiv:2607.05750. Yao, S.; Zhao, J.; Yu, D.; Du, N.; Shafran, I.; Narasimhan, K. R.; and Cao, Y. 2023. ReAct: Synergizing Reasoning and Acting in Language Models. In International Conference on Learning Representations .Zhang, A.; Jia, W.; Zou, Q.; Feng, Y.; Wei, X.; and Zhang, Y. 2025a. Diffusion-CAD: Controllable Diffusion Model for Generating Computer-Aided Design Models. IEEE Trans-actions on Visualization and Computer Graphics .Zhang, Z.; Sun, S.; Wang, W.; Cai, D.; and Bian, J. 2025b. FlexCAD: Unified and Versatile Controllable CAD Gener-ation with Fine-tuned Large Language Models. In Interna-tional Conference on Learning Representations .Zhou, J.; Camba, J. D.; and Company, P. 2026. CADialogue: A Multimodal LLM-Powered Conversational Assistant for Intuitive Parametric CAD Modeling. Computer-Aided De-sign , 191: 104006. Zhou, J.; Gupta, D.; and Camba, J. D. 2026. Prompt2CAD: A Lightweight LLM Framework for Conversational CAD Generation and Iterative Refinement. Procedia Computer Science , 277: 1663–1672. Supplementary Material 
+
+This supplementary material presents formal metric definitions, additional experiments on LLM backends and inference cost, and an end-to-end case study of generation and repair. 
+
+# A Evaluation Metric Definitions 
+
+We provide formal definitions for all metrics reported in the main paper. Let N denote the number of evaluated cases. For case 
+
+i, Gi and Si denote the generated and reference BRep solids, and Xi and Yi denote point clouds uniformly sampled from their surfaces. Before comparison, each shape is centered and isotropically scaled to fit within [−0.5, 0.5] 3. The generated shape is then rigidly aligned to the reference using Iterative Closest Point (ICP). After alignment, the generated shape is centered and isotropically rescaled once more to fit the same canonical cube before metric evaluation. Unless stated otherwise, each dataset-level result is the arithmetic mean of the corresponding per-case metric over cases with the required evidence. Throughout this section, | · | denotes the cardinality of a finite set. For ICP, we sample at most 2048 surface points from each shape and use point-to-point estimation with identity initialization and a maximum correspondence distance of 0.2 in normalized coordinates. We use the default Open3D convergence criteria. If alignment fails, the normalized prediction is retained with the identity transform rather than excluding the pair. 
+
+## A.1 Geometric Fidelity 
+
+BRep Intersection over Union (IoU). We compute IoU from the volumes of the aligned BRep solids, where Vol( ·) denotes enclosed volume: 
+
+IoU i = Vol( Gi ∩ Si)Vol( Gi ∪ Si) = Vol( Gi ∩ Si)Vol( Gi) + Vol( Si) − Vol( Gi ∩ Si) . (4) The CAD kernel computes the BRep intersection and evaluates its enclosed volume. Let VIoU denote the set of valid BRep pairs and NIoU = |V IoU |. We report N −1IoU 
+
+P 
+
+> i∈V IoU
+
+IoU i.
+
+Chamfer Distance (CD). For surface point sets Xi and Yi, the symmetric squared Chamfer distance is 
+
+CD i(Xi, Y i) = 1
+
+|Xi|
+
+X
+
+> x∈Xi
+
+min 
+
+> y∈Yi
+
+∥x − y∥22 + 1
+
+|Yi|
+
+X
+
+> y∈Yi
+
+min 
+
+> x∈Xi
+
+∥y − x∥22. (5) We sample 2048 points uniformly from each surface. Reported CD values are multiplied by 10 3 for readability. 
+
+Hausdorff Distance (HD). HD captures the largest bidirectional nearest-neighbor discrepancy: 
+
+HD i(Xi, Y i) = max 
+
+
+
+max 
+
+> x∈Xi
+
+min 
+
+> y∈Yi
+
+∥x − y∥2, max 
+
+> y∈Yi
+
+min 
+
+> x∈Xi
+
+∥y − x∥2
+
+
+
+. (6) CD measures average surface agreement, whereas HD exposes the most severe local discrepancy. 
+
+## A.2 Repair Behavior 
+
+Let F denote the cases whose initial generation fails. For i ∈ F , let ai ≥ 1 be the number of subsequent code-agent invocations, and let zi ∈ { 0, 1} indicate whether the case ultimately exports valid STEP and STL artifacts. 
+
+Recovery Score (Rec.). Rec. discounts successful recovery by the number of repair attempts and assigns zero to an unrecovered case: 
+
+Rec = 1
+
+|F| 
+
+X
+
+> i∈F
+
+zi
+
+ai
+
+. (7) A recovery completed by the first subsequent code-agent invocation therefore contributes 1, one completed by the second contributes 1/2, and an unrecovered failure contributes 0.
+
+Geometric Regression (Reg.). Reg. measures whether repair removes reference-consistent geometry or introduces new reference-inconsistent geometry. Let Bi, Ai, and Ri denote the occupied voxel sets of the pre-repair baseline, repaired output, and reference, respectively. We use the first successfully exported STEP model as the baseline when available; otherwise, we use the executable initial model. The normalization and reference alignment estimated for the repaired model are applied to both generated states. Alignment sampling uses a deterministic seed derived from the case identifier. With the default regression resolution of 64, occupied voxels are computed with pitch 2/64 in normalized coordinates. Correct Geometry Retention (CGR) and New False Geometry (NFG) are 
+
+CGR i = |Ai ∩ Bi ∩ Ri||Bi ∩ Ri| , NFG i = |Ai \ (Bi ∪ Ri)||Ri| . (8) The per-case regression score and its dataset mean are 
+
+Reg i = (1 − CGR i) + NFG i, Reg = 1
+
+|V Reg |
+
+X
+
+> i∈V Reg
+
+Reg i, (9) where VReg contains cases with distinct executable pre- and post-repair artifacts and nonempty reference-consistent baseline geometry. Lower values indicate less geometric regression. 
+
+Repair Scope Ratio (Scope). For promoted candidate j, let Cj contain the CAD step scopes changed relative to the initial program, and let Uj contain all CAD step identifiers appearing in either program. We define 
+
+Scope j = |Cj ||Uj | , Scope = 1
+
+|P| 
+
+X
+
+> j∈P
+
+Scope j , (10) where P denotes promoted repairs with both code snapshots available. Lower values indicate more localized edits. 
+
+Repair-Skill Reuse Precision (Reuse). Let nret denote the number of unique uses of retrieved skills across localized repair rounds, and let nprom denote the number of those uses associated with promoted repairs. Reuse precision is 
+
+Reuse = nprom 
+
+nret 
+
+. (11) The metric measures whether retrieved skills contribute to accepted repairs, rather than whether retrieval merely occurs. 
+
+## A.3 Task Success and Efficiency 
+
+Let qi ∈ { 0, 1} indicate whether case i terminates with valid STEP and STL artifacts. Let ci be its number of code-agent invocations, including the initial generation and subsequent repairs. 
+
+Success Rate (SUC). SUC is the fraction of evaluated cases that produce valid STEP and STL artifacts: 
+
+SUC = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+qi. (12) 
+
+Average Retry Count (AVG Re). AVG Re counts the initial generation as one invocation: 
+
+AVG Re = 1
+
+Nc
+
+X
+
+> i∈V c
+
+ci, (13) where Vc is the set of cases with invocation traces and Nc = |V c|.
+
+Tokens. Let uiℓ denote the total token usage recorded for model call ℓ in case i, and let Li denote the set of recorded model calls for that case. The average token cost is 
+
+Tokens = 1
+
+NT
+
+X
+
+> i∈V T
+
+X
+
+> ℓ∈L i
+
+uiℓ . (14) Here, VT is the set of cases with token traces and NT = |V T |. The total includes all recorded main-agent, code-agent, and vision-model calls, including cached-input and reasoning-token usage when available in the call metadata. Tables labeled “Tokens (K)” divide the result by 10 3.
+
+End-to-End Latency. Let tstart  
+
+> i
+
+and tend  
+
+> i
+
+denote task submission and termination times, respectively. Then 
+
+Latency = 1
+
+NL
+
+X
+
+> i∈V L
+
+ tend  
+
+> i
+
+− tstart 
+
+> i
+
+ . (15) Here, VL is the set of cases with valid timing records and NL = |V L|. Latency covers model calls, code execution, rendering, validation, and repair. 
+
+Metric availability. We do not impute metrics when their required evidence is absent. Scope requires a promoted candidate and paired code snapshots, Reuse requires a retrieved skill, and Reg. requires comparable pre- and post-repair geometry. A dash therefore denotes an unavailable measurement rather than zero. B Additional Experiments 
+
+## B.1 Benchmark Construction 
+
+We construct both evaluation subsets from the held-out DeepCAD test split. Deduplication follows the SkexGen preprocessing pipeline: each construction history is normalized, its sketch and extrusion sequences are quantized with six-bit precision, and the concatenated sequence is hashed with SHA-256. Histories with the same sketch–extrusion hash form a duplicate group, from which only the lexicographically smallest model identifier is retained. Models without a valid converted construction history are also excluded from the sampling pool. We measure model complexity by the number of sketch primitives plus extrusion operations. The fixed stratified 200-model subset contains 40 successfully converted models from each of five command-count intervals: 1–10, 11–20, 21–30, 31–40, and 41 or more. Within each stratum, cases are selected from a pseudorandom candidate ordering generated with seed 20260705. The 1K subset is obtained by shuffling the same eligible test pool with the same seed but without command-count balancing. When a selected history cannot be converted and exported as a nonempty STEP model, the next candidate in the seeded order is used. Each reference STEP model is rendered once using our fixed-view rendering script. The script samples up to 500 points from the solid interior and applies PCA to estimate three object-aligned axes. It then forms an oblique viewing direction from the first two principal axes at a fixed 30 ◦ azimuth and adds the third axis with weight √2/2. This construction exposes multiple principal extents while avoiding alignment with any single principal axis. The camera targets the bounding-box center and fits the complete model into a 496 ×473 viewport with an opaque white background. We use GPT-5.5 to produce the shape-only text description from this single image. This dataset rendering is distinct from the six-view runtime validation described below. 
+
+## B.2 Implementation Settings 
+
+All experiments use Python 3.12 and SimpleCADAPI 2.0.0b3. Unless an ablation explicitly changes a component, the imple-mentation settings in Table 5 are held fixed. We use retry budget as an umbrella term for these agent-level termination and repair limits, rather than as a separate scalar hyperparameter. Dataset sampling and replacement order use the fixed seed 20260705. The hosted LLM endpoints do not provide a consistently enforceable sampling seed, so generation remains stochastic under the fixed model and temperature settings. Each configuration is executed once per selected case, and the reported aggregates are computed across cases.            
+
+> Setting Value
+> CAD environment Python 3.12; SimpleCADAPI 2.0.0b3. Agent step limits At most 30 main-agent tool steps and 20 internal Code Agent steps per invocation. Repair limits At most three deterministic fast-repair attempts and two complex-repair invocations per Code Agent call. Bounded search evaluates at most three candidates over at most two target steps; its dependency region starts at one upstream hop and may expand once to two hops. Execution and stopping Each program execution has a 180-second timeout. The main loop terminates after five consec-utive unsuccessful repair evaluations or five consecutive visual-feedback failures. Validation rendering Six orthographic views at 512 ×512 pixels, arranged in a 3×2grid with bounds-adaptive framing. Context management Four recent interaction blocks, each comprising an assistant response and its associated tool results, are retained verbatim; older blocks are compacted. Tool context and execution-trace previews are capped at 4,000 and 1,200 characters, respectively.
+
+Table 5: Common implementation settings and retry-budget limits. 
+
+## B.3 Effect of the LLM Backend 
+
+We evaluate the sensitivity of TraceCAD to the underlying LLM by substituting the backend used for the main-agent, code-agent, and vision-model roles while keeping the benchmark, SimpleCADAPI environment, retry budget, and metric implementation fixed. Each backend is evaluated on the same 200 cases used for the main ablations. The three backends are comparably capable general-purpose LLMs from different model families. Gemini-3.1-Pro-Preview is used for the main-paper results, while GPT-5.4 and Claude-Sonnet-4.6 test whether the findings transfer to other model families at a similar capability level.                             
+
+> LLM Backend IoU ↑CD ↓HD ↓SUC ↑AVG Re ↓Tokens (K) ↓Latency (s) ↓
+> GPT-5.4 0.3605 11.30 0.1882 100.0% 1.3 82.0 223.6
+> Claude-Sonnet-4.6 0.3596 12.09 0.1826 100.0% 1.7 100.6 297.7 Gemini-3.1-Pro-Preview 0.3639 10.92 0.2002 100.0% 1.5 103.6 240.8
+
+Table 6: Effect of the LLM backend on the 200-model subset. Table 6 shows that the LLM backend affects both geometry and inference efficiency, but the overall variation among these similarly capable models remains limited. All three backends reach 100.0% success, and their IoU values span only 0.0043. Gemini-3.1-Pro-Preview achieves the best IoU (0.3639) and CD (10.92), whereas Claude-Sonnet-4.6 obtains the lowest HD (0.1826). GPT-5.4 requires the fewest code-agent invocations and has the lowest token cost and latency, while all three backends preserve similar geometric fidelity. Backend choice therefore has a measurable effect, particularly on cost, but the limited variation suggests that TraceCAD does not depend strongly on a particular model family at this capability level. 
+
+## B.4 Inference-Cost Comparison 
+
+We compare four agent configurations on the same 200 cases, using GPT-5.4 for all model calls. They share the CAD backend, hardware, and artifact checks, and differ in agent organization and knowledge access. 
+
+• Single agent performs planning, API selection, code generation, execution diagnosis, and repair within one agent history. It retains the local API skill but removes the code-agent boundary, isolating the effect of role separation. 
+
+• RAGFlow knowledge injection replaces the compact local API skill with documents retrieved from RAGFlow. This variant evaluates the cost of repeatedly retrieving and injecting API documentation instead of using the compact local skill. 
+
+• TraceCAD full uses main/code-agent separation, a local API skill, persistent recovery state, and bounded localized repair. 
+
+• CADDesigner uses its RAGFlow-based knowledge retrieval and is reproduced with the same GPT-5.4 backend and evaluation environment as an external agentic baseline. For the RAGFlow-based configurations, retrieval first considers 30 candidate chunks and returns at most three results per query. We use a page size of 33, a similarity threshold of 0.2, and a vector-similarity weight of 0.6. No additional document-count cap is applied after mapping retrieved chunks back to their source documents. For each configuration, token usage is the mean total token count per case, and latency is the mean end-to-end wall-clock time in seconds. Both statistics are computed over all 200 cases rather than only successful cases. Figure 5 compares the resulting token usage and latency. 
+
+Figure 5: Average token usage and end-to-end latency on the 200-model subset. Each metric is normalized independently by its maximum; bar labels report the original values in thousands of tokens and seconds. All configurations use GPT-5.4. The single-agent configuration retains planning, documentation, execution, and repair evidence throughout one long-lived context. RAGFlow supplies API documentation through retrieval but may inject larger passages at several generation steps, while CADDesigner relies on repeated interaction between its primary agent and tools. In contrast, TraceCAD delegates code-local work to a bounded code agent, retrieves only the relevant API skill content, preserves a compact recovery state, and executes candidates within a local repair region. TraceCAD full reduces mean token usage by 30.1% relative to the single-agent variant and by 55.4% relative to RAGFlow knowledge injection; the corresponding latency reductions are 24.3% and 41.8%. Relative to CADDesigner, the token reduction is much larger (88.4%) than the latency reduction (14.3%). This smaller latency margin is expected because TraceCAD performs persistent recovery, repeated artifact execution, rendering, and stricter visual validation after code generation. These operations add wall-clock time without proportionally expanding the language-model context. Thus, part of the time saved by compact local skills is spent on validation and repair. 
+
+## B.5 Paired Statistical Analysis 
+
+We complement the reported means with two-sided paired Wilcoxon signed-rank tests over cases with finite paired measurements. Paired differences are oriented so that positive values favor TraceCAD: for IoU they are computed as TraceCAD minus the baseline, whereas for distance and cost metrics they are computed as the baseline minus TraceCAD. We report Holm-adjusted p-values together with matched-pairs rank-biserial effect sizes rrb . Holm correction is applied across all nine geometry comparisons and, separately, across all six inference-cost comparisons.                 
+
+> Baseline IoU CD (×10 3)HD
+> CADDesigner 0.7884 (0 .164) 0.4352 (0 .293) 0.7884 (0 .154)
+> CADCodeVerify 0.3245 (0 .359) 0.0550 (0 .485) 0.4472 (0 .275)
+> Text2CAD 1.15 ×10 −5(0 .835) 4.56 ×10 −7(0 .880) 8.45 ×10 −6(0 .812)
+
+Table 7: Paired geometry comparisons. Each entry reports the Holm-adjusted p-value followed by rrb in parentheses; positive effect sizes favor TraceCAD. Table 7 shows that the improvement over Text2CAD is consistent across all three geometry metrics: the Holm-adjusted 
+
+p-values remain significant, and the paired effect sizes are large. The differences from CADDesigner are not significant, which is consistent with the close aggregate values in the main comparison and indicates comparable geometric fidelity. For CADCodeVerify, CD shows the largest paired effect among the three geometry metrics, but it does not remain significant after correction across the tested geometry family.               
+
+> Comparator Tokens Latency
+> Single agent 0.0180 (0 .468) 0.0020 (0 .598)
+> RAGFlow 5.82 ×10 −9(0 .944) 4.17 ×10 −8(0 .910)
+> CADDesigner 1.09 ×10 −11 (1 .000) 0.0498 (0 .356)
+
+Table 8: Paired inference-cost comparisons. Each entry reports the Holm-adjusted p-value followed by rrb in parentheses; positive effect sizes indicate lower cost for TraceCAD full. The cost results in Table 8 support the aggregate comparison: TraceCAD full significantly reduces both token usage and latency relative to the single-agent and RAGFlow variants. Relative to CADDesigner, the token reduction is uniform and large, whereas the latency reduction is smaller and less consistent. This distinction agrees with the earlier observation that some model-side savings are offset by execution, validation, and repair. 
+
+# C End-to-End Generation and Repair 
+
+We illustrate the complete workflow using a geared electric motor. The reference image depicts a stepped cylindrical housing, top terminal box, faceted reduction gearbox, slotted output flange, splined shaft, cable-entry bosses, and service plugs. The user provides this image with the concise instruction: 
+
+Create a geared electric motor with a cylindrical motor body, a top terminal box, a polygonal reduction gearbox, a slotted circular output flange, and a projecting stepped shaft. 
+
+This case traces requirement refinement, feature tracking, API grounding, localized repair, and final visual validation. 
+
+## C.1 Refined Requirements 
+
+Image-conditioned refinement converts the short request into the operational specification in Table 9. The dimensions are those used by the final validated program. Feature Operational specification 
+
+Reference frame Model the coaxial assembly along the global X-axis, with the output shaft pointing toward negative X and the terminal box above the motor along positive Z. Motor housing Create a 100-mm-diameter, 190-mm-long cylindrical barrel with stepped front and rear closures, conical transition bands, and two shallow circumferential detail bands. Reduction gearbox Build a short, bulky octagonal housing approximately 150 mm across, followed by a lofted transition toward the motor body. Output flange Add a circular flange of radius 85 mm and cut six uniformly distributed open radial slots through it. Output shaft Construct a central boss, stepped shaft base, cylindrical shaft blank, reduced tip, and ten longitudinal spline grooves. Terminal enclosure Form a rounded rectangular neck, box, rim, and lid; add four lid fasteners and three visible cable-entry bosses with recessed openings. Service details Add separate top and side gearbox service plugs with low-profile caps, preserving their attach-ment to the common housing. Deliverables Produce executable model.py , STEP and STL files, a CAD step trace, and visual verification against the reference image. 
+
+Table 9: Refined requirements for the geared electric motor. 
+
+## C.2 Feature Coverage 
+
+The persistent feature tracker initializes eight requested feature groups. Table 10 consolidates them into seven presentation rows by combining evidence from the promoted program, successful CAD step trace, and final visual report. The final program executes twelve CAD step scopes. 
+
+Feature Related CAD step Consolidated evidence State 
+
+Motor housing motor_body Successful execution; barrel and stepped closures visible in multiple views Verified Gearbox gearbox_housing Octagonal housing and tapered transition execute successfully and are visually present Verified Slotted flange output_flange ,
+
+flange_slot_cut 
+
+Six evenly distributed open radial slots are visible Verified Stepped shaft output_shaft ,
+
+spline_groove_cut 
+
+The associated steps execute successfully; the raised boss, projecting shaft, reduced tip, and ten grooves are visible Verified Terminal box terminal_box ,
+
+cable_entry_bosses ,
+
+cable_opening_cut 
+
+Rounded enclosure, lid fasteners, and three recessed side openings are visible Verified Service plugs gearbox_plugs Initially failed; the promoted local repair completes without a failed CAD step Verified Assembly and export assembly , export_model One final assembly is produced; STEP and STL are both verified Verified 
+
+Table 10: Feature coverage and evidence for the geared electric motor. 
+
+## C.3 Skill Organization and API Grounding 
+
+The SimpleCADAPI skill organizes documentation hierarchically rather than as a flat signature list. SKILL.md defines global modeling rules and the retrieval order, the references directory contains package maps and reusable workflows, and separate pages document individual APIs and core types. Listing 1 shows the portion relevant to this case. Listing 1: Organization of the SimpleCADAPI documentation skill.                                             
+
+> skills/simplecadapi/ |--SKILL.md |Global rules, retrieval order, and modeling discipline ‘--references/ |--SDK_OVERVIEW.md |Package-level map and public concepts |--MODELING_WORKFLOWS.md |Reusable construction and validation workflows ‘--docs/ |--api/README.md |Index of public API pages |--api/union_rsolid.md |Contract, parameters, failure behavior, and example ‘--core/solid.md Semantics of the Solid type returned by the API
+
+The agent first reads the skill-level rules and API index, then retrieves the page for the required operation. For union_rsolid ,that page states that the input may contain individual solids or nested solid sequences, but the operation must return exactly one 
+
+Solid . It also documents the clean , glue , and optional tol parameters, together with the failure condition for disconnected inputs. Listing 2 shows how the promoted program applies this contract. The spatially separated service-plug components remain in a sequence until final assembly. At that point, each component intersects the common gearbox body, allowing the complete input to form one connected solid. Listing 2: Concrete use of the union_rsolid contract in the promoted repair.                   
+
+> 1gearbox_plugs = [
+> 2top_plug_stem,
+> 3top_plug_cap,
+> 4side_plug_stem,
+> 5side_plug_cap,
+> 6]
+> 78final_model = union_rsolid(
+> 9motor_body,
+> 10 gearbox_body,
+> 11 slotted_output_flange,
+> 12 shaft_assembly,
+> 13 finished_terminal_box,
+> 14 gearbox_plugs,
+> 15 tol=0.1,
+> 16 glue=False,
+> 17 )
+
+This organization provides both the global single-solid rule and the local parameter and failure semantics required for repair, without injecting the full SDK documentation into the model context. 
+
+## C.4 Failure Localization and Localized Repair 
+
+The initial program fails at gearbox_plugs before export. It directly fuses the spatially separated top and side plug groups, causing the Boolean kernel to return two solids and violate the one-solid contract of union_rsolid . The execution trace localizes the failed step and operation without implicating the motor, flange, shaft, or terminal-box code. After three deterministic fast-repair attempts fail, bounded search evaluates the two candidates in Table 11. C1 is rejected before execution because its replacement lacks a valid gearbox_plugs step block. C2 makes a 19-line local edit that defers the disconnected union until final assembly. It executes without a failed CAD step, exports valid STEP and STL artifacts, and is promoted. Candidate Patch Exec. Artifacts Decision         
+
+> C1 Invalid step replacement Not run 0Reject C2 Deferred Boolean union Success 3Promote
+
+Table 11: Local candidates evaluated for gearbox_plugs .Because the failure occurs before the initial program exports a valid STL, no faithful pre-repair rendering exists. Figure 6 therefore places the localized execution evidence and promoted patch between the input and final output. 
+
+Figure 6: Image-conditioned generation and localized repair of the geared electric motor: (a) conditioning sketch, (b) failure localized to gearbox_plugs and the promoted deferred-union patch, and (c) the validated output. After promotion, the final visual verifier accepts the model with 0.94 confidence. It confirms the elongated motor body, faceted gearbox, six-slot flange, stepped splined shaft, top terminal box, cable-entry openings, and coaxial alignment, and reports no missing feature or obvious geometric defect. 
+
+## C.5 Repair Outcome 
+
+This run does not induce a repair skill. The trajectory nevertheless records the repair family deferred_boolean_union :disconnected detail groups remain separate until they can be merged with a common intersecting parent during assembly. We distinguish this observed repair pattern from a persisted reusable skill. 
+
+## C.6 Example of an Induced Repair Skill 
+
+A separate foot-mounted electric-motor run illustrates skill induction. The run completed without an execution error and produced an STL file, but downstream rendering found no valid triangles or plottable vertices. After the export path was repaired and the result passed execution and visual checks, TraceCAD induced the skill repair_empty_stl_from_cad_ assembly_export . Table 12 summarizes the persisted record.         
+
+> Field Persisted content
+> Failure signature Nominally successful export_model step, but the STL contains no renderable vertices or triangles. Diagnosis Artifact existence and a zero process return code do not establish successful mesh export; an assembly or container may not have been triangulated into usable geometry. Repair policy Collect valid visible solids, triangulate them explicitly, combine only nonempty meshes, and reopen the STL to verify its size, vertex and triangle counts, and finite bounds. Success evidence The BRep exports remain valid, while the repaired STL is nonempty and renders as a coherent motor in six views. Reusable context Multi-solid or assembly-like CAD models whose BRep export succeeds but whose assembly-level STL is empty.
+
+Table 12: Persisted fields of an induced export-repair skill. The record separates applicability, diagnosis, repair policy, and validation evidence. This example is independent of the geared-motor case: the latter records a useful repair pattern but does not itself induce a skill. 
+
+## C.7 Final Validated Program 
+
+The promoted program contains twelve CAD step scopes that map to the coverage entries in Table 10. It exports the final STEP and STL models and passes the final visual verification. The full program listing is omitted here for concision. 
+
+## C.8 Mapping to FreeCAD 
+
+A conversion script maps the validated sequence of SimpleCADAPI operations to a FreeCAD-compatible Python macro. Executing the macro reconstructs the model in FreeCAD for parameter inspection, downstream editing, and export. This post-evaluation conversion does not alter the geometry used to compute the reported metrics. Figure 7 shows the resulting editable FreeCAD model and feature hierarchy. 
+
+Figure 7: The validated geared-motor model reconstructed in FreeCAD. Although collapsed in the screenshot, the tree at left retains the complete hierarchy of mapped features for downstream inspection and editing.
