@@ -1,0 +1,690 @@
+Title: ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation
+
+URL Source: https://arxiv.org/pdf/2608.04439v1
+
+Published Time: Thu, 06 Aug 2026 00:28:45 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation 
+
+# Yiru Dong 
+
+Beihang University Beijing, China yrdong@buaa.edu.cn 
+
+# Richong Zhang 
+
+Beihang University Beijing, China zhangrichong@buaa.edu.cn 
+
+# Fanshuang Kong ✉
+
+Beihang University Beijing, China kongfs@buaa.edu.cn 
+
+# Si Chen 
+
+Beihang University Beijing, China chen.si@buaa.edu.cn 
+
+## Abstract 
+
+Large language models (LLMs) have made notable progress in code generation, but they still struggle on challenging tasks that require sophisticated algorithms or complex implementations. Recent meth-ods increasingly use code execution as feedback, especially in self-correction pipelines that construct verification signals from gener-ated code. However, these pipelines often depend on supervision signals whose reliability is unknown, which can introduce mislead-ing feedback, unnecessary revisions, and incorrect final answers. To address this issue, we propose ExeCRE, an Exe cution-Consistency guided code Reliability Estimation framework. Instead of judging candidate code by tests or LLM feedback, ExeCRE estimates code reliability by statistically analyzing consistency patterns in execu-tion outputs over a large number of randomly generated inputs. It collects execution outputs over generated inputs, projects them into consistency signals, and applies Dawid–Skene model to infer latent code reliability. We integrate ExeCRE into self-correction for code generation. Experiments show that ExeCRE consistently improves both effectiveness and stability, while substantially reducing mis-leading correction signals. Under GPT-5.2 on LiveCodeBench, the average number of misleading feedback cases on already correct code drops from 113.2 with a representative self-correction baseline to 14.0 with ExeCRE. As an additional study, we apply the same re-liability estimation strategy to code-based mathematical reasoning and observe similar benefits. These results suggest that ExeCRE enables more reliable use of generated code in execution-based pipelines. 
+
+## CCS Concepts 
+
+• Software and its engineering → Automatic programming ;
+
+Software testing and debugging .
+
+## Keywords 
+
+Large Language Models, Code Generation, Self-Correction, Relia-bility Estimation  
+
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> ASE ’26, Munich, Germany
+> ©2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2882-2/2026/10 https://doi.org/10.1145/3832783.3837445
+
+ACM Reference Format: 
+
+Yiru Dong, Richong Zhang, Fanshuang Kong, and Si Chen. 2026. ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation. In Proceedings of the 41st IEEE/ACM International Con-ference on Automated Software Engineering (ASE ’26), October 12–16, 2026, Munich, Germany. ACM, New York, NY, USA, 13 pages. https://doi.org/10. 1145/3832783.3837445 
+
+## 1 Introduction 
+
+Large language models (LLMs) have achieved remarkable success in code generation, particularly on elementary programming tasks [ 1,21 , 36 – 38 ]. However, their performance degrades on more chal-lenging problems that require sophisticated algorithms or complex implementation details [ 18 , 23 , 27 , 29 ]. To mitigate this limitation, a prominent and increasingly effective research paradigm is self-correction, where models iteratively refine generated code by lever-aging execution-based feedback signals [5, 39, 45, 53]. A fundamental prerequisite for effective self-correction is re-liable verification. These verification signals determine whether candidate solutions should be revised and therefore directly shape the refinement trajectory. One common way to obtain such verifica-tion signals is through execution-based tests. Recent studies suggest that code execution often provides more informative feedback than LLM-based judgments [ 5 , 9, 35 , 56 ]. They also show that reference codes, although often brute-force and inefficient, can still be used to construct such tests [54]. However, in practice, reference codes themselves may be unre-liable: they can contain subtle bugs, cover only partial cases, or disagree with each other on complex inputs [ 54 ]. Using unreliable reference codes to construct verification signals can mislead the self-correction process, leading to correct codes being unneces-sarily revised or incorrect codes being reinforced. To improve the reliability of LLM-generated results, prior work has explored con-sistency as an effective signal [ 2, 24 , 46 , 49 –51 ]. In code generation, consistency has been used to favor solutions that pass more tests or exhibit more consistent behavior across different counterparts. Instead of relying on generated tests, our proposed ExeCRE directly analyzes large-scale execution outputs and uses a statistical method to identify unreliable reference codes. This reliability-aware design substantially reduces misleading supervision during self-correction. On LiveCodeBench, ExeCRE substantially reduces misleading feed-back on already correct code, as shown in Table 6. arXiv:2608.04439v1 [cs.SE] 5 Aug 2026 ASE ’26, October 12–16, 2026, Munich, Germany Yiru Dong, Richong Zhang, Fanshuang Kong, and Si Chen 
+
+Figure 1: Self-correction pipelines with and without ExeCRE. ExeCRE filters unreliable reference codes before they pro-duce misleading verification signals. 
+
+As illustrated in Figure 1, reference code reliability is a critical yet underexplored bottleneck in execution-guided self-correction. Existing approaches [ 53 , 54 ] typically assume reference codes or tests to be correct, or rely on language models to judge correctness, leaving the reliability of supervision signals largely unquantified. Representative methods for self-correction and verification dif-fer substantially in how feedback is obtained, how correctness is judged, and what information is used to construct such signals. As summarized in Table 1, existing approaches either rely on language models as judges, use relatively small numbers of generated tests, or assume the reliability of reference codes without explicitly esti-mating it. This design space motivates a more direct treatment of reference code reliability. 
+
+Table 1: Comparison of representative self-correction and verification approaches.                           
+
+> Method Feedback Source Judging Basis Information Source Scale ConTested Test LLM/human LLM-gen. tests ∼10 Oracle-Guided LLM LLM Symbolic inputs ∼1000 B4 Test Statistical LLM-gen. tests ∼100 ALGO Test Ref. code LLM rand. inputs ∼30 TextGrad LLM LLM ––ExeCRE Test Statistical Parsed rand. inputs ∼1000
+
+To address this issue, we propose an Exe cution-Consistency guided reference code Reliability Estimation framework, named ExeCRE, which explicitly models and infers the reliability of ref-erence codes and leverages only trustworthy supervision for self-correction. Specifically, ExeCRE operates in three stages. First, we introduce a schema-driven test input generation mechanism that enforces structural and semantic constraints, enabling the auto-matic generation of a large number of valid and diverse test inputs. Second, motivated by prior observations that brute-force imple-mentations, while inefficient, tend to be highly accurate [ 54 ], we execute multiple candidate reference codes on these inputs and analyze their execution consistency. We then employ Dawid–Skene model [ 8 ] to infer the latent error-rates of reference codes from their consistency patterns, without requiring ground-truth labels. Finally, we select the reference code with the highest inferred reli-ability and use the tests constructed from it as trusted execution judges to guide iterative self-correction. By explicitly filtering unre-liable supervision signals, ExeCRE reduces unnecessary or harmful revisions, avoids cascading errors during refinement, and enables more stable and effective code generation. We summarize our contributions as follows: 
+
+• We propose ExeCRE, an Exe cution-Consistency guided ref-erence code Reliability Estimation framework for modeling the reliability of codes from execution outputs. 
+
+• We integrate ExeCRE into execution-guided self-correction by selecting or filtering reference codes before they are used to construct verification signals, thereby reducing the risk of misleading supervision. 
+
+• Experiments on 182 LiveCodeBench problems, together with a small applicability study on GSM8K, show that ExeCRE improves self-correction effectiveness and stability while substantially reducing unnecessary correction signals. 
+
+## 2 Preliminary 
+
+Given a problem instance 𝑃 , ExeCRE collects multiple candidate codes for the same problem and analyzes their execution outputs on a set of constructed inputs. Formally, let 𝐶 𝑃 = {𝐶 1, 𝐶 2, . . . , 𝐶 |𝐶 𝑃 | }
+
+denote the set of candidate codes generated for 𝑃 , and let 𝐼 𝑃 =
+
+{𝐼 1, 𝐼 2, . . . , 𝐼 |𝐼 𝑃 | } denote the set of execution inputs. Running candi-date code 𝐶 𝑗 on input 𝐼 𝑖 produces an execution output 𝑂 𝑖 𝑗 , and all outputs form an execution matrix 𝑂 = [𝑂 𝑖 𝑗 ].Our goal is not to formally verify full semantic correctness, but to estimate whether a candidate code is reliable enough for subsequent use. The intuition is that more reliable codes tend to exhibit more stable agreement patterns across diverse inputs, while unreliable ones are more likely to behave inconsistently. We refer to this signal as execution consistency . Based on this signal, ExeCRE assigns each candidate code 𝐶 𝑗 a reliability score 𝛼 𝑗 ∈ [ 0, 1].Our formulation is related to Dawid–Skene (DS), a classical EM-based method for aggregating noisy annotations. In the standard DS setting, multiple annotators provide labels for the same item, and the model estimates both latent true labels and annotator-specific error-rates. In our setting, execution inputs correspond to items, candidate codes correspond to annotators, and the observed signals are derived from execution consistency rather than raw execution outputs. This view allows us to estimate the reliability of code from execution behavior. 
+
+## 3 ExeCRE 
+
+ExeCRE estimates the reliability of candidate reference codes be-fore they are used to generate verification signals. Given multiple reference code candidates for the same problem, it constructs di-verse execution inputs, collects execution outputs, projects them into binary consistency signals, and applies a Dawid–Skene based ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+estimator to infer candidate reliability. The resulting scores are used to either select a trusted reference code or trigger fallback when no candidate is sufficiently reliable. 
+
+## 3.1 Execution Input Construction for Code Generation 
+
+ExeCRE constructs diverse execution inputs to expose behavioral differences among candidate codes. Unlike prior methods [ 2, 10 , 45 ]that rely on repeated LLM-based test generation or direct parameter parsing, ExeCRE prompts an LLM once to extract an input schema and then uses rule-based parsing to support both stdin-style and function-style inputs. This design reduces LLM cost while pre-serving broad input-format coverage and generating behaviorally discriminative inputs. We prompt an LLM to extract a structured input schema from the problem description. The schema captures the input format, variable types, value ranges, and dependency relations among vari-ables. The prompt specifies the target JSON format, explains the semantics of each field, and provides a few-shot examples to guide the extraction process. The full prompt is included in the publicly archived materials. As illustrated in Listing 1, input variables may exhibit explicit ordering constraints. For example, the schema may specify 𝑟 𝑖 ∈ [ 𝑙 𝑖 , 10 9], meaning that 𝑙 𝑖 must be generated before 𝑟 𝑖 .To capture such relations, we extract a variable dependency graph from the schema, where each node corresponds to a variable and each directed edge 𝑥 → 𝑦 indicates that the valid range or con-straints of 𝑦 depend on the value of 𝑥 . The topological ordering of this graph then defines a valid generation order.         
+
+> {"parameters": { "intervals": { "type": "List", "range": [1, 50000], "data_type": { "l_i": {"type": "int", "range": [1, 1000000000]}, "r_i": {"type": "int", "range": ["$l_i", 1000000000]}, "weight_i": {"type": "int", "range": [1, 1000000000]} }}}, "output_order" : [ {"name": "intervals", "separator": "\n"} ]}
+
+Listing 1: Example schema for structured input generation. 
+
+Following this order, we sequentially instantiate variables by randomly sampling values within their specified types and con-straint ranges, conditioned on previously instantiated variables. Symbolic bounds are resolved against the current variable context before sampling. For structured objects such as lists, groups, and matrices, the generator first resolves their size parameters and then recursively instantiates their elements. To keep generation valid and computationally manageable, the resolved ranges are further intersected with predefined runtime limits on numeric values and collection sizes. In our implementation, the sizes of List, Group, and Matrix objects are additionally bounded at 20, which reduces execution overhead while remaining sufficient to expose behavioral differences among functionally distinct code candidates. To improve robustness, we further validate each schema candi-date during execution. In rare cases, a schema may not be parsed or may produce inputs that trigger frequent runtime errors, typically due to mismatches in input format or value ranges. We therefore discard a schema candidate if it cannot be parsed or if more than 10% of input–code executions fail under that schema. In implemen-tation, we generate multiple schema candidates and keep only those that pass this validation step. When a generated schema cannot be parsed or instantiated, our implementation retries with a new schema candidate for up to three attempts. Overall, this process yields a large and diverse set of valid execution inputs for subse-quent reliability estimation. Formally, given a problem instance 𝑃 ,we construct a set of execution inputs I𝑃 = {𝐼 1, 𝐼 2, . . . }.
+
+## 3.2 Reliability Estimation from Execution Consistency 
+
+To estimate the reliability of codes, we first construct an execution output matrix O. For a problem instance 𝑃 , we generate a set of reference codes C𝑃 = {𝐶 1, 𝐶 2, . . . } by prompting a large language model multiple times. To expose subtle execution differences be-tween candidate codes, we construct a large and diverse input set 
+
+I𝑃 based on the extracted schema. Correct and incorrect codes may behave identically on a few simple inputs, so limited testing often fails to expose their differences, which only emerge when the codes are executed on a broader and more diverse input set. Collecting execution outputs for all pairs of reference codes and test inputs yields an execution output matrix, where 𝑂 𝑖 𝑗 denotes the output of code 𝐶 𝑗 on input 𝐼 𝑖 :
+
+O = [𝑂 𝑖 𝑗 ] 𝑗 =1,..., | C 𝑃 |  
+
+> 𝑖 =1,..., | I 𝑃 |
+
+.
+
+For some input–code pairs, execution may fail, typically due to mismatches in input format or value ranges. In such cases, we record the corresponding entry 𝑂 𝑖 𝑗 as NaN and exclude it from subsequent consistency projection and estimation. Since our goal is to identify correct code rather than distinguish fine-grained failure types, we do not model different error categories separately. As a simple and intuitive instantiation for estimating code relia-bility, we introduce ExeCRE-Voting based on the execution output matrix O. Specifically, reliability is computed as the average fraction of other candidate codes that produce the same execution output as the target code across all inputs, formulated as: 
+
+𝛼 Voting  
+
+> 𝑗
+
+= 1
+
+|I 𝑃 | 
+
+> | I 𝑃 |
+
+∑︁ 
+
+> 𝑖 =1
+
+1
+
+|C 𝑃 | 
+
+> | C 𝑃 |
+
+∑︁ 
+
+> 𝑘 =1
+
+1 𝑂 𝑖𝑘 = 𝑂 𝑖 𝑗 
+
+ .
+
+However, this estimation treats all codes equally. When wrong codes fail on different subsets of inputs, simple voting can still be misled by the wrong codes that happen to agree on one input. Dawid–Skene instead models a latent label for each input and an error-rate for each code, then fits these quantities by maximizing the likelihood of the observed consistency labels. The resulting reliability scores can assign lower reliability to codes whose outputs fit the inferred labels poorly, rather than giving every candidate the same vote. We therefore employ a Dawid–Skene-based latent reliability estimator that learns code-specific error tendencies from binary execution-consistency signals. ASE ’26, October 12–16, 2026, Munich, Germany Yiru Dong, Richong Zhang, Fanshuang Kong, and Si Chen LLM                            
+
+> Input
+> Constructor
+> I1
+> I2
+> I3
+> I4
+> Input Construction
+> O11 O12 O13 O14
+> O21 O22 O23 O24
+> O31 O32 O33 O34
+> O41O42 O43 O44
+> Generated
+> Inputs I
+> Generated
+> Codes C
+> Execution Output
+> Matrix O
+> 1100
+> 0101
+> 1110
+> 1111
+> Execution Consistency
+> Projection
+> Code Execution
+> I1
+> I2
+> I3
+> I4
+> C1C2C3C4
+
+Dawid –Skene                                                                  
+
+> 𝒎𝒂 𝒙 𝝅 ,𝒑 𝑬 𝒍𝒐𝒈 𝑼 𝝅 ,𝒑
+> M-step
+> Class Priors 𝒑
+> 𝑈 𝑖
+> ∗01
+> 𝑝 0.36 0.64
+> Individual Error -rates 𝝅
+> 𝜋 101
+> 00.94 0.65
+> 10.06 0.35
+> 𝜋 201
+> 00.94 0.65
+> 10.06 0.35
+> 𝜋 301
+> 00.94 0.65
+> 10.06 0.35
+> Consistency Matrix U
+> Reliability
+> Score 𝜶
+> 𝜶 1(C1)
+> 𝜶 2(C2)
+> 𝜶 3(C3)
+> 𝜶 4(C4)
+> RELIABLE
+> CODE
+> 𝜶 ∗≥Threshold
+> UNRELIABLE
+> CODE
+> 𝜶 ∗<Threshold
+> Consistency Projection Dawid —Skene EM Estimation Problem Reliability Selection
+> 110165 65 60 65
+> 𝜶 ∗=max
+> 𝒊 𝜶 𝒊
+> 𝑪 ∗=𝑪 arg max
+> 𝑖 𝛼 𝑖
+> Code 𝑪 ∗
+> C1
+> C2
+> C3
+> C4
+> E-step
+> Problem:
+> Generate a brute -
+> force solution (brute -
+> force, simulation, and
+> enumeration) for
+> “Range Update Query”
+> with input consists of
+> 1 to 50,000 intervals,
+> where each interval is
+> represented by three
+> integers 𝑙 𝑖 ,𝑟 𝑖 ,𝑤 𝑖
+> satisfying (1≤𝑙 𝑖 ≤
+> 𝑟 𝑖 ≤10 9)and (1≤
+> 𝑤 𝑖 ≤10 9).
+
+Problem       
+
+> 111119 19 19 19
+> C2I1
+> Virtual
+> Environment
+> O12
+
+Figure 2: Overview of ExeCRE. Given a problem, ExeCRE constructs execution inputs and collects execution outputs from multiple candidate codes. It then projects raw outputs into a binary consistency matrix and applies Dawid–Skene EM to estimate the latent reliability of each candidate. The estimated reliability scores are finally used to select reliable code or trigger fallback when no candidate exceeds the threshold. 
+
+3.2.1 Dawid–Skene Model in Execution . In practice, codes exhibit distinct individual error characteristics: some codes are consistently correct across inputs, while others produce errors on a small fraction of inputs or fail consistently on certain input patterns. Treating all codes as equally reliable will ignore such individual error characteristics and lead to suboptimal reliability estimates. To address this limitation, we employ an improved Dawid–Skene algorithm to infer the latent error-rates of each code from execution consistency signals. The original Dawid–Skene algorithm is designed for annotation settings, where multiple annotators provide labels for the same instances. Because these labels may be noisy, the model estimates both the latent true-label distribution and the annotator-specific error-rates under an iterative maximum-likelihood framework [ 8]. For annotator 𝑗 , the error-rate matrix 𝜋 ( 𝑗 ) 
+
+> 𝑞𝑎
+
+models the conditional probability of producing observed label 𝑎 when the latent true label is 𝑞 . The key assumption is that annotators may exhibit systematic biases rather than purely random noise. For example, an anno-tator may tend to confuse one class with another under certain latent labels, and such patterns can be estimated by aggregating observations across many instances. 
+
+3.2.2 Execution Consistency Projection . In the code genera-tion task, however, when codes are treated as annotators and inputs as data instances, the effective annotation space corresponding to distinct execution outputs typically exceeds the number of observed inputs. As a result, the Dawid–Skene model struggles to estimate code error-rates in this setting. To address this issue, we reduce the annotation space by pro-jecting raw execution outputs onto execution consistency signals. Rather than modeling the concrete execution outputs directly, we focus on whether different codes exhibit consistent behavior on the same input. Specifically, for each input–code pair, the execution output is mapped to a binary agreement indicator based on majority consistency across codes, where 1[·] denotes the indicator function that equals 1 when the condition holds and 0 otherwise: 
+
+𝑈 𝑖 𝑗 =
+
+(
+
+1𝑂 𝑖 𝑗 = arg max 𝑣 |{ 𝑘 | 𝑂 𝑖𝑘 = 𝑣 }|  , if 𝑂 𝑖 𝑗 ≠ NaN ,
+
+NaN , otherwise .
+
+This projection transforms the execution output matrix O into a consistency matrix U, whose valid entries take values in {0, 1} and whose missing entries are recorded as NaN . In the rare case of a tie, a majority value is arbitrarily selected. This binary projection does not assume that the majority output is correct. Instead, each input is associated with a latent consis-tency state indicating which side of the partition better reflects reliable behavior. In particular, reliable behavior may correspond to the minority side when several codes share the same system-atic mistake. This preserves agreement patterns while reducing the label space enough for Dawid–Skene estimation. Under this view, different codes can still exhibit distinct conditional bias pat-terns on U. A more reliable code tends to agree with the latent consistency state more often across inputs, whereas a less reliable code may systematically fall on the opposite side for certain input patterns. By collapsing diverse execution outputs into consistency and inconsistency, the projection preserves agreement patterns and systematic bias patterns among codes while substantially reducing the annotation space. This makes code error-rate estimation with the Dawid–Skene algorithm tractable. ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+3.2.3 EM Formulation with Execution Consistency . After the execution-consistency projection, each input 𝐼 𝑖 is associated with a binary observation from each candidate code 𝐶 𝑗 , namely 
+
+𝑈 𝑖 𝑗 ∈ { 0, 1}. Here, the latent class does not represent a concrete execution output. Instead, it represents the latent consistency state of the input, namely, which side of the observed binary partition is more likely to correspond to the reliable behavior for that input. We implement the Dawid–Skene estimation using Crowd-Kit [ 48 ]. Following Dawid–Skene [ 8 ], we introduce for each input 𝐼 𝑖 a pair of latent indicator variables {𝑇 𝑖𝑞 }𝑞 ∈ { 0,1} , where 𝑇 𝑖𝑞 = 1 if and only if the latent consistency class of 𝐼 𝑖 is 𝑞 , with Í𝑞 ∈ { 0,1} 𝑇 𝑖𝑞 = 1. Let 
+
+𝑝 𝑞 = 𝑃 (𝑇 𝑖𝑞 = 1) denote the class prior, and let 
+
+𝜋 ( 𝑗 ) 
+
+> 𝑞𝑎
+
+= 𝑃 (𝑈 𝑖 𝑗 = 𝑎 | 𝑇 𝑖𝑞 = 1)
+
+denote the individual error-rate parameters of candidate code 𝐶 𝑗 ,namely, the probability that 𝐶 𝑗 assigns observed label 𝑎 when the true latent class is 𝑞 , where 𝑞, 𝑎 ∈ { 0, 1}. In this form, 𝜋 ( 𝑗 ) captures whether code 𝐶 𝑗 tends to align with or deviate from the latent consistency state under different inputs, thereby modeling code-specific systematic tendencies on the binary consistency signals rather than on the raw outputs themselves. For notational con-sistency with the original Dawid–Skene formulation, we further define 
+
+𝑛 ( 𝑗 ) 
+
+> 𝑖𝑎
+
+= 1{𝑈 𝑖 𝑗 = 𝑎 }, 𝑎 ∈ { 0, 1}.
+
+Here, 𝑛 ( 𝑗 ) 
+
+> 𝑖𝑎
+
+denotes the count indicator for whether candidate code 𝐶 𝑗 produces observed label 𝑎 on input 𝐼 𝑖 . If the observa-tion is missing, we set 𝑛 ( 𝑗 ) 
+
+> 𝑖𝑎
+
+= 0 for both 𝑎 = 0 and 𝑎 = 1. Let 
+
+Ω𝑖 = { 𝑗 | 𝑈 𝑖 𝑗 ≠ NaN } denote the set of candidate codes whose consistency labels are available on input 𝐼 𝑖 . In our setting, observa-tions associated with Runtime Error or Time Limit Exceeded are mapped to NaN and are therefore excluded from Ω𝑖 .Under the Dawid–Skene conditional independence assumption, the observations produced by different codes are independent given the latent class of the input. Therefore, if the latent indicators {𝑇 𝑖𝑞 }
+
+were observed, the complete-data likelihood is 
+
+𝐿 𝑐 (p, 𝝅 ; 𝑈 ,𝑇 ) =
+
+Ö 
+
+> 𝑖 =1,..., |𝐼 𝑃 |
+
+Ö
+
+> 𝑞 ∈ { 0,1}
+
+©«
+
+𝑝 𝑞 
+
+Ö 
+
+> 𝑗 ∈Ω𝑖
+
+Ö
+
+> 𝑎 ∈ { 0,1}
+
+
+
+𝜋 ( 𝑗 )
+
+> 𝑞𝑎
+
+𝑛 ( 𝑗 ) 
+
+> 𝑖𝑎
+
+ª®¬
+
+> 𝑇 𝑖𝑞
+
+.
+
+However, the latent indicators 𝑇 𝑖𝑞 are unobserved. Marginalizing them out yields the observed-data likelihood 
+
+𝐿 (p, 𝝅 ; 𝑈 ) =
+
+Ö 
+
+> 𝑖 =1,..., |𝐼 𝑃 |
+
+©«∑︁ 𝑞 ∈ { 0,1}
+
+𝑝 𝑞 
+
+Ö 
+
+> 𝑗 ∈Ω𝑖
+
+Ö
+
+> 𝑎 ∈ { 0,1}
+
+
+
+𝜋 ( 𝑗 )
+
+> 𝑞𝑎
+
+𝑛 ( 𝑗 ) 
+
+> 𝑖𝑎
+
+ª®¬
+
+.
+
+This likelihood has the same mixture form as in the original Dawid– Skene model, and direct maximization is inconvenient because the summation over latent classes is inside the product over inputs. We therefore treat {𝑇 𝑖𝑞 } as missing data and optimize the model using EM. In the E-step, we compute the posterior expectation of each latent indicator 
+
+ˆ𝑇 𝑖𝑞 ≜ 𝐸 [𝑇 𝑖𝑞 | 𝑈 ]
+
+=
+
+Î𝑗 ∈Ω𝑖 
+
+Î𝑎 ∈ { 0,1}
+
+
+
+𝜋 ( 𝑗 )
+
+> 𝑞𝑎
+
+𝑛 ( 𝑗 ) 
+
+> 𝑖𝑎
+
+𝑝 𝑞 
+
+Í1
+
+> 𝑞 ′=0
+
+Î𝑗 ∈Ω𝑖 
+
+Î𝑎 ∈ { 0,1}
+
+
+
+𝜋 ( 𝑗 )
+
+> 𝑞 ′𝑎
+
+𝑛 ( 𝑗 ) 
+
+> 𝑖𝑎
+
+𝑝 𝑞 ′
+
+.
+
+In the M-step, we maximize the expectation of the complete-data log-likelihood under the posterior distribution computed in the E-step: 
+
+𝐸 [log 𝐿 𝑐 (p, 𝝅 ; 𝑈 ,𝑇 ) | 𝑇 ] =∑︁  
+
+> 𝑖 =1,..., |𝐼 𝑃 |
+
+∑︁ 𝑞 ∈ { 0,1}
+
+ˆ𝑇 𝑖𝑞 
+
+
+
+log 𝑝 𝑞 +∑︁  
+
+> 𝑗 ∈Ω𝑖
+
+∑︁ 𝑎 ∈ { 0,1}
+
+𝑛 ( 𝑗 ) 
+
+> 𝑖𝑎
+
+log 𝜋 ( 𝑗 )
+
+> 𝑞𝑎
+
+
+
+.
+
+Subject to Í𝑞 𝑝 𝑞 = 1 and Í𝑎 𝜋 ( 𝑗 ) 
+
+> 𝑞𝑎
+
+= 1 for each 𝑗, 𝑞 , maximizing this objective yields the closed-form updates 
+
+𝑝 𝑞 ← 1
+
+|𝐼 𝑃 |∑︁ 𝑖 =1,..., |𝐼 𝑃 |
+
+ˆ𝑇 𝑖𝑞 , 𝑞 ∈ { 0, 1},
+
+and 
+
+𝜋 ( 𝑗 ) 
+
+> 𝑞𝑎
+
+←
+
+Í𝑖 =1,..., |𝐼 𝑃 | ˆ𝑇 𝑖𝑞 𝑛 ( 𝑗 )
+
+> 𝑖𝑎
+
+Í𝑖 =1,..., |𝐼 𝑃 | ˆ𝑇 𝑖𝑞 
+
+, 𝑞, 𝑎 ∈ { 0, 1},
+
+The EM iterations alternate between these two steps until conver-gence. The final estimates ˆp and ˆ𝝅 are then used to quantify the reliability of each candidate code. 
+
+3.2.4 Reliability Score from Individual Error-Rates . Finally, the reliability score 𝛼 𝑗 of code 𝐶 𝑗 is derived from its estimated individual error-rates 𝜋 ( 𝑗 ) as 
+
+𝛼 𝑗 ≜ ˆ𝑝 1 ˆ𝜋 ( 𝑗 ) 
+
+> 1,1
+
++ ˆ𝑝 0 ˆ𝜋 ( 𝑗 ) 
+
+> 0,0
+
+∈ [ 0, 1],
+
+which corresponds to the expected probability that 𝐶 𝑗 produces ex-ecution outcomes consistent with the latent execution-consistency states inferred across inputs. For binary decisions, we classify 𝐶 𝑗 as 
+
+Reliable if 𝛼 𝑗 exceeds a task-specific threshold, and as Unreliable 
+
+otherwise. Among the reliable candidates, we select the code with the highest inferred reliability, 
+
+𝑗 ∗ = arg max     
+
+> 𝑗 :𝛼 𝑗 ≥𝜏
+
+𝛼 𝑗 , 𝐶 ∗ = 𝐶 𝑗 ∗ , 𝛼 ∗ = 𝛼 𝑗 ∗ ,
+
+If no candidate satisfies 𝛼 𝑗 ≥ 𝜏 , ExeCRE does not select a reference code or add generated reference tests. Self-correction then proceeds from the initial code using only public tests, preventing an unreli-able reference code from making a correct initial solution appear to fail. 
+
+## 3.3 Self-Correction with Reliability Estimation 
+
+Figure 1 illustrates how ExeCRE is integrated into the self-correction pipeline for code generation. Given a programming problem, the LLM produces both a candidate solution and a set of reference codes intended for constructing verification signals. ExeCRE esti-mates the reliability of these reference codes before they are used downstream. Reference codes whose reliability scores exceed a predefined threshold are regarded as reliable candidates. Formally, let 𝐶 ∗ denote the reliable candidate with the highest inferred reliability score 𝛼 ∗.ASE ’26, October 12–16, 2026, Munich, Germany Yiru Dong, Richong Zhang, Fanshuang Kong, and Si Chen 
+
+This selected reference code is then executed on generated small-scale inputs to produce input–output pairs, which serve as reference tests. If no reference code passes the threshold, the verification stage falls back to using only the available public tests. The reference code is a brute-force implementation obtained by prompting the LLM to solve the problem using direct simulation, explicit enumeration, or similarly straightforward strategies. Prior work has shown that such implementations are often easier for LLMs to generate correctly when efficiency is not a concern [ 54 ]. As a result, brute-force codes tend to exhibit higher correctness compared to optimized solutions, making them suitable as reference implementations. However, these codes are typically inefficient and cannot scale to large inputs. We therefore restrict execution to small-scale inputs, where the reference code remains tractable while still providing reliable execution outcomes for both reliability estimation and test construction. Using the assembled test set, we adopt a test-driven self-correction pipeline following TextGrad [ 53 ], while avoiding direct LLM-based correctness judgments as feedback signals. When a reliable ref-erence code is available, the resulting test set provides stronger verification signals and supports more effective self-correction iter-ations. When it is not, ExeCRE prevents unreliable reference tests from entering the loop and reduces harmful corrections caused by misleading execution feedback. 
+
+## 4 Experimental Setup 4.1 Research Questions 
+
+We carry out experiments to answer the following research ques-tions: 
+
+RQ1: Does ExeCRE improve final performance across models of dif-ferent scales? 
+
+RQ2: To what extent can reliability estimation distinguish reliable code from unreliable code? 
+
+RQ3: Does reliability estimation reduce misleading or unnecessary correction signals and improve the stability of iterative self-correction? 
+
+RQ4: How robust is ExeCRE’s reliability estimation to threshold choices and agreement among wrong candidates, and how sensitive is it to the input construction method? 
+
+We also include an additional applicability study on GSM8K to examine whether the same reliability estimation mechanism can also help code-based mathematical reasoning, and briefly analyze runtime and token cost for practical reference. 
+
+## 4.2 Dataset 
+
+We evaluate the framework on competitive code generation tasks, with experiments conducted on LiveCodeBench. LiveCodeBench [ 27 ]consists of algorithmic programming problems collected from Code-forces, AtCoder, and LeetCode. To minimize the potential impact of training-data contamination on evaluation, we use the most re-cent LiveCodeBench problems available at the time of submission. Specifically, we use LiveCodeBench v6 and include all 182 problems released between 2025-01-01 and 2025-05-01. No later problems were available because the benchmark had not yet been updated be-yond May 2025. The complete list of problem identifiers is provided in the archived artifact. As a small additional applicability study beyond the main code-generation setting, we also evaluate ExeCRE on GSM8K [ 6], using its test set of 1,319 grade-school mathematical word problems. We adopt a program-of-thought (PoT) setting, where the model may either generate executable code or directly produce the answer. 
+
+## 4.3 Evaluation Metrics 
+
+For LiveCodeBench, we report final Pass@1 under the default evalu-ation setting. Selected brute-force codes are used as reference codes to guide self-correction. To evaluate the quality of these selected codes, we also report F1, Precision, and Recall under a semantic-only setting, where Time Limit Exceeded (TLE) cases are treated as correct because computational efficiency is not a concern for brute-force reference code. For GSM8K, we report answer accu-racy, defined as the proportion of problems whose final numerical answers exactly match the ground truth. 
+
+## 4.4 Compared Techniques 
+
+We compare ExeCRE on LiveCodeBench against several represen-tative baselines. Base directly generates a single solution using the standard LiveCodeBench prompt. 
+
+ConTested [10 ] performs consistency-based, test-driven self-correction by co-evolving code and tests. For fair comparison, we use the same model for both test generation and refinement, rather than relying on stronger external models or human feedback as in the original setup. Oracle-Guided [16 ] performs program selec-tion using LLM-guided oracle judgments on distinguishing inputs. 
+
+B4 [ 3] performs Bayesian solution selection under noisy LLM-generated test signals. ALGO [54 ] uses brute-force reference codes to generate oracle tests and guide code selection within existing test-driven frameworks, such as CodeT [ 2]. TextGrad [53 ] per-forms LLM-based iterative self-correction. For GSM8K, we compare with the program-of-thought (PoT) baseline, as our goal is to eval-uate whether ExeCRE can effectively estimate the reliability of generated code in mathematical reasoning settings, rather than to comprehensively benchmark against all reasoning methods. 
+
+## 4.5 Implementation Details 
+
+We evaluate GPT-5.2 [ 43 ], DeepSeek-V3.2 [ 36 ], Qwen2.5-Coder-32B-Instruct [ 25 ], and LLaMA-3.1-8B-Instruct [ 20 ] on LiveCodeBench. GPT-5.2, Qwen2.5-Coder-32B-Instruct, and LLaMA-3.1-8B-Instruct have reported knowledge cutoffs of 2025-08, 2024-06, and 2023-12, respectively. DeepSeek-V3.2 was released on December 1, 2025, but no precise knowledge cutoff has been disclosed. We additionally evaluate Qwen2.5-Coder-32B-Instruct and LLaMA-3.1-8B-Instruct on GSM8K. For Dawid–Skene aggregation, we sample 10 reference code can-didates and 5 schemas for execution input construction. Reference codes are generated with temperature set to 1.0 and top-𝑝 to 0.99 to encourage diversity. During execution outcome matrix construc-tion, we generate 300 inputs for each code using our schema-driven execution input generation strategy, resulting in execution output matrices of size approximately 10 × 300 . We use greedy decoding (temperature=0.0) in self-correction to ensure deterministic behav-ior. All baselines involving multi-round self-correction are run for 20 rounds. ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Table 2: Pass@1 performance across models of different scales, with results further broken down by difficulty level. All numbers are reported as mean ± standard deviation over five runs. 
+
+Method GPT-5.2 DeepSeek-V3.2 Qwen2.5-Coder-32B-Instruct LLaMA-3.1-8B-Instruct All Easy Medium Hard All Easy Medium Hard All Easy Medium Hard All Easy Medium Hard Base 62.7 ±1.8 99.6 ±1.8 74.2 ±3.5 34.9 ±3.1 44.5 ±1.4 91.6 ±1.7 48.0 ±3.0 16.3 ±2.3 27.4 ±0.6 87.1 ±2.6 14.9 ±2.1 2.9 ±1.0 16.3 ±0.4 57.3 ±1.7 6.2 ±1.9 0.5 ±0.6 
+
+ConTested 55.6 ±1.2 74.7 ±1.1 67.6 ±2.4 37.1 ±1.8 43.6 ±0.5 90.2 ±1.1 49.1 ±3.0 14.4 ±1.2 16.2 ±0.8 48.0 ±3.0 13.1 ±3.1 0.7 ±1.0 7.7 ±0.6 27.8 ±1.1 2.7 ±0.9 0.0 ±0.0 
+
+Oracle 63.2 ±0.8 100.0 ±0.0 77.0 ±1.3 33.7 ±1.5 44.4 ±0.2 92.4 ±1.1 50.9 ±0.0 13.7 ±0.5 26.2 ±0.7 80.0 ±1.4 18.2 ±2.0 2.0 ±0.6 8.2 ±0.2 31.1 ±1.1 1.8 ±0.2 0.0 ±0.0 
+
+B4 64.5 ±0.6 100.0 ±0.0 77.8 ±1.8 36.1 ±0.6 45.6 ±0.6 91.1 ±0.0 54.6 ±0.2 14.6 ±0.0 28.6 ±0.8 88.9 ±2.4 18.2 ±1.2 2.4 ±0.6 10.1 ±1.8 36.9 ±6.2 3.3 ±0.7 0.0 ±0.0 
+
+ALGO 66.8 ±1.0 100.0 ±0.0 77.8 ±0.6 41.2 ±2.0 44.8 ±0.2 91.1 ±0.0 52.0 ±2.0 14.6 ±1.3 28.1 ±1.2 85.3 ±1.8 17.1 ±2.0 4.2 ±1.5 8.1 ±0.4 30.7 ±1.7 1.8 ±0.2 0.0 ±0.0 
+
+TextGrad 69.9 ±1.2 98.2 ±1.7 80.7 ±2.5 47.1 ±2.3 52.6 ±1.0 96.0 ±1.7 56.0 ±4.2 26.6 ±2.2 31.5 ±1.0 86.2 ±4.3 25.5 ±3.8 5.6 ±1.7 19.4 ±0.5 67.4 ±1.1 7.9 ±1.7 0.8 ±0.6 
+
+ExeCRE 72.8 ±1.5 99.6 ±0.9 84.4 ±1.9 50.2 ±0.9 55.4 ±1.8 97.8 ±0.0 62.2 ±2.7 27.6 ±3.5 32.5 ±1.4 91.1 ±1.4 24.0 ±1.8 6.1 ±1.8 21.0 ±0.9 72.0 ±3.3 8.7 ±1.8 1.2 ±0.8 
+
+During test construction, we adopt 0.95 as the reliability score threshold. When evaluating code in self-correction, we constrain the test suite to execute within 1 minute under a single-threaded setting; in practice, this allows us to generate approximately 2,000 test cases. The reported results are averaged over 5 runs, and we report the mean and standard deviation (mean ± std) to account for stochasticity. 
+
+## 5 Experiment Results 5.1 RQ1: Overall Performance Across Model Scales 
+
+We compare ExeCRE against representative self-correction and selection baselines on four models of varying scales. As shown in Table 2, ExeCRE achieves the best overall Pass@1 on all four models. Cutoff cleanliness varies across models, as reported knowledge cutoffs of Qwen2.5-Coder-32B-Instruct and LLaMA-3.1-8B-Instruct precede the entire evaluated window. In contrast, the cutoff of GPT-5.2 postdates the entire window, and no cutoff-clean subset was available for this model in the most recent LiveCodeBench release available at the time of our evaluation. For DeepSeek-V3.2, the developer does not disclose a precise knowledge cutoff, so the cutoff cleanliness of its results and the availability of a strictly cutoff-clean subset cannot be verified. We therefore use the GPT-5.2 and DeepSeek-V3.2 results for comparison but do not consider them contamination-free evidence. The gains are most evident on Medium and Hard problems, while all methods perform similarly on Easy problems due to near-saturated accuracy. This pattern suggests that ExeCRE is partic-ularly beneficial in more challenging settings, where unreliable reference codes are more likely to mislead downstream correction. The same trend is observed on the two models whose knowledge cutoffs precede the benchmark period. On Qwen2.5-Coder-32B-Instruct, ExeCRE increases Pass@1 from 31.5 to 32.5 and reduces misleading feedback from 50.4 to 7.4. On LLaMA-3.1-8B-Instruct, Pass@1 increases from 19.4 to 21.0, while misleading feedback de-creases from 30.0 to 1.2. These results provide cutoff-clean support for the main qualitative finding that reliability-aware selection improves self-correction. The overall results in Table 2 show that reliability-aware selec-tion is beneficial in general, but they do not by themselves explain how well ExeCRE distinguishes semantically reliable code candi-dates or how this advantage affects the correction process. We therefore next examine these two aspects through semantic-level reliability identification in RQ2 and misleading-feedback reduction together with iterative stability in RQ3. 
+
+## 5.2 RQ2: Effectiveness of Reliability Estimation 
+
+We evaluate whether reliability estimation from execution consis-tency can effectively distinguish correct from incorrect codes at the semantic level. Each problem is treated as one evaluation instance. A positive prediction means that the candidate with the highest score is adopted because its reliability score reaches 𝛼 = 0.95 , while the ground truth label is positive only when every hidden test is Accepted or TLE and none fails. Specifically, we consider a semantic-only setting where Time Limit Exceeded is treated as correct, and compare predicted correctness against ground-truth labels using Precision, Recall, and F1. In the context of self-correction, Precision reflects the risk of introducing misleading feedback, while Recall measures the ability to preserve correct signals. We therefore use F1 as the primary metric to capture the trade-off between the two. Oth-erwise, ExeCRE falls back to public tests. Fallback is the percentage of problems where no reference program is adopted. 
+
+5.2.1 Dawid–Skene vs Majority Voting: An Example. We use a sim-ple example to show how Dawid–Skene can distinguish reliable codes more clearly when majority voting assigns similar scores to correct and incorrect candidates. Consider a coupon rule that is valid only when subtotal >= 25 and count >= 3 . Codes A, B, and C implement the rule correctly. Codes D and E use subtotal > 25 , while codes F and G use count > 3 .
+
+Table 3: A case where agreement among wrong codes mis-leads majority voting. T and F indicate that the coupon is valid and invalid, respectively. 
+
+Input A B C D E F G Voting subtotal=25, count=5 T T T F F T T T (5:2) subtotal=40, count=3 T T T T T F F T (5:2) subtotal=25, count=3 T T T F F F F F (3:4) 
+
+In the first two inputs, only one type of bug is exposed, and the majority voting decision remains correct. In the final input, both ASE ’26, October 12–16, 2026, Munich, Germany Yiru Dong, Richong Zhang, Fanshuang Kong, and Si Chen 
+
+bug types are triggered, causing four incorrect programs to agree on F causes majority voting to make an incorrect decision. Across the three inputs, ExeCRE-Voting assigns A–C a score of 13 /21 
+
+and D–G a score of 11 /21 . Since both scores remain below the 0.95 adoption threshold, ExeCRE-Voting falls back. Dawid–Skene instead jointly estimates per-code error-rates by maximizing the likelihood of the full consistency matrix. Applying Dawid–Skene to this matrix assigns substantially higher reliability to A–C than to D–G, allowing it to adopt one of the correct codes. 
+
+5.2.2 Comparison with Reliability Identification Methods. Table 4 reports detailed results on DeepSeek-V3.2. Random randomly de-cides whether to adopt the selected reference program or fall back, without examining the problem or code. LLM Judge directly asks the model to assess the code correctness. LLM Analyze follows the TextGrad-style prompting strategy [ 53 ], where the model first generates an analysis before making a judgment. CodeJudge [ 47 ]uses its Analyze then Summarize method, first analyzing the candi-date program and then producing a YES or NO judgment from the analysis. SLM Judge [7 ] uses a Qwen2.5 Coder 3B model fine-tuned for binary code correctness classification. We score each candidate using the probability of label 1 normalized over labels 0 and 1, and adopt the highest scored candidate only when its score exceeds 0.06, giving SLM Judge a fallback rate close to ExeCRE’s and simi-lar adoption coverage. None of the methods has access to hidden tests. We further compare with ExeCRE-Voting and ExeCRE, which estimate reliability based on execution consistency using voting and EM-based inference, respectively. 
+
+Table 4: Reliability identification performance on DeepSeek-V3.2. Both ExeCRE and ExeCRE-Voting use a reliability threshold of 0.95.                                 
+
+> Method F1 (%) Precision (%) Recall (%) Fallback (%) Random 56.06 52.22 60.50 39.50 LLM Judge 60.49 94.23 44.55 71.43 LLM Analyze 61.82 92.73 46.36 69.78 CodeJudge 62.58 94.44 46.79 69.49 SLM Judge 72.64 82.95 64.60 50.28 ExeCRE-Voting 70.83 87.18 59.65 55.37 ExeCRE 76.62 86.52 68.75 48.55
+
+As shown in Table 4, both ExeCRE variants significantly outper-form all baselines in terms of F1, demonstrating stronger semantic discrimination ability. LLM-based methods achieve high precision but suffer from low recall, indicating conservative but incomplete identification of correct codes. In contrast, ExeCRE achieves a more balanced trade-off, reducing misleading feedback while retaining substantially more correct signals. This gap between ExeCRE and ExeCRE-Voting suggests that simple output agreement is not suffi-cient for reliability identification. By modeling code-specific error tendencies, the EM-based estimator can retain more semantically correct candidates while still controlling misleading signals. Exe-CRE achieves the highest F1. SLM Judge also performs well, but has slightly lower precision and recall. In terms of LLM call cost beyond shared candidate generation, Random requires no model calls, and SLM Judge uses only a fine tuned local model. Each remaining selector requires fewer than five LLM calls per problem. In terms of runtime under single threaded execution without parallel judge calls, CodeJudge completes within 15 seconds per problem, while ExeCRE Voting and ExeCRE com-plete within 30 seconds. The remaining methods complete within 5 seconds, with most of their runtime coming from the latency of a single LLM call. 
+
+Table 5: RQ2 reliability identification results across models.                
+
+> Model F1 (%) Precision (%) Recall (%) GPT-5.2 78.12 88.50 69.93 DS-V3.2 76.62 86.52 68.75 Qwen-32B 74.50 69.10 80.90 LLaMA-8B 55.60 50.10 62.50
+
+5.2.3 Reliability Identification Across Models. To check whether the RQ2 result is specific to DeepSeek-V3.2, Table 5 reports Ex-eCRE’s reliability identification results across all four evaluated models under the same experimental settings. The results show that reliability identification is not specific to a single generator. ExeCRE reaches similar F1 on GPT-5.2, DeepSeek-V3.2, and Qwen-32B, and the LLaMA-8B row provides the same evaluation on a smaller model. Together with Table 4, these results support that execution consistency provides a useful reliability signal across model families. 
+
+Table 6: Number of problems on the 182-problem Live-CodeBench set for which self-correction methods produce feedback signals for already correct codes. Results are re-ported as mean ± standard deviation over five runs.                 
+
+> Method GPT-5.2 DS-V3.2 Qwen-32B LLaMA-8B TextGrad 113.20 ±3.06 81.20 ±2.99 50.40 ±0.80 30.00 ±0.82 ConTested 104.60 ±1.36 72.20 ±0.40 48.40 ±0.80 10.00 ±1.44 ExeCRE 14.00 ±1.67 11.60 ±1.74 7.40 ±0.80 1.20 ±0.75
+
+## 5.3 RQ3: Mitigating Misleading Feedback and Improving Iterative Stability 
+
+5.3.1 Reduction of Misleading Feedback. Table 6 reports the num-ber of problems where a self-correction method produces feedback signals for already correct codes, thus triggering unnecessary cor-rection steps. Both TextGrad and ConTested generate such misleading signals on a large number of problems across models, whereas ExeCRE consistently reduces this number by a substantial margin. Some misleading feedback may preserve correctness, but it still adds cost and instability. Reliability estimation reduces such unnecessary interventions. For example, in LeetCode 3743, the initial solution passed both public and hidden tests, but tests generated by a low reliability reference code reported a Rand failure on it. ExeCRE avoids this misleading feedback by excluding tests generated from reference codes whose reliability score is below 0.95. ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Figure 3: Pass@1 over self-correction iterations. 
+
+5.3.2 Iterative Self-Correction Stability. Figure 3 further examines the iterative behavior of different self-correction methods. A consis-tent trend is observed across both models. ExeCRE improves rapidly in the early rounds and ultimately achieves the best final Pass@1. On GPT-5.2, ExeCRE continues to improve in later iterations rather than saturating early, and a similar steady increase is observed on DeepSeek-V3.2. In contrast, TextGrad yields only limited early gains and quickly saturates, while ConTested remains below the base and stays nearly flat across iterations, suggesting ineffective or misleading correction signals. One possible reason is that, in our implementation, the same latest model is used for both test generation and test modification in ConTested, whereas the original setting relies on a stronger model or human involvement for test refinement. Notably, ExeCRE does not exhibit early-round Pass@1 degradation on either model, which further supports the effectiveness of its reliability-guided mechanism in suppressing misleading corrections and stabilizing iterative refinement. 
+
+## 5.4 RQ4: Robustness of Reliability Estimation and Input Construction 
+
+5.4.1 Sensitivity to the Reliability Threshold. Figure 4 shows how Precision, Recall, and F1 vary with the reliability threshold 𝛼 on GPT-5.2 and DeepSeek-V3.2. As 𝛼 increases, Precision improves and Recall decreases, while F1 remains stable over a broad range of thresholds. This suggests that the EM based reliability estimator is not sensitive to careful threshold tuning. 
+
+5.4.2 Robustness to Input Construction. The pipeline constructs execution inputs from extracted schemas. Based on human verifica-tion, schema extraction succeeds for most problems, reaching 96.7% on GPT-5.2, 95.6% on LLaMA-3.1-8B-Instruct, 92.9% on DeepSeek-V3.2, and 81.3% on Qwen2.5-Coder-32B-Instruct. When extraction is wrong, the resulting invalid or inconsistent executions usually lead to low reliability scores rather than confident adoption. 
+
+Table 7: Reliability identification with different input gener-ators on 65 LiveCodeBench function-call problems.             
+
+> Input source F1 Precision Recall Schema(Ours) 0.791 0.872 0.723 Fuzzing(Oracle-Guided) 0.795 0.795 0.795 LLM generate(CodeT) 0.813 0.804 0.822
+
+Figure 4: Precision, Recall, and F1 of EM under different reliability thresholds. 
+
+To test whether the reliability estimator depends on schema-based input construction, we replace our schema-based input gen-erator with Oracle-Guided fuzzing [ 16 ] and LLM-generated inputs from CodeT [ 2]. As shown in Table 7, Oracle-Guided fuzzing is implemented for typed function-call problems and does not directly support stdin-style input generation, so this ablation uses the 65 LiveCodeBench problems with function-call interfaces. All three input sources achieve F1 scores between 0.79 and 0.81, suggest-ing that the reliability estimator is not tied to schema-based input construction on this subset. 
+
+5.4.3 Robustness to Agreement Among Wrong Candidates. Dawid– Skene assumes conditional independence, but reference codes sam-pled from the same LLM may share mistakes. We therefore test whether stronger agreement among wrong candidates increases incorrect adoption. Incorrect adoption refers to adopting a refer-ence code that is semantically incorrect. Wrong groups are formed by identical wrong outputs across generated inputs. Fewer wrong groups mean that more wrong candidates behave identically, indi-cating stronger dependence and a larger departure from conditional independence. 
+
+Table 8: Incorrect adoption by number of wrong output groups. Results are pooled over four models. Share is over 233 mixed model problem instances, and Wrong codes re-ports the bucket average.                   
+
+> Wrong groups Share (%) Wrong codes Incorrect adoption (%) 125.3 1.9 10.2 217.6 3.8 7.3 313.7 5.1 3.1 49.0 5.9 14.3 5+ 34.3 7.8 10.0
+
+Table 8 reports results pooled across the four evaluated mod-els. Each instance has at least one correct and one wrong refer-ence code. If such dependence undermined Dawid–Skene, incorrect adoption should increase as the number of wrong groups decreases. Instead, incorrect adoption remains between 3.1% and 14.3% across all group counts, including 10.2% when there is one wrong group. This supports the robustness of the estimator under the observed dependence among errors from the same LLM. ASE ’26, October 12–16, 2026, Munich, Germany Yiru Dong, Richong Zhang, Fanshuang Kong, and Si Chen 
+
+## 5.5 Additional Applicability Study on Code-Based Mathematical Reasoning 
+
+As a small additional applicability study, we further examine whether the same reliability estimation mechanism can also help in code-based mathematical reasoning. We evaluate ExeCRE on GSM8K under a program-of-thought (PoT) setting, where the model solves each problem by generating executable code and deriving the fi-nal answer from execution [ 4]. In this setting, ExeCRE is not used to construct verification signals for iterative correction. Instead, it serves as a reliability gate for generated code. Only candidates whose reliability is sufficiently supported by execution evidence are executed to produce the final answer. Otherwise, the system falls back to the direct-answer path. Figure 5 shows the overall pipeline of PoT enhanced with ExeCRE in this setting, together with an illustrative GSM8K example (“Area of Rectangle”). 
+
+Figure 5: Comparison between the original PoT pipeline and PoT enhanced with ExeCRE in the additional GSM8K study. 
+
+Compared with general code generation tasks, execution input construction in GSM8K is also simpler. We construct execution in-puts by changing the explicit numeric parameters in the generated code within bounded ranges while preserving the original problem structure. This perturbation-based strategy yields randomized in-puts that remain close to the original instance while still exposing behavioral differences among candidate code solutions, without requiring complex schema extraction or dependency parsing. We focus on two relatively smaller models, Qwen2.5-Coder-32B-Instruct and LLaMA-3.1-8B-Instruct, because GSM8K is already close to saturation for stronger frontier models, making it less suitable for analyzing the effect of reliability estimation. Since our goal here is only to examine whether reliability estimation can also help when reasoning relies on generated code, we mainly compare ExeCRE with PoT, rather than strategies that do not rely on code generation. The results suggest that ExeCRE can also provide improvements over PoT in this setting. On Qwen2.5-Coder-32B-Instruct, accu-racy increases from 90.28% to 92.96%; on LLaMA-3.1-8B-Instruct, it improves from 75.16% to 78.85%. These results provide additional ev-idence that reliability estimation can also be useful in mathematical reasoning settings when the model relies on generated code. Using the same global reliability threshold 𝛼 = 0.95 , ExeCRE achieves 94.93% precision, 53.49% recall, and 68.42 F1 in identifying reliable code paths. This conservative behavior matches the reasoning set-ting, where executing unreliable code can directly determine the final answer. The gains therefore come from better deciding when generated code should be trusted, while the remaining cases fall back to direct answers. 
+
+## 5.6 Runtime Analysis 
+
+Under a practical multithreaded setting, we sample 20 tasks and repeat the experiment five times, yielding 100 runs with batched DeepSeek API calls. Each task uses 10 candidate codes, five schemas, and 300 inputs per schema. ExeCRE takes 26.10 ± 4.37 seconds per run. API calls average 6.40 seconds, while Dawid–Skene estimation takes less than 3 seconds, indicating that evidence collection domi-nates. Parallel execution, batched generation, and smaller candidate or input budgets can reduce this overhead. In costly correction workflows, early filtering may also avoid unnecessary refinement and offset part of the runtime cost. 
+
+## 6 Related Work 
+
+Generated code serves as both a final answer and an executable component in downstream workflows. Prior work improves reli-ability through refinement, candidate selection, and execution or testing [ 10 , 16 , 45 , 50 , 53 ]. Other studies evaluate programs using LLM judgments and execution feedback [2, 3, 5, 22, 53]. 
+
+## 6.1 LLM-as-Judge and Self-Correction 
+
+Several prior works improve generated codes using LLM-based feedback. Reflexion [ 45 ] and Self-Refine [ 39 ] enable iterative re-finement by prompting models to reflect on their own failures, while Revisit Self-Debugging [ 5] further studies self-debugging with self-generated tests and execution traces. Cycle [ 9] studies self-refinement using available feedback and test-suite execution results. More generally, approaches such as Tree of Thoughts [ 52 ], multi-LLM debate [ 13 , 14 ], MapCoder [ 26 ], and TextGrad [ 53 ] use structured reasoning, comparison, or gradient-like textual feedback to guide generation. Dong et al. [ 11 ] further study self-collaboration for code generation, where multiple LLM agents with specialized roles such as analyst, coder, and tester collaboratively solve complex programming tasks. CodeTree [ 33 ] further introduces agent-guided tree search that combines execution-based and LLM-generated feed-back to refine and rank candidate solutions. While effective, these methods typically rely on feedback whose quality is not explicitly modeled, which may introduce unstable or misleading correction signals. 
+
+## 6.2 Consistency and Candidate Selection 
+
+Another line of work improves generation by sampling multiple candidates and selecting outputs based on agreement or consistency. Related work also studies reviewer or reranker-based selection for code generation [ 44 , 55 ]. Self-Consistency [ 50 ] aggregates multiple reasoning paths via majority voting, while subsequent extensions explore more diverse perspectives for consistency-based selection, such as Multi-Perspective Self-Consistency [ 24 ]. CodeChain [ 31 ]further extends this idea to modular and iterative code construc-tion. Related work also considers explicit similarity-based voting among codes. For example, More Agents Is All You Need [ 34 ] per-forms majority selection based on pairwise BLEU scores between generated codes. Prior work has used agreement, similarity, and behavioral disagreement to assess generated code. Incoherence [ 49 ]ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+is an oracle-free measure of incorrectness. For a programming task, pointwise incoherence is the probability that two independently sampled programs produce different outputs on an input drawn from an input generator. This disagreement probability yields a provable lower bound on the pointwise error of the code gener-ation system. ExeCRE uses execution consistency for a different self-correction decision. It estimates the reliability of each candidate reference code, selects a reference code only when its score exceeds the threshold, and otherwise does not add generated reference tests to the correction loop. 
+
+## 6.3 Mitigating Unreliable Feedback Signals 
+
+Several studies seek to reduce the impact of unreliable code, tests, or verification signals on downstream code selection and refine-ment. CodeT [ 2] evaluates candidate codes using model-generated tests and execution agreement. ALGO [ 54 ] further introduces brute-force reference codes to generate tests and integrates this signal into test-driven frameworks such as CodeT to improve selection and correction performance. ConTested [ 10 ] enhances self-correction by iteratively repairing unreliable model-generated tests, thereby reducing misleading feedback during refinement. B4 [ 3] studies the challenging setting where both candidate solutions and gener-ated tests may be plausible but unreliable, and formulates solution selection under such noisy signals in a Bayesian framework. Re-lated efforts such as ROCODE [ 28 ] incorporate program analysis or structured search to reduce syntactic or compilation errors. These methods improve robustness to imperfect feedback sig-nals, but they mainly use such signals for direct selection, filtering, or repair, while the reliability of the executable code component itself is less explicitly modeled before downstream use. ExeCRE applies reliability filtering before tests generated from a reference code are added to the correction loop. Mu et al. [ 42 ] propose Clar-ifyGPT, a framework that detects ambiguous requirements and improves code generation by asking targeted clarifying questions before final code synthesis. Similarly, Fakhoury et al. [ 15 ] propose TICODER, an interactive workflow that uses tests to guide intent clarification between users and LLMs, thereby improving code gen-eration under ambiguous natural language specifications. Related work also explores generating test oracles directly from source code and documentation. Tratto [ 41 ], for instance, derives axiomatic test oracles from Java methods and Javadoc using a neuro-symbolic token-by-token generation procedure. 
+
+## 6.4 Mathematical Reasoning Using Code 
+
+Generated code can also serve as an executable intermediate for rea-soning. Chain of Code [ 32 ] combines interpreter execution with lan-guage model emulation, while PAL [ 17 ], Program-of-Thought [ 4 ], and TORA [ 19 ] generate code or invoke tools for mathematical reasoning on benchmarks such as GSM8K [ 6]. Recent work further integrates code execution into the reasoning process [ 30 , 40 ]. Be-cause unreliable code can directly determine final answers, these settings motivate reliability-aware use of executable components. 
+
+## 7 Threats to Validity 
+
+Regarding internal validity, performance may be affected by prompt format, candidate sampling, correction budget, execution limits, and input construction. We use consistent settings where possible and report averages across multiple runs. These choices may still affect absolute performance, but are unlikely to change the overall trends. Benchmark contamination is another internal validity threat. The evaluated LiveCodeBench window is cutoff-clean for Qwen2.5-Coder-32B-Instruct and LLaMA-3.1-8B-Instruct, but not for GPT-5.2. For DeepSeek-V3.2, cutoff cleanliness cannot be determined because its precise knowledge cutoff is not disclosed. We treat the GPT-5.2 and DeepSeek-V3.2 results as comparative evidence only. Using the same problems for all methods controls the comparison but does not guarantee that potential contamination affects them equally. Dawid–Skene assumes candidate outputs are conditionally independent given the latent state. This assumption is approximate because reference codes sampled from the same LLM can share bugs. Our wrong output group analysis shows that incorrect adoption remains limited across observed group counts. Still, ExeCRE can adopt an incorrect reference code when many wrong candidates share a bug that generated inputs do not expose. Regarding external validity, our evaluation does not directly cover repository-level tasks. The main difference in extending Exe-CRE to repository-level settings lies in the form of generated inputs. The input-generator ablation in Table 7 provides preliminary evi-dence that the reliability identification pipeline can remain effective when the input generator is replaced, although direct evaluation on repository-level tasks is still needed. Such an extension also requires candidate programs to be executed repeatedly within a reasonable amount of time and with manageable computational and system resources. Evaluating ExeCRE on stateful repository tasks and longer coding-agent workflows remains future work. 
+
+## 8 Conclusion 
+
+In this work, we study how execution consistency can be lever-aged to estimate code reliability and support self-correction in LLM-based code generation. We propose ExeCRE, an execution-consistency guided reliability estimation framework that infers the trustworthiness of candidate codes from their execution behaviors over large and diverse constructed inputs. By executing multiple candidate codes and modeling their agreement patterns across inputs, ExeCRE derives reliability scores for candidate codes us-ing a principled aggregation approach. Experimental results show that this reliability signal helps identify more reliable reference codes and supports more stable iterative self-correction in code generation. We also include a small additional study on GSM8K, whose results suggest that the same mechanism may be useful for code-based mathematical reasoning when final answers depend on generated code. Overall, our findings highlight the practical value of execution consistency as a signal for reliability estimation. 
+
+## Acknowledgments 
+
+This work was supported by the National Natural Science Foun-dation of China (No. U2433212), the China Postdoctoral Science Foundation (Nos. GZB20250951, 2026T191088, and 2026M794685), in part by the Fundamental Research Funds for the Central Uni-versities, and in part by the State Key Laboratory of Complex & Critical Software Environment. ASE ’26, October 12–16, 2026, Munich, Germany Yiru Dong, Richong Zhang, Fanshuang Kong, and Si Chen 
+
+## Data Availability Statement 
+
+Artifacts are archived at Zenodo [ 12 ]. The actively maintained repository is available at https://github.com/moyi-dong/ExeCRE. 
+
+## References 
+
+[1] Yupeng Chang, Xu Wang, Jindong Wang, Yuan Wu, Linyi Yang, Kaijie Zhu, Hao Chen, Xiaoyuan Yi, Cunxiang Wang, Yidong Wang, et al . 2024. A survey on evaluation of large language models. ACM transactions on intelligent systems and technology 15, 3 (2024), 1–45. doi:10.1145/3641289 [2] Bei Chen, Fengji Zhang, Anh Nguyen, Daoguang Zan, Zeqi Lin, Jian-Guang Lou, and Weizhu Chen. 2022. Codet: Code generation with generated tests. arXiv preprint arXiv:2207.10397 (2022). doi:10.48550/arXiv.2207.10397 [3] Mouxiang Chen, Zhongxin Liu, He Tao, Yusu Hong, David Lo, Xin Xia, and Jianling Sun. 2024. B4: Towards optimal assessment of plausible code solutions with plausible tests. In Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering . 1693–1705. doi:10.1145/3691620.3695536 [4] Wenhu Chen, Xueguang Ma, Xinyi Wang, and William W Cohen. 2022. Program of thoughts prompting: Disentangling computation from reasoning for numerical reasoning tasks. arXiv preprint arXiv:2211.12588 (2022). doi:10.48550/arXiv.2211. 12588 [5] Xiancai Chen, Zhengwei Tao, Kechi Zhang, Changzhi Zhou, Xinyu Zhang, Wanli Gu, Yuanpeng He, Mengdi Zhang, Xunliang Cai, Haiyan Zhao, et al . 2025. Revisit self-debugging with self-generated tests for code generation. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) . 18003–18023. doi:10.18653/v1/2025.acl-long.881 [6] Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al . 2021. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 (2021). doi:10.48550/arXiv.2110.14168 [7] Giuseppe Crupi, Rosalia Tufano, and Gabriele Bavota. 2026. Improving Code Generation via Small Language Model-as-a-judge. arXiv preprint arXiv:2602.11911 
+
+(2026). doi:10.48550/arXiv.2602.11911 [8] Alexander Philip Dawid and Allan M Skene. 1979. Maximum likelihood estima-tion of observer error-rates using the EM algorithm. Journal of the Royal Statistical Society: Series C (Applied Statistics) 28, 1 (1979), 20–28. doi:10.2307/2346806 [9] Yangruibo Ding, Marcus J Min, Gail Kaiser, and Baishakhi Ray. 2024. CYCLE: Learning to Self-Refine the Code Generation. Proceedings of the ACM on Pro-gramming Languages 8, OOPSLA1 (2024). doi:10.1145/3649825 [10] Jinhao Dong, Jun Sun, Wenjie Zhang, Jin Song Dong, and Dan Hao. 2025. Con-tested: Consistency-aided tested code generation with llm. Proceedings of the ACM on Software Engineering 2, ISSTA, 596–617. doi:10.1145/3728902 [11] Yihong Dong, Xue Jiang, Zhi Jin, and Ge Li. 2024. Self-collaboration code genera-tion via chatgpt. ACM Transactions on Software Engineering and Methodology 33, 7 (2024), 1–38. doi:10.1145/3672459 [12] Yiru Dong, Richong Zhang, Fanshuang Kong, and Si Chen. 2026. ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation. Zenodo. doi:10.5281/zenodo.21737670 [13] Yilun Du, Shuang Li, Antonio Torralba, Joshua B Tenenbaum, and Igor Mordatch. 2024. Improving factuality and reasoning in language models through multiagent debate. In Forty-first international conference on machine learning .[14] Andrew Estornell and Yang Liu. 2024. Multi-llm debate: Framework, principals, and interventions. Advances in Neural Information Processing Systems 37 (2024), 28938–28964. doi:10.52202/079017-0911 [15] Sarah Fakhoury, Aaditya Naik, Georgios Sakkas, Saikat Chakraborty, and Shu-vendu K Lahiri. 2024. Llm-based test-driven interactive code generation: User study and empirical evaluation. IEEE Transactions on Software Engineering 50, 9 (2024), 2254–2268. doi:10.1109/TSE.2024.3428972 [16] Zhiyu Fan, Haifeng Ruan, Sergey Mechtaev, and Abhik Roychoudhury. 2024. Oracle-guided program selection from large language models. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis .628–640. doi:10.1145/3650212.3680308 [17] Luyu Gao, Aman Madaan, Shuyan Zhou, Uri Alon, Pengfei Liu, Yiming Yang, Jamie Callan, and Graham Neubig. 2023. Pal: Program-aided language models. In 
+
+International conference on machine learning . PMLR, 10764–10799. [18] Jonas Gehring, Kunhao Zheng, Jade Copet, Vegard Mella, Quentin Carbonneaux, Taco Cohen, and Gabriel Synnaeve. 2024. Rlef: Grounding code llms in execution feedback with reinforcement learning. arXiv preprint arXiv:2410.02089 (2024). doi:10.48550/arXiv.2410.02089 [19] Zhibin Gou, Zhihong Shao, Yeyun Gong, Yelong Shen, Yujiu Yang, Minlie Huang, Nan Duan, and Weizhu Chen. 2023. Tora: A tool-integrated reasoning agent for mathematical problem solving. arXiv preprint arXiv:2309.17452 (2023). doi:10. 48550/arXiv.2309.17452 [20] Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, et al . 2024. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 
+
+(2024). doi:10.48550/arXiv.2407.21783 [21] Daya Guo, Qihao Zhu, Dejian Yang, Zhenda Xie, Kai Dong, Wentao Zhang, Guanting Chen, Xiao Bi, Yifan Wu, YK Li, et al . 2024. DeepSeek-Coder: when the large language model meets programming–the rise of code intelligence. arXiv preprint arXiv:2401.14196 (2024). doi:10.48550/arXiv.2401.14196 [22] Xinyi He, Jiaru Zou, Yun Lin, Mengyu Zhou, Shi Han, Zejian Yuan, and Dongmei Zhang. 2024. Cocost: Automatic complex code generation with online searching and correctness testing. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing . 19433–19451. doi:10.18653/v1/2024.emnlp-main. 1082 [23] Dan Hendrycks, Steven Basart, Saurav Kadavath, Mantas Mazeika, Akul Arora, Ethan Guo, Collin Burns, Samir Puranik, Horace He, Dawn Song, et al . 2021. Mea-suring coding challenge competence with apps. arXiv preprint arXiv:2105.09938 
+
+(2021). doi:10.48550/arXiv.2105.09938 [24] Baizhou Huang, Shuai Lu, Xiaojun Wan, and Nan Duan. 2024. Enhancing large language models in coding through multi-perspective self-consistency. In Proceed-ings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) . 1429–1450. doi:10.18653/v1/2024.acl-long.78 [25] Binyuan Hui, Jian Yang, Zeyu Cui, Jiaxi Yang, Dayiheng Liu, Lei Zhang, Tianyu Liu, Jiajun Zhang, Bowen Yu, Keming Lu, et al . 2024. Qwen2.5-coder technical report. arXiv preprint arXiv:2409.12186 (2024). doi:10.48550/arXiv.2409.12186 [26] Md Ashraful Islam, Mohammed Eunus Ali, and Md Rizwan Parvez. 2024. Map-coder: Multi-agent code generation for competitive problem solving. In Proceed-ings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) . 4912–4944. doi:10.18653/v1/2024.acl-long.269 [27] Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. 2024. Livecodebench: Holistic and contamination free evaluation of large language models for code. 
+
+arXiv preprint arXiv:2403.07974 (2024). doi:10.48550/arXiv.2403.07974 [28] Xue Jiang, Yihong Dong, Yongding Tao, Huanyu Liu, Zhi Jin, and Ge Li. 2025. ROCODE: Integrating Backtracking Mechanism and Program Analysis in Large Language Models for Code Generation. In Proceedings of the IEEE/ACM 47th International Conference on Software Engineering . 334–346. doi:10.1109/ICSE55347. 2025.00133 [29] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik Narasimhan. 2023. Swe-bench: Can language models resolve real-world github issues? arXiv preprint arXiv:2310.06770 (2023). doi:10.48550/ arXiv.2310.06770 [30] Dongwon Jung, Wenxuan Zhou, and Muhao Chen. 2025. Code Execution as Grounded Supervision for LLM Reasoning. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing . 24822–24833. doi:10.18653/ v1/2025.emnlp-main.1260 [31] Hung Le, Hailin Chen, Amrita Saha, Akash Gokul, Doyen Sahoo, and Shafiq Joty. 2023. Codechain: Towards modular code generation through chain of self-revisions with representative sub-modules. arXiv preprint arXiv:2310.08992 (2023). doi:10.48550/arXiv.2310.08992 [32] Chengshu Li, Jacky Liang, Andy Zeng, Xinyun Chen, Karol Hausman, Dorsa Sadigh, Sergey Levine, Li Fei-Fei, Fei Xia, and Brian Ichter. 2023. Chain of code: Reasoning with a language model-augmented code emulator. arXiv preprint arXiv:2312.04474 (2023). doi:10.48550/arXiv.2312.04474 [33] Jierui Li, Hung Le, Yingbo Zhou, Caiming Xiong, Silvio Savarese, and Doyen Sahoo. 2025. Codetree: Agent-guided tree search for code generation with large language models. In Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) . 3711–3726. doi:10.18653/v1/2025. naacl-long.189 [34] Junyou Li, Qin Zhang, Yangbin Yu, Qiang Fu, and Deheng Ye. 2024. More agents is all you need. arXiv preprint arXiv:2402.05120 (2024). doi:10.48550/arXiv.2402.05120 [35] Qingyao Li, Xinyi Dai, Xiangyang Li, Weinan Zhang, Yasheng Wang, Ruiming Tang, and Yong Yu. 2025. Codeprm: Execution feedback-enhanced process reward model for code generation. In Findings of the Association for Computational Linguistics: ACL 2025 . 8169–8182. doi:10.18653/v1/2025.findings-acl.428 [36] Aixin Liu, Aoxue Mei, Bangcai Lin, Bing Xue, Bingxuan Wang, Bingzheng Xu, Bochao Wu, Bowei Zhang, Chaofan Lin, Chen Dong, et al . 2025. Deepseek-v3. 2: Pushing the frontier of open large language models. arXiv preprint arXiv:2512.02556 (2025). doi:10.48550/arXiv.2512.02556 [37] Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. 2023. Is your code generated by chatgpt really correct? rigorous evaluation of large language models for code generation. Advances in neural information processing systems 
+
+36 (2023), 21558–21572. doi:10.52202/075280-0943 [38] Anton Lozhkov, Raymond Li, Loubna Ben Allal, Federico Cassano, Joel Lamy-Poirier, Nouamane Tazi, Ao Tang, Dmytro Pykhtar, Jiawei Liu, Yuxiang Wei, et al . 2024. Starcoder 2 and the stack v2: The next generation. arXiv preprint arXiv:2402.19173 (2024). doi:10.48550/arXiv.2402.19173 [39] Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon, Nouha Dziri, Shrimai Prabhumoye, Yiming Yang, et al .2023. Self-refine: Iterative refinement with self-feedback. Advances in neural information processing systems 36 (2023), 46534–46594. doi:10.52202/075280-2019 ExeCRE: Execution-Consistency Guided Reliability Estimation for Self-Correcting Code Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+[40] Xinji Mai, Haotian Xu, Weinong Wang, Yingying Zhang, Wenqiang Zhang, et al .2025. Agentic RL Scaling Law: Spontaneous Code Execution for Mathematical Problem Solving. In The Thirty-ninth Annual Conference on Neural Information Processing Systems .[41] Davide Molinelli, Alberto Martin-Lopez, Elliott Zackrone, Beyza Eken, Michael D Ernst, and Mauro Pezzè. 2025. Tratto: A neuro-symbolic approach to deriving axiomatic test oracles. Proceedings of the ACM on Software Engineering 2, ISSTA (2025), 1887–1909. doi:10.1145/3728960 [42] Fangwen Mu, Lin Shi, Song Wang, Zhuohao Yu, Binquan Zhang, ChenXue Wang, Shichao Liu, and Qing Wang. 2024. Clarifygpt: A framework for enhancing llm-based code generation via requirements clarification. Proceedings of the ACM on Software Engineering 1, FSE (2024), 2332–2354. doi:10.1145/3660810 [43] OpenAI. 2025. Introducing GPT-5.2. https://openai.com/index/introducing-gpt-5-2/. [44] Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea Finn. 2023. Direct preference optimization: Your language model is secretly a reward model. Advances in neural information processing systems 36 (2023), 53728–53741. doi:10.52202/075280-2338 [45] Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao. 2023. Reflexion: Language agents with verbal reinforcement learning. 
+
+Advances in neural information processing systems 36 (2023), 8634–8652. doi:10. 52202/075280-0377 [46] Zhiqing Sun, Xuezhi Wang, Yi Tay, Yiming Yang, and Denny Zhou. 2022. Recitation-augmented language models. arXiv preprint arXiv:2210.01296 (2022). doi:10.48550/arXiv.2210.01296 [47] Weixi Tong and Tianyi Zhang. 2024. Codejudge: Evaluating code generation with large language models. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing . 20032–20051. doi:10.18653/v1/2024.emnlp-main. 1118 [48] Dmitry Ustalov, Nikita Pavlichenko, and Boris Tseitlin. 2024. Learning from Crowds with Crowd-Kit. Journal of Open Source Software 9, 96 (2024), 6227. doi:10.21105/joss.06227 [49] Thomas Jean-Michel Valentin, Ardi Madadi, Gaetano Sapia, and Marcel Böhme. 2026. Incoherence as oracle-less measure of error in LLM-based code generation. In Proceedings of the AAAI Conference on Artificial Intelligence , Vol. 40. 33305– 33313. doi:10.1609/aaai.v40i39.40616 [50] Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. 2022. Self-consistency improves chain of thought reasoning in language models. arXiv preprint arXiv:2203.11171 (2022). doi:10.48550/arXiv.2203.11171 [51] Kai Xiong, Xiao Ding, Yixin Cao, Ting Liu, and Bing Qin. 2023. Examining inter-consistency of large language models collaboration: An in-depth analysis via debate. In Findings of the Association for Computational Linguistics: EMNLP 2023 . 7572–7590. doi:10.18653/v1/2023.findings-emnlp.508 [52] Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Tom Griffiths, Yuan Cao, and Karthik Narasimhan. 2023. Tree of thoughts: Deliberate problem solving with large language models. Advances in neural information processing systems 36 (2023), 11809–11822. doi:10.52202/075280-0517 [53] Mert Yuksekgonul, Federico Bianchi, Joseph Boen, Sheng Liu, Pan Lu, Zhi Huang, Carlos Guestrin, and James Zou. 2025. Optimizing generative ai by backpropagating language model feedback. Nature 639, 8055 (2025), 609–616. doi:10.1038/s41586-025-08661-4 [54] Kexun Zhang, Danqing Wang, Jingtao Xia, William Yang Wang, and Lei Li. 2023. Algo: Synthesizing algorithmic programs with generated oracle verifiers. 
+
+Advances in Neural Information Processing Systems 36 (2023), 54769–54784. doi:10. 52202/075280-2389 [55] Tianyi Zhang, Tao Yu, Tatsunori Hashimoto, Mike Lewis, Wen-tau Yih, Daniel Fried, and Sida Wang. 2023. Coder reviewer reranking for code generation. In 
+
+International Conference on Machine Learning . PMLR, 41832–41846. [56] Li Zhong, Zilong Wang, and Jingbo Shang. 2024. Debug like a human: A large language model debugger via verifying runtime execution step by step. In Findings of the Association for Computational Linguistics: ACL 2024 . 851–870. doi:10.18653/ v1/2024.findings-acl.49 
+
+Received 2026-03-27; accepted 2026-06-18
