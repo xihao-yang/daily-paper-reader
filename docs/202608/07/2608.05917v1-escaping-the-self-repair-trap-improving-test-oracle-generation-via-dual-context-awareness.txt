@@ -1,0 +1,475 @@
+Title: Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness
+
+URL Source: https://arxiv.org/pdf/2608.05917v1
+
+Published Time: Fri, 07 Aug 2026 00:52:35 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness 
+
+# Kefan Li 
+
+kefanli@buaa.edu.cn Beihang University School of Computer Science and Engineering China 
+
+# Hongyue Yu 
+
+Natt1e@buaa.edu.cn Beihang University National College for Excellent Engineers China 
+
+# Yuan Yuan ∗
+
+yuan21@buaa.edu.cn Beihang University School of Computer Science and Engineering and Qingdao Research Institute and Hangzhou Innovation Institute China 
+
+## Abstract 
+
+Large Language Models (LLMs) have shown strong potential for regression-oracle completion, where a test prefix is given and the current program version is treated as expected behavior. Recent approaches increasingly rely on iterative self-repair and execution feedback, but optimizing execution success does not necessarily yield strong fault-revealing oracles. This objective, widely adopted in repair-based methods, serves only as a proxy and may be mis-aligned with the true goal of oracle generation. Such misalignment biases the repair process, giving rise to a feedback-driven degen-eration that we term the Self-Repair Trap , where iterative repair progressively drives models toward assertions that are easier to satisfy but less effective at detecting faults. To address this issue, we propose DCAware , a computationally efficient, non-iterative framework that prioritizes high signal-to-noise contextual ground-ing over multi-round repair. DCAware integrates structured static context with selectively retrieved dynamic states, enabling precise and robust oracle generation without iterative feedback loops. Ex-tensive experiments based on execution and mutation testing show that DCAware consistently improves fault-revealing effectiveness while maintaining high execution success, outperforming prior methods with substantially lower computational cost. Our results suggest that improving contextual quality is more effective than adding iterative repair complexity in the studied regression-oracle setting. 
+
+## CCS Concepts 
+
+• Software and its engineering → Software testing and debug-ging .
+
+## Keywords 
+
+Oracle Generation, Software Testing, Large Language Models  
+
+> ∗Corresponding author.
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> ASE ’26, Munich, Germany
+> ©2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2882-2/2026/10 https://doi.org/10.1145/3832783.3834421
+
+ACM Reference Format: 
+
+Kefan Li, Hongyue Yu, and Yuan Yuan. 2026. Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness. In Proceed-ings of the 41st IEEE/ACM International Conference on Automated Software Engineering (ASE ’26), October 12–16, 2026, Munich, Germany. ACM, New York, NY, USA, 13 pages. https://doi.org/10.1145/3832783.3834421 
+
+## 1 Introduction 
+
+Unit tests play a crucial role in ensuring the reliability, maintain-ability, and evolvability of software systems [ 15 , 45 ]. They help developers detect regressions early, preserve behavioral consis-tency across code revisions, and act as executable documentation that facilitates program comprehension, refactoring, and long-term maintenance [ 36 ]. In modern software engineering practice, the availability and quality of unit tests are widely regarded as key indicators of project health and development maturity. However, writing high-quality unit tests is notoriously labor-intensive and time-consuming [ 9 ]. A typical unit test consists of two essential components: the test prefix , which prepares the environment and invokes the target code, and the test oracle , which determines the expected behavior or correctness condition [ 3 ]. Compared with gen-erating test prefixes, producing accurate and meaningful test oracles is more challenging due to the need for semantic understanding, behavioral reasoning, and inference about program intent. In this work, we focus on regression-oracle generation in a test-completion setting, where an executable test prefix is already available and the current program version is assumed to represent the expected behavior. The goal is to automatically complete or strengthen the missing oracle assertion rather than generate complete test cases from scratch. Therefore, regression-oracle generation remains a frequently studied and highly challenging problem. Early methods [ 35 , 51 ]attempted to learn assertion patterns directly from code but were significantly constrained. Subsequently, transformer-based meth-ods emerged, following two distinct trajectories: rule-based gen-eration with model-based reranking (e.g., TOGA [ 11 ]), and direct code generation via fine-tuned small-scale models (e.g., TECO [ 40 ], LLM-AG [ 55 ], TOGLL [ 18 ]). Unfortunately, these small models are fundamentally restricted in reasoning, and many were trained on EvoSuite-generated data [ 14 ], which differs significantly from human-written code conventions, limiting their real-world utility. Recently, Large Language Models (LLMs) have shown impressive generalization across software domains. Inspired by these advance-ments, recent literature has explored incorporating LLMs into oracle arXiv:2608.05917v1 [cs.SE] 6 Aug 2026 ASE ’26, October 12–16, 2026, Munich, Germany Kefan Li, Hongyue Yu, and Yuan Yuan 
+
+generation [ 17 , 24 , 38 , 55 ]. Notably, ChatAssert [ 17 ] introduced a paradigm that bypasses small model training, utilizing prompts, vector retrieval, and iterative execution feedback in a self-repair workflow to achieve high accuracy. By employing modern LLMs, ChatAssert significantly outperformed previous approaches. ChatAssert          
+
+> •Round 1 Assistant: assertEquals(1, cm.count("default"));
+> •Round 2 User: I am getting the following test failure:
+> ... Can you please fix the generated assert statement?
+> Assistant:
+> assertTrue(cm.count("default") > 0);
+> •Round 3 User: I am getting the following test failure: ... Can you please fix the generated assert statement?
+> Assistant: assertNotNull(cm);
+> Problem
+> public class RpcConnectionManagerTest {private int port = ...; private String poolKey = ...; @Before public void init() { ... } @After public void stop() { ... } @Test public void testAdd() { Connection conn = getAConn(); cm.add(conn); // An assert statement here }}DCAware
+> assertEquals(1, cm.count(poolKey)); 3.4 s 30.0 s
+> Test Method
+
+Figure 1: A motivating example illustrating the degeneration of test oracle quality during iterative repair. 
+
+Despite these advancements, a potential limitation lies in the objective underlying execution-guided repair approaches. Existing methods typically optimize for execution success, ensuring that generated assertions compile and pass runtime checks. However, execution success is only a proxy and may not always align with the goal of generating strong fault-revealing assertions. This objective misalignment can bias the repair process. When guided by execu-tion feedback, models may modify failing assertions toward easier-to-satisfy conditions rather than improving their fault-revealing capability. As a result, iterative repair can lead to a feedback-driven degeneration, where some assertions become easier to satisfy but less effective at revealing faults. We term this phenomenon the Self-Repair Trap . As illustrated in Figure 1, although repaired assertions achieve execution success, their fault-detection capability can be significantly weakened. In addition, these approaches often incur substantial computational overhead due to iterative interactions and repeated executions. To address this limitation, we hypothesize that high-quality test oracle generation does not require multi-round trial-and-error rea-soning. Instead, it depends on providing high signal-to-noise con-textual grounding in a non-iterative pipeline. We argue that by sup-plying carefully denoised static structures and precisely targeted dynamic states, the model can directly generate fault-revealing assertions without relying on iterative repair. Inspired by recent agentless software-engineering workflows that reduce unnecessary multi-round agent interactions through structured context construction [ 29 , 52 ], we propose DCAware ,a computationally efficient dual-context approach for regression-oracle generation. DCAware integrates two key components: Con-textual Semantic Folding , which constructs a concise structural representation by filtering irrelevant code, and Intent-Driven Dy-namic State Extraction , which selectively retrieves runtime states essential for oracle reasoning. Together, these components provide high-quality contextual grounding that enables precise oracle gen-eration in a non-iterative pipeline. We evaluate DCAware using execution-based metrics and mutation testing via PITest [ 8]. Re-sults show that DCAware improves fault-revealing effectiveness while maintaining high execution success, and achieves these gains with substantially lower computational cost than prior methods. In summary, the main contributions of this paper are as follows: (1) We identify an objective misalignment in execution-guided oracle generation and characterize its effect as the Self-Repair Trap , a feedback-driven degeneration that weakens fault-revealing capability. (2) We propose DCAware , a computationally efficient, non-iterative approach that improves oracle generation through high-quality static and dynamic contextual grounding. (3) We conduct extensive dynamic evaluations showing that DCAware achieves superior fault-revealing effectiveness with substantially lower computational cost than state-of-the-art methods. 
+
+## 2 Methodology 
+
+In this section, we detail the architectural design of the DCAware approach. Inspired by the philosophy of information denoising, our pipeline avoids complex, multi-round agent loops. Instead, it is structured into three distinct and sequential phases: Static Context-Aware, Dynamic Context-Aware, and Oracle Generation. The overall procedure is illustrated in Figure 2. 
+
+## 2.1 Static Context-Aware Phase 
+
+The Static Context-Aware phase is designed to gather sufficient structural code information while actively controlling token noise. Previous approaches typically provided only the focal method, test setup, and test prefix. This restrictive view omits critical contextual elements necessary for semantic understanding. To resolve this informational deficit without overwhelming the LLM’s attention mechanism, we introduce Contextual Semantic Folding . LLMs frequently suffer from the “lost in the middle” phe-nomenon when processing long code contexts; massive amounts of irrelevant local variables and uninvoked method bodies act as noise that dilutes the model’s focus. By utilizing JavaParser [22 ], we extract three specific dimensions of static context and apply precise semantic folding: 
+
+Callees: We extract all methods invoked within the test pre-fix. For each identified class, we retain import statements and the structural skeleton. We preserve complete method bodies only for explicitly invoked methods; all other method bodies are strictly deleted (folded). Focal Class: We preserve the import statements and the full implementation of the target focal method. Crucially, we retain the signatures of all other sibling methods within the focal class while folding their bodies. This provides the LLM with a comprehensive view of the class’s capabilities (its skeleton) without introducing the noise of unrelated implementations. Test Class: 
+
+The golden oracle is replaced with a placeholder comment. To pre-vent data leakage and further compress the prompt, we completely fold all other test methods. We retain the complete bodies of utility and lifecycle configuration methods (e.g., @Before ), as these ini-tialization mechanisms are essential for understanding the testing environment. Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness ASE ’26, October 12–16, 2026, Munich, Germany Dynamic Context-Aware Phase Static Context-Aware Phase Static Context Java Debugger 
+
+Queries 
+
+> conns conns.size() conns.get(poolKey) conns.get(poolKey).size()
+
+Dynamic Context Values 
+
+> conns = "{127.0.0.1:1111=[com...@71d15f18... conns.size() = 1 conns.get(poolKey) = "[com...@71d15f18 ... conns.get(poolKey).size() = 4
+
+Focal&Test Method 
+
+Java Repository 
+
+Static Context LLM 
+
+Oracle Generation Prompt Answer 
+
+> ```java Assert.assertEquals(4, conns.get(poolKey).size()); ```
+
+Callees Test Class Focal Class JavaParser 
+
+Static Context 
+
+Dynamic Context 
+
+LLM 
+
+Retrieve Context Find Callees and Parent Classes Construct Context Aware Context Start Debugger Extract Values 
+
+> package com.alipay.remoting.inner.connection; import ... public class RpcConnectionManagerTest { private BoltServer server; ... @Before public void init() { ... } @After public void stop() { ... } @Test public void testGetAll() { cm.add(getAConn()); cm.add(getAConn()); cm.add(getAConn()); cm.add(getAConn()); Map<String, List<Connection>> conns = cm.getAll(); // An assert statement here }private Connection getAConn() { ... }}
+> Class Attributes and Constructors Class Attributes and Constructors Focal Method
+> package com.alipay.remoting.inner.connection; import ... public class DefaultConnectionManager { protected ConnectionFactory ...; ... public DefaultConnectionManager(...) {...} public Map<String, List<Connection>> getAll(){ ... (focal method body) }public void startup() throws ... public void shutdown() throws ... ... }
+> Other Methods’ Signature
+> package com.alipay.remoting; import ... public class Connection { private static final Logger logger = ... ... public Connection(...) { ... } ... }
+> Called Methods (if any) Test Method Test Setup Tool Methods Class Attributes
+
+Instruction 
+
+Figure 2: Overview of the DCAware framework. The pipeline constructs a folded static context, retrieves targeted runtime states through LLM-generated debugger queries, and combines both contexts to generate the oracle in a single pass. 
+
+This Contextual Semantic Folding effectively improves the con-text’s Signal-to-Noise Ratio (SNR), grounding the LLM in a solid structural reality. Furthermore, this structural reality serves as an indispensable blueprint for the LLM to formulate precise dynamic queries in the subsequent phase. 
+
+## 2.2 Dynamic Context-Aware Phase 
+
+Understanding the runtime state is frequently necessary for assert-ing complex object behaviors. To achieve this, we introduce Intent-Driven Dynamic State Extraction . Unlike existing methods that passively dump all available local variables into the prompt—a prac-tice that exacerbates context noise—we treat the LLM as an Active Debugger .Initially, the folded static context is provided to the LLM. The model analyzes the code skeleton to formulate an intent, outputting a specific list of queries (variables, mathematical expressions, or side-effect-free function calls) whose runtime values are required to write a precise oracle. Once the LLM generates this query list, we execute an automated debugging sequence. We inject a valid suspension point ( int __breakpoint__ = 0; ), spawn a Maven test process configured for remote JVM debugging, and attach the Java Debugger (JDB). Through automated pseudo-terminal interaction, we command the JDB to evaluate the exact queries formulated by the LLM. If a query fails due to invalid syntax, out-of-scope variables, or runtime exceptions, JDB returns the corresponding error message, which is recorded and provided as feedback while the remaining queries continue to execute. The successfully retrieved values provide the dynamic context, ensuring the LLM only receives high-entropy, semantically relevant runtime information. 
+
+## 2.3 Oracle Generation 
+
+In the final phase, the folded static context and the intent-driven dynamic context are synthesized. Through explicit instructions, we direct the model to generate an accurate test oracle in a non-iterative manner. To prevent the model from outputting overfit-ted or fragile oracles, we establish Anti-Overfitting Guardrails 
+
+within the prompt. During dynamic execution, the runtime environ-ment might return volatile memory references (e.g., obj@12345 ) or transient timestamps. Without constraints, LLMs tend to generate fragile, exact-match assertions that pass the immediate execution check but inevitably fail in subsequent regression tests. Instruction 
+
+... CRITICAL ASSERTION RULES: Generate robust assertions. NEVER rely on volatile internal states, memory references, or exact string matching of complex objects. 
+
+‐ AVOID (Fragile): Using `.toString()`, hardcoding dynamic DB IDs (e.g., `"#3:1"`), version numbers (`"v1"`), or assuming order in Sets (e.g., `.iterator().next()`). 
+
+‐ PREFER (Robust): Asserting collection `.size()`, or comparing deterministic business fields (e.g., `.field("value")`). ... 
+
+Figure 3: Anti-overfitting guardrails used during oracle gen-eration. 
+
+Therefore, these guardrails strictly prohibit matching against dynamically allocated addresses, forcing the model to extract and assert semantically stable attributes (e.g., utilizing .size() or de-terministic business fields). The specific instruction design is illus-trated in Figure 3. ASE ’26, October 12–16, 2026, Munich, Germany Kefan Li, Hongyue Yu, and Yuan Yuan 
+
+The LLM outputs the final test oracle encapsulated within a Mark-down Java code block, entirely bypassing the need for a secondary execution and repair loop. 
+
+## 3 Results 
+
+In this section, we present the experimental setup and answer the formulated research questions. 
+
+## 3.1 Research Questions 
+
+We propose the following research questions: 
+
+• RQ1: How effective are the oracles generated by DCAware? 
+
+• RQ2: How does each static-context component contribute to the final performance of DCAware? 
+
+• RQ3: How does each dynamic-context strategy affect the final performance of DCAware? 
+
+• RQ4: How does DCAware perform in terms of token con-sumption and execution time? 
+
+• RQ5: How do the static and dynamic contexts complement each other in the complete DCAware pipeline? 
+
+## 3.2 Experimental Setting 
+
+Datasets: Due to the substantial computational cost of dynamic evaluation, we utilize a subset of 500 distinct problems from the TECO dataset, exactly identical to the official ChatAssert evaluation subset [ 17 ]. Here, each problem represents a test-method assertion-completion instance rather than a project. These instances are collected from 38 open-source Java projects and provide executable test prefixes with missing oracle assertions. We verified that all golden (human-written) oracles successfully execute and pass on these problems, ensuring baseline validity. For consistency with TECO and ChatAssert, we follow their single-assertion comple-tion setting, where each instance requires generating one oracle assertion. Handling multiple assertions within a single test case is beyond the scope of this work. 
+
+Baselines: We compare DCAware against seven baselines across three categories: 
+
+• Training-based: TECO [40 ] (CodeT5 [ 49 ]), TOGA [ 11 ](CodeBERT [ 13 ]), LLM-AG [55 ] (CodeT5 [ 49 ]), and the top two performing variants (CodeGen [ 41 ], CodeParrot [ 7 ]) of TOGLL [18 ]. We exclude Doc2OracLL [ 20 ] as its source code and models are unavailable, though its methodology resembles TOGLL. 
+
+• LLM-based: ChatAssert [ 17 ] and a single-query Direct Prompting baseline. 
+
+• Rule-based: Trivial generates solely assertTrue(true); ,serving as a fundamental lower bound for oracle strength to demonstrate the necessity of semantic validation. Notably, while prior works (e.g., TECO and ChatAssert) originally replaced string literals with a generic STR token to reduce gen-eration difficulty, we strictly retain the original strings across all baselines to maintain realistic testing conditions. 
+
+Models: We employ Qwen3-Coder-30B-A3B-Instruct-FP8 [54 ](deployed via vLLM [ 26 ] on a single 40 GB NVIDIA A100 GPU) and GPT-5-mini [ 42 ] (accessed via Azure API). In the following experiments, we refer to these models as Qwen3-Coder-30B and GPT-5-mini , respectively. To prevent data contamination and latency inaccuracies from shared prompt caching, each evaluated approach uses a unique cache_salt to strictly isolate cache memory. 
+
+Metrics: Prior works often rely on static metrics (e.g., Exact Match, ROUGE [ 32 ], CodeBLEU [ 44 ]), which fail to accurately cap-ture functional correctness. To address this, we employ fully dy-namic execution-based metrics: 
+
+• Pass Rate (%): The percentage of generated oracles that the Maven test process completes normally without runtime crashes, and the extracted test results confirm that the target test method successfully passes. 
+
+• Kill Golden (KG) (%): Measures fault-revealing capabil-ity using PITest [ 8] (with the DEFAULTS mutator). Since high Pass Rates can be artificially inflated by trivial ora-cles, mutation analysis provides rigorous semantic valida-tion. We strictly filter the dataset to exclude problems where PITest fails, or the golden oracle kills zero mutants, yielding 
+
+𝑁 = 362 valid problems. KG is calculated as the macro-average of individual kill rates: 
+
+𝐾𝐺 = 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+|𝑀 𝑔𝑒𝑛 𝑘𝑖𝑙𝑙𝑒𝑑,𝑖 ∩ ( 𝑀 𝑔𝑜𝑙𝑑𝑒𝑛 𝑘𝑖𝑙𝑙𝑒𝑑,𝑖 ∪ 𝑀 𝑔𝑜𝑙𝑑𝑒𝑛 𝑠𝑢𝑟 𝑣𝑖𝑣𝑒𝑑,𝑖 )| |𝑀 𝑔𝑜𝑙𝑑𝑒𝑛 𝑘𝑖𝑙𝑙𝑒𝑑,𝑖 | (1) where 𝑀 𝑔𝑒𝑛 𝑘𝑖𝑙𝑙𝑒𝑑,𝑖 represents mutants killed by the generated or-acle (scoring zero if execution fails). KG evaluates generated-oracle effectiveness only within the behavioral scope exer-cised by the golden oracle, defined by the union of golden-killed and golden-survived mutants. This design avoids inflat-ing scores with mutants outside the tested behavior scope. 
+
+• Shared Kill Golden (Shared KG) (%): We compute Shared KG on the mutation-valid instances passed by all methods in each comparison, eliminating bias from different Pass Rates. The Trivial baseline serves as a lower bound because it can score non-zero when mutants are killed by the test prefix before the assertion is reached; the improvement over this baseline reflects the assertion’s additional fault-revealing contribution. Because the shared set is recomputed for each table, Shared KG values are comparable only within the same table. 
+
+• Runtime Error (RE) (%): The ratio of generated oracles that crash during execution (e.g., syntax errors, unresolved dependencies, or exceptions). 
+
+• Test Failed (TF) (%): The proportion of generated oracles where the Maven test process completes normally without any runtime crashes, but the extracted test results indicate that the target test method failed. 
+
+• Empty Oracle (EO) (%): The percentage of cases where the method fails to output any oracles. 
+
+Execution Environment: All evaluations are conducted within isolated Docker containers to ensure stable and reproducible dy-namic assessments. Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Table 1: Execution-based metrics comparison of DCAware and other baselines. The best-performing results are in bold. 
+
+Method Model Pass Rate (%) KG (%) RE (%) TF (%) EO (%) TOGA [11] CodeBERT 23.00 14.54 1.00 12.60 63.40 TOGLL [18] CodeGen-350M 26.20 18.37 35.60 24.00 14.20 TOGLL [18] CodeParrot-110M 22.60 16.13 40.80 23.80 12.80 LLM-AG [55] CodeT5 8.80 8.75 73.80 16.40 1.00 TECO [40] CodeT5 25.60 24.19 24.00 21.20 29.20 Direct Prompting Qwen3-Coder-30B 55.00 50.76 21.60 23.40 0.00 GPT-5-mini 61.40 54.58 21.40 17.20 0.00 ChatAssert [17] Qwen3-Coder-30B 68.40 59.00 28.40 0.80 2.40 GPT-5-mini 73.20 61.56 25.40 0.20 1.20 DCAware Qwen3-Coder-30B 80.80 73.20 7.40 11.80 0.00 GPT-5-mini 88.20 78.17 4.20 7.60 0.00 
+
+## 3.3 RQ1: Performance of DCAware 
+
+As shown in Table 1, methods trained primarily on EvoSuite-generated data exhibit a significant performance drop when encountering real-istic test prefixes. To rigorously evaluate fault-revealing capabilities independently of Pass Rates, we performed a comparative analysis on the shared subset of successfully passed problems (Table 2a and Table 2b). The results reveal that achieving higher execution success does not necessarily imply stronger fault-revealing capability. For exam-ple, although ChatAssert achieves higher Pass Rates than Direct Prompting, its Shared KG is lower on both models. This indicates that iterative execution-guided repair may improve executability while potentially weakening assertion strength. 
+
+Table 2: Evaluation of fault-revealing capability on LLM-based methods. Bold indicates the best result. (a) Results using Qwen3-Coder-30B on 152 shared problems; (b) Results using GPT-5-mini on 183 shared problems. 
+
+> (a) Qwen3-Coder-30B
+
+Method Shared KG (%) Trivial 39.83 Direct Prompting 92.77 ChatAssert [17] 87.54 DCAware 93.72 
+
+> (b) GPT-5-mini
+
+Method Shared KG (%) Trivial 41.88 Direct Prompting 91.65 ChatAssert [17] 86.31 DCAware 92.83 
+
+A closer analysis of ChatAssert provides further evidence for the “Self-Repair Trap”. While iterative repair improves execution success, the oracles that first pass at later stages tend to exhibit weaker fault-revealing capability. As shown in Figure 4, later stages continue increasing cumulative Pass Rate but recover increasingly weaker oracles. This suggests that execution feedback can bias iterative repair toward easier-to-satisfy assertions. In contrast, DCAware avoids iterative repair by constructing high-signal contextual information before generation. It achieves the highest overall Pass Rate while maintaining the strongest Shared 1 2–5 >5    
+
+> Stage
+> 40
+> 60
+> 80
+> Performance (%)
+> (a) Qwen3-Coder-30B
+> 12–5 >5
+> Stage
+> (b) GPT-5-mini
+> Cumulative Pass Rate (%) Newly Passed KG (%)
+
+Figure 4: Evolution of ChatAssert across generation and re-pair stages. Stage 1 denotes the initial generation. Pass Rate is cumulative, whereas KG is calculated over the oracles that first pass within each stage group. 
+
+KG among evaluated LLM-based methods ( 93 .72% for Qwen3-Coder-30B and 92 .83% for GPT-5-mini). These results suggest that im-proving contextual grounding can alleviate the trade-off between execution success and fault-revealing capability. 
+
+Answer RQ1: DCAware outperforms all evaluated baselines in both execution success and fault-revealing capability. The stage-wise analysis further shows that iterative repair ap-proaches such as ChatAssert may improve Pass Rates while recovering weaker oracles at later stages. DCAware avoids this trade-off through a non-iterative, context-aware generation pipeline. 
+
+## 3.4 RQ2: Contribution of Individual Static Contextual Components 
+
+In this section, we conduct a granular analysis to investigate the specific role of each component within the static context. To ensure computational efficiency and minimize interference from dynamic factors, all experiments in this subsection are conducted by exclud-ing dynamic context. We compare the following four configurations: 
+
+• w/o Test Class: Removes the skeleton information of the test class, providing only the source code of the test prefix. 
+
+• w/o Focal Class: Excludes the focal class skeleton, retaining only the source code of the focal method. ASE ’26, October 12–16, 2026, Munich, Germany Kefan Li, Hongyue Yu, and Yuan Yuan 
+
+Table 3: Execution-based performance of the static-context ablations with dynamic context disabled. Full retains the test class, focal class, and callee components. 
+
+Model Method Pass Rate (%) KG (%) RE (%) TF (%) EO (%) Qwen3-Coder-30B w/o Test Class 68.00 59.36 12.80 19.20 0.00 w/o Focal Class 65.60 58.57 11.40 23.00 0.00 w/o Callees 70.20 62.00 7.00 22.80 0.00 Full 72.40 65.92 6.00 21.60 0.00 GPT-5-mini w/o Test Class 76.60 66.18 9.00 14.20 0.20 w/o Focal Class 74.20 65.41 13.00 12.80 0.00 w/o Callees 78.00 69.22 6.80 15.00 0.20 Full 80.40 70.23 5.80 13.60 0.20 
+
+• w/o Callees: Strips away other invocations within the test prefix, with the exception of the focal method. 
+
+• Full : Represents the complete static context configuration, which corresponds to the w/o Dynamic Context variant discussed in Section 3.7. The detailed results are demonstrated in Table 3. The experimental results reveal that the inclusion of test class skeletons and focal class skeletons significantly reduces the RE rate. This suggests that these components provide critical references for dependency attributes and method signatures, thereby preventing the model from invoking non-existent properties or methods. In contrast, while the contribution of callees is relatively marginal, it still provides auxiliary context that enhances overall performance. In accordance with Section 3.3, we conduct a mutation analysis of the four configurations. The detailed results are shown in Table 4a and Table 4b. 
+
+Table 4: Evaluation of fault-revealing capability of four static context configurations. (a) Results using Qwen3-Coder-30B on 176 shared problems; (b) Results using GPT-5-mini on 213 shared problems. 
+
+> (a) Qwen3-Coder-30B
+
+Method Shared KG (%) Trivial 36.73 w/o Test Class 92.56 w/o Focal Class 93.34 
+
+w/o Callees 91.72 Full 92.83 
+
+> (b) GPT-5-mini
+
+Method Shared KG (%) Trivial 38.10 w/o Test Class 90.25 w/o Focal Class 91.05 w/o Callees 92.28 
+
+Full 92.01 The results reveal an inherent trade-off between context size and fault-revealing intensity across both models. While the Full 
+
+configuration achieves the highest Pass Rates, it ranks second in Shared KG (92.83% for Qwen3-Coder-30B and 92.01% for GPT-5-mini). Specifically, the w/o Focal Class setting peaks at 93.34% for Qwen3-Coder-30B, whereas w/o Callees reaches 92.28% for GPT-5-mini. This indicates that expanding context to resolve dependencies successfully maximizes execution success but introduces minor at-tentional noise. This interference slightly dilutes the models’ focus on generating the most rigorous semantic checks, preventing the 
+
+Full setting from achieving the absolute highest mutation scores. Overall, this demonstrates the utility of static components in bal-ancing compilation correctness against checking capability, high-lighting the inherent trade-offs in context expansion. To some extent, our findings challenge the conclusions presented in the previous work [ 38 ]. This discrepancy can be attributed to two key factors: 
+
+• Context Optimization: Our context compression strategy (i.e., folding uninvoked method bodies) effectively prevents context overflow and provides the model with more precise and relevant information. 
+
+• Evaluation Metrics: Unlike the restrictive EM used in prior work, our execution-based metrics offer a more authentic and accurate assessment of oracle quality, leading to a more reliable measurement of their fault-revealing potential. 
+
+Answer RQ2: Integrating structural skeletons balances execu-tion correctness and checking intensity. While the Full context maximizes Pass Rates across both models, its expanded size in-troduces a trade-off: minor attentional noise slightly dilutes as-sertion strictness, yielding the second-highest fault-revealing performance. 
+
+## 3.5 RQ3: Contribution of Different Dynamic Contextual Strategies 
+
+In this section, we investigate the contribution of dynamic context in enhancing oracle generation. Building upon the Full Static Context configuration, we conduct a comparative analysis of the following three strategies: 
+
+• None: No dynamic context is provided. Note that this con-figuration is methodologically identical to the Full static configuration evaluated in RQ2 and the w/o Dynamic Con-text variant discussed in RQ5. 
+
+• Locals: A naive approach where all available function pa-rameters and local variable values are directly concatenated into the prompt context. 
+
+• DCAware: Uses the full static context together with the Dy-namic Context-Aware phase. In this configuration, the LLM autonomously identifies and retrieves the values of specific Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Table 5: Execution-based performance of dynamic-context strategies built on the full static context. None provides no dynamic state, Locals dumps available local-variable values, and DCAware retrieves LLM-selected expressions. 
+
+Model Method Pass Rate (%) KG (%) RE (%) TF (%) EO (%) Qwen3-Coder-30B None 72.40 65.92 6.00 21.60 0.00 Locals 72.40 66.05 5.40 22.00 0.20 DCAware 80.80 73.20 7.40 11.80 0.00 GPT-5-mini None 80.40 70.23 5.80 13.60 0.20 Locals 84.40 71.64 4.80 10.60 0.20 DCAware 88.20 78.17 4.20 7.60 0.00 variables, expressions, or object states it deems necessary during the runtime execution. The detailed results are shown in Table 5. Our findings indicate that DCAware significantly contributes to the improvement of Pass Rates. Conversely, the naive provision of all local variables ( Locals ) does not consistently yield performance gains. For instance, compared to the baseline with no dynamic context, the Locals strategy shows no improvement in the Pass Rate on Qwen3-Coder-30B and only a marginal increase on GPT-5-mini. Dynamic Context-Aware 
+
+> handshakeResponse = "org.nanohttpd.protocols.http.response .Response@531f4093" handshakeResponse.getStatus() = "BAD_REQUEST" handshakeResponse.getStatus() .getRequestStatus() = 400
+> Locals
+> handshakeResponse = instance of org.nanohttpd .protocols.http .response.Response( id=1607 )
+> Test Method Oracle (Locals)
+> assertNotNull( handshakeResponse);
+> (Killed/Golden Killed: 0/2)
+> Oracle (Dynamic Context-Aware)
+> assertEquals(Status.BAD_REQUEST, handshakeResponse.getStatus());
+> (Killed/Golden Killed: 2/2)
+> @Test public void testMissingKeyReturnsErrorResponse() { this.headers.remove("sec-websocket-key"); Response handshakeResponse =this.nanoWebSocketServer.handle(this.session); // An assert statement here }
+
+Figure 5: Case study comparing Locals and DCAware. Tar-geted runtime queries enable DCAware to generate a stronger oracle than a raw local-variable dump. 
+
+Through a detailed case study shown in Figure 5, we observed that Locals often inundates the LLM with raw data that lacks semantic relevance to the specific assertion logic. Furthermore, 
+
+Locals fails to provide access to critical runtime information such as method return values or object attributes at a given execution state. In contrast, DCAware enables the LLM to selectively retrieve the values of specific variables and complex expressions it deems critical, thereby providing more targeted and actionable information for generating correct oracles. Similarly, we conduct a mutation analysis on the common subset of problems successfully passed by all evaluated dynamic strategies. The results are illustrated in Table 6a and Table 6b, respectively. We observe a critical phenomenon validating our Intent-Driven extraction. For GPT-5-mini, providing a large number of raw local-variable values ( Locals ) improves the Pass Rate but paradoxically 
+
+Table 6: Evaluation of fault-revealing capability of different dynamic context strategies. (a) Results using Qwen3-Coder-30B on 223 shared problems; (b) Results using GPT-5-mini on 263 shared problems. 
+
+(a) Qwen3-Coder-30B 
+
+Method Shared KG (%) Trivial 35.68 None 92.66 Locals 93.13 DCAware 95.58 
+
+(b) GPT-5-mini 
+
+Method Shared KG (%) Trivial 37.35 None 90.87 Locals 88.66 DCAware 92.32 
+
+causes a sharp decline in fault-revealing intensity compared to the static-only baseline. Because Locals inundates the LLM with raw, unfiltered data that lacks semantic relevance, the noise obstructs the model’s semantic focus. Furthermore, it fails to capture critical method return states. In contrast, DCAware allows the LLM to act as an active debugger, retrieving only targeted, high-entropy expressions, achieving simultaneous improvements in both metrics. 
+
+Answer RQ3: The Intent-Driven Dynamic State Extrac-tion strategy significantly outperforms the naive Locals ap-proach. Dumping all available local-variable values introduces noise that degrades fault-revealing intensity (especially in GPT-5-mini), whereas targeted, active querying empowers the LLM to formulate precise semantic assertions. 
+
+## 3.6 RQ4: Overhead of DCAware 
+
+Token and time consumption are crucial considerations within the context of LLM-based software engineering. In this section, we calculate the average token usage and time expenditure per problem for all evaluated LLM-based methods. The detailed results are shown in Table 7. Since Qwen3-Coder-30B is deployed locally, we report the mon-etary cost of GPT-5-mini. The monetary costs are calculated based on the standard pricing rates of the Azure API for the GPT-5-mini model. Since the reported total prompt tokens include the cached tokens, the exact cost per request is computed as follows: the un-cached prompt tokens (Total Prompt minus Cached) are billed at 0.25 USD per 1M, the cached prompt tokens at 0.025 USD per 1M, ASE ’26, October 12–16, 2026, Munich, Germany Kefan Li, Hongyue Yu, and Yuan Yuan 
+
+Table 7: Average per-instance token usage and execution time for the LLM-based methods. Prompt, Cached, and Completion are average token counts. 
+
+Model Method Prompt Cached Completion Seconds Qwen3-Coder-30B Direct Prompting 349.14 18.21 19.15 0.20 ChatAssert [17] 8881.96 3156.73 1474.63 18.08 DCAware 6796.23 3369.95 148.16 5.73 GPT-5-mini Direct Prompting 349.10 0.00 30.75 4.21 ChatAssert [17] 10271.60 840.03 1941.51 51.06 DCAware 6816.10 1296.90 163.74 11.78 and the completion tokens at 2.00 USD per 1M. Given that the av-erage cost per problem is extremely small in magnitude, we report the total cost aggregated over the 500 problems in Table 8. 
+
+Table 8: Total GPT-5-mini API cost over all 500 assertion-completion instances under the official pricing. 
+
+Method Total Cost ($) Direct Prompting 0.07 ChatAssert [17] 3.13 DCAware 0.87 While DCAware constructs a comprehensive structural prompt, its non-iterative, feed-forward design drastically curtails the gen-eration of output tokens compared to ChatAssert (e.g., 163.74 vs. 1941.51 completion tokens for GPT-5-mini). In modern LLM inference, the generation phase (decoding) is significantly more latency-bound and computationally expensive than prompt pro-cessing (pre-filling). By shifting the computational burden from iter-ative output generation to high-SNR input construction, DCAware 
+
+achieves superior generation quality with substantially lower over-all execution time and monetary cost. Notably, DCAware achieves higher prompt caching than the iterative ChatAssert . We achieve this by anchoring the token-heavy static context at the prompt’s beginning, ensuring this prefix remains stable across phases to maximize KV-cache hits and minimize costs. 
+
+Answer RQ4: By substituting iterative generation loops with a high-signal non-iterative pipeline, DCAware shifts the com-putational paradigm. It achieves superior generation quality with approximately one quarter of the API generation cost and up to 77% less execution time compared to complex agentic frameworks like ChatAssert .
+
+## 3.7 RQ5: Ablation Study 
+
+While RQ2 and RQ3 compare alternative designs within the static and dynamic modules, respectively, RQ5 removes complete modules to examine their dependency and complementarity. Specifically, we investigate whether dynamic querying relies on static anchors and whether combining both contexts improves the complete DCAware 
+
+pipeline. For compact presentation, we denote the variants that remove the static and dynamic modules as w/o Static and w/o Dynamic , respectively. We evaluate the following configurations: 
+
+• w/o Static : Omits the Static Context-Aware phase. Similar to Direct Prompting , only the focal method, test setup, and test prefix are provided, while the Dynamic Context-Aware phase remains enabled. 
+
+• w/o Dynamic : Omits the Dynamic Context-Aware phase. The complete static context is retained, but no dynamic infor-mation is provided. This configuration is structurally identi-cal to the Full configuration in RQ2 and the None configu-ration in RQ3. 
+
+• DCAware : Uses both the Static Context-Aware and Dynamic Context-Aware phases, representing the complete approach. The detailed results are shown in Table 9. Our ablation study reveals two key findings. First, both the static and dynamic contexts contribute significantly to the overall per-formance, demonstrating the efficacy of both modules. Second, removing the static context yields the most substantial impact. This is partially because the static context provides the LLM with more accurate awareness targets. In practice, if only the Dynamic Context-Aware phase is enabled without the static context, the model often struggles to identify the most appropriate objects for observation. This confirms that the static context provides the necessary anchor points; without this architectural blueprint, the dynamic query mechanism operates blindly. In accordance with Section 3.3, we conduct a mutation analysis. The detailed results are shown in Table 10a and Table 10b. On the commonly passed problems, the ablation results further demonstrate the complementary roles of static and dynamic con-texts. For Qwen3-Coder-30B, combining both contexts achieves the highest Shared KG. For GPT-5-mini, DCAware and the w/o Dynamic Context variant achieve essentially identical Shared KG values (92.07% vs. 92.08%); therefore, we do not interpret the 0.01-point difference as meaningful. Nevertheless, dynamic context substantially improves the Pass Rate from 80.40% to 88.20% without a material reduction in fault-revealing capability. Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Table 9: Execution-based comparison of the full DCAware pipeline with complete-module ablations. w/o Static and w/o Dynamic remove the corresponding context-aware phase. 
+
+Model Method Pass Rate (%) KG (%) RE (%) TF (%) EO (%) Qwen3-Coder-30B w/o Static 64.00 59.81 21.60 14.40 0.00 w/o Dynamic 72.40 65.92 6.00 21.60 0.00 DCAware 80.80 73.20 7.40 11.80 0.00 GPT-5-mini w/o Static 77.40 68.82 18.20 4.40 0.00 w/o Dynamic 80.40 70.23 5.80 13.60 0.20 DCAware 88.20 78.17 4.20 7.60 0.00 
+
+Table 10: Evaluation of the fault-revealing capability of ab-lated variants. (a) Results using Qwen3-Coder-30B on 178 shared problems; (b) Results using GPT-5-mini on 215 shared problems. 
+
+> (a) Qwen3-Coder-30B
+
+Method Shared KG (%) Trivial 40.92 w/o Static 93.90 w/o Dynamic 92.78 DCAware 96.15 
+
+> (b) GPT-5-mini
+
+Method Shared KG (%) Trivial 41.31 w/o Static 91.83 w/o Dynamic 92.08 
+
+DCAware 92.07 
+
+Answer RQ5: Static context provides important anchors for intent-driven dynamic querying, while dynamic context im-proves the overall execution success of the complete pipeline. Combining both contexts achieves the strongest overall per-formance, maximizing Shared KG for Qwen3-Coder-30B and substantially improving the Pass Rate of GPT-5-mini while maintaining comparable Shared KG. 
+
+## 4 Discussion 4.1 The Reward Hacking Phenomenon in LLMs 
+
+Our RQ1 results reveal reward-hacking-like behavior in the evalu-ated execution-guided regression-oracle workflow. When an LLM is placed within a “Generate-Execute-Repair” loop, its primary op-timization objective implicitly shifts from “generating a rigorous semantic check” to “generating code that compiles and passes”. Consequently, when faced with a complex assertion failure, rather than deeply reasoning about the faulty logic, the LLM takes the path of least resistance. It drops dimensional checks, strips away object field validations, and relies on trivial state verifications (e.g., 
+
+assertNotNull instead of assertEquals ). These results suggest that, without careful control, execution feedback can favor pass-ability over assertion strength. 
+
+## 4.2 Static vs. Dynamic Synergy 
+
+The ablation study (RQ5) demonstrates that dynamic context alone performs poorly without static support. This emphasizes the fun-damental synergy of our approach: the static context is not merely a source of dependency resolution; it is the blueprint for intent. Without the folded code skeleton, the LLM operates blindly and cannot deduce which variables or methods are worth querying during the dynamic phase. The static phase defines the “what could be checked”, while the dynamic phase confirms “what is currently true”. 
+
+## 4.3 Model Tendencies and Trade-offs 
+
+Our evaluation reveals an intriguing divergence in behavior among different LLMs. For instance, Qwen3-Coder-30B tends to prioritize the rigor and fault-revealing strength of the oracle, occasionally at the cost of execution Pass Rates. Conversely, GPT-5-mini exhibits a strong inclination towards generating executable, high-pass-rate oracles, but sometimes compromises on testing intensity when presented with overwhelming raw dynamic data (e.g., the Locals 
+
+strategy). 
+
+Table 11: Evaluation of fault-revealing capability across the two models using DCAware on 273 shared problems. 
+
+Method Model Shared KG (%) Trivial - 36.47 DCAware Qwen3-Coder-30B 92.17 
+
+DCAware GPT-5-mini 90.14 To robustly quantify this divergence, we conducted a direct com-parison of the fault-revealing capabilities between the two models using the DCAware approach. As shown in Table 11, by isolating the intersection of problems successfully passed by both models, we obtained a substantial shared set of 273 problems. The results con-firm our observation: Qwen3-Coder-30B achieves a higher Shared KG (92.17%) compared to GPT-5-mini (90.14%). This quantitatively demonstrates that while GPT-5-mini excels in yielding runnable oracles, it generates slightly weaker assertions compared to Qwen3-Coder-30B. These model-dependent tendencies suggest that future frameworks could adapt their prompting strategies to the underly-ing model; identifying their causes remains future work. 
+
+## 4.4 Performance on a Larger Model 
+
+To investigate whether the effectiveness of DCAware extends be-yond the models used in the main evaluation, we additionally eval-uate it with GPT-5 under the same protocol. DCAware achieves a Pass Rate/KG of 92.20/82.17, compared with 61.60/53.46 for Direct Prompting and 73.80/59.61 for ChatAssert. These results suggest ASE ’26, October 12–16, 2026, Munich, Germany Kefan Li, Hongyue Yu, and Yuan Yuan 
+
+that the benefit of DCAware is not limited to smaller models, al-though a more comprehensive evaluation across additional large models remains future work. 
+
+## 4.5 The Necessity of Semantic Identification 
+
+A naive approach to utilizing dynamic execution feedback might involve extracting object states and directly asserting them using an assertEquals . However, our observations indicate that this method is fundamentally flawed. Many complex runtime variables return memory addresses or instance identifiers (e.g., handshakeRe sponse="org.nanohttpd.protocols.http.response.Response @531f4093" ). Forcing an equals match on these dynamically allo-cated addresses leads to extremely fragile and trivial oracles that will inevitably fail upon subsequent executions. This underscores the necessity of semantic identification: rather than blindly matching raw string outputs, DCAware empowers the LLM to comprehend the underlying object semantics and extract stable, meaningful attributes (such as return values of specific accessor methods) to construct robust and reproducible test oracles. 
+
+## 5 Threats to Validity 5.1 Internal Validity 
+
+The non-deterministic nature of LLM inference may affect evalua-tion consistency. For models whose inference APIs expose a tem-perature parameter, we set it to 0.2. The main tables report the first run, and we independently reran each complete generation-and-evaluation pipeline twice, resulting in three runs per configuration. 50 60 70 80 90  
+
+> Mean Performance (%)
+> Direct
+> ChatAssert
+> DCAware
+> Direct
+> ChatAssert
+> DCAware
+> Qwen3-Coder-30B
+> GPT-5-mini
+> Pass Rate (%) KG (%)
+
+Figure 6: Stability of Pass Rate and KG across three indepen-dent runs. Markers indicate the mean values, and horizon-tal error bars denote one standard deviation. The rankings of Direct Prompting, ChatAssert, and DCAware remain un-changed for both evaluated models. 
+
+As shown in Figure 6, the method rankings remain unchanged across the three runs: DCAware consistently achieves the high-est Pass Rate and KG, followed by ChatAssert and Direct Prompt-ing. The limited standard deviations further indicate that the ob-served performance differences are stable under repeated gener-ation. To assess execution flakiness separately from generation non-determinism, we additionally executed every golden test and each generated oracle three times and observed no flaky outcomes. All local-model experiments were conducted using the same 40 GB NVIDIA A100 GPU. 
+
+## 5.2 Construct Validity 
+
+Construct validity threats primarily concern our measurement methodologies. First, inference engine prefix caching can skew token consumption and latency metrics via unintended cache hits across tasks. We mitigated this by assigning a unique cache_salt 
+
+to each test method’s API request, isolating cache memory to ensure accurate resource tracking. Prompt guardrails may con-found the contribution of dual-context grounding. We therefore ap-plied the same guardrails to Direct Prompting and ChatAssert. For Qwen3-Coder-30B, their Pass Rate/KG changed from 55.00/50.76 to 54.40/49.48 and from 68.40/59.00 to 68.20/58.12, respectively; for GPT-5-mini, the corresponding changes were 61.40/54.58 to 59.60/53.39 and 73.20/61.56 to 73.40/56.87. Thus, guardrails alone do not explain DCAware’s gains. Second, generated test oracles might cover different code paths than the golden oracle, producing an inconsistent set of program mutants. To ensure equitable comparisons, we calculated muta-tion scores for all automated methods based exclusively on the predefined subset of mutants generated during the human-written golden oracle’s execution. A potential threat involves the reliability of debugger-based ex-traction. LLM-generated queries may fail due to invalid expressions, unavailable variables, or runtime exceptions. In our evaluation, Qwen3-Coder-30B generated an average of 4.75 successful and 2.22 failed queries per instance, while GPT-5-mini generated 7.36 suc-cessful and 3.21 failed queries. Nevertheless, 88.40% and 90.60% of instances obtained at least one successful query for Qwen3-Coder-30B and GPT-5-mini, respectively, indicating that query failures are usually localized rather than preventing dynamic context extrac-tion. Regarding side effects, query immutability is enforced through prompt constraints rather than strict static checking. A conserva-tive name-based scan of generated assertions (e.g., set* , remove* ,and create* ) flagged only 8/500 cases (1.60%) for each model; since benign calls may match these patterns, this is an upper-bound esti-mate. Final oracles are evaluated in fresh environments, although JDB attachment may remain challenging for projects with heavy mocking or asynchronous frameworks. 
+
+## 5.3 External Validity 
+
+A primary threat to external validity is potential data leakage, as the evaluation datasets contain open-source code predating the LLMs’ training cutoffs. We addressed this by demonstrating that naive direct prompting yielded much lower accuracy, confirming the models did not perfectly memorize the repositories. Furthermore, a significant advantage of our methodology against external validity threats is its structural simplicity. Complex agentic systems (like ChatAssert) often overfit to the strong, multi-turn instruction-following capabilities of specific closed-source models (e.g., GPT-4). Once migrated to smaller or open-source models, these complex prompt chains frequently collapse. In contrast, DCAware’s fixed, non-iterative pipeline may depend less on model-specific multi-turn behavior, as suggested by its consistent performance on Qwen3-Coder-30B and the evaluated GPT models. Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness ASE ’26, October 12–16, 2026, Munich, Germany 
+
+## 6 Related Work 6.1 Automated Test Oracle Generation 
+
+Automated oracle generation has progressed from information-retrieval and neural methods [ 11 , 40 , 51 ] to LLM-based generation [ 18 , 55 ]. Subsequent evaluations show that exact-match metrics and synthetic benchmarks can overestimate practical effectiveness, motivating more realistic and execution-based evaluation [19, 33]. Recent empirical and survey work also emphasizes the distinction between intended behavior and regression oracles derived from the current implementation [ 4, 24 , 37 , 38 ]. DCAware explicitly targets the latter setting: a test prefix is given, the current program ver-sion is treated as expected behavior, and one missing assertion is completed. Recent methods improve semantic guidance through fine-tuning [ 18 ], documentation or natural-language specifications [ 1, 12 , 20 ,23 ], or domain-specific verification [ 34 ]. These approaches primar-ily target specification alignment or semantic guidance. In con-trast, DCAware studies how compressed static dependencies and selectively queried runtime states can strengthen regression-oracle completion without iterative assertion repair. 
+
+## 6.2 Execution Feedback in LLM-Based Testing 
+
+LLMs have been combined with search-based testing and develop-ment workflows to generate semantically rich tests [ 27 , 47 ]. Pro-gram analysis, coverage, mutation, and multi-agent feedback have also been used to guide test generation [ 2 , 10 , 39 , 46 , 50 , 53 ], includ-ing industrial mutation-testing applications and mutant prioritiza-tion [5, 16]. Iterative systems such as LLMLOOP, ChatUniTest, and ChatAssert repeatedly generate, execute, and repair code or tests [ 6, 17 , 43 ]. ChatAssert is the most closely related approach because it generates assertions using static analysis and execution feedback. DCAware instead uses execution to collect LLM-selected states before oracle generation and does not repair the generated oracle, enabling a fixed pipeline that prioritizes fault revelation and computational efficiency rather than execution success alone. 
+
+## 6.3 Contextual Information in Code Generation 
+
+Repository-level code generation benefits from dependency-aware static context, including local, global, and third-party dependencies [ 25 , 31 ], as well as caller–callee localization [ 21 ]. Dynamic signals have also been incorporated through real-time edit rewards or learned execution feedback [28, 48]. DCAware combines these directions specifically for regression-oracle completion. Contextual Semantic Folding retains relevant structural dependencies while removing method bodies likely to introduce noise, whereas Intent-Driven Dynamic State Extraction retrieves only expressions selected for the target assertion. Thus, the contribution is not simply adding more context, but coordinating compressed static anchors with targeted runtime observations in a fixed, feed-forward pipeline. 
+
+## 7 Conclusion 
+
+In this paper, we revisited execution-guided test oracle generation and showed that optimizing for execution success alone is insuffi-cient for producing strong fault-revealing tests. We identified that this objective misalignment can bias the repair process, leading to a feedback-driven degeneration we term the Self-Repair Trap .Our results suggest that this limitation can be addressed without increasing reasoning complexity. Instead, providing high-quality static and dynamic context in a non-iterative pipeline, as instanti-ated in DCAware , is sufficient to achieve both strong fault detection and efficient generation. For the studied regression-oracle comple-tion setting, these findings favor improving contextual quality over adding iterative repair complexity. Future work will explore model-specific generation biases for adaptive prompting, address scenarios where the focal method contains latent bugs, and extend intent-driven extraction to more complex repository-level dependencies. 
+
+## Data-Availability Statement 
+
+The source code, datasets, and prompts used in this study are avail-able at [30]. 
+
+## References                                    
+
+> [1] Saranya Alagarsamy, Chakkrit Tantithamthavorn, Wannita Takerngsaksiri, Chetan Arora, and Aldeida Aleti. 2025. Enhancing large language models for text-to-testcase generation. Journal of Systems and Software 230 (2025), 112531. doi:10.1016/j.jss.2025.112531 [2] Juan Altmayer Pizzorno and Emery D. Berger. 2025. CoverUp: Effective High Coverage Test Generation for Python. Proc. ACM Softw. Eng. 2, FSE, Article FSE128 (June 2025), 23 pages. doi:10.1145/3729398 [3] Earl T. Barr, Mark Harman, Phil McMinn, Muzammil Shahbaz, and Shin Yoo. 2015. The Oracle Problem in Software Testing: A Survey. IEEE Transactions on Software Engineering 41, 5 (2015), 507–525. doi:10.1109/TSE.2014.2372785 [4] Adam Bodicoat, Gunel Jahangirova, and Valerio Terragni. 2025. Understanding LLM-Driven Test Oracle Generation. In 2025 2nd IEEE/ACM International Confer-ence on AI-powered Software (AIware) . 29–39. doi:10.1109/AIware69974.2025.00011 [5] Mohamed Salah Bouafif, Mohammad Hamdaqa, and Edward Zulkoski. 2025. PRIMG: Efficient LLM-driven Test Generation Using Mutant Prioritization. In
+> Proceedings of the 29th International Conference on Evaluation and Assessment in Software Engineering (EASE ’25) . Association for Computing Machinery, New York, NY, USA, 1107–1116. doi:10.1145/3756681.3756991 [6] Yinghao Chen, Zehao Hu, Chen Zhi, Junxiao Han, Shuiguang Deng, and Jianwei Yin. 2024. ChatUniTest: A Framework for LLM-Based Test Generation. In Com-panion Proceedings of the 32nd ACM International Conference on the Foundations of Software Engineering (Porto de Galinhas, Brazil) (FSE 2024) . Association for Com-puting Machinery, New York, NY, USA, 572–576. doi:10.1145/3663529.3663801 [7] CodeParrot. 2022. CodeParrot-Small-Multi . Hugging Face. Retrieved July 25, 2026 from https://huggingface.co/codeparrot/codeparrot-small-multi [8] Henry Coles and PIT contributors. [n. d.]. PIT: Mutation Testing for Java and the JVM . PIT Project. Retrieved July 25, 2026 from https://github.com/hcoles/pitest [9] Ermira Daka and Gordon Fraser. 2014. A Survey on Unit Testing Practices and Problems. In 2014 IEEE 25th International Symposium on Software Reliability Engineering . 201–211. doi:10.1109/ISSRE.2014.11 [10] Arghavan Moradi Dakhel, Amin Nikanjam, Vahid Majdinasab, Foutse Khomh, and Michel C. Desmarais. 2024. Effective test generation using pre-trained Large Language Models and mutation testing. Information and Software Technology
+> 171 (2024), 107468. doi:10.1016/j.infsof.2024.107468 [11] Elizabeth Dinella, Gabriel Ryan, Todd Mytkowicz, and Shuvendu K. Lahiri. 2022. TOGA: a neural method for test oracle generation. In Proceedings of the 44th International Conference on Software Engineering (Pittsburgh, Pennsylvania) (ICSE ’22) . Association for Computing Machinery, New York, NY, USA, 2130–2141. doi:10.1145/3510003.3510141 [12] Madeline Endres, Sarah Fakhoury, Saikat Chakraborty, and Shuvendu K. Lahiri. 2024. Can Large Language Models Transform Natural Language Intent into Formal Method Postconditions? Proc. ACM Softw. Eng. 1, FSE, Article 84 (July 2024), 24 pages. doi:10.1145/3660791 [13] Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xiaocheng Feng, Ming Gong, Linjun Shou, Bing Qin, Ting Liu, Daxin Jiang, and Ming Zhou. 2020. CodeBERT: A Pre-Trained Model for Programming and Natural Languages. In Findings of the Association for Computational Linguistics: EMNLP 2020 , Trevor Cohn, Yulan He,
+
+ASE ’26, October 12–16, 2026, Munich, Germany Kefan Li, Hongyue Yu, and Yuan Yuan 
+
+and Yang Liu (Eds.). Association for Computational Linguistics, Online, 1536– 1547. doi:10.18653/v1/2020.findings-emnlp.139 [14] Gordon Fraser and Andrea Arcuri. 2011. EvoSuite: automatic test suite generation for object-oriented software. In Proceedings of the 19th ACM SIGSOFT Symposium and the 13th European Conference on Foundations of Software Engineering (Szeged, Hungary) (ESEC/FSE ’11) . Association for Computing Machinery, New York, NY, USA, 416–419. doi:10.1145/2025113.2025179 [15] Patrice Godefroid, Nils Klarlund, and Koushik Sen. 2005. DART: directed automated random testing. In Proceedings of the 2005 ACM SIGPLAN Confer-ence on Programming Language Design and Implementation (Chicago, IL, USA) 
+
+(PLDI ’05) . Association for Computing Machinery, New York, NY, USA, 213–223. doi:10.1145/1065010.1065036 [16] Mark Harman, Jillian Ritchey, Inna Harper, Shubho Sengupta, Ke Mao, Abhishek Gulati, Christopher Foster, and Hervé Robert. 2025. Mutation-Guided LLM-based Test Generation at Meta. In Proceedings of the 33rd ACM International Conference on the Foundations of Software Engineering (Clarion Hotel Trondheim, Trondheim, Norway) (FSE Companion ’25) . Association for Computing Machinery, New York, NY, USA, 180–191. doi:10.1145/3696630.3728544 [17] Ishrak Hayet, Adam Scott, and Marcelo d’Amorim. 2025. ChatAssert: LLM-Based Test Oracle Generation With External Tools Assistance. IEEE Transactions on Software Engineering 51, 1 (2025), 305–319. doi:10.1109/TSE.2024.3519159 [18] Soneya Binta Hossain and Matthew B. Dwyer. 2025. TOGLL: Correct and Strong Test Oracle Generation with LLMS. In 2025 IEEE/ACM 47th International Con-ference on Software Engineering (ICSE) . 1475–1487. doi:10.1109/ICSE55347.2025. 00098 [19] Soneya Binta Hossain, Antonio Filieri, Matthew B. Dwyer, Sebastian Elbaum, and Willem Visser. 2023. Neural-Based Test Oracle Generation: A Large-Scale Evalua-tion and Lessons Learned. In Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering 
+
+(San Francisco, CA, USA) (ESEC/FSE 2023) . Association for Computing Machinery, New York, NY, USA, 120–132. doi:10.1145/3611643.3616265 [20] Soneya Binta Hossain, Raygan Taylor, and Matthew Dwyer. 2025. Doc2OracLL: Investigating the Impact of Documentation on LLM-Based Test Oracle Generation. 
+
+Proc. ACM Softw. Eng. 2, FSE, Article FSE084 (June 2025), 22 pages. doi:10.1145/ 3729354 [21] Chao Hu, Wenhao Zeng, Yuling Shi, Beijun Shen, and Xiaodong Gu. 2026. In Line with Context: Repository-Level Code Generation via Context Inlining. Proc. ACM Softw. Eng. 3, FSE, Article FSE066 (June 2026), 23 pages. doi:10.1145/3797094 [22] JavaParser Project. [n. d.]. JavaParser . JavaParser Project. Retrieved July 25, 2026 from https://github.com/javaparser/javaparser [23] Shaker Mahmud Khandaker, Fitsum Kifetew, Davide Prandi, and Angelo Susi. 2025. AugmenTest: Enhancing Tests with LLM-Driven Oracles. In 2025 IEEE Conference on Software Testing, Verification and Validation (ICST) . 279–289. doi:10. 1109/ICST62969.2025.10988926 [24] Michael Konstantinou, Renzo Degiovanni, and Mike Papadakis. 2024. Do LLMs generate test oracles that capture the actual or the expected program behaviour? arXiv:2410.21136 [cs.SE] https://arxiv.org/abs/2410.21136 [25] Rahul Krishna, Rangeet Pan, Saurabh Sinha, Srikanth Tamilselvam, Raju Pavuluri, and Maja Vukovic. 2025. Codellm-Devkit: A Framework for Contextualizing Code LLMs with Program Analysis Insights. In Proceedings of the 33rd ACM In-ternational Conference on the Foundations of Software Engineering (Clarion Hotel Trondheim, Trondheim, Norway) (FSE Companion ’25) . Association for Comput-ing Machinery, New York, NY, USA, 308–318. doi:10.1145/3696630.3728555 [26] Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gonzalez, Hao Zhang, and Ion Stoica. 2023. Efficient Memory Management for Large Language Model Serving with PagedAttention. In Proceedings of the 29th Symposium on Operating Systems Principles (Koblenz, Germany) (SOSP ’23) . Association for Computing Machinery, New York, NY, USA, 611–626. doi:10.1145/3600006.3613165 [27] Caroline Lemieux, Jeevana Priya Inala, Shuvendu K. Lahiri, and Siddhartha Sen. 2023. CodaMosa: Escaping Coverage Plateaus in Test Generation with Pre-trained Large Language Models. In 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) . 919–931. doi:10.1109/ICSE48619.2023.00085 [28] Bolun Li, Zhihong Sun, Tao Huang, Hongyu Zhang, Yao Wan, Ge Li, Zhi Jin, and Chen Lyu. 2024. IRCoCo: Immediate Rewards-Guided Deep Reinforcement Learning for Code Completion. Proc. ACM Softw. Eng. 1, FSE, Article 9 (July 2024), 22 pages. doi:10.1145/3643735 [29] Hongwei Li, Yuheng Tang, Shiqi Wang, and Wenbo Guo. 2025. PatchPilot: A Cost-Efficient Software Engineering Agent with Early Attempts on Formal Verification. arXiv:2502.02747 [cs.RO] https://arxiv.org/abs/2502.02747 [30] Kefan Li, Hongyue Yu, and Yuan Yuan. 2026. Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness (Artifact) . doi:10. 5281/zenodo.21357436 [31] Dianshu Liao, Shidong Pan, Xiaoyu Sun, Xiaoxue Ren, Qing Huang, Zhenchang Xing, Huan Jin, and Qinying Li. 2024. A3A3-CodGen: A Repository-Level Code Generation Framework for Code Reuse With Local-Aware, Global-Aware, and Third-Party-Library-Aware. IEEE Transactions on Software Engineering 50, 12 (2024), 3369–3384. doi:10.1109/TSE.2024.3486195 [32] Chin-Yew Lin. 2004. ROUGE: A Package for Automatic Evaluation of Summaries. In Text Summarization Branches Out . Association for Computational Linguistics, Barcelona, Spain, 74–81. https://aclanthology.org/W04-1013/ [33] Zhongxin Liu, Kui Liu, Xin Xia, and Xiaohu Yang. 2023. Towards More Realistic Evaluation for Neural Test Oracle Generation. In Proceedings of the 32nd ACM SIGSOFT International Symposium on Software Testing and Analysis (Seattle, WA, USA) (ISSTA 2023) . Association for Computing Machinery, New York, NY, USA, 589–600. doi:10.1145/3597926.3598080 [34] Qiuyang Mang, Runyuan He, Suyang Zhong, Xiaoxuan Liu, Huanchen Zhang, and Alvin Cheung. 2026. Automated Discovery of Test Oracles for Database Management Systems Using LLMs. Proc. ACM Manag. Data 4, 3, Article 140 (May 2026), 28 pages. doi:10.1145/3802017 [35] Antonio Mastropaolo, Simone Scalabrino, Nathan Cooper, David Nader Palacio, Denys Poshyvanyk, Rocco Oliveto, and Gabriele Bavota. 2021. Studying the Usage of Text-To-Text Transfer Transformer to Support Code-Related Tasks. In 2021 IEEE/ACM 43rd International Conference on Software Engineering (ICSE) .336–347. doi:10.1109/ICSE43902.2021.00041 [36] Gerard Meszaros. 2007. xUnit Test Patterns: Refactoring Test Code . Addison-Wesley. [37] Facundo Molina, Alessandra Gorla, and Marcelo d’Amorim. 2025. Test Oracle Automation in the Era of LLMs. ACM Trans. Softw. Eng. Methodol. 34, 5, Article 150 (May 2025), 24 pages. doi:10.1145/3715107 [38] Davide Molinelli, Luca Di Grazia, Alberto Martin-Lopez, Michael D. Ernst, and Mauro Pezzè. 2025. Do LLMs Generate Useful Test Oracles? An Empirical Study with an Unbiased Dataset. In 2025 40th IEEE/ACM International Conference on Automated Software Engineering (ASE) . 278–290. doi:10.1109/ASE63991.2025. 00031 [39] Zifan Nan, Zhaoqiang Guo, Kui Liu, and Xin Xia. 2025. Test Intention Guided LLM-Based Unit Test Generation. In 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . 1026–1038. doi:10.1109/ICSE55347.2025.00243 [40] Pengyu Nie, Rahul Banerjee, Junyi Jessy Li, Raymond J. Mooney, and Milos Gligoric. 2023. Learning Deep Semantics for Test Completion. In 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) . 2111–2123. doi:10. 1109/ICSE48619.2023.00178 [41] Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan Wang, Yingbo Zhou, Silvio Savarese, and Caiming Xiong. 2023. CodeGen: An Open Large Language Model for Code with Multi-Turn Program Synthesis. arXiv:2203.13474 [cs.LG] https://arxiv.org/abs/2203.13474 [42] OpenAI. 2025. GPT-5 System Card . OpenAI. Retrieved July 25, 2026 from https://openai.com/index/gpt-5-system-card [43] Ravin Ravi, Dylan Bradshaw, Stefano Ruberto, Gunel Jahangirova, and Valerio Terragni. 2025. LLMLOOP: Improving LLM-Generated Code and Tests Through Automated Iterative Feedback Loops. In 2025 IEEE International Conference on Software Maintenance and Evolution (ICSME) . 930–934. doi:10.1109/ICSME64153. 2025.00109 [44] Shuo Ren, Daya Guo, Shuai Lu, Long Zhou, Shujie Liu, Duyu Tang, Neel Sun-daresan, Ming Zhou, Ambrosio Blanco, and Shuai Ma. 2020. CodeBLEU: a Method for Automatic Evaluation of Code Synthesis. arXiv:2009.10297 [cs.SE] https://arxiv.org/abs/2009.10297 [45] P. Runeson. 2006. A survey of unit testing practices. IEEE Software 23, 4 (2006), 22–29. doi:10.1109/MS.2006.91 [46] Gabriel Ryan, Siddhartha Jain, Mingyue Shang, Shiqi Wang, Xiaofei Ma, Mu-rali Krishna Ramanathan, and Baishakhi Ray. 2024. Code-Aware Prompting: A Study of Coverage-Guided Test Generation in Regression Setting using LLM. 
+
+Proc. ACM Softw. Eng. 1, FSE, Article 43 (July 2024), 21 pages. doi:10.1145/3643769 [47] Arkadii Sapozhnikov, Mitchell Olsthoorn, Annibale Panichella, Vladimir Ko-valenko, and Pouria Derakhshanfar. 2024. TestSpark: IntelliJ IDEA’s Ultimate Test Generation Companion. In Proceedings of the 2024 IEEE/ACM 46th Inter-national Conference on Software Engineering: Companion Proceedings (Lisbon, Portugal) (ICSE-Companion ’24) . Association for Computing Machinery, New York, NY, USA, 30–34. doi:10.1145/3639478.3640024 [48] Zhihong Sun, Yao Wan, Jia Li, Hongyu Zhang, Zhi Jin, Ge Li, and Chen Lyu. 2024. Sifting through the Chaff: On Utilizing Execution Feedback for Ranking the Generated Code Candidates. In Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering (Sacramento, CA, USA) (ASE ’24) .Association for Computing Machinery, New York, NY, USA, 229–241. doi:10. 1145/3691620.3695000 [49] Yue Wang, Weishi Wang, Shafiq Joty, and Steven C.H. Hoi. 2021. CodeT5: Identifier-aware Unified Pre-trained Encoder-Decoder Models for Code Un-derstanding and Generation. In Proceedings of the 2021 Conference on Empir-ical Methods in Natural Language Processing , Marie-Francine Moens, Xuanjing Huang, Lucia Specia, and Scott Wen-tau Yih (Eds.). Association for Compu-tational Linguistics, Online and Punta Cana, Dominican Republic, 8696–8708. doi:10.18653/v1/2021.emnlp-main.685 [50] Zejun Wang, Kaibo Liu, Ge Li, and Zhi Jin. 2024. HITS: High-coverage LLM-based Unit Test Generation via Method Slicing. In Proceedings of the 39th IEEE/ACM International Conference on Automated Software Engineering (Sacramento, CA, Escaping the Self-Repair Trap: Improving Test Oracle Generation via Dual-Context Awareness ASE ’26, October 12–16, 2026, Munich, Germany 
+
+USA) (ASE ’24) . Association for Computing Machinery, New York, NY, USA, 1258–1268. doi:10.1145/3691620.3695501 [51] Cody Watson, Michele Tufano, Kevin Moran, Gabriele Bavota, and Denys Poshy-vanyk. 2020. On learning meaningful assert statements for unit test cases. In 
+
+Proceedings of the ACM/IEEE 42nd International Conference on Software Engineer-ing (Seoul, South Korea) (ICSE ’20) . Association for Computing Machinery, New York, NY, USA, 1398–1409. doi:10.1145/3377811.3380429 [52] Chunqiu Steven Xia, Yinlin Deng, Soren Dunn, and Lingming Zhang. 2024. Agentless: Demystifying LLM-based Software Engineering Agents. arXiv:2407.01489 [cs.SE] https://arxiv.org/abs/2407.01489 [53] Qinghua Xu, Guancheng Wang, Lionel Briand, and Kui Liu. 2026. Hallucination to Consensus: Multi-Agent LLMs for End-to-End JUnit Test Generation. ACM Trans. Softw. Eng. Methodol. (March 2026). Just Accepted. doi:10.1145/3803418 [54] An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al . 2025. Qwen3 technical report. arXiv:2505.09388 [cs.CL] https://arxiv.org/abs/2505.09388 [55] Quanjun Zhang, Weifeng Sun, Chunrong Fang, Bowen Yu, Hongyan Li, Meng Yan, Jianyi Zhou, and Zhenyu Chen. 2025. Exploring Automated Assertion Generation via Large Language Models. ACM Trans. Softw. Eng. Methodol. 34, 3, Article 81 (Feb. 2025), 25 pages. doi:10.1145/3699598 
+
+Received 2026-03-26; accepted 2026-06-18
