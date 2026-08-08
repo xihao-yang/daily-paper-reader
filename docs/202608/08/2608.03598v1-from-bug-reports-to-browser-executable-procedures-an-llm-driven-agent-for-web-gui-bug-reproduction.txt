@@ -1,0 +1,439 @@
+Title: From Bug Reports to Browser-Executable Procedures: An LLM-Driven Agent for Web GUI Bug Reproduction
+
+URL Source: https://arxiv.org/pdf/2608.03598v1
+
+Published Time: Wed, 05 Aug 2026 01:02:23 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# From Bug Reports to Browser-Executable Procedures: An LLM-Driven Agent for Web GUI Bug Reproduction 
+
+Cunming Zhang 
+
+University of Luxembourg cunming.zhang@uni.lu 
+
+Yu Pei 
+
+University of Luxembourg yu.pei@uni.lu 
+
+Michail Papadakis 
+
+University of Luxembourg michail.papadakis@uni.lu 
+
+Abstract —Reproducing web GUI bugs from natural-language bug reports is critical for software maintenance, but remains difficult because reports often lack prerequisites such as depen-dencies and input files. Existing bug reproduction techniques mainly target code units or mobile applications and lack end-to-end visual execution and validation for web GUIs. We present REBUG , a context-aware agent system that reconstructs, exe-cutes, and validates browser-level reproduction procedures from web GUI bug reports by driving a real browser. R EBUG separates reproduction into two stages. In the preparation stage, R EBUG 
+
+reconstructs missing prerequisites from the report and available artifacts, and it produces a high-level reproduction plan. In the execution stage, it performs tool-mediated interactions in the browser, maintains structured summaries of page state and action history, and validates the final state against expectations derived from the report. We evaluate R EBUG on 667 real-world bug reports from four open-source web applications. On con-trolled current deployments, R EBUG outperforms both baselines, achieving an average RSR of 49.96%, a mean task completion rate of 74.96%, and a mean action execution success rate of 86.54%. Our results show that explicit context reconstruction and state-aware browser execution effectively support report-derived browser reproduction, while historical replay shows that successful procedures often expose the original bug-present behavior on restored buggy versions. 
+
+Index Terms —LLMs, Web Testing, Natural Language, Bug Reproduction, Web GUI Testing 
+
+I. I NTRODUCTION 
+
+Reproducing web GUI failures from bug reports is a critical prerequisite for software testing and maintenance, as it allows developers to observe reported failures before diagnosing their causes [1], [2]. In practice, reproduction requires translating an informal description into a concrete sequence of browser interactions and checking whether the observed outcome is consistent with the reported behavior. Despite its importance, reproduction remains largely manual and labor intensive, as developers must interpret informal natural language descrip-tions and translate them into executable UI actions. Modern web applications make this task difficult for several reasons. First, bug reports often omit important reproduc-tion information, such as entry points, authentication require-ments, environmental conditions, or test data [3], [4]. Second, web GUIs, especially single-page apps are highly dynamic: page states depend on user context, navigation history, asyn-chronous events, and changing DOM structures [5]. Third, the growing volume of bug reports makes manual reproduction costly at scale [6]. These challenges motivate automated sup-port for transforming natural-language reports into executable web GUI reproduction procedures. Existing techniques provide only partial support for this setting. Browser automation frameworks such as Selenium and Playwright offer the execution base for web interactions [7], [8], but they assume that selectors and test logic are already available and can be brittle under locator or DOM changes [9]. Prior bug reproduction research has made progress in mobile and code-level settings [10], [11]. Android systems such as RepRev, ReCDroid+, AdbGPT, and ReBL extract information from reviews or bug reports, match it to Android GUI ele-ments, or use feedback during replay [12]–[15]. Existing im-plementations and evaluation assumptions in these systems are built around mobile-specific substrates such as APKs, Android UI hierarchies, platform instrumentation, and mobile-oriented failure signals. Web GUI reproduction must instantiate these ideas through a general browser, where actions and outcomes are grounded in browser-observable evidence such as URLs, DOM snapshots, screenshots, tab states, and asynchronous page updates. Existing web-focused work has often addressed GUI testing, exploration, or runtime recording, while auto-mated reproduction from natural-language bug reports remains less explored [16], [17]. Recent LLM-based web agents and benchmarks show that language models can interpret instructions and interact with browser environments [18]–[21]. Nevertheless, these agents have a primary focus on task completion or test generation, whereas bug reproduction necessitates supplementary capabil-ities, such as the ability to recover missing execution context, adapt actions to dynamic browser states, and validate the final browser-observable outcome against report-derived ex-pectations. Taken together, existing approaches only partially address web GUI bug reproduction, as they often assume fixed scripts, generic task execution, or Android/code-level execution models that do not fully capture missing context, dynamic browser states, and browser-observable outcomes. To address this gap, we present R EBUG , a context-aware LLM agent that reconstructs and validates browser-level re-production procedures from natural-language web GUI bug reports. R EBUG first prepares report-specific execution context arXiv:2608.03598v1 [cs.SE] 4 Aug 2026 when needed, then drives a real browser with state-aware actions, and finally checks the resulting browser-observable state against report-derived expectations. We evaluate R EBUG on 667 real world web GUI bug reports collected from the GitHub issue trackers of four open source web applications. To account for report quality and software evolution, we curate the benchmark through a multistage con-struction pipeline: (i) large scale collection and confirmation reduce thousands of bug issues to a set of confirmed bug reports; (ii) refinement removes low quality or environment incompatible reports; and (iii) annotation specifies outcome oracles in terms of browser-observable signals, enabling con-sistent automated evaluation of reproduction outcomes. Across the benchmark, R EBUG achieves an average re-production success rate of 49.96% and demonstrates con-sistent improvements over baselines in task completion and action level execution. Since the large-scale evaluation mainly measures report-derived procedure reconstruction and current-deployment outcome validation, we further study 40 successful cases through historical replay and analyze task completion, action execution, cost, and failure modes to identify the strengths and limitations of automated web GUI reproduc-tion. The results suggest that explicit context reconstruction and state-aware browser execution are useful in this setting, while dynamic UI grounding and missing prerequisites remain important challenges. In summary, this paper makes the following contributions:  
+
+> •
+
+We propose R EBUG , a context-aware, LLM-driven agent that integrates prerequisite reconstruction, state-aware browser execution, and report-derived outcome checking to construct and execute browser-executable reproduction procedures from natural-language web GUI bug reports.  
+
+> •
+
+We conduct an empirical evaluation on 667 real-world web GUI bug reports and compare R EBUG with direct script generation and a browser-agent baseline. We further perform a historical replay study on 40 successful cases, providing complementary evidence that reconstructed procedures can trigger the report-described failures when the corresponding buggy versions are restored.  
+
+> •
+
+We build a benchmark of real-world GitHub web GUI bug reports with annotated outcome oracles, supporting systematic evaluation and future research on LLM-based testing and web GUI bug reproduction. II. M OTIVATION 
+
+Reproducing web GUI bugs from bug reports (written in natural language) is necessary for understanding failures, validating fixes, and supporting regression testing in modern web applications. Empirical studies show that developers often encounter difficulties reproducing reported bugs due to missing execution steps, incomplete environment information, and the nondeterminism of complex systems [22]. These challenges highlight the need for more systematic support for bug reproduction. Existing web testing frameworks and browser agents provide useful automation support, but they typically assume predefined scripts, stable interaction goals, or manually specified preconditions. In contrast, bug reproduction starts from an informal report and requires constructing an executable procedure whose final browser state can be checked against the reported behavior. From a systems perspective, three technical limitations remain insufficiently addressed.  
+
+> •
+
+Context Completion: Reports may depend on prerequi-sites that are only partially specified, such as configura-tion, data, or files. Existing approaches provide limited support for preparing such execution context from the report and project-level artifacts.  
+
+> •
+
+State-aware Execution: Web interfaces may change dur-ing interaction due to navigation, asynchronous updates, or dynamic DOM changes. The same action may lead to different results depending on the current page state and previous steps, requiring execution decisions to be grounded in recently observed browser state.  
+
+> •
+
+Outcome Validation: In many settings, success is de-cided implicitly or through manual inspection. Without a consistent comparison between observed browser states and report implied expectations, it is difficult to judge whether a run truly reproduces the reported outcome. Together, these limitations motivate a staged treatment of web GUI bug reproduction. Although the underlying chal-lenges are common in bug reproduction, the web setting makes them operationally different: the system cannot rely on APK-level instrumentation, mobile UI hierarchies, or platform crash signals, and must instead reason from browser-observable DOM states, screenshots, URLs, asynchronous updates, and GUI-consumable artifacts. III. A PPROACH 
+
+A. Overview of REBUG 
+
+REBUG constructs, executes, and checks browser-executable reproduction procedures from natural-language web GUI bug reports. Given a report, REBUG first determines whether the run requires additional resources beyond the baseline setup available in the evaluation environment. These resources include prerequisite data, input files, or other local artifacts needed during execution. The preparation stage produces an artifact inventory and a high-level reproduction plan. The execution stage uses them to drive a real browser, record a structured trace, and collect the final observed state for oracle checking. Figure 1 gives an overview of the workflow. 
+
+B. Preparation Stage 
+
+The preparation stage operationalizes the setup decisions iden-tified in the overview: it assesses report-specific prerequisites, materializes feasible artifacts, generates a high-level plan, and initializes the browser entry state. 
+
+1) Context Builder 
+
+Phase 1: Assessment. 
+
+For each report, the Context Builder determines whether browser execution requires materializable report-specific pre-requisites that are absent from a fresh deployment. These prerequisites include files, images, documents, configuration Context 
+
+> Building
+> Agent
+> System
+> Executor
+> Bug
+> Report
+> Whitelist
+> File
+> Build
+> Use
+> Context
+> Browser
+> Initialization
+> Plan
+> Generator
+> Reproduction
+> Plan
+> Generate
+
+Preparation Stage  
+
+> Information
+> Center
+> Action
+> Executor
+> Browser-Info
+> Update Historical Filtering
+> Plan List Update
+
+Execution Stage  
+
+> Reproduction
+> Report
+> Assessment
+> Context Builder
+> Context
+> Information
+> Refine Plan Generation
+> Final Page
+> State
+> Information
+> Update
+> Skip
+> Context
+> Evaluation Phase
+> Evaluator
+> Action
+> Generator
+> Expected
+> Description
+> Unexpected
+> Description
+> Browser
+> Interaction
+
+Fig. 1: Overview of R EBUG . The workflow begins with the preparation stage, which reconstructs the required context and produces a reproduction plan. It then enters the execution stage, which performs an iterative execution loop in a real browser with continuous state tracking and trace logging, followed by automatic outcome evaluation. snippets, spreadsheet-like data, or other local artifacts con-sumed by the browser procedure; they exclude deployment-level conditions such as installing the application, switching versions, rebuilding databases, or reproducing the reporter’s machine environment. The assessment outputs a prerequisite summary recording the artifact type, source, preparation feasi-bility, local path if prepared, and failure reason if unavailable. Self-contained reports skip artifact preparation, while infeasi-ble prerequisites are recorded for later analysis. The whitelist defines the local resource boundary available to the Context Builder. It contains only evaluation-provided directories, downloaded report attachments, and artifacts pro-duced by preparation steps for the same report. The agent can also reuse existing local resources by scanning candidate files and deciding whether they satisfy the prerequisites implied by the report, which reduces redundant preparation work. 
+
+Phase 2: Iterative Materialization. If the context assess-ment indicates that missing prerequisites must be prepared, the Context Builder enters an execution stage that incrementally materializes the required context. This phase is implemented as an iterative Context Building Agent that follows a build, check, and refine loop. At each iteration, the agent reasons over three signals: the bug report, the prerequisite summary produced by assessment, and the current set of prepared artifacts. It then proposes a small set of concrete preparation operations that move the workspace toward an executable reproduction setup. The Context Builder realizes these decisions through a tool supported System Executor rather than free-form scripting. The executor runs all operations inside a sandboxed workspace and exposes a bounded set of local artifact operations, includ-ing creating or editing files and directories, reusing whitelisted files, downloading report-linked resources, validating file ex-istence and readability, and staging files for browser upload. Each executed operation produces explicit outputs, such as newly created files, updated configurations, or validated re-sources, which are persistently recorded as reusable artifacts. To keep the process robust and traceable, the system maintains an explicit artifact inventory and an action history. The inventory enables the agent to reuse previously prepared resources and to avoid duplicating work. The action history grounds future decisions and provides evidence for debugging and evaluation, including which preparation step failed, which file was produced, and what validation result was observed. The preparation loop terminates when the Context Builder emits an explicit done action after the requested artifacts have been prepared, or when the preparation budget is exhausted. 
+
+2) Plan Generation 
+
+Before browser execution, R EBUG derives an ordered se-quence of high-level intent steps from the bug report and prepared context. The plan serves as a progress scaffold rather than a fixed script: during execution, the agent grounds each step in the current browser state, dynamically chooses target elements, refines subactions, and may insert or skip actions to handle UI variation. The original plan is not rewritten; it is used to track how far the live execution has advanced. 
+
+3) Browser Initialization 
+
+At the beginning of a run, R EBUG initializes a fresh browser session with standardized settings and prepares the executor state for step-wise interaction. R EBUG encodes runtime sig-nals as structured fields in the browser-state record, including the current URL, page title, active tab, tab count, navigation status, dialog or popup events, browser errors, action timeout, element-not-found errors, blocked interactions, downloads, and browser responsiveness, which are provided to the Action Generator after each action to help distinguish successful execution, partial progress, and failures. It also verifies that the session is responsive and that browser focus is properly established. If the bug report specifies an entry point, such as a starting URL, the executor navigates to that page to set the initial state. Otherwise, when the report contains no starting page information, R EBUG defaults to launching from the web application’s homepage as the entry state, and then proceeds with plan-guided exploration. 
+
+C. Execution Stage 
+
+The execution stage drives the browser according to the prepared artifacts and high-level plan, while continuously ob-serving the live page state and recording a trace for validation and analysis. 
+
+1) Execution Loop (Step-wise execution loop) 
+
+REBUG executes the reproduction plan through a step-wise interaction loop with the live web page. At each iteration, the information update module captures a screenshot and a structured DOM representation of the current browser state. REBUG uses the screenshot as runtime visual evidence, to-gether with the visible DOM, interactable elements, URL, tab state, and latest action outcome, to ground subsequent actions and to support final-state validation. This visual evidence is collected uniformly for every report during browser execu-tion; screenshots or other visual attachments in the original report are treated only as optional input artifacts, not as a prerequisite for visual processing. The Browser-Info Update then converts these raw observations into a compact browser-observable record and writes it to the Information Center as the current state. Historical Filtering keeps the decision context compact by exposing only the latest browser state as grounding evidence, while summarizing recent agent history and saving the full action and browser-state trace for offline analysis. This prevents obsolete page observations from being reused as current state. Based on the updated web information and the remaining plan, the agent decides the next execution step and produces one or more structured low-level actions that explicitly state the intended operation together with its required parameters. The supported browser actions include navigation, clicking, text input, keyboard input, scrolling, hovering, dropdown se-lection, file upload, waiting, and task termination. Each action is grounded in the current browser state and parameterized by fields such as an element index, URL, input value, file path, option text, or wait condition. The action specification is then handed to the web execution script, which materializes the operation in the browser through tool mediated interactions. After the action completes, its outcome is returned to the 
+
+Information Center together with lightweight feedback, and the Plan List Update is performed to reflect the progress. The Information Center is R EBUG ’s structured execution-time memory. It stores the agent state, context summary, message history, action results, browser-state history, and reproduction statistics. Components read from and update this shared memory: the Context Builder records prepared artifacts, the Action Generator uses the latest browser state and action history, the Plan List Update module tracks the current plan step, and the Evaluator reads final-state evidence and outcome descriptions. This keeps subsequent actions grounded in the most recent observed state. The Action Generator emits structured JSON containing an assessment of the previous step, compact memory, the next immediate goal, the current high-level plan-step index, and one or more tool actions. The tool actions are validated against typed action schemas before execution, and actions can only refer to interactive element indices exposed in the current browser state. 
+
+Failure control, budgets, and termination. The execution enforces explicit budgets, including a maximum number of execution steps, per action timeouts, and a limit on consecutive failures. An action is counted as failed when the executor cannot complete it because the target is unavailable, hidden, blocked, invalid, or the action times out. The consecutive-failure counter is reset after any successfully executed browser action. When failures accumulate beyond these thresholds, the execution forces a final step in which only termination is permitted. This design ensures that each run ends cleanly and produces a complete execution trace, even when reproduction cannot be completed, as detailed in Section IV-E. 
+
+Trace and statistics collection. Throughout execution, the system records screenshots, URLs, issued actions, execution outcomes, and step metadata into a structured trace as Repro-duction Report . It also updates reproduction statistics online, including action execution success and coarse task progress inferred from step signals. These artifacts support downstream evaluation, error analysis, and ablation studies. 
+
+2) Evaluation Phase 
+
+After executing the report-described procedure, R EBUG sum-marizes the final browser-observable state using a compact evi-dence representation. This summary includes the current URL, a structured view of the relevant visible elements and their states, screenshots, and the accumulated evidence stored in the 
+
+Information Center . Based on the bug report, R EBUG derives an outcome oracle that captures the reported failure symptom or the expected observable behavior, such as an error message, missing or incorrect UI content, unexpected navigation, or the inability to complete an operation. The evaluator checks the final evidence against this oracle and outputs a binary reproduction decision together with a short rationale grounded in the captured evidence. In implementation, the evaluator is an LLM-based judge that compares the final URL, visible DOM summary, screenshot evidence, and relevant trace entries with the expected and unexpected descriptions. This design allows practitioners to run R EBUG against the target deployment under test and obtain a traceable reproduction result. The evaluator returns a structured decision indicating whether the final state satisfies the expected description, whether it satisfies the unexpected description, and an evidence-grounded rationale. A run is counted as successful only when it reaches the planned terminal state, satisfies the expected description, and does not satisfy the unexpected description. IV. S TUDY DESIGN 
+
+A. Dataset 1) Criteria for Selecting Projects 
+
+We select mature, actively maintained, and issue-rich web applications from diverse domains. Each selected project has more than 40,000 stars, 10,000 commits, and 4,000 issues, and was active within three months before data collection. The final subjects are Ghost, Metabase, NocoDB, and n8n, covering digital publishing, business intelligence, collaborative data platforms, and workflow automation. 
+
+2) Dataset Collection 
+
+Our goal is to evaluate whether a system can transform real-world GitHub bug reports into browser-executable reproduc-tion procedures and check the resulting browser-observable states. We construct a new dataset because existing bug report corpora typically do not provide runnable web application de-ployments or report-derived outcome oracles, while web-agent benchmarks mainly focus on task completion rather than bug reproduction. We evaluate reports on controlled deployments of the selected applications rather than reconstructing a histor-ical buggy snapshot for every report, because doing so at this scale would require identifying fixing changes, rebuilding prior versions and dependencies, and restoring compatible data and configuration. The dataset therefore focuses on reports with executable browser-level procedures and browser-observable end states, with annotations that support checking the final state on the evaluated deployment. We construct the dataset in two stages, as described below. 
+
+Stage 1: bug report collection and validity confirmation. 
+
+We collect issues from each project’s GitHub issue tracker and identify confirmed bug reports. We first use an automated filter based on bug-related labels and simple text patterns in issue descriptions and discussions. We then manually review the candidates and remove false positives, such as feature requests mislabeled as bugs or discussions that do not describe a concrete defect. This process yields approximately 4,000 initial candidates and 875 confirmed bug reports, as shown in Table I (#Stage 1 column). For each confirmed report, we retain the original issue text and metadata needed for later execution and analysis. This procedure follows common practices for constructing bug report datasets from GitHub [3], [23]–[25]. 
+
+Stage 2: refinement and reproduction-oriented annotation. 
+
+After Stage 1, many reports are still unsuitable for scalable browser-level evaluation. We remove reports that lack ac-tionable user interactions or observable UI outcomes, while retaining reports that omit common but inferable steps, such as logging in or navigating to a relevant module. For each re-tained report, two authors annotate an expected description and an unexpected description. The expected description captures the final browser-observable state when the report-derived procedure is executed on the controlled evaluated deployment, whereas the unexpected description is derived from the failure symptom described in the original report. We further exclude reports matching one or more of the following conditions:                   
+
+> Projects #Stars #Stage 1 #Stage 2
+> Ghost 51.6k 249 194 Metabase 45.6k 203 157 NocoDB 61.5k 200 143 n8n 169k 223 173
+> Total -875 667
+
+TABLE I: Projects. Number of retained bug reports after Stage 1 and Stage 2 for each project.  
+
+> •
+
+(R1) Installation, build, or upgrade defects: Reproduc-tion primarily depends on dependency resolution, build tooling, or version upgrade workflows rather than web GUI interactions.  
+
+> •
+
+(R2) Specialized infrastructure: Reproduction requires non-public resources such as proprietary databases, en-terprise services, private integrations, or specialized hard-ware.  
+
+> •
+
+(R3) Version Locked issues: The failure is explicitly tied to a past software version or historical configuration that cannot be recreated in the current deployed environment.  
+
+> •
+
+(R4) Non GUI failures: Diagnosis or validation relies on backend logs, server traces, or other artifacts not accessible to a browser-based executor. These filters exclude bug reports that are inherently incom-patible with scalable browser execution, rather than reports that are merely challenging for our approach. After Stage 2, we obtained 667 bug reports across the four selected projects, as summarized in Table I. To reduce potential bias, two authors independently reviewed each report, and disagreements were resolved through discussion. As complementary validation, we construct a historical replay subset for RQ1 by sampling 10 successful R EBUG runs per application and restoring the corresponding buggy versions when feasible. 
+
+B. Research questions 
+
+To systematically evaluate R EBUG , we design the following research questions: 
+
+RQ1. Effectiveness : How effective is REBUG in reconstruct-ing and executing report-described web GUI reproduction procedures from natural language bug reports? 
+
+RQ1 evaluates the end-to-end effectiveness of R EBUG on real bug reports. We treat effectiveness as executability: given a report, the system should interpret the described procedure, recover feasible missing prerequisites, produce a reproduction plan, and execute the required browser interactions. We run REBUG on the reports in our dataset while preserving their noise and incompleteness, and provide only the minimal setup needed for controlled execution. We compare R EBUG with two external baselines and mul-tiple LLM backbones, and report RSR, TCR, and AESR from validation outputs and execution traces. We further perform a project-balanced historical replay on successful runs to assess whether reconstructed procedures can trigger the original reported failures on restored buggy versions. 
+
+RQ2. Ablation : How do context reconstruction and plan generation affect the effectiveness of automated web GUI bug reproduction? 
+
+RQ2 examines the role of two preparation-stage compo-nents. First, we disable the Context Builder while keeping the deployed instances fixed and the success criteria unchanged. Many bug reports depend on prerequisites that may be un-available at execution time; by disabling this module and executing the raw report with only the minimal environment setup, we quantify the contribution of explicit prerequisite reconstruction. Second, we disable the Plan Generator and let the execution agent proceed directly from the bug report and available context. This variant examines whether the initial high-level intent scaffold contributes beyond the online planning and state-aware action selection already performed during execution. 
+
+RQ3. Failure Analysis : Why does the reproduction fail in practice, and what are the dominant failures across different web applications? 
+
+RQ3 investigates the bottlenecks that prevent successful reproduction. We perform a retrospective analysis of failed runs using execution traces that record observations, issued actions, action outcomes, plan progress, and the final pass flag with an optional failure note. We inspect unsuccessful runs and assign one or more failure labels using a shared taxonomy. In most cases, a run has a single dominant label, while multiple labels are used when distinct blockers are observed. 
+
+C. Evaluation Metrics 
+
+We evaluate R EBUG using the following metrics that capture end-to-end reproducibility, task level progress, and action-level executability. Let D = {ri}Ni=1 denote a dataset of N
+
+bug reports. We execute each report for multiple independent attempts and compute the metrics for each attempt. In Eqs. (1), (2), (3), and (4), each attempt is treated as a run level sample. Accordingly, N denotes the total number of runs across all reports. Each run produces an execution trace that records is-sued actions, plan status, and observed browser states, together with a final user observable state si captured at termination. 
+
+1) Reproduction Success Rate (RSR) 
+
+In our evaluation setting, the buggy symptom described in a report may not be observable on the evaluated deployment because the reports are closed and we do not reconstruct a historical buggy snapshot per issue. We therefore adopt a metamorphic testing inspired oracle. Under this setting, reproduction success is interpreted as end-to-end procedural completion with end state consistency under the annotated expected and unexpected oracle pair. Each report ri is an-notated with an expected state description Ei, representing the intended or bug absent behavior, and an unexpected state description Ui, representing the erroneous or bug present behavior. Given the final state si, let mE (i) ∈ { 0, 1} and 
+
+mU (i) ∈ {0, 1} indicate whether si matches Ei and Ui,respectively. A run is counted as a successful reproduction if it terminates as completed ( done i = 1 ), matches the expected state, and does not match the unexpected state. We define: 
+
+RSR := 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+I[done i ∧ mE (i) ∧ ¬ mU (i)] . (1) The variable done i indicates that the agent terminated with the task marked as completed, meaning that it reached the final planned goal state. This enforces the rule that only runs that complete the task are eligible to be counted as successful reproductions. The key idea of RSR is consistency with the annotated expected and unexpected oracle pair. For the historical replay subset, we separately report whether the restored buggy version exhibits the report-described bug-present behavior after executing the reconstructed procedure. This metric is not used to replace RSR; instead, it provides complementary evidence that successful current-deployment procedures can correspond to actual failure-triggering execu-tions when the relevant buggy version is restored. We compute RSR at the run level. Each report is executed for multiple independent attempts under the same configuration, and each attempt contributes one run-level sample to Eq. (1). Therefore, the reported RSR values are aggregated over all attempts across reports, rather than computed from a single execution per report. 
+
+2) Task Completion Rate (TCR) 
+
+RSR is intentionally strict and binary, and therefore does not reflect partial progress toward reproduction. TCR captures how far the system progresses, even when it does not fully complete the task. For each report ri, let Pi be a flat sequence of 
+
+|Pi| high-level plan steps produced during preparation, and let Ci ⊆ { 1, . . . , |Pi|} be the indices of plan steps marked as completed in the plan-status trace. We define: 
+
+TCR( i) := |Ci||Pi| ∈ [0 , 1] , (2) 
+
+3) Action Execution Success Rate (AESR) 
+
+AESR measures action level executability by quantifying whether issued actions can be successfully executed by the automation backend. It complements RSR and TCR because an agent may fail individual actions during exploration and still recover to complete the task, and it measures the precision of action execution. For report ri, let Ai be the sequence of issued actions with length |Ai|, and let xi,j ∈ { 0, 1} denote whether the j-th action is executed successfully. We define: 
+
+AESR( i) := 1
+
+|Ai|
+
+> |Ai|
+
+X
+
+> j=1
+
+xi,j , (3) 
+
+4) Cost metrics 
+
+We compute interaction and time level cost from the same execution traces. For each report ri, we record (i) the number of issued actions nact (i) := |Ai|; (ii) wall-clock duration 
+
+T (i) := tend  
+
+> i
+
+− tstart  
+
+> i
+
+; (iii)and the number of LLM calls 
+
+nllm (i) := P|Ai| 
+
+> j=1
+
+I[llmcall( ai,j ) = 1] .
+
+5) Failure taxonomy distribution 
+
+We summarize failures at the level of failure labels rather than unique failed runs. For each run i, we extract a multiset of failure labels Li, where each label ℓ ∈ L i maps to exactly one taxonomy category in C. Let Ip be the set of runs associated with project p and let N lab  
+
+> p
+
+:= P 
+
+> i∈I p
+
+|L i| be the total number of collected labels. For a category k ∈ C , we compute: 
+
+FailProp p(k) := 
+
+P
+
+> i∈I p
+
+P 
+
+> ℓ∈L i
+
+I[cat( ℓ) = k]
+
+N lab 
+
+> p
+
+. (4) 
+
+D. Baselines 
+
+We compare R EBUG with two external baselines and report model variants of R EBUG to quantify backbone sensitivity. 
+
+Backbone variants of REBUG . We run REBUG with different backbone LLMs, including GPT 5 mini, Claude 4.5 Haiku, and Gemini 2.5 Flash. This comparison keeps the system design and environment fixed and varies only the underlying model. 
+
+Browser-use. Browser-use is a representative web agent that interacts with a real browser without our preparation stage and workflow stabilizations 1.
+
+Direct script generation. This baseline prompts an LLM to synthesize a runnable Playwright or Selenium script from the bug report in one shot. We instantiate it with GPT 5 mini and Gemini 2.5 Flash. 
+
+E. Experimental Setup 
+
+Target applications and deployment. We evaluate the system on four widely used open source web applications: Ghost, Metabase, NocoDB, and n8n. Each application is deployed using its officially recommended self-hosting method to keep the environment realistic and reproducible. Ghost is installed locally using Ghost-CLI in development mode with an SQLite database. Metabase is deployed using its official Docker image with a persistent application database following its production guidance. NocoDB is deployed using Docker Compose to run the application together with its database service. n8n is deployed using its official Docker workflow with persistent storage. All methods are evaluated on the same deployed instances. 
+
+Browser execution environment. All reproductions are ex-ecuted in a controlled browser automation environment. We use a stable Chrome-based browser with a fixed viewport and consistent language and locale settings to reduce UI variation across runs. During execution, we collect browser-observable signals required for validation, including DOM snapshots, screenshots, and element-level state information. All configurations, including the script generation baseline, run on the same deployed application instances and under the same browser environment. 
+
+Global Parameter Settings. To ensure comparability across research questions and ablation studies, we keep the following parameters fixed unless explicitly stated otherwise.  
+
+> •
+
+Execution budgets. For each report, we enforce a maxi-mum of Bstep = 20 executed steps and cap the number of allowed execution steps failures at Bfail = 3 . In addition, we apply a per action execution time limit of Tact = 120 s     
+
+> 1Browser-use: the AI browser agent, https://github.com/browser-use/ browser-use
+
+to bound the runtime of individual automation steps and avoid indefinite blocking on slow or unstable page states.  
+
+> •
+
+Termination criteria. A run terminates when the agent declares task completion, when the validation procedure ends the run, or when the execution budgets are exceeded.  
+
+> •
+
+State initialization. For each application, we standardize the initial execution state by using fixed accounts or cre-dentials and a clean baseline configuration. This ensures that all reports are executed from comparable starting points across runs. For each sampled historical replay case, we identify the relevant buggy version from issue, pull request, commit, or release information, and deploy that version when feasible. The replay uses the same report-driven R EBUG workflow and browser execution environment as the main evaluation, but the final decision checks for the bug-present behavior described in the original report.  
+
+> •
+
+Repeated attempts and aggregation. Each report is executed for up to K = 3 independent attempts. We use an early-stop protocol: once a report is successfully re-produced, subsequent attempts for that report are skipped. As a result, the actual number of executions for a dataset with N reports ranges from N to 3N . RSR, TCR, AESR, action count, time, and LLM calls are computed over the executed attempts and reported as per-run means. 
+
+F. Reproducibility artifacts 
+
+To support reproducibility, we provide an anonymous artifact repository containing the implementation, prompt templates, structured output schemas, evaluator rubric, tool specifications, model settings, execution configuration, and representative traces needed to inspect and reproduce the experiments. V. R ESULTS 
+
+A. RQ1. Effectiveness 
+
+To contextualize effectiveness, we compare R EBUG with two external baselines. Direct script generation is a simple baseline that asks an LLM to synthesize a runnable Playwright or Selenium script from the report in one attempt. Browser-use represents a browser agent baseline that interacts with a real browser without our preparation stage, enhanced tool suite, and execution safeguards. In addition, we run R EBUG with different backbone models to quantify model sensitivity under the same system design. Since the baselines do not provide compatible traces for fine-grained metrics, we report the repro-duction success rate (i.e., RSR ) for the method comparison and use the full set of metrics and cost statistics when comparing LLM backbone variants of R EBUG .Table II summarizes the reproduction success rates (RSR) of REBUG and the baselines. The full R EBUG configuration with GPT 5 mini consistently achieves the highest RSR, ranging from 45.79% (Ghost) to 52.60% (n8n). The Browser-use 
+
+baseline achieves moderate success (30.92%–40.63%) when it runs a real browser without any setup or workflow-level stabilizations. Its performance consistently falls between 10% and 17% compared with REBUG (Full), emphasizing the significance of structured execution and context reconstruction. Dataset Approach RSR ∆RSR                                         
+
+> Ghost
+> REBUG (Full), GPT-5 mini 45.79 —Browser-use, GPT-5 mini 30.92 -14.87 Direct script gen., GPT-5 mini 4.00 -41.79 Direct script gen., Gemini-2.5 Flash 4.82 -40.97 Metabase
+> REBUG (Full), GPT-5 mini 51.75 —Browser-use, GPT-5 mini 40.63 -11.12 Direct script gen., GPT-5 mini 3.80 -47.95 Direct script gen., Gemini-2.5 Flash 3.10 -48.65 NocoDB
+> REBUG (Full), GPT-5 mini 49.68 —Browser-use, GPT-5 mini 39.47 -10.21 Direct script gen., GPT-5 mini 2.76 -46.92 Direct script gen., Gemini-2.5 Flash 2.76 -46.92 n8n
+> REBUG (Full), GPT-5 mini 52.60 —Browser-use, GPT-5 mini 35.29 -17.31 Direct script gen., GPT-5 mini 1.34 -51.26 Direct script gen., Gemini-2.5 Flash 2.24 -50.36 Average REBUG (Full), GPT-5 mini 49.96 —
+
+TABLE II: RQ1 method comparison using reproduction suc-cess rate (RSR). ∆RSR denotes the absolute decrease in RSR (%) relative to the full R EBUG configuration with GPT 5 mini on the same dataset. Negative values indicate lower performance compared to R EBUG (Full). We include two external baselines: (i) Direct script generation , a one-shot baseline that asks an LLM to synthesize a runnable Playwright or Selenium script from the report, and (ii) Browser-use ,a browser agent baseline that drives a real browser without our preparation stage, enhanced tool suite, and execution safeguards. 
+
+Direct script generation , a one-shot LLM baseline, performs poorly across all datasets (1.34%–4.82%), showing that repro-ducing real-world bug reports requires more than translating natural language into scripts. Representative failures show that one-shot script generation often fails to handle missing setup and dynamic UI states, and Browser-use can interact with live pages, but it remains less reliable for bug reproduction because it lacks report-specific context reconstruction, artifact preparation, and reproduction-oriented safeguards for blocked or incomplete execution states. Table III further reports the effectiveness and cost of R E-BUG with three LLM backbones. Across all applications and models, R EBUG shows stable end-to-end performance: RSR ranges from 45.79% to 54.55%, TCR stays around the mid-70% range, and AESR remains high across most settings. These results indicate that many runs complete most planned steps and execute most low-level actions successfully, even when they do not satisfy the strict final reproduction oracle. The gap between high action executability and lower final RSR suggests that a small number of brittle interactions or late-stage mismatches can still determine whether the strict oracle is satisfied. The project-level patterns also explain the remaining vari-ation. n8n achieves the highest RSR, especially when reports provide importable workflows, but its canvas-centric editor, frequent modals, and nested menus make action grounding less reliable when workflows must be built from scratch.                                                                                 
+
+> Dataset LLM Model Effectiveness Metrics Cost Metrics RSR % TCR % AESR % #Actions Time #LLM Calls
+> Ghost GPT 5 mini 45.79 72.16 82.93 32.23 7.27 16.42 Claude 4.5 Haiku 49.48 75.83 86.41 31.67 7.11 16.37 Gemini 2.5 Flash 47.94 73.02 84.17 29.81 5.97 14.19 Metabase GPT 5 mini 51.75 77.29 81.57 27.68 7.70 18.90 Claude 4.5 Haiku 50.96 75.11 79.02 28.39 7.53 18.27 Gemini 2.5 Flash 51.59 76.88 80.41 26.21 6.41 16.73 NocoDB GPT 5 mini 49.68 76.87 92.46 34.10 7.74 19.05 Claude 4.5 Haiku 53.15 74.23 90.11 33.77 7.21 18.79 Gemini 2.5 Flash 54.55 78.94 91.33 31.93 6.19 16.61 n8n GPT 5 mini 52.60 73.58 89.18 27.92 7.25 16.56 Claude 4.5 Haiku 52.02 71.37 90.47 28.63 6.97 16.19 Gemini 2.5 Flash 51.45 74.91 88.21 25.97 5.81 13.97
+
+TABLE III: RQ1 effectiveness and cost of R EBUG with differ-ent LLM models across four web applications, averaged over multiple independent runs per report. RSR% measures end-to-end reproduction success. TCR% denotes the proportion of planned steps completed per run, and AESR% denotes the proportion of actions executed successfully. #Actions , Time 
+
+(minutes), and #LLM Calls denote per-run means. NocoDB and Metabase show high TCR and AESR because many reproductions consist of smaller, more direct UI actions; however, longer dependency chains, missing prerequisites, unobserved state changes, or late-stage mismatches can still prevent the final oracle from being satisfied. The cost metrics remain moderate and stable. Runs require about 26-34 actions, 6-8 minutes, and 14-19 LLM calls on average. These costs are small compared with manual script authoring and debugging, which often require iterative imple-mentation, repeated reruns, and troubleshooting when selectors or prerequisites break. Replacing the backbone LLM changes the numbers modestly, but the overall trends remain consistent, suggesting that the execution pipeline has a stronger influence on executability than the specific model choice. 
+
+1) Historical buggy-version replay. 
+
+The main RQ1 evaluation uses controlled current deployments, which enables large-scale comparison but cannot by itself show whether reconstructed procedures trigger the original failures on historical buggy versions. We therefore conduct a project-balanced historical replay study on 40 reports by randomly selecting 10 successful R EBUG runs per applica-tion. This subset is not used to re-estimate overall success; instead, it checks whether procedures that pass the current-deployment oracle can expose the bug-present behavior after the corresponding buggy version is restored. For each selected report, we identify the corresponding historical buggy version, rebuild and deploy that version when feasible, and rerun the same report-driven reproduction process against the restored deployment. A historical replay is counted as successful when the execution reaches the report-described scenario and the final browser-observable state matches the bug-present behavior described in the original report. Table IV summarizes the results. As shown in Table IV, R EBUG triggers the reported bug-present behavior in 39 out of 40 historical buggy-version replays. For all 40 replay cases, two authors manually in-Dataset Sampled Rebuilt Triggered Trigger Rate                     
+
+> Ghost 10 10 990.0% Metabase 10 10 10 100.0% NocoDB 10 10 10 100.0% n8n 10 10 10 100.0%
+> Total 40 40 39 97.5%
+
+TABLE IV: Historical buggy-version replay on a project-balanced sample of current-deployment successful reports. 
+
+Sampled denotes reports randomly selected from successful REBUG runs in the current-deployment evaluation. Built de-notes historical buggy versions that were successfully recon-structed and deployed. Triggered counts reports for which REBUG triggered the report-described bug-present behavior on the corresponding buggy version. spected the final screenshots, DOM summaries, execution traces, and the report-described bug-present behavior. The manual judgments were consistent with the automated eval-uator decisions in all cases, providing additional confidence in the reported replay outcomes. These results validate the semantic meaning of successful current-deployment runs: the reconstructed procedures usually expose the original failure once the corresponding buggy version is restored, rather than merely completing unrelated current-version workflows. The only unsuccessful Ghost case required a specific theme that was not materialized in the replay setup, so the symptom could not be observed even on the historical buggy version. 
+
+Answer to RQ1. REBUG reconstructs and validates a substantial portion of real-world web GUI bug-report proce-dures on controlled current deployments, achieving on aver-age 49.96% RSR and outperforming both the browser-agent baseline and one-shot script generation. The performance varies little across backbone LLMs, indicating that agent design influences reproducibility more than model choice. Historical replay further provides complementary evidence that procedures passing the current-deployment oracle can usually trigger the original report-described failures when the corresponding buggy versions are restored. 
+
+B. RQ2. Ablation on System Components 
+
+Table V shows how two preparation-stage components affect reproduction success. To keep the comparison focused, all RQ2 variants use the same deployed applications, success criterion, model backbone, and execution budgets as the full system. We report RSR as the main metric for component-level comparison. Removing the Context Builder leads to a clear decrease in success on all evaluated projects. RSR drops by 6.63% to 11.29%, with Ghost and n8n showing larger declines. This reduction indicates that many bug reports implicitly rely on missing prerequisites, such as entry information, required resources, or setup steps that are difficult to infer purely dur-ing online execution. Explicit materialization before browser interaction reduces early breakdowns and improves the chance of completing long reproduction procedures end-to-end.                                  
+
+> Condition Setting Ghost Metabase NocoDB n8n
+> Default REBUG , Full (%) 45.79 51.75 49.68 52.60 Context ablation REBUG ,34.50 44.68 43.05 42.20 w/o Context Builder (%) -11.29 -7.07 -6.63 -10.40
+> Plan ablation REBUG ,45.34 50.32 48.95 50.29 w/o Plan Generator (%) -0.45 -1.43 -0.73 -2.31
+> Context requirement Req. extra context share (%) 51.03 29.30 30.07 32.95
+
+TABLE V: RQ2 ablation results on the impact of Context Builder and Plan Generator on reproduction success rate (RSR) across projects. Values in parentheses indicate the absolute decrease in RSR (percentage points) relative to the full R EBUG configuration. The last row reports the proportion of bug reports that require additional context preparation. Removing the Plan Generator leads to only a small RSR decrease in our preliminary results. This is expected because the Plan Generator mainly provides a high-level intent scaffold and a reference for tracking progress, while the execution agent still observes the live browser state and plans the next action online through the Action Generator. Therefore, the result suggests that the initial plan is useful for structuring execution and progress monitoring, but the main reproduction capability comes from state-aware online execution and pre-requisite reconstruction rather than from a fixed upfront plan alone. Although a significant proportion of reports require addi-tional context, the RSR decrease after removing context recon-struction is smaller than that proportion. This is because some reports remain difficult even with reconstructed context, so disabling the module does not reduce success proportionally. In addition, certain prerequisites can still be fulfilled through online interaction, such as registering an account or preparing data within the application, which partially compensates for missing offline preparation. 
+
+Answer to RQ2. Context Builder has a clear effect, while removing the Plan Generator causes only a small decrease, suggesting that the initial plan mainly stabilizes progress tracking and that online state-aware execution contributes most of the execution capability. 
+
+C. RQ3. Reproduction Failure Analysis 
+
+To understand why reproduction attempts fail, we analyze unsuccessful runs using execution traces, tool logs, and in-termediate screenshots. Each failed run is assigned one or more fine-grained failure labels and then mapped to broader failure sources: UI interaction failures, execution-control fail-ures, missing preconditions or dependencies, and specifica-tion issues. To reduce subjectivity, two authors independently labeled the failures using predefined criteria and resolved disagreements through discussion. Specifically, we label failures using a trace-guided coding protocol driven by two complementary evidence sources. First, we consult the reproduction summary produced by the system at the end of each run, which often includes an inferred failure explanation. Second, we inspect the execution logs to validate Failure sub-category Ghost Metabase NocoDB n8n Element grounding / blocked 72.03 60.47 64.29 73.91 Unsupported primitive 1.69 2.33 2.38 3.26 File/artifact prerequisite 6.78 6.98 8.33 5.43 Data/database prerequisite 3.39 6.98 5.95 4.35 Configuration/environment prerequisite 5.08 3.49 3.57 2.17 Deployment/external dependency 3.39 5.81 2.38 1.09 Report ambiguity / insufficient detail 5.08 5.81 5.95 3.26 Budget exceeded (step/timeout) 2.54 8.14 7.14 6.52     
+
+> #Failure labels 118 86 84 92
+
+TABLE VI: RQ3 failure taxonomy across projects. Percent-ages are computed over all failure labels in each project. or revise this hypothesis by analyzing the full trajectory, including the last successfully executed actions, observed page transitions, and the final reachable browser state. When the summary and logs conflict, we prioritize the explanation sup-ported by the logs. Failures with missing special annotations, namely pass = N with no failure note, are conservatively assigned to Element grounding or interaction blocked .The taxonomy contains eight fine-grained labels: Element grounding or interaction blocked , Unsupported primitive ,
+
+File/artifact prerequisite , Data/database prerequisite , Config-uration/environment prerequisite , Deployment/external depen-dency , Report ambiguity or insufficient detail , and Budget exceeded . These labels are grouped into broader failure sources covering UI interaction failures, execution-control failures, missing preconditions or dependencies, and specification is-sues. Table VI summarizes the distribution of failure labels across projects. Element grounding or interaction blocked is the dominant failure mode in every subject, accounting for 60.47%-73.91% of all failure labels. These failures occur when the agent cannot bind an intended action to a visible and interactable UI target, due to overlays, hidden or stale elements, blocked interactions, or dynamic UI updates. This result suggests that, even with live browser-state grounding, robustly mapping report-derived intents to dynamic web UI elements remains a central challenge. Other failures mainly reflect missing execution context or long interaction chains. File/artifact, data/database, con-figuration/environment, and deployment/external-dependency failures show that real reports often assume resources or states that are not present in the controlled deployment. Budget-exceeded failures are more frequent on Metabase and NocoDB, suggesting that longer workflows or slower state transitions can exceed the step or timeout limits. Report ambiguity also prevents a reliable execution path when the report lacks sufficient detail. Overall, RQ3 demonstrates that reproduction failures are not primarily caused by system crashes or incorrect action selection, but rather by constraints in the reconstruction of execution prerequisites and the grounding of actions to dy-namic web interfaces. These findings indicate that future reproduction systems would be enhanced by more robust UI interaction modeling, environment-aware execution, and a more seamless integration between report comprehension and execution planning. 
+
+Answer to RQ3. Reproduction failures are driven primar-ily by difficulties in grounding actions to dynamic web UI interfaces (60%-74%), rather than incorrect high-level action selection, with secondary failures emphasizing the importance of prerequisite recovery and environment-aware execution. VI. D ISCUSSION 
+
+Relation to prior bug reproduction systems. REBUG is related to Android bug reproduction systems such as RepRev, ReCDroid+, and ReBL [12], [13], [15], which reproduce mobile bugs by extracting useful information from reviews or bug reports, matching it to Android GUI elements, and guiding exploration or LLM-based replay. R EBUG shares the same goal of reducing manual reproduction effort, but targets a different setting: web GUI bugs executed through a general-purpose browser. Unlike Android systems that can rely on APKs, Android UI hierarchies, platform instrumentation, and crash signals, R EBUG must reason over browser-observable evidence such as dynamic DOM states, URLs, screenshots, asynchronous page updates, and web-specific artifacts. REBUG also differs from recent general bug reproduction agents such as AEGIS [26], which focus on generating code-level reproduction scripts from issue descriptions. In con-trast, R EBUG executes deployed web applications through browser interactions and checks the final browser-observable state against report-derived expectations. Rather than replacing Android or code-level reproduction systems, R EBUG provides a complementary exploration of web GUI bug reproduction, where missing execution context, dynamic user-facing work-flows, and browser-observable outcomes play an important role. VII. T HREATS TO VALIDITY 
+
+Construct Validity. A primary threat arises from how the reproduction success rate is defined and measured. R EBUG 
+
+evaluates browser states, such as DOM snapshots, screenshots, and execution traces, against expectations based on bug re-ports to determine success. This procedure may not capture all subtle or context-dependent signs of a bug, particularly those involving complex visual effects or timing-sensitive interactions. Furthermore, the system’s capacity to reproduce the reported failure may be impacted by the quality and completeness of project metadata and supplementary artifacts, which are essential for context reconstruction and state-aware execution. 
+
+Internal Validity. REBUG depends on large language mod-els to interpret natural-language bug reports and generate executable interaction sequences. Variability in reproduced behavior across runs or model configurations is introduced by the probabilistic nature of LLM outputs. The reproducibility of results may be influenced by prompt design or integration with the browser automation environment, which could also affect performance. To mitigate these effects, evaluations are conducted using consistent model configurations, and each bug report involves multiple reproduction attempts. 
+
+External Validity. Our evaluation is conducted on a curated set of real-world bug reports from selected web applications. While the dataset includes diverse UI patterns and interaction sequences, the findings may not generalize to all web applica-tions, particularly highly dynamic, domain-specific, or rapidly evolving systems. The dataset may also be biased toward more easily reproducible cases due to filtering and environ-ment compatibility, which could affect the generalization of reproduction results to arbitrary bug reports. VIII. R ELATED WORK 
+
+Web GUI Testing and Bug Reproduction. Prior research on web GUI testing has produced a wide range of automation frame-works and tools, including record and replay systems, script based testing frameworks, and model based approaches [2], [27]–[33]. Tools such as Selenium and Playwright enable auto-mated browser interaction through manually authored scripts, while model based testing techniques infer UI models to gener-ate test sequences automatically [7], [34]–[36]. Although these methods are effective in regression testing, they are typically limited in their ability to directly reproduce failures from natural language bug reports due to their reliance on predefined test cases, test scripts, or manually specified preconditions [4]. Several studies have investigated automated bug reproduc-tion, primarily in the context of desktop or mobile applica-tions, where execution traces, stack traces, or system logs are leveraged to guide reproduction [5], [12], [15], [37], [38]. In the web domain, reproduction support remains more limited, as failures often depend on complex UI interactions, dynamic content, and evolving client side state [30], [39]–[41]. Consequently, existing approaches typically do not provide end-to-end support for reconstructing reproduction scenarios directly from informal bug descriptions. 
+
+Large Language Models for Web GUI Testing. Recent ad-vances in large language models have stimulated growing interest in applying LLMs to software engineering tasks, including test generation, program repair, code summariza-tion, and bug report analysis [10], [42]–[46]. Several studies explore the use of LLMs to generate UI test scripts from natural language instructions or high level specifications, and others investigate autonomous web agents capable of per-forming goal driven interactions [47]–[49]. While promising, these approaches often focus on instruction following or task completion and provide limited support for reproduction specific requirements, such as context reconstruction, state tracking, and outcome validation grounded in reported failure descriptions [50]. LLM-based web agents further demonstrate autonomous browser interaction [18], [19], [51]–[53], but they are generally optimized for directed task completion rather than report-specific reproduction with prerequisite recovery and oracle-based validation. Our work, in contrast, explicitly integrates context recon-struction, state aware execution, and outcome validation to perform end-to-end reproduction of web GUI bugs directly from natural language bug reports, and treats bug reports as actionable inputs. IX. C ONCLUSION 
+
+We presented REBUG , an LLM-driven browser agent for reconstructing and validating browser reproduction procedures from web GUI bug reports. R EBUG combines prerequisite preparation, state-aware browser execution, and oracle-based final-state validation. On 667 bug reports from four open source web applications, R EBUG achieves an average RSR of 49.96% and outperforms both direct script generation and a browser-agent baseline. A historical replay study on 40 suc-cessful cases further shows that the reconstructed procedures can usually trigger the original bug-present behavior when the corresponding buggy versions are restored. The ablation study shows that context reconstruction improves success, while failure analysis identifies UI grounding on dynamic web interfaces as the dominant bottleneck. Future work will improve grounding for complex widgets, prerequisite recovery, and the integration of reproduction traces with debugging and regression testing. REFERENCES [1] T. Roehm, N. Gurbanova, B. Bruegge, C. Joubert, and W. Maalej, “Monitoring user interactions for supporting failure reproduction,” in                               
+
+> 2013 21st International Conference on Program Comprehension (ICPC) .IEEE, 2013, pp. 73–82. [2] B. Burg, R. Bailey, A. J. Ko, and M. D. Ernst, “Interactive record/replay for web application debugging,” in Proceedings of the 26th annual ACM symposium on User interface software and technology , 2013, pp. 473– 484. [3] N. Bettenburg, S. Just, A. Schr¨ oter, C. Weiss, R. Premraj, and T. Zim-mermann, “What makes a good bug report?” in Proceedings of the 16th ACM SIGSOFT International Symposium on Foundations of software engineering , 2008, pp. 308–318. [4] O. Chaparro, C. Bernal-C´ ardenas, J. Lu, K. Moran, A. Marcus, M. Di Penta, D. Poshyvanyk, and V. Ng, “Assessing the quality of the steps to reproduce in bug reports,” in Proceedings of the 2019 27th ACM joint meeting on european software engineering conference and symposium on the foundations of software engineering , 2019, pp. 86–96. [5] S. Herbold, J. Grabowski, S. Waack, and U. B¨ unting, “Improved bug reporting and reproduction through non-intrusive gui usage monitoring and automated replaying,” in 2011 IEEE fourth international conference on software testing, verification and validation workshops .IEEE, 2011, pp. 232–241. [6] J. Anvik, L. Hiew, and G. C. Murphy, “Who should fix this bug?” in
+> 28th International Conference on Software Engineering (ICSE 2006), Shanghai, China, May 20-28, 2006 , L. J. Osterweil, H. D. Rombach, and M. L. Soffa, Eds. ACM, 2006, pp. 361–370. [7] S. Gojare, R. Joshi, and D. Gaigaware, “Analysis and design of selenium webdriver automation testing framework,” Procedia Computer Science ,vol. 50, pp. 341–346, 2015. [8] K. Pathak, Web Automation Testing Using Playwright: End-to-end, API, accessibility, and visual testing using Playwright .BPB Publications, 2024. [9] S. Brisset, R. Rouvoy, L. Seinturier, and R. Pawlak, “Erratum: Leverag-ing flexible tree matching to repair broken locators in web automation scripts,” Information and Software Technology , vol. 144, p. 106754, 2022. [10] S. Kang, J. Yoon, and S. Yoo, “Large language models are few-shot testers: Exploring llm-based general bug reproduction,” in 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) .IEEE, 2023, pp. 2312–2323.
+
+[11] L. Khatib, N. S. Mathews, and M. Nagappan, “Assertflip: Reproduc-ing bugs via inversion of llm-generated passing tests,” arXiv preprint arXiv:2507.17542 , 2025. [12] S. Li, J. Guo, M. Fan, J.-G. Lou, Q. Zheng, and T. Liu, “Automated bug reproduction from user reviews for android applications,” in Pro-ceedings of the ACM/IEEE 42nd International Conference on Software Engineering: Software Engineering in Practice , 2020, pp. 51–60. [13] Y. Zhao, T. Su, Y. Liu, W. Zheng, X. Wu, R. Kavuluru, W. G. Halfond, and T. Yu, “Recdroid+: Automated end-to-end crash reproduction from bug reports for android apps,” ACM Transactions on Software Engineer-ing and Methodology (TOSEM) , vol. 31, no. 3, pp. 1–33, 2022. [14] S. Feng and C. Chen, “Prompting is all you need: Automated android bug replay with large language models,” in Proceedings of the 46th IEEE/ACM International Conference on Software Engineering , 2024, pp. 1–13. [15] D. Wang, Y. Zhao, S. Feng, Z. Zhang, W. G. Halfond, C. Chen, X. Sun, J. Shi, and T. Yu, “Feedback-driven automated whole bug report reproduction for android apps,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis ,2024, pp. 1048–1060. [16] D. Wang, M. Galster, and M. Morales-Trujillo, “Application monitoring for bug reproduction in web-based applications,” Journal of Systems and Software , vol. 207, p. 111834, 2024. [17] M. Chen, Z. Liu, C. Chen, J. Wang, B. Wu, J. Hu, and Q. Wang, “Standing on the shoulders of giants: Bug-aware automated gui testing via retrieval augmentation,” Proceedings of the ACM on Software Engineering , vol. 2, no. FSE, pp. 825–846, 2025. [18] X. Deng, Y. Gu, B. Zheng, S. Chen, S. Stevens, B. Wang, H. Sun, and Y. Su, “Mind2web: Towards a generalist agent for the web,” Advances in Neural Information Processing Systems , vol. 36, pp. 28 091–28 114, 2023. [19] S. Zhou, F. F. Xu, H. Zhu, X. Zhou, R. Lo, A. Sridhar, X. Cheng, T. Ou, Y. Bisk, D. Fried et al. , “Webarena: A realistic web environment for building autonomous agents,” arXiv preprint arXiv:2307.13854 , 2023. [20] B. Zheng, B. Gou, J. Kil, H. Sun, and Y. Su, “Gpt-4v (ision) is a generalist web agent, if grounded,” arXiv preprint arXiv:2401.01614 ,2024. [21] S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. R. Narasimhan, and Y. Cao, “React: Synergizing reasoning and acting in language models,” in The eleventh international conference on learning representations , 2022. [22] L. N. Lota, T. S. Zaman, M. M. Azwad, L. Farah, A. Chowdhury, Z. Anjum, C. Islam, and A. R. M. Kamal, “Recent trends and challenges in using nlp techniques in software debugging: A systematic literature review,” Available at SSRN 5060080 .[23] J. Zhou, H. Zhang, and D. Lo, “Where should the bugs be fixed? more accurate information retrieval-based bug localization based on bug reports,” in 2012 34th International conference on software engineering (ICSE) . IEEE, 2012, pp. 14–24. [24] O. Chaparro, J. Lu, F. Zampetti, L. Moreno, M. Di Penta, A. Marcus, G. Bavota, and V. Ng, “Detecting missing information in bug descrip-tions,” in Proceedings of the 2017 11th joint meeting on foundations of software engineering , 2017, pp. 396–407. [25] S. Davies and M. Roper, “What’s in a bug report?” in Proceedings of the 8th ACM/IEEE International Symposium on Empirical Software Engineering and Measurement , 2014, pp. 1–10. [26] X. Wang, P. Gao, X. Meng, C. Peng, R. Hu, Y. Lin, and C. Gao, “Aegis: An agent-based framework for general bug reproduction from issue descriptions,” arXiv preprint arXiv:2411.18015 , 2024. [27] E. Borjesson and R. Feldt, “Automated system testing using visual gui testing tools: A comparative study in industry,” in 2012 IEEE Fifth International Conference on Software Testing, Verification and Validation . IEEE, 2012, pp. 350–359. [28] A. M. Memon and M. B. Cohen, “Automated testing of gui applications: models, tools, and controlling flakiness,” in 2013 35th International Conference on Software Engineering (ICSE) . IEEE, 2013, pp. 1479– 1480. [29] I. Banerjee, B. Nguyen, V. Garousi, and A. Memon, “Graphical user interface (gui) testing: Systematic mapping and repository,” Information and Software Technology , vol. 55, no. 10, pp. 1679–1694, 2013. [30] S. Artzi, A. Kiezun, J. Dolby, F. Tip, D. Dig, A. Paradkar, and M. D. Ernst, “Finding bugs in web applications using dynamic test generation and explicit-state model checking,” IEEE Transactions on Software Engineering , vol. 36, no. 4, pp. 474–494, 2010. [31] S. Artzi, J. Dolby, S. H. Jensen, A. Møller, and F. Tip, “A framework for automated testing of javascript web applications,” in Proceedings of the 33rd international conference on software engineering , 2011, pp. 571–580. [32] F. Lebeau, B. Legeard, F. Peureux, and A. Vernotte, “Model-based vul-nerability testing for web applications,” in 2013 IEEE Sixth International Conference on Software Testing, Verification and Validation Workshops .IEEE, 2013, pp. 445–452. [33] G. R. Mattiello and A. T. Endo, “Model-based testing leveraged for automated web tests,” Software Quality Journal , vol. 30, no. 3, pp. 621– 649, 2022. [34] A. Holmes and M. Kellogg, “Automating functional tests using sele-nium,” in AGILE 2006 (AGILE’06) . IEEE, 2006, pp. 6–pp. [35] H. A. Thooriqoh, T. N. Annisa, and U. L. Yuhana, “Selenium framework for web automation testing: A systematic literature review,” JUTI: Jurnal Ilmiah Teknologi Informasi , pp. 65–76, 2021. [36] B. Garc´ ıa, J. M. del Alamo, M. Leotta, and F. Ricca, “Exploring browser automation: A comparative study of selenium, cypress, puppeteer, and playwright,” in International Conference on the Quality of Information and Communications Technology . Springer, 2024, pp. 142–149. [37] Z. Zhang, R. Winn, Y. Zhao, T. Yu, and W. G. Halfond, “Automatically reproducing android bug reports using natural language processing and reinforcement learning,” in Proceedings of the 32nd ACM SIGSOFT International Symposium on Software Testing and Analysis , 2023, pp. 411–422. [38] J. Johnson, J. Mahmud, T. Wendland, K. Moran, J. Rubin, and M. Fazz-ini, “An empirical investigation into the reproduction of bug reports for android apps,” in 2022 IEEE International Conference on Software Analysis, Evolution and Reengineering (SANER) . IEEE, 2022, pp. 321– 322. [39] G. A. Di Lucca and M. Di Penta, “Considering browser interaction in web application testing,” in Fifth IEEE International Workshop on Web Site Evolution, 2003. Theme: Architecture. Proceedings. IEEE, 2003, pp. 74–81. [40] S. McAllister, E. Kirda, and C. Kruegel, “Leveraging user interactions for in-depth testing of web applications,” in International Workshop on Recent Advances in Intrusion Detection . Springer, 2008, pp. 191–210. [41] A. Apaolaza and M. Vigo, “Wevquery: Testing hypotheses about web interaction patterns,” Proceedings of the ACM on Human-Computer Interaction , vol. 1, no. EICS, pp. 1–17, 2017. [42] Y. Chen, Z. Hu, C. Zhi, J. Han, S. Deng, and J. Yin, “Chatunitest: A framework for llm-based test generation,” in Companion Proceedings of the 32nd ACM International Conference on the Foundations of Software Engineering , 2024, pp. 572–576. [43] M. Sch¨ afer, S. Nadi, A. Eghbali, and F. Tip, “An empirical evaluation of using large language models for automated unit test generation,” IEEE Transactions on Software Engineering , vol. 50, no. 1, pp. 85–105, 2023. [44] S. Yu, C. Fang, Y. Ling, C. Wu, and Z. Chen, “Llm for test script generation and migration: Challenges, capabilities, and opportunities,” in 2023 IEEE 23rd International Conference on Software Quality, Reliability, and Security (QRS) . IEEE, 2023, pp. 206–217. [45] M. Jin, S. Shahriar, M. Tufano, X. Shi, S. Lu, N. Sundaresan, and A. Svyatkovskiy, “Inferfix: End-to-end program repair with llms,” in 
+
+Proceedings of the 31st ACM joint european software engineering conference and symposium on the foundations of software engineering ,2023, pp. 1646–1656. [46] J. Acharya and G. Ginde, “Can we enhance bug report quality using llms?: An empirical study of llm-based bug report generation,” in 
+
+Proceedings of the 29th International Conference on Evaluation and Assessment in Software Engineering , 2025, pp. 994–1003. [47] D. Ran, H. Wang, Z. Song, M. Wu, Y. Cao, Y. Zhang, W. Yang, and T. Xie, “Guardian: A runtime framework for llm-based ui exploration,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis , 2024, pp. 958–970. [48] Z. Liu, C. Chen, J. Wang, M. Chen, B. Wu, X. Che, D. Wang, and Q. Wang, “Make llm a testing expert: Bringing human-like interaction to mobile gui testing via functionality-aware decisions,” in Proceedings of the IEEE/ACM 46th International Conference on Software Engineering ,2024, pp. 1–13. [49] P. Duan, J. Warner, and B. Hartmann, “Towards generating ui design feedback with llms,” in Adjunct Proceedings of the 36th Annual ACM Symposium on User Interface Software and Technology , 2023, pp. 1–3. [50] N. Nashid, I. Bouzenia, M. Pradel, and A. Mesbah, “Issue2test: Generating reproducing test cases from issue reports,” arXiv preprint arXiv:2503.16320 , 2025. [51] K. Yang, Y. Liu, S. Chaudhary, R. Fakoor, P. Chaudhari, G. Karypis, and H. Rangwala, “Agentoccam: A simple yet strong baseline for llm-based web agents,” arXiv preprint arXiv:2410.13825 , 2024. [52] K. Ma, H. Zhang, H. Wang, X. Pan, W. Yu, and D. Yu, “Laser: Llm agent with state-space exploration for web navigation,” arXiv preprint arXiv:2309.08172 , 2023. [53] J. Y. Koh, R. Lo, L. Jang, V. Duvvur, M. Lim, P.-Y. Huang, G. Neubig, S. Zhou, R. Salakhutdinov, and D. Fried, “Visualwebarena: Evaluating multimodal agents on realistic visual web tasks,” in Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , 2024, pp. 881–905.

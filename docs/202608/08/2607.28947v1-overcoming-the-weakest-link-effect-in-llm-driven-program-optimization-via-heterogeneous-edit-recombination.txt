@@ -1,0 +1,578 @@
+Title: Overcoming the Weakest-Link Effect in LLM-Driven Program Optimization via Heterogeneous Edit Recombination
+
+URL Source: https://arxiv.org/pdf/2607.28947v1
+
+Published Time: Mon, 03 Aug 2026 00:19:59 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Overcoming the Weakest-Link Effect in LLM-Driven Program Optimization via Heterogeneous Edit Recombination 
+
+# Jingwen Fu ∗1,2 , Zhen Liu ∗3, Yuhan Liu 4,He Zhang 1,2 †, Nanning Zheng 3†
+
+> 1
+
+Zhongguancun Academy 
+
+> 2
+
+Zhongguancun Institute of Artificial Intelligence 
+
+> 3
+
+National Key Laboratory of Human-Machine Hybrid Augmented Intelligence, and Institute of Artificial Intelligence and Robotics, Xi’an Jiaotong University 
+
+> 4
+
+Xiaomi Inc jwfu99@gmail.com, zhanghe@zgci.ac.cn, nnzheng@mail.xjtu.edu.cn 
+
+Abstract 
+
+Large language models (LLMs) are increasingly used to solve complex problems by searching over program space, offering a general paradigm for scientific problems that can be naturally represented and solved as programs. Despite recent progress, identifying effective optimization directions for a candidate program remains challenging. By analogy with automatic dif-ferentiation, existing methods typically guide the search using a textual “gradient”: a first-order update direction expressed as textual edits. Such gradients are inferred either from previ-ously evaluated programs or from LLM-generated feedback on the implicit program-score mapping. However, these esti-mates become increasingly unreliable as the program–score mapping grows more complex, limiting their practical utility. We argue that explicit gradients are not essential for effec-tive program optimization. Leveraging their prior knowledge, LLMs can propose plausible atomic edits directly from the current program, thereby enabling a zeroth-order optimization strategy. However, zeroth-order search suffers from a weakest-link effect : when a bundle of edits is accepted or rejected as a whole, a single harmful edit can negate the benefits of all remaining edits. To address this issue, we introduce HERO, a program optimizer that prompts an LLM to generate diverse, non-overlapping atomic edits and then systematically selects and composes them into coherent program improvements us-ing evaluator scores. We evaluate HERO across algorithmic problems, strategy games, the design of LLM-based agentic systems, and robotic path planning. Across these domains, HERO consistently discovers higher-scoring programs and converges substantially faster than prior LLM-based optimiz-ers, while consuming fewer tokens. 
+
+# 1 Introduction 
+
+Optimization over program space provides a general frame-work for solving complex problems, ranging from mathe-matical construction to agent design. Such problems can often be expressed naturally as programs, which are exe-cutable, automatically evaluable, and compositional (Zhang et al. 2024b; Yuksekgonul et al. 2025; Ding et al. 2025). LLMs are well suited to this setting as they can reason about 
+
+> ∗
+
+These authors contributed equally. 
+
+> †
+
+Corresponding authors. Task Description 
+
+> Initial Program
+> LLM Edits Proposal
+> Refined Program
+> Ranking
+> & Selection
+> Best Program
+
+Figure 1: Workflow of HERO. Given a task description, HERO iteratively improves the program by applying selec-tively recombined edits proposed by the LLM. program semantics, draw on broad prior knowledge, and iter-atively revise candidate solutions (Zhou et al. 2025; Madaan et al. 2023; Zhang et al. 2025b; Romera-Paredes et al. 2024). The central difficulty, however, is how to steer the search. At each iteration, the optimizer must determine an optimization direction to guide how the current program should be mod-ified to improve its performance (Nie et al. 2023; Liu et al. 2026c,a,b). Existing methods typically infer this direction from the observed performance of previously evaluated can-didates, which we refer to as first-order information (Yuksek-gonul et al. 2025; Cheng, Nie, and Swaminathan 2024). The underlying intuition is that the evaluation history provides a local description of the objective: by identifying which past modifications helped or hurt, the optimizer can infer a useful update direction, analogous to estimating a numerical gradi-ent. Consequently, access to evaluation scores is often treated as essential. We posit that this assumption becomes unreliable as the program–score mapping grows more complex. Inferring an update from performance can be regarded as a credit-assignment problem: the optimizer must attribute a scalar score to the many interacting components of a program and determine which components should be changed. When the program–score mapping is simple, this attribution could be tractable. Nevetheless, for those open scientific problems re-mained underexplored by LLMs, the candidate programs typ-ically involve long execution traces, tightly coupled compo-nents, or stochastic outcomes. As a result, the same evaluator arXiv:2607.28947v1 [cs.LG] 31 Jul 2026 ⋯   
+
+> E1+
+> E4+
+> E2-
+> E3-
+> E1+ E4+
+> subset
+> score
+> best subset
+> apply all
+> The weakest link limits
+> the global performance
+> score:
+> 0.345
+> score:
+> 0.261
+> E1+ E2-
+> E3-
+> E4+
+> LLM Edits Proposal
+> Heterogeneous atomic edits
+> E3-
+> Recombination & Selection
+> E1+ E4+
+> A
+> zeroth-order method
+> HERO
+> B
+
+Figure 2: Overview of HERO. (A) Working mechanism. At each step, the LLM generates multiple non-overlapping, heteroge-neous atomic edits. Exsiting methods apply or reject all edits by the global score, hence suffering from the weakest-link effect. HERO instead recombines the edits and selects the subset that maximizes performance, neutralizing the influence of harmful edits. (B) Best-subset recombination mitigates the weakest-link effect and leads to substantial performance improvement. score can be consistent with several different explanations, making the inferred attribution or ‘gradient direction’ funda-mentally ambiguous. We theoretically formulate this limita-tion in Appendix A, and show that a finite history of scores cannot uniquely determine the correct update direction when the decoder from scores to update labels is unconstrained. The limitations of score-based reasoning raise the cen-tral question of this paper: Can an LLM-based optimizer remain effective without reasoning about ground-truth per-formance? Our starting point is a simple empirical evidence observed in prior research (Yang et al. 2024; Zhang et al. 2024c; Xia et al. 2024): even without performance feedback, LLMs possess substantial implicit knowledge of how a can-didate solution might be improved (Fig. 1). Given only a task description and a candidate program, they can often propose plausible, localized atomic edits . The main difficulty, we ar-gue, lies not in generating individual edits but in combining them. As shown in Fig. 2A, a straightforward approach is to apply all proposed edits together and accept or reject the resulting program according to its global score. However, a batch may contain both beneficial and harmful edits since edit generation is stochastic and unguided by performance feedback. Under this all-or-nothing decision rule, a single harmful edit can outweigh the gains from the others, causing the entire batch, including its useful edits, to be discarded. We refer to this failure mode as the weakest-link effect . Simply instructing the model to generate only beneficial edits does not resolve the problem, because the model cannot reliably determine the effect of each edit before evaluation without ground-truth feedback. Harmful edits must therefore be fil-tered during selection, by evaluating modifications at a finer granularity than the full batch. Motivated by this observation, we introduce HERO 
+
+(Heterogeneous Edit Recombination Optimizer), which sep-arates edit generation from edit selection (Fig. 2A). During generation, the LLM proposes optimization directions using its internal knowledge; during selection, scalar evaluations identify effective combinations of those directions. At each iteration, HERO provides the LLM with only the task de-scription and the current program, deliberately withholding its ground-truth performance, and asks it to generate a set of heterogeneous, non-overlapping atomic edits . Instead of applying the entire set, HERO evaluates recombinations of these edits and retains the best-performing subset, prevent-ing a single harmful edit from overriding beneficial ones. Ground-truth performance is used only as a scalar criterion for comparing edit subsets and evaluating the resulting pro-gram; it is never interpreted by the LLM or used to infer an update direction. In this sense, HERO performs zeroth-order optimization while converting the LLM’s latent knowledge of plausible edits into reliable program improvements. We evaluate HERO in four domains: Circle Packing (Novikov et al. 2025), Strategy Games (Dor 2018), Agent System De-sign (Zhang et al. 2025a), and Path Planning (Meng et al. 2024; Xiao et al. 2023). Together, these domains cover com-binatorial construction, adversarial and partially observable decision making, agentic reasoning, and planning. Overall, this paper makes three contributions: 
+
+• We identify a key bottleneck in LLM-based program op-timization: the challenge is not generating promising up-date directions, but composing heterogeneous edits with-out suffering from the weakest-link effect induced by all-or-nothing acceptance. 
+
+• We introduce HERO, which separates edit generation from edit selection. It generates heterogeneous, non-overlapping atomic edits and selectively recombines them using scalar evaluations, without requiring the LLM to reason about ground-truth performance. 
+
+• Across four domains, HERO achieves faster convergence, lower token consumption, and higher final performance. Finally, our results are not a claim that first-order informa-tion is useless. By charting what is achievable without it, we aim to recalibrate the community’s estimate of its value and to inform when, and how, it is worth the cost of methods that 
+
+do leverage it. The full discussion of related work is deferred to Appendix D. 
+
+# 2 Method 
+
+2.1 Formulation and Intuition 
+
+Problem setup. Let X be the solution space and f : X → 
+
+R+ a target (performance) function. The optimizer seeks a maximizer 
+
+x⋆ ∈ arg max 
+
+> x∈X
+
+f (x), (1) and proceeds iteratively: at step t it maintains an incumbent 
+
+xt ∈ X together with an evaluation history 
+
+Ht = (xi, f (xi)) ti=1 .
+
+A single step proposes a modification α : X → X and moves to α(xt). To contrast HERO with prior work precisely, we first classify the information available to such a proposal, then explain why HERO deliberately uses only part of it. 
+
+First- vs. zeroth-order information. We distinguish two sources of information a proposal mechanism may exploit. 
+
+First-order information is any functional of the evalua-tion history Ht used to estimate the local ascent direction 
+
+∇f (xt) (Cheng, Nie, and Swaminathan 2024; Zhang et al. 2024a). The aim is not to reconstruct the entire gradient field but only the direction at the incumbent xt; this is presumed feasible because Ht implicitly constrains f . The difficulty is that recovering ∇f (xt) from Ht is an inverse problem, and Appendix shows it is ill-posed once f is complex: a finite history is consistent with many distinct directions, so the in-ferred direction is unreliable precisely in the hard regime. 
+
+Zeroth-order information , by contrast, is any information in-dependent of Ht, namely that carried by the task description and the model’s internal prior. Formally, a first-order opti-mizer samples a modification from a distribution conditioned on the full context, 
+
+α ∼ π · | Task , H t, x t
+
+,
+
+drawing on both sources, whereas a purely zeroth-order op-timizer conditions only on (Task , x t).
+
+A latent-objective model of zeroth-order proposals. As a zeroth-order optimizer, HERO samples α ∼ π · |
+
+Task , x t
+
+ withholding all scores, so the proposed direction cannot be inferred from Ht and must originate from the model’s prior. To analyze this prior we adopt the following modeling assumption—a tractable abstraction, not a claim about internal mechanics. We posit a finite set of latent ob-jectives g1, . . . , g h : X → R, each encoding a property the model associates with quality (e.g., “avoid boundary waste” in packing, or “protect corners” in Othello). We model each sampled modification α as an approximate ascent step on a 
+
+random mixture of these objectives: 
+
+gαθ =
+
+> h
+
+X
+
+> i=1
+
+θαi gi, α(xt) − xt ≈ η ∇gαθ (xt), (2) where η > 0 is a step size and the weight vector θα =(θα 
+
+> 1
+
+, . . . , θ αh ) is drawn afresh for each sample, reflecting the stochasticity of generation. Under this model a single edit is a noisy, partially correct direction: it ascends some objective the model believes in, but not necessarily f .
+
+Objective: aligning the aggregate with f . Since the mix-ture weights are random, no single α is guaranteed to increase 
+
+f . The problem HERO solves is therefore one of aggrega-tion : select a sub-collection {α1, . . . , α n} whose combined direction is positively aligned with the true objective near xt,i.e., there exists c > 0 such that 
+
+∇
+
+> n
+
+X
+
+> i=1
+
+gαi 
+
+> θ
+
+(xt) ≈ c ∇f (xt). (3) Equation (3) formalizes the intuition that combining many partially correct edits cancels their objective-specific (off-
+
+f ) components while reinforcing the shared component that tracks f , converting diffuse prior knowledge into a usable ascent direction without ever reasoning over scores. 
+
+The weakest-link effect. A naive aggregation applies all 
+
+proposed edits and accepts the result by its global score; we show this squanders the very alignment that Eq. (3) targets. Let {α1, . . . , α n} be the proposals, write the joint update 
+
+α1: n = α1 ◦ · · · ◦ αn, and let δi = f  αi(xt) − f (xt)
+
+denote the marginal gain of edit i. When the edits act on disjoint parts of the solution—as enforced in Section 2.2— their effects are approximately additive, 
+
+f  α1: n(xt) − f (xt) ≈
+
+> n
+
+X
+
+> i=1
+
+δi. (4) 
+
+All-or-nothing acceptance keeps the bundle iff this sum is positive. Because the model receives no feedback, it cannot certify any edit, so some δj < 0 is essentially unavoid-able; by Eq. (4), a single sufficiently harmful edit—one with 
+
+δj < − P 
+
+> i̸=j
+
+δi when the remaining edits are beneficial— renders the total non-positive and triggers rejection of the 
+
+entire bundle, discarding every beneficial edit along with the harmful one. We call this the weakest-link effect : the fate of the bundle is dictated by its worst component. It explains the puzzle from Section 1—the model proposes sound edits, yet all-or-nothing acceptance prevents them from accumulating into gains. The remedy is to evaluate at a finer granularity than the full bundle: the subset S⋆ = arg max S⊆[n]
+
+P 
+
+> i∈S
+
+δi
+
+retains exactly the beneficial edits {i : δi > 0} and attains gain P 
+
+> i:δi>0
+
+δi ≥ Pni=1 δi. This subset search is the core of HERO, developed next. 
+
+2.2 Generation–Selection Framework 
+
+The analysis of Section 2.1 isolates two distinct concerns: 
+
+proposing candidate directions, which the model’s prior already supports, and verifying which of them to keep, which all-or-nothing acceptance handles poorly. HERO de-couples these into a knowledge-driven Generation phase and a feedback-driven Selection phase. Starting from an initial program x0 ∈ X , it applies the composite update 
+
+xt = Update( xt−1) =  Select ◦ Generate (xt−1),
+
+(5) and returns xT as the final solution. Generation supplies candidate edits from the model’s prior alone, while selection uses ground-truth performance purely as a scalar criterion to retain the edits that help. We specify each phase in turn. 
+
+Generation phase. Queried with only the task description and the incumbent xt−1—no scores—the model returns a set of atomic edits 
+
+A = {α1, . . . , α n}, αi : X → X ,whose cardinality n is chosen by the model itself, so that granularity adapts to how much the program admits improve-ment. We require the edits to be heterogeneous and pairwise 
+
+commuting : for all i, j ∈ [n],
+
+αi ◦ αj = αj ◦ αi. (6) Commutativity is what makes subset selection well posed. For any index subset S ⊆ [n], define the recombined program 
+
+AS (x) = 
+
+
+
+⃝i∈S αi
+
+
+
+(x),
+
+the composition of the edits indexed by S. By Eq. (6) this composition is independent of the order of application, so 
+
+AS is unambiguous and an instruction such as “keep edits 
+
+{i, k } but drop j” is well defined; without commutativity the effect of a subset would depend on application order and on which other edits are present, and recombination would be ill posed. Commutativity thus turns recombination into a clean combinatorial choice over the 2n subsets of disjoint, heterogeneous edits. 
+
+Selection phase. Given A, selection returns the best-performing subset at the incumbent xt−1:
+
+S⋆ ∈ arg max 
+
+> S⊆[n]
+
+bDS f (xt−1),
+
+bDS f (xt−1) = f (AS (xt−1)) − f (xt−1)
+
+∥S∥ .
+
+(7) after which we set xt = AS⋆ (xt−1). Here bDS f (xt−1) is the empirical directional improvement of f along the re-combined edit (the finite-sample analogue of the directional derivative DS f ), AS is as defined above, and ∥S∥ is the update magnitude, set to 1 throughout for simplicity. Two observations connect this rule to Section 2.1. First, because the optimum ranges over all subsets rather than the single full bundle S = [ n], harmful edits are excluded while bene-ficial ones are retained: under the additive approximation of Eq. (4) with ∥S∥ = 1 , Eq. (7) reduces to max S⊆[n]
+
+P 
+
+> i∈S
+
+δi,whose maximizer is exactly {i : δi > 0}. This is the precise mechanism by which HERO neutralizes the weakest-link ef-fect. Second, Eq. (7) uses f only as a black-box scalar to 
+
+compare candidates; it never asks why one subset scores higher, keeping HERO strictly zeroth-order in the sense of Section 2.1. 
+
+2.3 Design Details 
+
+HERO follows a score-free generation and evaluator-based selection procedure. Given the task description and cur-rent program, the LLM produces localized, pairwise non-overlapping SEARCH /REPLACE edits (Novikov et al. 2025). The non-overlapping constraint makes edit composition order-independent and enables well-defined subset recombi-nation. Selection first removes edits that cause execution er-rors, then evaluates candidate subsets and retains the highest-scoring recombination. We enumerate all subsets when feasi-ble; otherwise, we use a budgeted subset pool. For expensive evaluator, we adopt an approximately order-preserving sur-rogate. The evaluation budget therefore balances subset cov-erage against ranking reliability. Evaluator scores are used only for subset comparison and are never provided to the LLM. See more implementation details in Appendix E. 
+
+Discussion. We close by stating precisely the role ground-truth performance plays in HERO, since this is exactly what separates it from first-order methods and substantiates the zeroth-order claim made in the abstract and introduction. During optimization the signal enters at a single point—the comparison of edit subsets in Eq. (7)—and at one further point afterward, the evaluation of the returned program xT .It is never reasoned about : HERO extracts no explanation of why one subset outscores another and infers no structural insight from the score. All directional knowledge originates from the model’s prior (the Generation phase), whereas per-formance acts solely as a scalar comparison oracle (the Selec-tion phase). This cleanly classifies HERO as a zeroth-order 
+
+optimizer in the sense of Section 2.1, and it explains why HERO sidesteps the credit-assignment failure formalized in Appendix A: by ranking candidates rather than inverting a scalar score back onto a solution’s parts, it never attempts the ill-posed inversion that renders first-order reasoning unreli-able in the hard regime. 
+
+# 3 Experiments 
+
+Our experiments are designed to test the paper’s central claim, not merely to report wins. If the bottleneck in LLM-driven optimization is composing edits rather than knowing directions, then a zeroth-order method that recombines ed-its should (1) converge faster, (2) cost fewer tokens, and (3) reach better final solutions than first-order baselines— and, critically, its advantage should grow as the solution-to-performance mapping becomes harder to reason about, since that is where first-order credit assignment degrades. We therefore study four task families—Circle Packing, Strategy Games, Agent System Design, and Path Planning—chosen to span combinatorial construction, adversarial and partially observable decision making, agentic reasoning, and plan-ning, so that they stress both the reasoning and the optimiza-tion capabilities of the LLM. Unless otherwise stated, we use Qwen-Plus (Alibaba 2025) as the base LLM. 
+
+3.1 Circle Packing 
+
+Task Description. The circle packing problem aims to place 26 circles within a unit square while maximizing the sum of their radii, subject to non-overlapping constraints and the requirement that all circles remain inside the square. The task blends discrete placement decisions with continuous radius adjustments, making it a challenging benchmark: it features numerous local optima, and naive methods often become trapped in suboptimal configurations that use space inefficiently. This task provides a suitable testbed for our claim because good moves (e.g., shifting a row, regrowing a radius) are locally describable, yet their joint effect on the global sum is highly coupled—precisely the regime where bundling edits should hurt. 
+
+Convergence Speed. We measure the number of steps each method needs to reach a target performance of 2.60 ;results are summarized in Fig. 3A. HERO reaches the target with substantially fewer steps than all baselines. The reason is structural rather than incidental: by recombining edits, each step retains locally beneficial change instead of discarding a Number of Steps Number of Tokens Evolved Performance Score Figure 3: Results on the Circle Packing task. A. Number of steps required to reach a configuration with sum_radii > 2.60 .
+
+B. Average number of tokens consumed per evolution step. C. Optimization trajectories of different methods during the search. whole batch whenever one edit misfires, so progress com-pounds across steps rather than stalling. This translates into strong sample efficiency, which matters most when interac-tion budgets are tight—a common constraint when deploying LLM-driven optimization under time or compute limits. 
+
+Token Consumption. Faster convergence would be of little practical value if each step were expensive, so we next measure the average token usage per step over a 100-step run (Fig. 3B); tokens directly reflect runtime cost in LLM-based applications. HERO consistently requires the fewest tokens per iteration. The saving is a direct consequence of being zeroth-order: because HERO neither feeds in scored examples nor asks the model to reason over performance, its prompts omit the long example contexts and chain-of-thought analyses that first-order methods rely on, and each update is produced in a single edit-generation pass. Efficiency here is thus not an engineering trick but a built-in benefit of removing first-order reasoning. 
+
+Learning Curve. To see how the methods reach their solutions, we compare learning curves over 100 steps (Fig. 3C). HERO shows a pronounced early acceleration, im-proving far sooner than competitors, which progress slowly and incrementally. This shape is exactly what our diagno-sis predicts: the model already retrieves strong task-relevant moves from the outset, so once selection prevents good moves from being vetoed, large gains are available immediately rather than having to be slowly inferred from accumulated score history. 
+
+3.2 Strategy Games 
+
+The previous task is fully deterministic. We now raise the difficulty of credit assignment along two axes—long-horizon interaction and partial observability—using two games, which lets us test the prediction that HERO’s ad-vantage widens as reasoning from scores gets harder. 
+
+Othello. Othello is a classic two-player deterministic board game on an 8 × 8 grid. At each turn a player places a disc to flip the opponent’s pieces, and the outcome depends heavily on long-horizon positional planning. Solving the task requires evaluating board configurations, anticipating multi-step consequences, and countering an adaptive opponent, making it a strong benchmark for strategic reasoning and adversarial foresight. We use win-rate as the performance signal and design two opponents (details in Appendix); we Table 1: Results on Strategy Games.                               
+
+> Task HERO ShinkaEvolve OpenEvolve EoH Best of N
+> Othello-E 0.97 0.90 0.93 0.30 0.36 Othello-H 0.85 0.10 0.15 0.00 0.06 Battleship-E 0.34 0.18 0.20 0.02 0.08 Battleship-H 0.28 0.14 0.14 0.00 0.04
+> Average 0.61 0.33 0.36 0.08 0.14
+
+denote the task against the hard opponent as Othello-H and against the easy one as Othello-E. 
+
+Battleship. Battleship is a probabilistic strategy game in which a player must locate hidden ships on a grid through a sequence of queries. Unlike Othello, the environment is un-certain and only partially observable: the agent must maintain and continuously update a belief over feasible ship configu-rations (details in Appendix). Strong performance hinges on probing strategies that maximize information gain, balanc-ing exploration and exploitation, and revising plans as new evidence arrives. Performance is measured as the ratio of successful hits to total shots. We define two difficulty levels by grid size, Battleship-H (hard) and Battleship-E (easy). 
+
+Performance. We run the optimizer for 60 steps on Othello and 20 steps on Battleship, and report final scores in Table 1, comparing against EoH, Best-of-N, OpenEvolve, and ShinkaEvolve under identical settings. HERO achieves the best performance on all four tasks. More telling than the wins is their pattern. On the easy variants the field is close (Othello-E: 0.97 vs. 0.90 –0.93 for the evolutionary baselines), but on the hard variants the gap explodes: on Othello-H HERO reaches 0.85 while every competitor col-lapses to at most 0.15 . This is the signature our thesis predicts. On Othello-E the score-to-performance mapping is benign enough that first-order reasoning still works, so all reason-able methods cluster together; on Othello-H the mapping becomes deeply entangled, first-order direction-finding de-generates, and only a method that bypasses it—recombining the model’s prior knowledge—keeps improving. The same trend holds on the partially observable Battleship ( 0.34 /0.28 
+
+vs. at most 0.20 /0.14 ). Averaged over the four tasks, HERO scores 0.61 , well above OpenEvolve ( 0.36 ) and ShinkaE-volve ( 0.33 ); notably, the largest contribution to this margin comes from the hard settings, which is precisely where the value of avoiding first-order reasoning should be greatest. Figure 4: Analysis on Strategy Games. A. Effect of the surrogate evaluator E′ with different numbers of replicate games. B. Average performance of HERO, ShinkaEvolve, and OpenEvolve across three LLMs. 
+
+Choice of Evaluator and Overfitting. A possible ob-jection is that HERO simply trades expensive reasoning for expensive evaluation, since selection (Eq. 7) calls f repeat-edly. In Othello, the faithful evaluator runs 1,000 games per candidate, which is costly, so we replace it with a cheap surro-gate E′ and ask how coarse E′ can be before selection suffers. Recall the method’s claim that selection needs only the cor-rect ranking of subsets, not accurate absolute scores; Fig. 4A tests this directly by sweeping the grain of E′ (number of games used to estimate the win-rate, horizontal axis) against win-rate (vertical axis). The training win-rate (blue) stays close to 1.0 even with very few games, and the test win-rate (orange), though lower with a handful of games, rises rapidly and plateaus, with negligible gains beyond a small budget. The interpretation is that ranking is far more robust to estima-tion noise than the scores themselves: even a noisy E′ usually orders a clearly-good subset above a clearly-bad one, which is all selection requires. HERO therefore attains accurate fi-nal performance without expensive large-scale evaluation, confirming that its reliance on f is cheap in practice rather than a hidden cost. 
+
+Choice of LLM. If the gains came from a quirk of one model, our claim about LLMs’ latent knowledge would be weak; we therefore repeat the comparison across three base models in Fig. 4B: Qwen-Plus, Deepseek-v3.2, and Kimi-K2-Instruct (full per-task breakdown in Appendix B). HERO leads consistently— 61% vs. 33% /36% on Qwen-Plus, 60% 
+
+vs. 38% /41% on Deepseek-v3.2, and 61% vs. 46% /44% on Kimi-K2-Instruct—and its lead persists even on the weaker base model, indicating that the relevant directional knowl-edge is broadly present across models and that HERO’s role is to unlock it rather than to supply it. HERO is also more stable across runs, whereas the baselines show larger vari-ability and lower ceilings, consistent with the brittleness that all-or-nothing acceptance introduces. 
+
+3.3 LLM Agent System Design 
+
+The previous tasks optimize a single artifact. We now test whether the same mechanism improves an agent scaffold ,and whether the improvements transfer across model scales. We follow the protocol of Lange, Imajuku, and Cetin (2025) on the AIME benchmark: the optimizer is run on AIME 2025 (Mathematical Association of America 2025) and eval-
+
+Figure 5: Accuracy–efficiency trade-off on AIME. Each point reports average accuracy over AIME 2024 and 2023 together with the average number of LLM queries. Points closer to the upper-left corner are preferred. uated on held-out AIME 2024 (Mathematical Association of America 2024) and AIME 2023 (Mathematical Associa-tion of America 2023). Optimization runs for 10 steps using Qwen3-0.6B to generate candidate scaffolds; to probe gen-eralization, we then evaluate the optimized scaffold on the larger Qwen3-7B model. Alongside accuracy, we report the average number of LLM queries per method as a proxy for computational cost. Figure 5 shows that all optimization-based methods beat the base agent, lifting average accuracy from 18 .5% to over 
+
+27% ; HERO is best at 28 .7% (33 .3% on 2024, 24 .1% on 2023). Two aspects support our thesis. First, the optimized scaffold, discovered on AIME 2025 with a tiny 0.6B model, still wins when transferred to a 7B model and to earlier years—improvements that are structural and model-agnostic, as expected if HERO is selecting genuinely good design choices rather than overfitting to one evaluator. Second, the efficiency gap is large: HERO needs only 2.15 LLM calls on average, versus 4 for ShinkaEvolve and 5 for OpenEvolve, because it neither replays scored exemplars nor runs reason-ing chains over them. The result is a favorable accuracy– efficiency trade-off that scales to practical settings. 
+
+3.4 Path Planning 
+
+Our final task moves from open-ended construction to a prob-lem with a known optimum, which lets us separate solution quality from search efficiency . Grid-based robot path plan-ning (Wang et al. 2019; Wang 2021; Jahanshahi and Sari 2018) guides an agent from a start cell to a target cell on a two-dimensional lattice, where each cell is either traversable or occupied. The objective is to find a collision-free path of adjacent traversable cells that avoids all obstacles. Depending on the setting, movement may be restricted to four-connected neighborhoods (up, down, left, right) or extended to eight-connected motion including diagonals. Each step incurs a cost—uniform in simple settings, but variable when diago-nal motion or terrain-dependent constraints are present—so the challenge is to reach the goal while minimizing cumula-tive path cost. Because the environment is fully discretized, the problem is naturally formulated as graph search, with grid cells as nodes and valid transitions as edges; classical algorithms such as A* find feasible, cost-optimal paths via Figure 6: Path planning performance. All methods achieve comparable path quality, while HERO substantially reduces search complexity measured by visited states. The path lengths are reported below each environment, and the bars show the number of visited states. heuristics and cost structures. Figure 6 reports path length (solution quality) and search complexity (planning cost, measured by visited states), comparing algorithms designed by HERO and OpenEvolve against A* and PPO. On path length all methods tie—length 33/34 in Canyon and 40 in Double Door—so optimality is not in question, and the comparison reduces to efficiency. There the methods diverge sharply: in Canyon, A* and PPO visit 264 and 256 states while HERO visits only 142, and in the harder Double Door the gap widens further—A* and PPO need 320 and 314 while HERO needs just 132, about a third of the classical cost. Tellingly, OpenEvolve, the other LLM optimizer, is the least efficient (361 and 491): merely using an LLM does not buy efficiency. The advantage comes from HERO composing the model’s heuristic knowledge into a search procedure that prunes unnecessary exploration, and once again it grows with task difficulty. 
+
+# 4 Analysis of HERO 
+
+Having shown that HERO works, we now examine why , and whether its simplicity is a limitation or a feature. We analyze two representative game benchmarks, Othello and Battle-ship, which differ in decision structure and feedback: Oth-ello emphasizes local strategy composition and long-horizon value evaluation in a sequential game, whereas Battleship emphasizes search and exploration under imperfect informa-tion. Studying both lets us probe HERO across complemen-tary, strategy-driven and search-driven regimes, and to ask whether common “add-ons” would improve it. 
+
+4.1 Ablation Study 
+
+We first remove HERO’s two core components—the recom-bination mechanism and the best-update mechanism —to test whether each is necessary, and we report both alongside two common enhancements (in-context examples and a larger population) for context. All results are in Figure 7. Removing recombination—reverting to applying the raw bundled output—is the most direct test of the weakest-link hypothesis. As shown in Fig. 7, this ablation causes the largest average drop, reducing the score by 0.15 relative to the full HERO configuration. The effect is especially pro-Recomb Best-Update + Examples + Population Othello-E Othello-H Battleship-E Battleship-H Average -0.06 +0.00 +0.01 -0.02 -0.41 -0.22 -0.21 -0.05 +0.00 +0.00 +0.00 +0.00 -0.12 +0.00 -0.04 -0.10 -0.15 -0.06 -0.06 -0.04 
+
+> 0.4
+> 0.3
+> 0.2
+> 0.1
+> 0.0 0.1
+> score
+
+Figure 7: Ablation study on Strategy Games. Each cell reports the performance change relative to HERO, computed as the variant score minus the full HERO score. Negative values indicate performance drops compared with HERO, while positive values indicate improvements. nounced on Othello-H, where performance drops from 0.85 
+
+to 0.44 . Battleship-H also decreases from 0.28 to 0.16 , while Battleship-E remains saturated at 0.34 . This pattern supports the claim that recombination is most valuable when the gen-erated edit bundle is likely to contain both beneficial and harmful edits. Removing best-update also weakens the method, but less severely. The average score decreases from 0.61 to 0.56 , with the main loss appearing on Othello-H, where performance drops from 0.85 to 0.63 . Battleship-H remains unchanged in the best-of-seeds score, but this does not negate the role of best-update; rather, it suggests that its stabilizing effect is most visible in strategy-driven settings such as Othello. Overall, recombination provides the main protection against weakest-link failures, while best-update stabilizes the trajec-tory around the best-so-far program. 
+
+4.2 Optimality Verification 
+
+A natural worry is that such a minimal design leaves easy gains on the table. We test this by adding two enhance-ments widely believed to help LLM optimizers—extra in-context examples and a larger program population—and ask-ing whether either improves on the full method (Figure 7). The answer is mixed at the individual-task level but clear at the average level. Adding examples slightly improves Othello-E from 0.97 to 0.98 , but it hurts the harder settings, reducing Othello-H from 0.85 to 0.64 and Battleship-H from 
+
+0.28 to 0.24 . Its average score is therefore 0.55 , below the full HERO score of 0.61 . This suggests that additional examples can help in benign settings, but they do not provide a robust improvement across tasks. Increasing the population shows a similar pattern. It re-mains competitive on Othello-H, reaching 0.80 , but it re-duces Battleship-H from 0.28 to 0.18 and yields an average score of 0.57 , still below the full method. Thus, neither en-hancement improves the overall accuracy–efficiency trade-off. The results support the design choice of keeping HERO minimal: its gains come primarily from selectively recom-bining heterogeneous edits and anchoring the search to the best-so-far program, rather than from adding more context or maintaining a larger population. 5 Conclusion 
+
+We introduced HERO, which improves programs by generat-ing atomic edits without performance feedback and selecting their best recombination using scalar scores. This avoids un-reliable score reasoning and the weakest-link effect. 
+
+# References 
+
+Alibaba. 2025. Qwen-Plus. https://qwen-ai.chat/models/ qwen-plus/. Bosio, C.; and Mueller, M. W. 2025. Synthesizing in-terpretable control policies through large language model guided search. In 2025 American Control Conference (ACC) ,583–590. IEEE. Brahmachary, S.; Joshi, S. M.; Panda, A.; Koneripalli, K.; Sagotra, A. K.; Patel, H.; Sharma, A.; Jagtap, A. D.; and Kalyanaraman, K. 2024. Large Language Model-Based Evo-lutionary Optimizer: Reasoning with Elitism. arXiv preprint arXiv:2403.02054 .Cheng, C.-A.; Kolobov, A.; Misra, D.; Nie, A.; and Swaminathan, A. 2023. Llf-bench: Benchmark for inter-active learning from language feedback. arXiv preprint arXiv:2312.06853 .Cheng, C.-A.; Nie, A.; and Swaminathan, A. 2024. Trace is the next autodiff: Generative optimization with rich feedback, execution traces, and llms. Advances in Neural Information Processing Systems , 37: 71596–71642. Ding, Z.; Hong, J.; Wang, J. T.; Lin, Z.; Wang, Z.; and Chen, Y. 2025. Scaling Textual Gradients via Sampling-Based Mo-mentum. arXiv preprint arXiv:2506.00400 .Dor, S. 2018. Strategy in games or strategy games: Dictio-nary and encyclopaedic definitions for game studies. Game Studies , 18(1): 43–55. Fu, J.; Wang, B.; Zhang, H.; Zhang, Z.; Chen, W.; and Zheng, N. 2023. When and Why Momentum Accelerates SGD: An Empirical Study. arXiv:2306.09000. Fu, J.; Zhang, X.; Wang, Y.; Zeng, W.; and Zheng, N. 2024. Understanding Mobile GUI: From Pixel-Words to Screen-Sentences. Neurocomputing , 601: 128200. Fu, J.; Zhu, X.; and Li, Y. 2019. Recognition of Sur-face Defects on Steel Sheet Using Transfer Learning. arXiv:1909.03258. Guo, Q.; Wang, R.; Guo, J.; Li, B.; Song, K.; Tan, X.; Liu, G.; Bian, J.; and Yang, Y. 2024. Connecting Large Lan-guage Models with Evolutionary Algorithms Yields Power-ful Prompt Optimizers. In The Twelfth International Confer-ence on Learning Representations .Jahanshahi, H.; and Sari, N. N. 2018. Robot path planning al-gorithms: a review of theory and experiment. arXiv preprint arXiv:1805.08137 .Kuang, Z.; Rong, R.; Yuan, Y.; and Nie, A. 2025. Learning Game-Playing Agents with Generative Code Optimization. 
+
+arXiv preprint arXiv:2508.19506 .Lange, R. T.; Imajuku, Y.; and Cetin, E. 2025. Shinkaevolve: Towards open-ended and sample-efficient program evolu-tion. arXiv preprint arXiv:2509.19349 .Li, P.; Wu, K.; Fu, J.; and Zhou, S. 2025. REGNav: Room Expert Guided Image-Goal Navigation. Proceedings of the AAAI Conference on Artificial Intelligence , 39(5): 4860– 4868. Liu, F.; Tong, X.; Yuan, M.; Lin, X.; Luo, F.; Wang, Z.; Lu, Z.; and Zhang, Q. 2024. Evolution of heuristics: Towards efficient automatic algorithm design using large language model. arXiv preprint arXiv:2401.02051 .Liu, Z.; Liu, Y.; Wang, J.; Liu, J.; Song, W.; and Fu, J. 2026a. The Essence of Balance for Self-Improving Agents in Vision-and-Language Navigation. arXiv:2604.19064. Liu, Z.; Liu, Y.; Wang, J.; Liu, J.; Song, W.; and Fu, J. 2026b. Instruction-as-State: Environment-Guided and State-Conditioned Semantic Understanding for Embodied Naviga-tion. arXiv:2604.18223. Liu, Z.; Liu, Y.; Wang, J.; Song, W.; Liu, J.; and Fu, J. 2026c. Structured Progressive Knowledge Activation for LLM-Driven Neural Architecture Search. arXiv preprint arXiv:2605.04057 .Madaan, A.; Tandon, N.; Gupta, P.; Hallinan, S.; Gao, L.; Wiegreffe, S.; Alon, U.; Dziri, N.; Prabhumoye, S.; Yang, Y.; et al. 2023. Self-refine: Iterative refinement with self-feedback. Advances in Neural Information Processing Sys-tems , 36: 46534–46594. Mathematical Association of America. 2023. 2023 Amer-ican Invitational Mathematics Examination (AIME) Prob-lems and Solutions. American Mathematics Competitions. Mathematical Association of America. 2024. 2024 Amer-ican Invitational Mathematics Examination (AIME) Prob-lems and Solutions. American Mathematics Competitions. Mathematical Association of America. 2025. 2025 Amer-ican Invitational Mathematics Examination (AIME) Prob-lems and Solutions. American Mathematics Competitions. Meng, S.; Wang, Y.; Yang, C.; Peng, N.; and Chang, K. 2024. LLM-A*: Large Language Model Enhanced Incre-mental Heuristic Search on Path Planning. Nie, A.; Cheng, C.-A.; Kolobov, A.; and Swaminathan, A. 2023. The Importance of Directional Feedback for LLM-Based Optimizers. In NeurIPS 2023 Workshop on Founda-tion Models for Decision Making .Novikov, A.; V˜ u, N.; Eisenberger, M.; Dupont, E.; Huang, P.-S.; Wagner, A. Z.; Shirobokov, S.; Kozlovskii, B.; Ruiz, F. J.; Mehrabian, A.; et al. 2025. AlphaEvolve: A coding agent for scientific and algorithmic discovery. arXiv preprint arXiv:2506.13131 .Paszke, A.; Gross, S.; Massa, F.; Lerer, A.; Bradbury, J.; Chanan, G.; Killeen, T.; Lin, Z.; Gimelshein, N.; Antiga, L.; et al. 2019. Pytorch: An imperative style, high-performance deep learning library. Advances in neural information pro-cessing systems , 32. Pourcel, J.; Colas, C.; and Oudeyer, P.-Y. 2025. Self-improving language models for evolutionary program syn-thesis: A case study on ARC-AGI. arXiv preprint arXiv:2507.14172 .Romera-Paredes, B.; Little, D.; Torr, P.; et al. 2024. Mathe-matical discoveries from program search with large language models. Nature , 625(7999): 476–483. Shen, Y.; Zhou, S.; Fu, J.; Wang, R.; Chen, S.; and Zheng, N. 2023. StructVPR: Distill Structural Knowledge with Weight-ing Samples for Visual Place Recognition. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 11217–11226. Wang, B. 2021. Path planning of mobile robot based on A* algorithm. In 2021 IEEE International Conference on Electronic Technology, Communication and Information (ICETCI) , 524–528. IEEE. Wang, B.; Fu, J.; Zhang, H.; Zheng, N.; and Chen, W. 2023. Closing the Gap Between the Upper Bound and Lower Bound of Adam’s Iteration Complexity. In Advances in Neural In-formation Processing Systems , volume 36, 39006–39032. Wang, H.; Hao, C.; Zhang, P.; Zhang, M.; Yin, P.; and Zhang, Y. 2019. Path planning of mobile robots based on A* algo-rithm and artificial potential field algorithm. China mechan-ical engineering , 30(20): 2489. Xia, C. S.; Deng, Y.; Dunn, S.; and Zhang, L. 2024. Agent-less: Demystifying llm-based software engineering agents. 
+
+arXiv preprint arXiv:2407.01489 .Xiao, H.; Wang, P.; Yu, M.; and Robbiani, M. 2023. Llm a*: Human in the loop large language models enabled a* search for robotics. arXiv preprint arXiv:2312.01797 .Yang, C.; Wang, X.; Lu, Y.; Liu, H.; Le, Q. V.; Zhou, D.; and Chen, X. 2023. Large language models as optimizers. In The Twelfth International Conference on Learning Repre-sentations .Yang, J.; Jimenez, C. E.; Wettig, A.; Lieret, K.; Yao, S.; Narasimhan, K.; and Press, O. 2024. Swe-agent: Agent-computer interfaces enable automated software engineer-ing. Advances in Neural Information Processing Systems ,37: 50528–50652. Ye, H.; Wang, J.; Cao, Z.; Berto, F.; Hua, C.; Kim, H.; Park, J.; and Song, G. 2024. Reevo: Large language models as hyper-heuristics with reflective evolution. Advances in neural information processing systems , 37: 43571–43608. Yuksekgonul, M.; Bianchi, F.; Boen, J.; Liu, S.; Lu, P.; Huang, Z.; Guestrin, C.; and Zou, J. 2025. Optimizing gen-erative ai by backpropagating language model feedback. Na-ture , 639(8055): 609–616. Zhang, J.; Xiang, J.; Yu, Z.; Teng, F.; Chen, X.-H.; Chen, J.; Zhuge, M.; Cheng, X.; Hong, S.; Wang, J.; et al. 2025a. AFlow: Automating Agentic Workflow Generation. In The Thirteenth International Conference on Learning Represen-tations .Zhang, P.; Jin, H.; Hu, L.; Li, X.; Kang, L.; Luo, M.; Song, Y.; and Wang, H. 2024a. HessianGrad: Optimizing AI Sys-tems with Hessian-Aware Textual Gradients. ICLR 2025 conference submission. Zhang, P.; Jin, H.; Hu, L.; Li, X.; Kang, L.; Luo, M.; Song, Y.; and Wang, H. 2024b. Revolve: Optimizing ai systems by tracking response evolution in textual optimization. arXiv preprint arXiv:2412.03092 .Zhang, Y.; Ruan, H.; Fan, Z.; and Roychoudhury, A. 2024c. Autocoderover: Autonomous program improvement. In Pro-ceedings of the 33rd ACM SIGSOFT International Sympo-sium on Software Testing and Analysis , 1592–1604. Zhang, Y.; Zhang, Y.; Leach, K.; and Huang, Y. 2025b. Code-Grad: Integrating Multi-Step Verification with Gradient-Based LLM Refinement. arXiv preprint arXiv:2508.10059 .Zhou, C.; Shi, Z.; Yao, Y.; Liang, L.; Chen, H.; and Zhang, Q. 2025. RiOT: Efficient Prompt Refinement with Residual Optimization Tree. arXiv preprint arXiv:2506.16389 .A Related Works: Discussion on First-Order Information 
+
+The contribution of this paper is best understood against the assumption it questions—that reasoning from ground-truth performance is necessary for LLM-based optimization. We therefore organize related work around first-order informa-tion : how it is used, when it genuinely helps, and where it quietly breaks down. 
+
+A.1 First-Order Information in LLM Optimizers 
+
+Following the convention of numerical optimization, we treat the ground-truth performance of a solution as zeroth-order information and any reasoning built on that performance as first-order information (Yuksekgonul et al. 2025; Zhang et al. 2024a). The idea that LLMs can act as optimizers dates back to early work showing they can iteratively improve solutions when shown past attempts and their scores (Yang et al. 2023), and first-order information has since been viewed as the key signal for choosing the next direction. Two lines of work operationalize this idea, and it is use-ful to see that they sit on a spectrum of how explicitly 
+
+they use first-order information. The first makes it explicit. TextGrad (Yuksekgonul et al. 2025), inspired by the autod-iff mechanism of PyTorch (Paszke et al. 2019), asks the model to analyze its previous outputs against performance feedback and emit improvement suggestions that act as a “textual gradient.” The second uses it implicitly. Evolution-ary LLM frameworks (Novikov et al. 2025; Romera-Paredes et al. 2024; Liu et al. 2024) maintain a population of scored candidates and sample parents from it (Brahmachary et al. 2024; Pourcel, Colas, and Oudeyer 2025), so the optimizer need not fixate on the most recent solution; first-order reason-ing still enters, however, because the model is shown several past solutions with their scores and asked to reason across them when proposing new ones (Guo et al. 2024; Ye et al. 2024). Despite their differences, both lines share a premise: the model should look at performance and reason about it. 
+
+A.2 Potential and Limitation of First-Order Information 
+
+First-order information is genuinely useful when the link between a solution and its score is easy to reason about(Wang et al. 2023; Fu, Zhu, and Li 2019; Shen et al. 2023; Fu et al. 2023, 2024; Li et al. 2025). Its core function is to let the model associate a candidate with its performance and adjust accordingly; when that mapping is simple and near-decomposable, the association is reliable. In a poem-generation task (Cheng et al. 2023), for example, the model can directly see that a line is too long and shorten it. And in settings where the model has little intrinsic prior about the task (Yang et al. 2023), first-order signals may be the only 
+
+source of direction, making them indispensable. The picture changes when evaluation is a complex, multi-stage process—as in multi-step games (Kuang et al. 2025; Bosio and Mueller 2025). There the final score aggregates many interacting decisions, so the causal path from any single component to the outcome is long and entangled. Reason-ing back from the score to “what to fix” becomes a credit-assignment problem with no unique answer, and the resulting direction is unreliable. This is the same failure our analysis in Appendix C formalizes, and it is, paradoxically, the regime where strong optimization is most needed. 
+
+A.3 Our Perspective 
+
+We draw a different conclusion from these limitations. Rather than working harder to extract directions from first-order information, we observe that for many complex tasks the LLM already holds substantial internal knowledge about what makes a solution good, by virtue of understanding the task itself. When that is true, performance need not be rea-soned about at all; it need only serve as a scalar criterion for comparing candidates—zeroth-order information in our terminology. The remaining obstacle is then not knowing the direction but composing the model’s many partial directions into a coherent improvement, which is exactly the weakest-link effect that HERO addresses. We stress what this perspective does and does not claim. We do not argue that first-order information is unimportant or obsolete; in low-prior tasks it remains essential. Rather, by showing how far zeroth-order information alone can go, we aim to surface an underappreciated strength—the knowledge already inside the model—and to prompt a more careful, cost-aware account of when first-order reasoning is worth its overhead and how it should be combined with the model’s prior. 
+
+# B Design Details 
+
+We instantiate the two phases with concrete choices that preserve the abstractions above while keeping the method strictly zeroth-order. 
+
+Generation. We realize the generation query as 
+
+LLM(Task , p ): the model receives the task description and the current program p only, with the performance of p with-held. Following prior work, the task description carries the essential problem specification plus optional hints and is held 
+
+fixed throughout optimization, so that any change in behavior is attributable to the search rather than to a shifting prompt. Rather than regenerating the whole program, we adopt the 
+
+SEARCH /REPLACE edit format of Novikov et al. (2025): the model emits several SEARCH /REPLACE pairs, each a small, localized modification. We constrain the SEARCH regions to be pairwise non-overlapping. This is a simple sufficient con-dition for the commutativity requirement (6)—edits touch-ing disjoint code regions cannot interfere—and it makes the resulting atomic edits genuinely heterogeneous, as the Gen-eration phase demands. 
+
+Selection. Let E denote the evaluator that returns the scalar performance used in place of f (e.g., a test harness or simu-lator). Selection proceeds in two sequential steps. (1) Error filtering. We apply each edit αi individually and discard any that triggers an execution error, yielding the valid set 
+
+Ane ⊆ A. This removes obviously broken directions and, crucially, prevents a single invalid edit from contaminating every subset that would contain it. (2) Performance optimiza-tion. Over Ane we solve Eq. (7). Exact selection is a subset search whose cost grows exponentially in |Ane |, so we match the budget to the regime: when |Ane | is small or E is cheap, we enumerate all subsets; when |Ane | is large, we evaluate randomly sampled subsets; and when E is expensive, we construct a cheap surrogate E′ ≈ E and optimize against 
+
+E′. The surrogate is sound for a specific reason: by Eq. (7), selection depends only on the relative ranking of subsets, not on accurate absolute scores, so any coarse but approximately order-preserving E′ suffices. We verify this empirically in Section 3.2 via the evaluator-grain analysis. 
+
+Selection. Let E denote the scalar evaluator used in place of f (e.g., a test harness or simulator). Selection uses this signal only as a comparison oracle and proceeds in two steps. 
+
+(1) Error filtering. We first apply each edit αi individually and discard any edit that causes an execution error, obtaining the non-error set Ane ⊆ A. This prevents a single invalid edit from corrupting every recombined subset that contains it. (2) Budgeted subset ranking. Over Ane , exact selection would enumerate all subsets as in Eq. (7), whose cost is exponential in |Ane |. We therefore solve a budgeted approximation: 
+
+S⋆ ∈ arg max  
+
+> S∈C B(Ane )
+
+bEmS (AS (xt−1)) ,
+
+X 
+
+> S∈C B(Ane )
+
+mS ≤ B. (8) where CB (Ane ) ⊆ 2Ane is the subset pool considered under budget B, mS is the number of evaluator calls assigned to subset S, and bEm(x) = 1
+
+> m
+
+Pmr=1 eEr (x) denotes the em-pirical score estimated either with the faithful evaluator E
+
+or, when evaluation is expensive, with a cheaper surrogate 
+
+E′ ≈ E. This formulation captures the practical breadth– reliability trade-off: the budget can be spent on evaluating more subsets (larger CB ) or on reranking promising sub-sets more reliably (larger mS ). When the budget is suffi-cient, CB (Ane ) = 2 Ane and Eq. (8) recovers exact selection; otherwise, we sample a subset pool and optionally allocate additional evaluations to top-ranked candidates. Because se-lection depends only on the relative ranking of subsets, an approximately order-preserving surrogate is sufficient. In all cases, the performance signal is used only for subset compar-ison: it is never provided to the LLM during edit generation and is never used as reasoning context. 
+
+# C A Analysis of First-Order Information 
+
+This appendix formalizes the claim made in the main text: once the mapping from a candidate solution to its perfor-mance is unrestricted, finitely many evaluations cannot de-termine the performance of an unseen candidate, so any di-rection inferred by reasoning over scores is unidentifiable. We proceed from definitions and assumptions to a core lemma, the main impossibility theorem, and two corollaries, and we close with remarks on intuition, tightness, and the implica-tion for first-order optimization. 
+
+C.1 Setup and Definitions 
+
+Throughout, X denotes the space of candidate solutions and 
+
+Y ⊆ R+ the space of (performance) labels, with |Y| ≥ 2.We use [k] = {1, . . . , k }.
+
+Definition 1 (Score–decoder model) . Fix a measurable la-tent score s : X → R. Let M be the set of all measurable 
+
+decoders ϕ : R → Y . The induced hypothesis class is 
+
+Fs = { ϕ ◦ s : ϕ ∈ M } .
+
+The target function f ⋆ = ϕ⋆ ◦ s ∈ F s is fixed but unknown; here the latent score s is common to every hypothesis, and only the decoder ϕ⋆ is unknown. 
+
+Definition 2 (Sample, observed scores, version space) . Asize-k sample is Sk = {(xi, y i)}ki=1 with yi = f ⋆(xi), and its observed score set is Zobs = {s(xi) : i ∈ [k]} ⊂ R. A decoder ϕ ∈ M is consistent with Sk if ϕ(s(xi)) = yi for all 
+
+i ∈ [k]. The version space is the set of all consistent decoders, 
+
+V (Sk) = {ϕ ∈ M : ϕ(s(xi)) = yi for all i ∈ [k]}.
+
+We make the following assumptions explicit. Assumptions (A1)–(A3) underlie all results below; (A4) is invoked only for the probabilistic statement of Corollary 4. (A1) Unrestricted decoder. M is the class of all measurable maps R → Y : no smoothness, monotonicity, or paramet-ric restriction is imposed on ϕ.(A2) Latent observability. The score s is fixed and shared across Fs, but its values are never observed directly; the learner observes only labels y = ϕ⋆(s(x)) .(A3) Finite data. The sample size k is finite, so Zobs is a finite subset of R.(A4) Non-atomic query scores. When the query point Xq is random, the law of s(Xq ) is non-atomic (e.g. it admits a density), so that Pr[ s(Xq ) = z] = 0 for every fixed 
+
+z ∈ R.The next lemma isolates the construction on which all subsequent results rest: outside the finitely many observed scores, a measurable decoder may be assigned freely without violating consistency. 
+
+Lemma 1 (Free assignment off the observed scores) . As-sume (A1)–(A3) . Let z1, . . . , z m ∈ R \ Zobs be distinct, and let b1, . . . , b m ∈ Y be arbitrary. Then there exists 
+
+ϕadv ∈ V (Sk) with ϕadv (zj ) = bj for every j ∈ [m].Proof. We construct ϕadv directly and verify each required property in turn. 
+
+(i) Consistency on observed scores. For z ∈ Zobs , de-fine ϕadv (z) = yi for any index i ∈ [k] with s(xi) = z.This is well defined: if s(xi) = s(xi′ ), then by Defini-tion 1 yi = ϕ⋆(s(xi)) = ϕ⋆(s(xi′ )) = yi′ , so the assigned value is independent of the chosen index. By construction 
+
+ϕadv (s(xi)) = yi for all i ∈ [k], which is exactly the consis-tency condition of Definition 2. 
+
+(ii) Prescribing the target values. By (A3), Zobs is finite and hence closed, and the points z1, . . . , z m ∈ R \ Zobs 
+
+are distinct. We may therefore choose pairwise-disjoint open intervals I1, . . . , I m with zj ∈ Ij and Ij ∩Zobs = ∅ for every 
+
+j ∈ [m]. Set ϕadv (z) = bj for all z ∈ Ij .
+
+(iii) Extension and measurability. Fix any y0 ∈ Y and set 
+
+ϕadv (z) = y0 for z ∈ R \  Zobs ∪ Smj=1 Ij
+
+. Then ϕadv 
+
+is constant on each of finitely many measurable pieces— a finite point set, finitely many disjoint open intervals, and their complement—hence is a simple function and therefore measurable; by (A1), ϕadv ∈ M .By (i) the decoder is consistent, so ϕadv ∈ V (Sk); by (ii) and zj ∈ Ij we have ϕadv (zj ) = bj for every j ∈ [m].
+
+C.2 Impossibility Results 
+
+Theorem 2 (Pointwise unidentifiability) . Assume (A1)– (A3) . Let xq ∈ X be a query point with unobserved la-tent score, i.e. s(xq ) /∈ Zobs . Then for every target label 
+
+ytarget ∈ Y there exists a hypothesis fadv = ϕadv ◦ s ∈ F s
+
+that is consistent with Sk and satisfies fadv (xq ) = ytarget .Consequently f ⋆(xq ) is not determined by Sk: no algorithm that observes only Sk can exclude any label in Y as the value at xq .Proof. We argue directly using Lemma 1, then conclude by a two-hypotheses (indistinguishability) argument. Applying Lemma 1 with the single point z1 = s(xq ) ∈ R \ Zobs and value b1 = ytarget yields a decoder ϕadv ∈ V (Sk) with 
+
+ϕadv (s(xq )) = ytarget . The hypothesis fadv = ϕadv ◦ s
+
+then lies in Fs by Definition 1, is consistent with Sk be-cause ϕadv ∈ V (Sk) (Definition 2), and satisfies fadv (xq ) = 
+
+ϕadv (s(xq )) = ytarget .For the final claim, suppose some algorithm, on input Sk,asserted f ⋆(xq )̸ = y for a particular y ∈ Y . Instantiating the construction with ytarget = y produces fadv ∈ F s consistent with Sk and with fadv (xq ) = y. The two hypotheses f ⋆
+
+and fadv agree on all of Sk and are thus indistinguishable to any procedure whose input is Sk; since fadv (xq ) = y
+
+is admissible, the assertion f ⋆(xq )̸ = y is unjustified. As 
+
+y ∈ Y was arbitrary, no label can be excluded. The barrier extends from single labels to comparisons ,which is the form first-order reasoning actually relies on. 
+
+Corollary 3 (Preference unidentifiability) . Assume (A1)– (A3) . Let x′, x ′′ ∈ X have distinct, unobserved latent scores, i.e. s(x′)̸ = s(x′′ ) and s(x′), s (x′′ ) /∈ Zobs . Then both strict orderings are realizable by consistent hypotheses: there exist 
+
+f1, f 2 ∈ F s, each consistent with Sk, such that f1(x′) <f1(x′′ ) and f2(x′) > f 2(x′′ ). Hence no algorithm observing only Sk can determine which of x′, x ′′ has the larger label. Proof. Since |Y| ≥ 2, fix a, b ∈ Y with a < b . The points 
+
+z1 = s(x′) and z2 = s(x′′ ) are distinct and lie in R \ Zobs ,so Lemma 1 applies with m = 2 . Choosing (b1, b 2) = ( a, b )
+
+gives a consistent decoder whose hypothesis f1 satisfies 
+
+f1(x′) = a < b = f1(x′′ ); choosing (b1, b 2) = ( b, a ) gives a consistent f2 with f2(x′) = b > a = f2(x′′ ). Both hypothe-ses lie in Fs and are consistent with Sk by Lemma 1, so the observed data are compatible with either ordering. Theorem 2 is stated for a fixed query point satisfying the genericity condition s(xq ) /∈ Zobs . We now show that, for a randomly drawn query, this condition holds almost surely. 
+
+Corollary 4 (Almost-sure unidentifiability) . Assume (A1)– (A4) and let the query Xq be drawn independently of Sk from a distribution whose pushforward under s is non-atomic. Then s(Xq ) /∈ Zobs with probability one, and hence the conclusion of Theorem 2 holds almost surely. Proof. By (A3) the set Zobs = {s(x1), . . . , s (xk)} is finite. By (A4) and a union bound, 
+
+Pr s(Xq ) ∈ Zobs 
+
+ ≤
+
+> k
+
+X
+
+> i=1
+
+Pr s(Xq ) = s(xi) = 0 .
+
+On the complementary event {s(Xq ) /∈ Zobs }, which there-fore has probability one, Theorem 2 applies verbatim. 
+
+Remark 1 (Why the result holds, and why (A1) is essen-tial) . The obstruction is information-theoretic rather than computational: by Lemma 1 the labels constrain the decoder only on the finite set Zobs , leaving its values on R \ Zobs 
+
+entirely unconstrained, so the version space V (Sk) remains rich enough to realize any label at an unseen query. As-sumption (A1) is precisely what enables this: with an un-restricted decoder, a constraint at an observed score cannot propagate to a nearby unobserved one. The result is tight in this sense—any restriction that couples nearby scores defeats the construction. If, for instance, ϕ were L-Lipschitz, then 
+
+|fadv (xq ) − yi| ≤ L |s(xq ) − s(xi)| for the nearest anchor 
+
+xi, so labels near observed scores could no longer be set arbi-trarily; monotone or finite-dimensional parametric decoder families likewise restore identifiability. This delineates ex-actly when reasoning from performance is trustworthy: only when the score-to-performance map is suitably constrained. 
+
+Remark 2 (Implication for first-order optimization) . In our setting the label y = f (x) is the performance of candidate 
+
+x, and the unknown decoder ϕ models a complex, uncon-strained map from latent quality s(x) to observed perfor-mance. Corollary 3 then states precisely that finite evalua-tion history cannot, in general, reveal which of two unseen candidates performs better. Because first-order reasoning op-erates by inferring such comparisons from observed (xi, y i)
+
+pairs, it is unreliable in exactly this regime—which moti-vates HERO’s use of performance as a direct scalar selection criterion rather than as a signal to reason from. 
+
+Remark 3 (On the original probabilistic formulation; flagged correction) . An earlier statement of this result asserted that the conclusion holds “with probability at least 1 − ϵ over the sampling of Sk” for every ϵ > 0. We flag this as imprecise and have restated it above rather than retaining it, for two reasons. First, the relevant randomness is not the draw of Sk
+
+but the position of the query score s(Xq ) relative to the finite set Zobs ; conditioned on Sk, the construction is deterministic (Theorem 2) once s(xq ) /∈ Zobs . Second, the construction in fact yields probability one , not merely 1 − ϵ, but only under a non-atomicity assumption on the score distribution that was absent from the original hypotheses; we have made it explicit as (A4) and isolated the probabilistic claim in Corollary 4. Without (A4) the claim can genuinely fail: if the law of s
+
+has an atom and s(xq ) = s(xi) for some i, then consistency forces f (xq ) = yi, the label is identified, and no adversarial decoder exists. The genericity condition s(xq ) /∈ Zobs is therefore necessary, not cosmetic. 
+
+C.3 Experiments 
+
+To further demonstrate that first-order information is little used in practice, we conduct a controlled experiment. We Table 2: Per-task results on Strategy Games using DeepSeek-v3.2. The best result in each row is in bold .
+
+Task HERO ShinkaEvolve OpenEvolve 
+
+Othello-E 0.94 0.94 0.96 
+
+Othello-H 0.95 0.28 0.26 Battleship-E 0.32 0.20 0.30 Battleship-H 0.16 0.10 0.10 
+
+Average 0.60 0.38 0.41 Table 3: Per-task results on Strategy Games using Moonshot-Kimi-K2-Instruct. The best result in each row is in bold .
+
+Task HERO ShinkaEvolve OpenEvolve 
+
+Othello-E 0.95 0.94 0.94 Othello-H 0.93 0.60 0.65 Battleship-E 0.36 0.18 0.12 Battleship-H 0.18 0.10 0.06 
+
+Average 0.61 0.46 0.44 use OpenEvolve as the base optimizer and iteratively remove the in-context examples that carry first-order signal, observ-ing how performance changes. We find that removing these examples leaves performance largely unaffected, indicating that the optimizer relies far less on first-order information than commonly assumed. 
+
+# D Extra Results 
+
+This section reports the full per-task results underlying the cross-model study summarized in Section 3.2 (Fig. 4B). To confirm that HERO’s advantage is not an artifact of a single backbone, we repeat the Strategy Games protocol of Section 3.2 on two additional base models—DeepSeek-v3.2 (Table 2) and Moonshot-Kimi-K2-Instruct (Table 3)— comparing against the two strongest evolutionary baselines, ShinkaEvolve and OpenEvolve, under identical settings (60 steps on Othello, 20 on Battleship). Together with the Qwen-Plus results in Table 1, these span three independently devel-oped model families. Two observations reinforce the conclusions of the main text. First, HERO attains the best average win-rate on both backbones— 0.60 versus 0.41 (OpenEvolve) and 0.38 
+
+(ShinkaEvolve) on DeepSeek-v3.2, and 0.61 versus 0.44 
+
+and 0.46 on Kimi-K2-Instruct—mirroring the 0.61 versus 
+
+0.36 /0.33 margin on Qwen-Plus (Table 1). The directional knowledge HERO exploits is therefore broadly present across model families rather than peculiar to one. Second, the easy– hard pattern recurs within each backbone: on the easy vari-ants (Othello-E, Battleship-E) the methods are close, and a baseline can occasionally edge ahead (e.g., OpenEvolve reaches 0.96 on Othello-E with DeepSeek-v3.2), whereas on the hard variants the gap widens sharply—on Othello-H, HERO scores 0.95 and 0.93 while no baseline exceeds 0.28 
+
+and 0.65 , respectively. This is the same signature predicted by our analysis and observed on Qwen-Plus: the benefit of A B
+
+Figure 8: Examples of Battleship and Othello Games. bypassing first-order reasoning is largest exactly where the score-to-performance mapping is hardest to invert, and it holds regardless of the underlying model. 
+
+# E Detail of Task Design 
+
+E.1 Othello Game 
+
+Othello, also known as Reversi, is a two-player determinis-tic board game that combines simple operational rules with substantial strategic depth. The game is played on a square board of fixed size, traditionally an 8 × 8 grid, and uses a set of identical discs that are colored black on one side and white on the other. Each disc represents ownership by one of the two players, and ownership may change during the course of the game through a well-defined flipping mechanism. The fundamental objective of the game is to finish with a greater number of discs of one’s own color on the board than the opponent. At the beginning of the game, the board is initialized with four discs placed at its center(Figure 8B). Two black discs and two white discs occupy these central squares in a diagonal configuration. All remaining squares on the board are empty. One player is assigned the black discs and always moves first, while the other player is assigned the white discs and moves second. Gameplay proceeds in alternating turns. On each turn, a player places a disc of their own color onto an empty square of the board, subject to strict legality conditions. A move is legal if and only if the placement of the disc results in at least one of the opponent’s discs being captured (the dashed circles in Figure 8 are valid movement for the black player.). Capture occurs when a contiguous line of one or more opponent discs becomes sandwiched between the newly placed disc and another disc of the current player’s color. This sandwiching must occur along a straight line in one of the eight possible directions defined by the board geometry, namely horizontal, vertical, or diagonal directions. If no such line exists, the move is illegal and cannot be played. If a player has no legal moves available on their turn, they are required to pass. Passing does not involve placing a disc or altering the board state, and the turn is immediately trans-ferred to the opponent. The game continues as long as at least one player has a legal move available. The game terminates when the board is completely filled with discs or when both players are unable to make a legal move consecutively. These termination conditions ensure that the game always reaches a finite conclusion. At the end of the game, scoring is per-formed by counting the number of discs of each color present on the board. Each disc contributes one point to the owning player’s score. The player with the higher score is declared the winner. In the case where both players have the same number of discs, the game ends in a draw. Notably, victory is determined solely by the final configuration of the board rather than intermediate advantages accrued during play. In the Othello game setting, we design two types of op-ponents, denoted as the “easy” and “hard” agents, each im-plementing distinct strategies with different levels of tacti-cal sophistication. The LLM is tasked with developing new strategies that can consistently outperform these opponents. This setup encourages the LLM not only to discover effec-tive local tactics but also to synthesize higher-level strategic patterns that generalize across different styles of adversaries. 
+
+E.2 Battleship 
+
+This game presents the agent with a two-dimensional grid map on which a fixed fleet of ships is secretly deployed (Fig-ure 8 A). The agent has no prior knowledge of the ships’ exact positions, their shapes, or how many squares each ship occu-pies. On every turn the agent selects a single cell to “shoot.” Immediately after the shot is fired the environment returns a reward signal: a positive value if a ship was hit and zero otherwise. No other information—such as the identity of the struck ship, its orientation, or how many of its remaining segments are still afloat—is revealed. The agent’s task is to infer, shot by shot, the most proba-ble locations of the hidden vessels and to maximize the total number of hits (or minimize the number of shots required to sink every ship). Because the only feedback is the sparse binary reward, the agent must maintain an internal belief state—typically a probability distribution over all possible ship configurations—and update that belief using the history of past shots and their outcomes. Efficient exploration, infor-mation gain, and probabilistic reasoning are therefore central to strong performance. Performance is evaluated as the ratio of successful hits to the total number of shots taken.
