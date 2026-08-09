@@ -1,0 +1,442 @@
+Title: AgentExecutor: Partial Code Execution via Agentic Context Generation
+
+URL Source: https://arxiv.org/pdf/2608.05959v1
+
+Published Time: Fri, 07 Aug 2026 01:09:45 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# AgentExecutor: Partial Code Execution via Agentic Context Generation 
+
+# Junkai Chen 
+
+junkaichen@smu.edu.sg Singapore Management University Singapore 
+
+# Chengran Yang 
+
+cryang@smu.edu.sg Singapore Management University Singapore 
+
+# Xing Hu ∗
+
+xinghu@zju.edu.cn Zhejiang University China 
+
+# Zhenhao Li 
+
+lzhenhao@yorku.ca York University Canada 
+
+# Xin Xia 
+
+xin.xia@acm.org Zhejiang University China 
+
+# David Lo 
+
+davidlo@smu.edu.sg Singapore Management University Singapore 
+
+## Abstract 
+
+Executing code snippets is essential for dynamic program analysis, but it remains challenging to execute an arbitrary code snippet due to issues like missing context and incomplete dependencies. Existing approaches to partial code execution, such as LExecutor and Treefix, leverage the power of language models to infer miss-ing information and enable execution. However, they suffer from (i) limited action spaces and feedback, and (ii) rigid optimization strategies, which restrict their effectiveness and efficiency. In this paper, we propose AgentExecutor, a novel multi-agent framework for partial code execution. Our approach introduces a three-phase design: execution environment preparation, dynamic exploration with iterative refinement, and prefix evolution via pro-gram synthesis. Supported by the power of LLM agents who can think, act, and get feedback iteratively, AgentExecutor is able to autonomously explore a richer action space, enabling diverse operations such as creating resource files and resolving environ-ment configuration. Furthermore, it adopts adaptive optimization strategies, including coverage-guided context pruning and prefix evolution via program synthesis, to systematically improve the execution quality of partial code. We evaluate AgentExecutor on two widely used datasets com-prising Stack Overflow snippets and open-source project code. The results show that AgentExecutor achieves up to 94% and 90% code coverage, outperforming the state-of-the-art approach Treefix by 19.9% and 13.8%, respectively. In addition, AgentExecutor sig-nificantly reduces execution time (by up to 80.3%) and cost (by up to 56.6%). These findings demonstrate that AgentExecutor provides an effective and efficient solution for partial code execution. 
+
+## CCS Concepts 
+
+• Software and its engineering → Software verification and vali-dation .
+
+> ∗Corresponding author.
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> ASE ’26, Munich, Germany
+> © 2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2882-2/2026/10 https://doi.org/10.1145/3832783.3834355
+
+## Keywords 
+
+Partial Code Execution, Code Agent, Large Language Model 
+
+ACM Reference Format: 
+
+Junkai Chen, Chengran Yang, Xing Hu, Zhenhao Li, Xin Xia, and David Lo. 2026. AgentExecutor: Partial Code Execution via Agentic Context Genera-tion. In Proceedings of the 41st IEEE/ACM International Conference on Auto-mated Software Engineering (ASE ’26), October 12–16, 2026, Munich, Germany. 
+
+ACM, New York, NY, USA, 13 pages. https://doi.org/10.1145/3832783.3834355 
+
+## 1 Introduction 
+
+Code execution provides access to the runtime information of the program, which supports a variety of dynamic analysis tasks, such as fuzz testing [14, 28, 43], program slicing [2, 35, 45], and per-formance analysis [15, 16, 21], facilitating software maintenance and development. For example, developers can use breakpoints to collect the program states for debugging. However, if given an arbitrary code snippet, it is typically nontrivial to execute it due to issues like missing contexts or environmental factors. When we search for answers to programming questions on Stack Over-flow [38], these answers typically contain only illustrative solutions, i.e., code without implementation details or environment configu-ration, and it is typically infeasible to use them directly as they are. With regard to code snippets from larger-scale projects on GitHub, even though the full artifacts required for execution are provided, there could be issues that prevent their execution as well, such as dependency conflicts and environment incompatibilities. In these cases, extra manual effort is required to make these partial code snippets executable, which is typically tedious and time-consuming. To enable the automatic execution of arbitrary code snippets, various approaches have been proposed to support this task, i.e., partial code execution [17, 18, 36, 37, 44]. LExecutor [36] is a pio-neering work applying learning-based approaches to this field. It trains neural language models to predict the values of variables under certain code contexts, and then utilizes them to inject their predictions into the runtime of the program to keep the execu-tion proceeding. This research has inspired a line of subsequent research [17, 18, 37, 44]. A recent work, Treefix [37], leverages the power of large language models (LLMs) to create a prefix tree of code context and achieves very promising results. These works also explore applying their techniques to various downstream tasks, in-cluding bug reproduction [18], regression testing [17], and runtime arXiv:2608.05959v1 [cs.SE] 6 Aug 2026 ASE ’26, October 12–16, 2026, Munich, Germany Chen et al. 
+
+error detection [44], showcasing the practical application of partial code execution in real-world software engineering processes. While previous research provides valuable insights and initial solutions, we uncover two major limitations through an analysis of the state-of-the-art solution, i.e., Treefix [37]: (i) Limited action space and feedback . While Treefix leverages the strong capability of LLMs, its action space is restricted and fixed, which consequently leads to rather uninformative feedback and hinders potential improvements to the prefixes. For example, Treefix only allows two fixed types of contexts in its prefix (i.e., library import and variable initialization), ignoring other types of contexts. It also has no access to the running environment, which hinders many necessary actions to support code execution, like creating resource directories and searching certain code blocks. Such a limitation is also evident in aspects like handling dependency resolution and identifying undefined elements, which both rely solely on inflexible, static ways (e.g., using the static tool pipreqs 
+
+as the only means to identify missing libraries). (ii) Rigid optimization strategy . Treefix optimizes code pre-fixes using a tree-based expansion, but it follows a largely rigid, fixed strategy. For instance, Treefix invokes the LLM a fixed number of times (e.g., 10), regardless of the prediction phase and current cov-erage status, which is wasteful when the optimization has already saturated, and potentially insufficient when further refinement is still needed. Moreover, it depends solely on the generation from LLMs as the prefix (i.e., using LLMs to predict the prefix directly) without other synthesis strategies. This single approach makes it difficult to systematically traverse potentially valuable candidates and increase the quality of partial execution. To address the aforementioned limitations, this paper presents AgentExecutor, an effective and efficient approach for partial ex-ecution supported by agentic coordination (where multiple agents are capable of thinking, acting with tools, and retrieving execution feedback in an iterative fashion). AgentExecutor generates the context for partial code by searching for code prefixes with a three-phase design: (i) execution environment preparation , where it prepares the environment by attempting to execute, (ii) dynamic exploration with iterative refinement , where our method dy-namically discovers diverse program paths for better prefixes, and (iii) prefix evolution via program synthesis , where AgentExecu-tor evolves prefixes by generating a prefix generator. Specifically, to mitigate the issue of limited action space and feedback , with the aid of LLM agents and tool usage capability, AgentExecutor can autonomously explore a diverse action space and get correspond-ing feedback for better prefixes, e.g., installing dependencies, cre-ating auxiliary directories, and trying different solutions. Further-more, AgentExecutor addresses rigid optimization strategy by adopting novel, dynamic optimization strategies for prefix refine-ment: In the phase of prefix exploration, it prunes visible contexts of agents guided by coverage improvement, preventing possible attention dilution of LLMs. In addition, in the final phase, AgentEx-ecutor systematically searches for better prefixes by synthesizing a prefix generator. We design a coverage-based method to select high-value prefixes as seeds for the generator to motivate better generations. We evaluate AgentExecutor on two datasets widely adopted in previous research [36, 37], consisting of partial code snippets drawn from popular open-source projects and Stack Overflow posts. Evaluation results show that AgentExecutor can cover 94% and 90% of lines of code within a single code prefix for Stack Overflow snippets and open-source functions, respectively. Under the same performance metric, compared with the previous state-of-the-art approach Treefix [37], AgentExecutor achieves relative improve-ments of 19.9% and 13.8%, while significantly reducing the average execution time (i.e., -80.3% & -77.9%), cost (i.e., -56.6% & -52.1%), and the numbers of LLM invocations (i.e., -52.1% & -53.9%) on the two datasets. Moreover, AgentExecutor can fully execute (i.e., achieving 100% line coverage) 36.1% and 18.1% more partial code snippets on functions from the two datasets, respectively. These results demonstrate that AgentExecutor presents substantially improved effectiveness on the task of partial code execution, while achieving improved efficiency on time and cost in comparison with baselines. We also provide analyses of our key design choices, ac-companied by two case studies for the illustrative demonstration of AgentExecutor. In summary, we make the following contributions: 
+
+• We propose AgentExecutor, a multi-agent approach for partial code execution, which has access to a wide action space and adopts well-designed optimization strategies. To the best of our knowledge, it is the first agentic approach for this task. 
+
+• Compared with the previous state of the art, AgentExecutor presents a significant improvement on code coverage (i.e., up to 20.2%), while showing much better efficiency in time, cost, and LLM invocation times (i.e., up to 80.3% reduction). 
+
+• To facilitate further research, we publicly open-source our code and datasets at GitHub and Zenodo [1]. 
+
+## 2 Related Work 2.1 Partial Code Execution 
+
+The technique of partial code execution enables the execution of incomplete code snippets. LExecutor [36] proposed the idea of learning-guided execution that leveraged deep learning models to predict the runtime value of partial code. It then injects the predic-tion during the execution process to continue the program running. Hayet et al. [18] proposed Incompleter to use execution feedback to guide the running of code. It consists of one mocker and one unmocker to enable execution while preserving the semantics of the original code. SelfPiCo [44] applies large language models to partial code execution. In this work, an LLM is used as an interactive value predictor, which iteratively refines its prediction by an execu-tion checker. ChangeGuard [17] extends the scope of partial code execution to a pair of code in the code change. By the technique of pairwise execution, which compares the dynamic behaviors of two paired programs, this work helps determine whether one code change is semantic-preserving or not. The latest work of partial code execution refers to Treefix [37]. This work constructs a tree of prefixes of the program to guide the code execution. During the expansion of the prefix tree, it tries to incrementally solve execution issues (e.g., variable undefinition) and improve the execution metrics (e.g., code coverage). Compared with Treefix, AgentExecutor utilizes multiple LLM agents with wide action space and dynamic optimization strategies. AgentExecutor: Partial Code Execution via Agentic Context Generation ASE ’26, October 12–16, 2026, Munich, Germany </>  
+
+> Iterative Refinement
+> Initial Env.
+> Generated Prefixes
+> Dynamic Pruning for Agent Context
+> Execution Environment Preparation
+> Environment Initialization Execution Attempt
+> Partial Code
+> Agent Execution
+> Prepare Environment
+> Prepared Env.
+> Dynamic Exploration with Iterative Refinement
+> Agent Execution
+> Agent Friendly Feedback
+
+# 🤗 
+
+> Prefix Evolution via Program Synthesis
+> Seed Prefixes
+> Program Synthesis
+> Agent Execution Generator Program
+> Evolved Prefixes
+
+Figure 1: Overview of AgentExecutor, which consists of three phases: (i) Execution Environment Preparation, (ii) Dynamic Exploration with Iterative Refinement, and (iii) Prefix Evolution via Program Synthesis. Given the partial code, we first (i) prepare the execution environment by attempting to execute, supported by EnvAgent, then (ii) iteratively generate and refine prefixes where we design dynamic pruning and friendly feedback for RefAgent, and finally (iii) produce a generator program to evolve more prefixes from selected seed prefixes. 
+
+## 2.2 Test Generation and Fuzzing 
+
+Fuzzing and test harness generation automatically produce inputs and driver code to dynamically test software. Generator-based fuzzers execute generator programs to create structured inputs [11, 32], and recent work synthesizes such generators with LLMs [7]; harness generation constructs fuzz drivers for target APIs from client code, unit tests, or LLMs [4, 22, 23, 27, 48]. Both assume a complete, executable target with well-defined entry points, and aim to expose bugs. In contrast, AgentExecutor targets incomplete snippets: it synthesizes a generator program to evolve prefixes that supply missing context, making arbitrary partial code executable and maximizing its own coverage. 
+
+## 2.3 Agent-Based Approach for Software Engineering 
+
+Empowered by capabilities like tool use and planning, LLM-based agents have shown great capabilities in various software engineer-ing tasks [8–10, 19, 20, 25, 40, 41]. RepairAgent [6] is an autonomous LLM-based agent framework for automated program repair. It for-mulates program repair as an agentic process where the model iteratively localizes bugs, gathers repair-relevant context, and vali-dates candidate patches through tool use and execution feedback. Zhang et al. introduced AutoCodeRover [49], a code agent for re-solving software engineering tasks such as fixing bugs in GitHub. The system combines LLM-based reasoning with structured code retrieval and spectrum-based fault localization to identify relevant program elements and generate patches in an iterative manner. VulTrial [42] introduces a multi-agent approach to simulate a court to review and examine the security issues in the program. The roles (e.g., code author) in the court are supported by agents who first discuss with each other, and then the final review board will give a final decision about whether one program is vulnerable or not. In this work, we apply agent-based approaches to the field of partial code execution. if value is not None: value = value.rstrip("/") self._static_url_path = value 
+
+value = "/static/" self = SimpleNamespace() 
+
+Prefix 𝑝 
+
+Partial code 𝑠 
+
+Figure 2: An example of incomplete code s and the expected prefix p.
+
+## 3 Approach 3.1 Problem Description 
+
+We first introduce the problem of partial code execution. Given an incomplete code snippet s, this task aims to add a prefix p
+
+(e.g., import statements to use libraries, value assignments to vari-ables used in the code) to make the complete code p+s executable, while maximizing the lines of code executed in the original part s.For example, in Figure 2, the incomplete snippet 𝑠 references two undefined variables, value and self . The prefix 𝑝 resolves this by assigning value a concrete string and instantiating self as a 
+
+SimpleNamespace object, so that 𝑝 + 𝑠 executes successfully. The coverage of the added prefix does not count, because the incomplete code s is the target program we would like to execute and study, while the prefix serves as an auxiliary tool to achieve this goal. Sometimes one isolated prefix p cannot cover the full code lines in 
+
+s, e.g., there are two if branches with conditions that conflict with each other. Therefore, consistent with the setting of Treefix [37], we also generate a set P of prefixes and count the union of cov-ered lines for 𝑝 ∈ 𝑃 . We call this the Cumulative Coverage (C-C); correspondingly, Single-Best Coverage (S-C) refers to the best cover-age reached with one single prefix. At its core, for one incomplete code snippet, AgentExecutor will produce a set of prefixes and optimize both its single-best and cumulative coverages. ASE ’26, October 12–16, 2026, Munich, Germany Chen et al. 
+
+## 3.2 Overview of AgentExecutor 
+
+AgentExecutor is a multi-agent approach for partial code execu-tion, illustrated in Figure 1. Overall, it consists of three stages, each of which is responsible for different roles to execute the partial code and maximize the coverage. Firstly, we initialize and pre-pare the execution environment with the help of the Environment Agent (EnvAgent); then, a Refinement Agent (RefAgent) will it-eratively generate and refine the prefixes; finally, we create an Evolution Agent (EvoAgent) to synthesize a generator program to produce more potential prefixes. Given the substantially different tasks handled by the three agents, we adopt a multi-agent rather than single-agent architecture, which allows for customized context management, reduces attention dilution and extra cost, and enables each agent to be powered by the model best suited to its task. AgentExecutor has two distinct advantages over previous base-lines: 
+
+• Wide Action Space and Feedback. In Treefix, the action space is strictly limited for the execution environment (e.g., relying solely on static dependency resolution) and prefix refinement (e.g., allowing only two types of code statements). AgentExecu-tor resolves this by using LLM agents with diverse commands in all phases. For example, it can create required resource files, view and edit programs, and install dependencies flexibly. We also analyze the used action space in Section 5.3 and introduce a case study in Section 6.1. Besides, we design an agent-friendly feedback mechanism to make AgentExecutor better under-stand the current failure and decide the next action (introduced in Section 3.4.1). 
+
+• Dynamic Optimization Strategies. Treefix follows a rigid way to optimize its prefix (e.g., calling LLMs a fixed number of times re-gardless of current coverage improvement). AgentExecutor pro-poses two novel strategies to achieve a flexible optimization: (i) To avoid the attention dilution of LLM agents, we adopt a coverage-aware context pruning technique to dynamically crop the history of low value (introduced in Section 3.4.2); (ii) To achieve a system-atic mining of generated prefixes, AgentExecutor produces a prefix generator program to iterate all valuable prefixes without numerous LLM invocations (introduced in Section 3.5.2). These two strategies show superior effectiveness while significantly reducing the time and monetary cost (which we discuss in Sec-tion 5.2 and 5.1). 
+
+## 3.3 Execution Environment Preparation 
+
+This stage prepares the execution environment of the incomplete code for the subsequent actions. It is responsible for the environ-ment management of code execution, including initializing virtual environments, installing required libraries, and solving environ-mental issues like missing files. It prepares the environment by iteratively attempting to execute code and solving issues based on execution feedback. 
+
+Environment Initialization. Before code execution and analysis, we first need to set up the environment for AgentExecutor to run the program and obtain execution feedback. In Treefix, they use a shared environment between different snippets; although it can ac-celerate the dependency installation and avoid repeated actions, the 0.2  
+
+> 0.3
+> 0.2
+> 0.1
+> 0.5
+> 0.0
+> 0.3
+> …
+> 0.2
+> 0.3
+> 0.1
+> 0.2
+> 0.1
+> 0.5
+> 0.0
+> 0.3
+> Refinement History
+> Prune
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> Visible in Agent Context (0.1: coverage of prefix) 0.3
+> I
+> Agent
+> LLM
+> Pruned
+
+Figure 3: Illustration of dynamic pruning. “ ①② ...”: numbers represent the order of exploration. 
+
+environment sharing may bring certain issues like contaminating other workspaces and dependency conflicts. To avoid these envi-ronmental issues, we build an isolated virtual environment for each code snippet. Specifically, we prepare a cleaned working directory and use uv [3], a popular environment manager, as the environment backbone to manage the code execution environment, such as pack-age installation and version switch. Compared with other solutions such as venv [34] and conda [12], uv enables extremely fast pack-age management at the project level, reducing environment setup time in our use case. We also pre-install common-use packages like 
+
+numpy to reduce the latency in subsequent agent actions. 
+
+Preliminary Execution Attempt. After the environment initial-ization, AgentExecutor will attempt to execute the code with EnvAgent. EnvAgent will first inspect the working directory and the partial code in order to understand what is missing in the environment for executing code, then it will try to take actions to manage this execution environment. The agent realizes these through the bash tool, where it can execute commands (e.g., pip install in the terminal) and obtain execution feedback (e.g., a 
+
+NameError ). Typical operations in the environment could include package installation and file creation; however, due to the wide action space with bash, it is able to do a lot of things, leading to the environment preparation. We also explore this in Section 5.3. After this, EnvAgent will try to run the code in the virtual environ-ment directly. If the agent thinks the code runs successfully and no additional actions are required, it will finish this phase on its own. Otherwise, based on execution feedback, EnvAgent will consider the potential cause and propose an action to address it until success or the step limit is reached. 
+
+## 3.4 Dynamic Exploration with Iterative Refinement 
+
+With the execution environment prepared using EnvAgent, this phase primarily focuses on exploring different program paths and generating various prefixes using agent-based iterative refinement. 
+
+3.4.1 Iterative Refinement with Agent Friendly Feedback. In this step, RefAgent reasons about the program paths and current sit-uations, generates different prefixes, tests their coverage, and re-trieves the execution feedback for further refinement. Specifically, we prompt RefAgent to inspect the partial code and think about potential program execution paths, especially key elements that AgentExecutor: Partial Code Execution via Agentic Context Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+are not initialized or not properly used (e.g., the condition variable in the if ). After that, based on this thought about program paths and the previous history if available (e.g., last turn of action and feedback), RefAgent attempts to generate or refine the code prefix via action execution (e.g., use sed to edit the file), and then retrieve the corresponding feedback. If the coverage is successfully returned and satisfactory to RefAgent, it will finish its task; otherwise, it appends the thoughts, actions, and feedback to the context history, proceeding to the next refinement iteration. In RefAgent, the feedback is an important factor for refining the prefix. The feedback can include the execution status of code, an illustration of code coverage, general execution traces from bash commands, etc. For instance, when the coverage is not full, and there are still lines not covered, we follow Treefix [37] and use special marks in the comments to label the corresponding lines of code in order to provide targeted feedback. However, when the agent executes commands directly in the terminal, the returned feedback (e.g., a long trace stack) is typically hard to read and understand; therefore, we design several agent-friendly feedback mechanisms for RefAgent to better understand the current situation and prepare the next actions. For example, we follow Treefix [37] and use static analysis to identify undefined variables in the partial code; if any one is undefined in the prefix, the environment will not only print out the raw outputs (e.g., throwing the NameError ), but also prompt RefAgent to notice this issue with a tip about the potential inaccuracy for this warning (as the results of static analysis may not be accurate). When the output of the program is empty, RefAgent will receive the note to check if the code is executed successfully or if there are issues like silent early exits or missing exception handling. We also design a specialized feedback if the generated prefix is not valid in format (e.g., invalid editing of partial code), leading to unexpected coverage computation failure. These small but useful designs significantly improve the instruction following ability of the LLM agents. 
+
+3.4.2 Dynamic Pruning for Agent Context. During the iterative refinement with RefAgent, history messages are available in the context of the LLM. These historical messages include thoughts, actions, and feedback, and they serve as useful experiences to better process the current refinement or other actions. However, if the history is too long and redundant, these contents will, in turn, bring negative effects to RefAgent (e.g., stuck in the error loop) and increase the consumption of time and monetary cost as well. Therefore, we propose to apply a coverage-aware dynamic prun-ing for the history context in RefAgent. As shown in Figure 3, the agent first explores one prefix refinement direction and obtains their coverage results (i.e., the most left path of " ①②③④ "). Then, once newly explored prefixes are worse than the previous best for several consecutive attempts (e.g., 0.1 and 0.2 < 0.3, with patience = 2 in this illustration), motivated by the idea of early stopping , we will prune the two failed exploratory messages and take previous successful, coverage-increasing history as the new context for re-finement (i.e., " ①② "). Similarly, the second pruning point is "0.3" on the path " ①②⑤⑥⑦ " as RefAgent has no patience to wait for a better prefix with coverage over the previous best “0.5". For the next exploration, RefAgent has the visible context “ ①②⑤ ”. This mechanism helps mitigate the issue of attention dilution for LLM #Prefix 1 a = 1 b = 2 
+
+> # Generator Program prefix = “” for a in [1, 3]: for b in [2, 4]: prefix += f“a = {a}\n” prefix += f“b = {b}\n”
+> #Prefix 2 a = 3 b = 4
+> a = 1 b = 4
+> a = 3 b = 2
+> ...
+
+Figure 4: A simplified, illustrative example of the prefix evo-lution. 
+
+agents while helping reduce the extra cost brought by a longer con-text. We set a limited budget (i.e., patience) for the agent to explore with the context of the unsuccessful history, which is considered a trade-off between free exploration and guided improvement. 
+
+## 3.5 Prefix Evolution via Program Synthesis 
+
+In this phase, based on existing ones generated by RefAgent, we use EvoAgent to evolve more prefixes with the help of program synthesis. 
+
+3.5.1 Coverage-Aware Prefix Seed Selection. We first construct a set of prefixes as the seeds for the evolutionary process. Intuitively, the seed set should be sufficiently representative to guide the agent toward generating more effective prefixes, while remaining compact to avoid introducing too much context in the program synthesis. During the exploration stage, RefAgent generates a large number of prefix candidates. However, directly using all these candidates as seeds is undesirable because some of them could be redundant or contain noisy behaviors, and including all of them may provide little additional benefit. Therefore, we select only a small subset of high-value prefixes to initialize the evolutionary process. Intuitively, prefixes that trigger the execution of more distinct code lines are more likely to represent different program behaviors. Our key intuition is that a good seed set should expose the agent to diverse behaviors of the target program. To select these seeds, we approximate behavioral diversity using code coverage. If the seeds collectively cover more execution behaviors, the evolutionary search is more likely to discover new and effective prefixes. There-fore, we aim to select a small set of prefixes whose combined code coverage is maximized. At the same time, the number of selected prefixes should remain limited so that the prompt context stays concise and manageable for the agent. Specifically, we view each prefix as the set of lines it covers; given a budget of at most N seeds, the goal is to maximize the size of their union. To improve efficiency, we use dynamic planning to implement this strategy. 
+
+3.5.2 Evolution Program Generation. After several representative prefix seeds are filtered out, we apply EvoAgent to evolve more pre-fixes based on these prefixes via program generation and execution. There are three main steps: (i) analyze key elements and their val-ues, (ii) produce the generator program to iterate all combinations, and (iii) verify and refine the generator program. 
+
+Analyze Key Elements. First, EvoAgent understands key elements in the partial code. We explicitly prompt the agent to reason about key variables related to the program execution path (e.g., a variable in one control flow) and their potential values given selected prefix seeds, and let EvoAgent attempt to predict all possible occurrences ASE ’26, October 12–16, 2026, Munich, Germany Chen et al. 
+
+of these variables (e.g., their assigned values). Through this step, we aim to ensure that EvoAgent comprehends diverse program paths in the partial code and analyzes potential reachability with prefixes. 
+
+Produce Program for Evolution. After that, EvoAgent will pro-duce a generator program to help implement all possible combi-nations via executing the generator program. Figure 4 provides a simplified, illustrative example of this process. There are two prefix seeds: a = 1, b = 2 and a = 3, b = 4 shown in the left part of the figure. EvoAgent will first identify the variables in the prefix seeds (i.e., a and b) and their potential values (i.e., a has two possible val-ues: {1, 3} , and b is for {2, 4} ), and then it will generate a Python script to iterate all these combinations. In this example, EvoAgent uses two for nested loops to generate all potential combinations, leading to two new prefix candidates: a = 1, b = 4 and a = 3, b = 2 . In practice, this process is typically more complicated and diverse, involving various types of identified elements, assigned values, implementation of the generator, etc. As the LLM agent has full autonomy to realize different generator programs and retrieve the coverage feedback, it helps AgentExecutor conduct a system-atic search to synthesize all potential prefix candidates; compared with previous approaches, AgentExecutor innovatively utilizes the program synthesis ability of LLM agents to produce a prefix evolution generator, which extends the search space and reduces the cost compared with directly obtaining predictions from LLMs. 
+
+Verify and Refine the Generator. For one generator program, EvoAgent will try to execute it, inspect its generated prefixes, and use the provided coverage tool to check their coverage. If the exe-cution of the generator fails, or EvoAgent thinks that the resulting coverage of generated prefixes is not satisfactory, it will iteratively refine the generator program, execute and obtain generated pre-fixes, and test their coverage, until the agent believes there is little room for further improvements. Finally, AgentExecutor will automatically save all the gener-ated prefixes EvoAgent produces and then re-calculate the cover-age of them to find the best covered code prefix. As the number of prefixes could be large, we adapt the original coverage com-putation script provided in previous works [37] with the help of multi-process execution. 
+
+## 3.6 Coverage Assessment and Agent Scaffold 
+
+Coverage. For each code snippet and a set of prefixes generated during the full pipeline, we will collect all the generations and compute the coverage again. This step performs a secondary con-firmation of results, avoiding acquiring wrong results caused by potential invalid operations from LLM agents. We compute the line coverage in the scope of the original program (i.e., not including the surrounding prefix and suffix), consistent with the evaluation setting in Treefix [37] and LExecutor [36]. Specifically, the program is instrumented by a special function _l_() after every code line. This function will be called if one line of code is successfully exe-cuted. Following the same setup, we note that this setup is stricter than general line coverage computation, as we only consider that one line is covered if the code line is executed without crashing. In our evaluation, we compute the code coverage under one execution and multiple attempts; please check Section 4.3 for more details about the metrics. 
+
+Agent Scaffold. AgentExecutor adopts multiple LLM agents to enable partial execution in different roles. These agents share the same base scaffold, while we design specialized harnesses (e.g., prompt design, context management, tool use) separately to let them fit in different responsibilities. Specifically, for the selection of agent scaffold, we adopt a ReAct [47]-like framework mini-SWE-agent [46] as the base agent, which is popular among the software engineering community and presents powerful capability [24]. We use this framework because it offers a minimal implementation of a basic agent framework (i.e., execution in a simple loop of thinking and acting with the bash tool), providing easy access for adaptation and not relying on any particular design. Besides, we include all original configurations, including prompts, in our replication package. 
+
+## 4 Experimental Setup 4.1 Baselines 
+
+We compare AgentExecutor with the following approaches adopted by previous works [36, 37, 44] based on our literature review in the field of partial code execution. We use the same exper-imental settings of these baselines adopted in the work Treefix [37] unless otherwise specified. 
+
+• Treefix [37] is the state-of-the-art approach for partial code execution. It designs a three-stage pipeline to identify missing elements in the code and iteratively prompt the LLM to generate code prefixes based on execution feedback. 
+
+• SelfPiCO [44] dynamically guides partial execution supported by LLMs within an iterative loop. It also uses in-context learning and chain-of-thought reasoning to inject human knowledge and enhance the reasoning capability. 
+
+• Incompleter [18] defines a series of rules (e.g., add class and file) to handle similar error patterns during execution. It then designs a feedback-driven approach from these error rules. 
+
+• LExecutor [36] proposed the idea of learning-guided execution, i.e., using a learning-based approach to executing arbitrary code snippets. LExecutor trains language models to predict the missing values of partial code (e.g., undefined variables) and inject them to proceed with the execution. 
+
+• Type4Py [29] is a neural model-based approach for type in-ference. It adopts a hierarchical neural network to learn the high-dimensional features of types for arguments, variables, and return values. 
+
+• Pynguin [26] is a test generation tool for Python functions. It adopts a search-based algorithm and leverages type information to maximize the test coverage. 
+
+• “As Is” means we try to execute the original code without any modification, just as it is. We can successfully run code directly if the code does not miss the required elements for execution. 
+
+## 4.2 Datasets 
+
+We follow Treefix [37] and conduct experiments on the two datasets with the same dataset processing method. Statistics are presented in Table 1. AgentExecutor: Partial Code Execution via Agentic Context Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Table 1: Datasets used for evaluation. Dataset # of Snippets # of Avg. LoC       
+
+> Open-Source Functions 1,000 9.7 Stack Overflow Snippets 462 7.5 Total 1,462 9.0
+
+• Stack Overflow snippets dataset includes 462 code snippets from the answers of Python programming questions collected from Stack Overflow [38]. 
+
+• Open-source functions dataset contains 1,000 functions sam-pled from five open-source Python projects (i.e., black, tensorflow, scrapy, flask, and pandas ) on GitHub. 
+
+## 4.3 Metrics 
+
+Consistent with the work Treefix [37], we adopt three coverage-based metrics to assess our approach in the main experiments. 
+
+• Single-Best Coverage (S-C ): For each code snippet, we compute the coverage of all predictions (i.e., code prefixes) and take the prediction with the highest coverage as its S-C result. This metric reflects scenarios focused on a single execution, e.g., inspecting one particular program path that requires only a single input. We then report the average S-C score over all code snippets in the dataset. S-C is consistent with “the coverage of single-best prefix” in the Treefix paper. 
+
+• Cumulative Coverage (C-C ): As we have a set of prefix pre-dictions for one code snippet, C-C considers one code line to be covered if any prefix in these predictions covers it (i.e., the union). Unlike S-C, which reflects a single execution trace, C-C is applicable in tasks where multiple inputs are jointly used to achieve broader coverage (e.g., fuzzing). Again, this metric is the same as the “cumulative coverage” of all prefixes in Treefix. 
+
+• Full Execution Rate (FER ): If one code snippet achieves a 1.0 C-C, i.e., full line coverage with all prefixes, we deem it a full execution. We report the percentage of code snippets in the dataset that achieve full execution. FER is taken as a supplement to C-C. For all the metrics mentioned above, a larger value indicates better performance. 
+
+## 4.4 Implementation Details 
+
+Agent and LLM. For each agent in AgentExecutor, we set the step limit to 70, consistent with Treefix [37], which allows up to 210 (=70 times/agent * 3 agents) LLM responses. For RefAgent, the patience for dynamic pruning is set to 10 based on a small set of preliminary experiments. For backbone LLMs in AgentExecu-tor, we use GPT-5 nano (gpt-5-nano-2025-08-07) for EnvAgent and GPT-5 mini (gpt-5-mini-2025-08-07) [30] for the other two agents. Compared with other models like GPT-4o, these models have been optimized for agentic tasks, making them suitable for our usage scenario in this work. We choose to combine different model ver-sions to achieve a balance between effectiveness and efficiency of AgentExecutor. For the reasoning effort, we set it to “minimal” to reduce token consumption and use default values for the other parameters. We use OpenRouter [31] and litellm [5] to obtain uni-fied and convenient access to endpoints of LLM servers, compatible and consistent with the agent scaffold. 
+
+Environment. We conduct our experiments in a Linux server within Dockerized environments. For experiments of Treefix and AgentExecutor, to mitigate potential issues such as network insta-bility, we prepare the cache of commonly used PyPI [33] packages and allow them to share it, which could help achieve a fair evalua-tion. 
+
+Baseline. The baseline Treefix originally uses GPT-4o series as the backbone LLMs, but this model family is kind of outdated; therefore, we rerun its experiments with the same backbone LLM, GPT-5 mini, and accordingly increase the context window Treefix can utilize to 128,000. We keep all other configurations the same as it is to achieve a fair comparison. 
+
+## 5 Results 
+
+In this section, we propose and answer the following research questions (RQs): 
+
+• RQ1 : What is the overall effectiveness of AgentExecutor and baselines on covering partial code? 
+
+• RQ2 : How efficient are AgentExecutor and Treefix in terms of time consumption, monetary cost, and number of LLM invoca-tions? 
+
+• RQ3 : How do key design choices (i.e., wide action space provided, dynamic pruning, and prefix evolution via program synthesis) perform in AgentExecutor? 
+
+## 5.1 RQ1: Overall Effectiveness 
+
+In this research question, we focus on the performance of baselines and AgentExecutor. Table 2 shows the overall effectiveness re-sults of AgentExecutor and other baselines in terms of three code coverage metrics (i.e., S-C, C-C, and FER). We underline the second-best results of each column and report the relative improvements of our approach in comparison with them. We do not include results of some LLM-based approaches like Incompleter [18] because they heavily rely on specialized, finetuned models and do not support API-based backbone language models. Overall, AgentExecutor achieves the best performance across all three metrics on two different datasets with a large improvement. With regard to Single-Best Coverage (S-C) and Cumulative Cover-age (C-C), results show that more than 90% lines of code are covered by our approach, meaning that the prefixes AgentExecutor gen-erates are able to make most parts of the program executable in one or multiple execution attempts for both illustrative programs from Stack Overflow and functions in open-source projects. Besides, on the metric of Full Execution Rate (FER), AgentExecutor also demonstrates good performance, with a 91% for Stack Overflow snippets and an 80% for open-source functions, respectively. Compared to the previous best technique, Treefix, AgentEx-ecutor has shown impressive improvement on all combinations of metrics and datasets. Shown in the brackets of the table, rela-tive improvements of AgentExecutor over Treefix range from 8.2% (i.e., C-C in open-source functions) to 36.1% (i.e., FER in Stack Overflow snippets), and the average number is 19.4%. Taking into ASE ’26, October 12–16, 2026, Munich, Germany Chen et al. 
+
+Table 2: Overall effectiveness of our approach and baselines. For Treefix, we replicate the experiments with the same backbone model to conduct a fair comparison; for other baselines, we take results from this paper [37] under the same settings and omit inapplicable ones with the mark “-”. We report the relative improvement of our approach with the second-best results (with underline) for the corresponding columns. “S-C”: Single-Best Coverage; “C-C”: Cumulative Coverage; “FER”: Full Execution Rate. Stack Overflow Snippets Open-Source Functions S-C ↑ C-C ↑ FER ↑ S-C ↑ C-C ↑ FER ↑                                                
+
+> As Is 0.43 —0.30 0.04 —0.02 Pynguin ———0.04 —0.02 Type4Py 0.46 —0.32 0.13 —0.08 LExecutor 0.65 —0.49 0.51 —0.35 Incompleter 0.69 —0.53 0.51 —0.35 SelfPiCO 0.75 —0.60 0.59 —0.40 Treefix 0.79 0.79 0.67 0.79 0.86 0.68
+> AgentExecutor (Ours) 0.94 (+19.9%) 0.95 (+20.2%) 0.91 (+36.1%) 0.90 (+13.8%) 0.93(+8.2%) 0.80 (+18.1%)
+
+account that Treefix has outperformed the other two competitive methods (i.e., SelfPiCO [44] and Incompleter [18]) by a significant margin, we believe that the performance of AgentExecutor is very impressive and promising. 
+
+Summary of RQ1: AgentExecutor presents new state-of-the-art results compared with Treefix in terms of code coverage with an up to 36.1% relative improvement. It can cover more than 90% lines of code on both Stack Overflow and open-source datasets. 
+
+## 5.2 RQ2: Efficiency Analysis 
+
+In this research question, we investigate the efficiency of Agen-tExecutor and the state-of-the-art baseline, Treefix, focusing on three key indicators: execution time (of the approach), monetary cost of API, and the number of LLM invocations. Other baselines like Type4Py [29] and LExecutor [36] are not included in this anal-ysis because we think the large performance gap and differences in underlying techniques (e.g., heuristics, finetuning) make them somewhat incomparable. We collect this information at the granularity of the task, which may consist of predicting and executing many candidate snippets for one partial code snippet. For example, “execution time” refers to the full execution time one approach consumes to give all pre-dictions and find the best prefix. Note that this setting is different from that of Treefix [37], where it computes the average among all execution attempts for one incomplete code snippet. For example, for one task corresponding to a specific incomplete code snippet, if the approach predicts and tests 10 candidates in 10 seconds, it will report the average time as 1 second (10 seconds/10 candidates). We believe our setup is more reasonable as it computes the consump-tion that the approach requires to achieve its best performance, and includes the potential loss for predictions that are invalid or without additional benefits. Table 3 presents the detailed statistics of the efficiency of Treefix and our AgentExecutor with the relative changes. We introduce the corresponding results separately in the following parts: 
+
+Time Consumption. For both AgentExecutor and Treefix, we record the timestamps immediately before the processing of each incomplete code begins and after it finishes, and then compute their difference as the time consumption. In this process, the time for library installation, virtual environment creation (for each code snippet in AgentExecutor), and coverage computation is included as well. The time consumptions of AgentExecutor are 221.64 seconds (s) and 155.56 seconds for open-source functions and Stack Overflow snippets, respectively. In comparison, Treefix requires around four to five times as long as AgentExecutor (e.g., 221.64s vs. 1124.01s), and its average time consumption among the two datasets is more than 15 minutes (i.e., 900s). We attribute the unsatisfactory time efficiency of Treefix to the inflexible processing of the predictions. For one incomplete code snippet, Treefix applies the same strategy to process and test every predicted prefix: detect and install dependencies, execute and cap-ture errors, filter incorrect lines of code, and measure the coverage. Considering the large search space of Treefix, this method is very time-consuming because many actions are not required to be re-peated for the same original code. In our manual inspection of the runtime logs, we find that repeatedly detecting and installing the same dependencies—even when none are required—takes a signifi-cant amount of time during its execution. Treefix lacks a kind of feedback mechanism about this kind of information (e.g., whether the dependency is already installed). In comparison, even if our approach does extra work like creating isolated virtual environ-ments, AgentExecutor adopts a dynamic, agentic approach to achieve an efficient iterative loop while remaining effective. 
+
+Monetary Cost. For AgentExecutor, we use the official interface provided by the agent scaffold to compute the cost for LLM tokens; For Treefix, we calculate this using the cost information returned by the LLM API. We choose not to use the cost computation script in the official repository of Treefix because it does not consider the varying price of prompt caching from the model provider ( which is generally lower ), leading to an unfair comparison. To execute one partial code snippet and maximize the cover-age, AgentExecutor requires around 0.055 USD for open-source AgentExecutor: Partial Code Execution via Agentic Context Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+Table 3: Efficiency results of Treefix and AgentExecutor. Open-Source Functions Stack Overflow Snippets Time (s) Cost ( 10 −2$) # Call Time (s) Cost ( 10 −2$) # Call             
+
+> Treefix 1124.01 12.60 75.42 704.60 4.86 45.84
+> AgentExecutor (Ours) 221.64 (-80.3%) 5.48 (-56.6%) 36.16 (-52.1%) 155.56 (-77.9%) 2.33 (-52.1%) 21.13 (-53.9%)
+
+functions and 0.023 for Stack Overflow snippets, respectively. Com-pared with the results of Treefix (i.e., 0.0486 vs. 0.126 USD), the monetary costs of AgentExecutor are less than half of them. We summarize two key designs of AgentExecutor contributing to this: (i) AgentExecutor dynamically prunes the redundant contexts during its iterative refinement based on coverage improve-ment, reducing the tokens used in the history of the agent while remaining performant; (ii) Instead of relying solely on direct gen-erations from LLMs, EvoAgent in AgentExecutor uses its code generation ability to efficiently produce a number of prefix candi-dates. 
+
+Number of LLM Invocations. We report both token costs and numbers of LLM calls because they capture complementary aspects here: token consumption reflects the monetary cost of using LLMs, while the number of calls reflects the interaction overhead and potential latency introduced by repeated model invocations. As shown in Table 3, AgentExecutor invokes LLMs 36.16 and 21.13 times for functions from open-source projects and Stack Over-flow, respectively. Under the same request limits (i.e., 210 times in total), Treefix needs roughly double the calls of LLMs to fin-ish the full process of one incomplete code snippet. The gap be-tween AgentExecutor and Treefix mainly comes from the design of prefix optimization: Treefix follows a fixed, tree-based expansion strategy for prefix refinement (i.e., 10 times for one prefix node), while AgentExecutor utilizes LLM agents to dynamically and iteratively improve the prediction step by step, making full use of each feedback from LLMs. 
+
+Summary of RQ2: Compared with the baseline, AgentEx-ecutor consumes only around 20% of the time and achieves a better performance. In the meantime, it also reduces more than half of the token costs and the number of LLM invocations, demonstrating its superior efficiency. 
+
+## 5.3 RQ3: Design Choices 
+
+Wide Action Space with LLM Agents. Table 4 presents the ac-tions (commands) that three agents used in the datasets. We collect all the commands and classify them into six categories, including execution (e.g., python , bash ), text processing (e.g., sed, awk ), File I/O (e.g., cat, echo ), statistics (e.g., wc, nl ), file system (e.g., ls, cp ), and others (e.g., curl, pip ). From the results, we find that: (i) The actions for agents are very diverse. These commands involve various steps AgentExecutor required to test the code (execution), edit the code (text processing), create directories (file system), etc. (ii) Three agents present different distributions of command usage. For example, “Others” exists much more frequently in EnvAgent than other agents because it requires the pip command to install 71.3% 26.4% 2.3%   
+
+> 72.5% 24.6% 2.9%
+> Stack Overflow Snippets Open-Source Functions
+> Tie Win Lose
+
+Figure 5: Distribution on whether pruning improves the fol-lowing prefixes. Treefix Env.+Ref. Env.+Ref.+Evo. 
+
+Figure 6: Results of Treefix, AgentExecutor w/o EvoAgent, and the full AgentExecutor, on the subset of cases entering the evolution phase. 
+
+dependencies; File I/O presents a significant proportion in RefAgent as it iteratively refines the prefix based on the execution feedback. 
+
+Dynamic Pruning in Iterative Refinement. We apply a dynamic pruning mechanism to reduce the issue of attention dilution while keeping AgentExecutor efficient. To explore how this mechanism performs, we collect statistics about whether the future coverage after pruning can be better than the current best one, and results are shown in Figure 5. As illustrated, we find that in most cases, the fu-ture coverage could be tied with (i.e., around 72%) or better than (i.e., around 25%) the current status. It suggests that the mechanism of dynamic pruning can help reduce the time and cost, while keeping or increasing the coverage performance. We also find that there is less than 3% of cases present a negative result. However, compared with neutral (i.e., “Tie”) and positive (i.e., “Win”) ones, its proportion could be negligible. Therefore, we think dynamic pruning brings essential benefits to AgentExecutor on both effectiveness and efficiency. 
+
+Ablation Study for Prefix Evolution. We explore if the phase of prefix evolution takes effects to the coverage. For all data items in the two datasets, EvoAgent will not launch if the coverage has already achieved 1.0, and we find that there are around 14.1% of ASE ’26, October 12–16, 2026, Munich, Germany Chen et al. 
+
+Table 4: Command Distribution of Different Agents. Agent Execution Text Processing File I/O File System Statistics Others 
+
+EnvAgent 6,779 5,489 3,291 1,912 2,560 354 RefAgent 18,520 687 34,797 2,322 53 7EvoAgent 7,929 1,769 5,070 672 101 11 them go into the third stage and use program synthesis to evolve more prefixes. For these cases, we collect their performance on Treefix, AgentExecutor w/o EvoAgent (i.e., “Env.+Ref.”), and the full AgentExecutor (i.e., “Env.+Ref.+Evo.”), and illustrate them in Figure 6. We have the following summaries: (i) AgentExecu-tor without Evolution phase can also outperform Treefix, which reflects the effectiveness of the design for EnvAgent and RefAgent. (ii) EvoAgent brings benefits to the final performance with an up to around 22% relative performance in FER. It also shows around 5% increase in S-C and C-C. As these cases under EvoAgent are typically more difficult to execute than average, it could be hard to bring an extremely outstanding improvement. 
+
+Summary of RQ3: We find that (i) AgentExecutor has a diverse action space for various actions in different stages. (ii) Dynamic pruning improves the efficiency while increas-ing or maintaining the coverage performance in around 98.5% cases. (iii) Prefix Evolution has positive effects on the results of RefAgent, with a relative improvement of up to 22% in FER. 
+
+## 6 Discussion 6.1 Case Study 1: Action Space 
+
+Here we study how AgentExecutor executes one partial code snippet ( StackOverflow_485 ) with various actions. The following is the code that needs to be executed, and we omit some unnecessary parts about image processing:  
+
+> # Importing Image class from PIL module
+> from PIL import Image # Opens a image in RGB mode im = Image.open(r"C:\Users\System-Pc\Desktop\ybear.jpg") # [Omitted Image Processing Steps]
+
+To execute this code, there are two challenges: (i) There should be one valid image file for code to open and process, and (ii) the file system may not be compatible with the provided one (i.e., 
+
+r"C:\Users\..." ). AgentExecutor solves them in two different phases: (i) In the environment initialization stage, EnvAgent successfully identifies that the provided path of the image is Windows-style, and it is not compatible with its execution environment (i.e., Linux), shown in the THOUGHT of EnvAgent (where we omit unimportant texts for brevity): 
+
+> THOUGHT :The code.py... opens a Windows-style path,... but the path is invalid in this Linux environment and the file is incomplete for execution... I will run the code... to use a local provided image or generate a placeholder image if the file doesn't exist...
+> ↩→
+> ↩→
+> ↩→
+> ↩→
+
+From the thought of the agent, we can also find that it would like to create an image file if there is no locally provided one (i.e., “I will run the code... or generate a placeholder image...”). To realize this action, it utilizes its tool use capability and creates a Python script to check if one image exists or generates a simple one with the Image library:  
+
+> ACTION :python - << 'PY' ... # We'll execute the logic in code.py by importing it if possible; otherwise, emulate running it safely. ↩→
+> # Since code.py is text, we will instead create a simple image and run a safe subset here to ensure PIL works. ↩→
+> img_path = Path("test_input_image.jpg")
+> if not img_path.exists(): # create a simple image to crop img = Image.new("RGB", (400, 400), color=(123, 200, 150)) ... img.save(img_path)
+
+(ii) After we already have one image for the script to use, in the second phase (i.e., Iterative Refinement), RefAgent attempts to solve the Windows-like path issue by mocking the used library 
+
+from PIL import Image :  
+
+> ... # Define an Image "module" with an open function that returns MockImage ↩→
+> def mock_open(path):
+> return MockImage(path) # Create a module-like object for PIL and PIL.Image pil_module = types.SimpleNamespace( Image=types.SimpleNamespace(open=mock_open)) # Ensure imports work: "from PIL import Image" will bind Image to pil_module.Image ↩→
+> sys.modules['PIL'] = pil_module # Also provide 'PIL.Image' as a module entry sys.modules['PIL.Image'] = pil_module.Image
+
+From the prefix AgentExecutor appends, we can see that it uses 
+
+sys.modules to mock the Image object used in the partial code; the method Image.open is also replaced by a self-defined function 
+
+mock_open . From this case, we can find that AgentExecutor is able to create diverse contexts via the large action space powered by LLM agents, and consequently enable the execution of complicated partial code and achieve a full coverage (i.e., 1.0). In contrast, Treefix covers none of the lines of code in this case (i.e., 0.0). AgentExecutor: Partial Code Execution via Agentic Context Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+## 6.2 Case Study 2: Synthesizing Generator to Evolve Prefixes 
+
+We study AgentExecutor’s actions for Open-Source_black_142 
+
+as another example. In this case, the baseline Treefix achieves a 0.5 S-C, while AgentExecutor increases the same metric from 0.69 (achieved in phase 2) to 0.88 through prefix evolution. The partial code is shown in the following code block:                     
+
+> has_value = leaf.type in BRACKETS or bool(leaf.value.strip())
+> if not has_value: exit()
+> if token.COLON == leaf.type and self.is_class_paren_empty:
+> del self.leaves[-2:]
+> if self.leaves and not preformatted: leaf.prefix += whitespace( leaf, complex_subscript=self.is_complex_subscript(leaf) )
+> if self.inside_brackets or not preformatted or track_bracket: self.bracket_tracker.mark(leaf)
+> if self.mode.magic_trailing_comma:
+> if self.has_magic_trailing_comma(leaf): self.magic_trailing_comma = leaf
+> elif self.has_magic_trailing_comma(leaf, ensure_removable= True ): ↩→
+> self.remove_trailing_comma()
+
+We can see that this code includes a lot of branches (e.g., if state-ments) and many of them are nested. In addition, it involves com-plex objects and attributes that influence each other (e.g., the object 
+
+leaf and one attribute magic_trailing_comma ). Therefore, it is difficult to achieve a high coverage on this code. In AgentExecutor, during the phase of iterative refinement, RefAgent successfully creates an executable prefix that contains complex elements and definitions (here we omit some statements for brevity):   
+
+> SEED PREFIX :
+> class MockSelf :
+> def __init__(self): self.mode = types.SimpleNamespace(magic_trailing_comma= False )↩→
+> self.inside_brackets = False
+> self = MockSelf() leaf = Leaf(token.COLON, "X")
+
+Though it has identified several important conditions to go into some deep branches (e.g., the deletion of colon ), it fails to reach the nested logic code (i.e., the branches guarded by “ if self.mode.magic_trailing_comma ” and “ has_value ”). In our pre-fix evolution, the generator program iterates all the potential values of each variable and attribute (e.g., the parameter True or False in 
+
+self.mode = types.SimpleNamespace(magic_trailing_comma=) ), and successfully resolves this issue:   
+
+> EVOLVED PREFIX :
+> class MockSelf :
+> def __init__(self): self.mode = types.SimpleNamespace(magic_trailing_comma= True )self.inside_brackets = True
+> self = MockSelf() leaf = Leaf(':', '')
+
+## 6.3 Threats to Validity 
+
+External Validity. We conduct experiments with code sourced from real GitHub repositories and Stack Overflow questions in Python. Although they are adopted by previous works [36, 37], the choice of datasets and programming languages could still affect the results of our evaluation. We use the model GPT-5 mini/nano as the backbone model of AgentExecutor for its agentic ability, compared with the GPT-4o series used by Treefix. To mitigate this issue, we reproduce the experiments of Treefix with the same base model and carefully ensure the fairness of the comparison by using the same experimental settings. Mini-SWE-agent [39] is selected as the agent scaffold of AgentExecutor. While it uses a general framework design (i.e., a minimal, ReAct-like agent), using other agent scaffolds may bring different conclusions. 
+
+Internal Validity. One potential threat to internal validity is the design of prompts. We follow the prompt design protocol of mini-SWE-agent [39] and adjust prompts based on preliminary exper-iments to improve the performance. To mitigate this issue, we open-source the full prompts we use in the experiments. In addi-tion, LLM randomness may affect the evaluation results. Therefore, we disclose the source code with the specific API version to mitigate this issue. The environment provided for agents may also affect the internal validity. To lessen this, we use Dockerized [13] containers to ensure a controlled execution environment. 
+
+Construct Validity. One potential threat to construct validity is the choice of evaluation metrics. We use code coverage as the main metric to assess the quality of partial code execution. However, a higher coverage does not necessarily mean that this execution is better aligned with the real usage or intention. To mitigate this issue, we keep the evaluation metrics consistent with closely related works [36, 37, 44]. As we use standard metrics used in prior studies, we believe the threat is minimal. 
+
+## 7 Conclusion and Future Work 
+
+In this paper, we study the problem of partial code execution, which aims to automatically execute incomplete code snippets. We first identify key limitations of previous works in their restricted ac-tion space, limited feedback mechanisms, and rigid optimization strategies. Then, we propose AgentExecutor, a novel multi-agent framework that enables effective and efficient partial code execu-tion. Extensive experiments on two popular datasets demonstrate that AgentExecutor significantly outperforms the state-of-the-art method, Treefix, in terms of both execution coverage and efficiency. 
+
+Future work. We plan to extend this work from various aspects. Agents often terminate prematurely, leaving trajectories incomplete and degrading downstream performance; customizing the harness to detect and recover from such early exits is a promising remedy. Besides, the granularity and diversity of data are also promising directions for future work. 
+
+## Data Availability Statement 
+
+Our code and data are publicly available at GitHub and Zenodo [1]. We also include the appendix in the replication package. 
+
+## Acknowledgments 
+
+This research/project is supported by the National Research Foun-dation, Singapore, under its Investigatorship Grant (NRF-NRFI08-2022-0002). Any opinions, findings, and conclusions or recommen-dations expressed in this material are those of the author(s) and do not reflect the views of National Research Foundation, Singapore. ASE ’26, October 12–16, 2026, Munich, Germany Chen et al. 
+
+## References 
+
+[1] 2026. Replication package. https://github.com/iCSawyer/AgentExecutor. repli-cation package. [2] Hiralal Agrawal and Joseph R Horgan. 1990. Dynamic program slicing. ACM SIGPlan Notices 25, 6 (1990), 246–256. [3] Astral. 2026. uv: An extremely fast Python package and project manager . https: //github.com/astral-sh/uv Accessed: 2026-02-09. [4] Domagoj Babić, Stefan Bucur, Yaohui Chen, Franjo Ivančić, Tim King, Markus Kusano, Caroline Lemieux, László Szekeres, and Wei Wang. 2019. FUDGE: Fuzz Driver Generation at Scale. In Proceedings of the 27th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE) . 975–985. doi:10.1145/3338906.3340456 [5] BerriAI. 2024. LiteLLM: Python SDK and Proxy Server for calling 100+ LLM APIs in OpenAI format. https://github.com/BerriAI/litellm. Accessed: 2026-03-08. [6] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2025. Repairagent: An autonomous, llm-based agent for program repair. In 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . IEEE, 2188–2200. [7] Chuyang Chen, Brendan Dolan-Gavitt, and Zhiqiang Lin. 2025. ELFuzz: Efficient Input Generation via LLM-driven Synthesis Over Fuzzer Space. In Proceedings of the 34th USENIX Security Symposium (USENIX Security) . 6279–6298. [8] Junkai Chen, Xing Hu, Zhenhao Li, Cuiyun Gao, Xin Xia, and David Lo. 2024. Code search is all you need? improving code suggestions with code search. In 
+
+Proceedings of the IEEE/ACM 46th international conference on software engineering .1–13. [9] Junkai Chen, Huihui Huang, Yunbo Lyu, Junwen An, Jieke Shi, Chengran Yang, Ting Zhang, Haoye Tian, Yikun Li, Zhenhao Li, et al. 2026. Securevibebench: Benchmarking secure vibe coding of ai agents via reconstructing vulnerability-introducing scenarios. In Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) . 24144–24168. [10] Junkai Chen, Zhiyuan Pan, Xing Hu, Zhenhao Li, Ge Li, and Xin Xia. 2025. Reasoning runtime behavior of a program with llm: How far are we?. In 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . IEEE, 1869–1881. [11] Koen Claessen and John Hughes. 2000. QuickCheck: A Lightweight Tool for Random Testing of Haskell Programs. In Proceedings of the Fifth ACM SIGPLAN International Conference on Functional Programming (ICFP) . 268–279. doi:10.1145/ 351240.351266 [12] conda contributors. 2026. conda: A system-level, binary package and environment manager running on all major operating systems and platforms . https://github. com/conda/conda [13] Docker, Inc. 2026. Docker: Accelerated Container Application Development. https://www.docker.com/. Accessed: 2026-03-15. [14] Patrice Godefroid, Michael Y Levin, David A Molnar, et al. 2008. Automated whitebox fuzz testing.. In Ndss , Vol. 8. 151–166. [15] Liang Gong, Michael Pradel, and Koushik Sen. 2015. Jitprof: Pinpointing jit-unfriendly javascript code. In Proceedings of the 2015 10th joint meeting on foun-dations of software engineering . 357–368. [16] Susan L Graham, Peter B Kessler, and Marshall K McKusick. 1982. Gprof: A call graph execution profiler. ACM Sigplan Notices 17, 6 (1982), 120–126. [17] Lars Gröninger, Beatriz Souza, and Michael Pradel. 2025. ChangeGuard: Vali-dating code changes via pairwise learning-guided execution. Proceedings of the ACM on Software Engineering 2, FSE (2025), 936–956. [18] Ishrak Hayet, Adam Scott, and Marcelo d’Amorim. 2024. Feedback-directed partial execution. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . 781–793. [19] Xinyi Hou, Yanjie Zhao, Yue Liu, Zhou Yang, Kailong Wang, Li Li, Xiapu Luo, David Lo, John Grundy, and Haoyu Wang. 2024. Large language models for software engineering: A systematic literature review. ACM Transactions on Software Engineering and Methodology 33, 8 (2024), 1–79. [20] Xing Hu, Feifei Niu, Junkai Chen, Xin Zhou, Junwei Zhang, Junda He, Xin Xia, and David Lo. 2025. Assessing and advancing benchmarks for evaluating large language models in software engineering tasks. ACM Transactions on Software Engineering and Methodology (2025). [21] Lexiang Huang and Timothy Zhu. 2021. tprof: Performance profiling via struc-tural aggregation and automated analysis of distributed systems traces. In Pro-ceedings of the ACM Symposium on Cloud Computing . 76–91. [22] Kyriakos Ispoglou, Daniel Austin, Vishwath Mohan, and Mathias Payer. 2020. FuzzGen: Automatic Fuzzer Generation. In 29th USENIX Security Symposium (USENIX Security) . 2271–2287. [23] Bokdeuk Jeong, Joonun Jang, Hayoon Yi, Jiin Moon, Junsik Kim, Intae Jeon, Taesoo Kim, WooChul Shim, and Yong Ho Hwang. 2023. UTopia: Automatic Generation of Fuzz Driver using Unit Tests. In 2023 IEEE Symposium on Security and Privacy (S&P) . 2676–2692. doi:10.1109/SP46215.2023.10179394 [24] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik R Narasimhan. 2024. SWE-bench: Can Language Models Resolve Real-world Github Issues?. In The Twelfth International Conference on Learning Representations .[25] Junwei Liu, Kaixin Wang, Yixuan Chen, Xin Peng, Zhenpeng Chen, Lingming Zhang, and Yiling Lou. 2024. Large language model-based agents for software engineering: A survey. arXiv preprint arXiv:2409.02977 (2024). [26] Stephan Lukasczyk, Florian Kroiß, and Gordon Fraser. 2020. Automated unit test generation for python. In International Symposium on Search Based Software Engineering . Springer, 9–24. [27] Yunlong Lyu, Yuxuan Xie, Peng Chen, and Hao Chen. 2024. Prompt Fuzzing for Fuzz Driver Generation. In Proceedings of the 2024 ACM SIGSAC Conference on Computer and Communications Security (CCS) . 3793–3807. doi:10.1145/3658644. 3670396 [28] Ruijie Meng, Martin Mirchev, Marcel Böhme, and Abhik Roychoudhury. 2024. Large language model guided protocol fuzzing. In Proceedings of the 31st Annual Network and Distributed System Security Symposium (NDSS) , Vol. 2024. [29] Amir M Mir, Evaldas Latoškinas, Sebastian Proksch, and Georgios Gousios. 2022. Type4py: Practical deep similarity learning-based type inference for python. In 
+
+Proceedings of the 44th International Conference on Software Engineering . 2241– 2252. [30] OpenAI. 2026. GPT-5 mini Model . https://developers.openai.com/api/docs/ models/gpt-5-mini Accessed: 2026-03-08. [31] OpenRouter. 2026. OpenRouter: The Unified Interface for LLMs. https:// openrouter.ai/. Accessed: 2026-03-08. [32] Rohan Padhye, Caroline Lemieux, Koushik Sen, Mike Papadakis, and Yves Le Traon. 2019. Semantic Fuzzing with Zest. In Proceedings of the 28th ACM SIG-SOFT International Symposium on Software Testing and Analysis (ISSTA) . 329–340. doi:10.1145/3293882.3330576 [33] Python Software Foundation. 2026. PyPI: The Python Package Index. https: //pypi.org/. Accessed: 2026-03-15. [34] Python Software Foundation. 2026. venv — Creation of Virtual Environments .https://docs.python.org/3/library/venv.html Python 3 Standard Library Docu-mentation. [35] Mifta Sintaha, Noor Nashid, and Ali Mesbah. 2023. Katana: Dual slicing based context for learning bug fixes. ACM Transactions on Software Engineering and Methodology 32, 4 (2023), 1–27. [36] Beatriz Souza and Michael Pradel. 2023. Lexecutor: Learning-guided execution. In Proceedings of the 31st ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . 1522–1534. [37] Beatriz Souza and Michael Pradel. 2025. Treefix: Enabling Execution with a Tree of Prefixes. In 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . IEEE, 2676–2688. [38] Stack Overflow Community. [n. d.]. Stack Overflow. https://stackoverflow.com. Accessed: 2026-02-10. [39] SWE-agent Authors. 2024. mini-swe-agent. https://github.com/SWE-agent/mini-swe-agent. GitHub repository. [40] Gou Tan, Zilong He, Min Li, Pengfei Chen, Jieke Shi, Zhensu Sun, Ting Zhang, Danwen Chen, Lwin Khin Shar, Chuanfu Zhang, and David Lo. 2026. LIDL: LLM Integration Defect Localization via Knowledge Graph-Enhanced Multi-Agent Analysis. CoRR abs/2601.05539 (2026). arXiv:2601.05539 doi:10.48550/ARXIV. 2601.05539 [41] Gou Tan, Zilong He, Min Li, Haiyu Huang, Yilun Wang, Pengfei Chen, Giuliano Casale, and Chuanfu Zhang. 2026. LLMRCA: Multilevel Root Cause Analysis for LLM Applications Using Multimodal Observability Data. ACM Trans. Softw. Eng. Methodol. (April 2026). doi:10.1145/3806200 Just Accepted. [42] Ratnadira Widyasari, Martin Weyssow, Ivana Clairine Irsan, Han Wei Ang, Frank Liauw, Eng Lieh Ouh, Lwin Khin Shar, Hong Jin Kang, and David Lo. 2025. Let the Trial Begin: A Mock-Court Approach to Vulnerability Detection using LLM-Based Agents. arXiv preprint arXiv:2505.10961 (2025). [43] Chunqiu Steven Xia, Matteo Paltenghi, Jia Le Tian, Michael Pradel, and Lingming Zhang. 2024. Fuzz4all: Universal fuzzing with large language models. In Pro-ceedings of the IEEE/ACM 46th International Conference on Software Engineering .1–13. [44] Zhipeng Xue, Zhipeng Gao, Shaohua Wang, Xing Hu, Xin Xia, and Shanping Li. 2024. Selfpico: Self-guided partial code execution with llms. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis .1389–1401. [45] Aashish Yadavally, Yi Li, and Tien N Nguyen. 2024. Predictive program slicing via execution knowledge-guided dynamic dependence learning. Proceedings of the ACM on Software Engineering 1, FSE (2024), 271–292. [46] John Yang, Carlos E Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik R Narasimhan, and Ofir Press. 2024. SWE-agent: Agent-Computer Inter-faces Enable Automated Software Engineering. In The Thirty-eighth Annual Con-ference on Neural Information Processing Systems . https://arxiv.org/abs/2405.15793 [47] Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik R Narasimhan, and Yuan Cao. 2022. React: Synergizing reasoning and acting in language models. In The eleventh international conference on learning representations .[48] Cen Zhang, Yaowen Zheng, Mingqiang Bai, Yeting Li, Wei Ma, Xiaofei Xie, Yuekang Li, Limin Sun, and Yang Liu. 2024. How Effective Are They? Exploring Large Language Model Based Fuzz Driver Generation. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) .AgentExecutor: Partial Code Execution via Agentic Context Generation ASE ’26, October 12–16, 2026, Munich, Germany 
+
+1223–1235. doi:10.1145/3650212.3680355 [49] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Au-tocoderover: Autonomous program improvement. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . 1592–1604.

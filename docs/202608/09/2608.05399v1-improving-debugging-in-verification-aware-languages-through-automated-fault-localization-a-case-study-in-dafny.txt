@@ -1,0 +1,416 @@
+Title: Improving Debugging in Verification-Aware Languages Through Automated Fault Localization: A Case Study in Dafny
+
+URL Source: https://arxiv.org/pdf/2608.05399v1
+
+Published Time: Fri, 07 Aug 2026 00:13:10 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# Improving Debugging in Verification-Aware Languages Through Automated Fault Localization: A Case Study in Dafny 
+
+´Alvaro Silva 
+
+INESC TEC, Faculdade de Engenharia, Universidade do Porto Porto, Portugal alvaro.silva@fe.up.pt 
+
+Isabel Amaral 
+
+INESC TEC, Faculdade de Engenharia, Universidade do Porto Porto, Portugal isabel.andre.amaral@gmail.com 
+
+Jo˜ ao Pascoal Faria 
+
+INESC TEC, Faculdade de Engenharia, Universidade do Porto Porto, Portugal jpf@fe.up.pt 
+
+Alexandra Mendes 
+
+INESC TEC, Faculdade de Engenharia, Universidade do Porto Porto, Portugal alexandra@archimendes.com 
+
+Abstract —Verification-aware languages, like Dafny, integrate formal specifications directly into source code to enable static correctness checks. However, when verification fails, the feedback provided is often limited to the specific condition of the error, such as a violated postcondition, rather than the root cause of the fault. While Dafny’s counterexample features provide concrete execution traces, these typically expose a single failing path per assertion failure, leaving the developer to manually look through the entire trace to locate the error. This paper investigates automated fault localization for verification-aware languages by comparing two paradigms: state-based and counterexample-based localization. Our state-based 
+
+localization strategy replicates the “snapshot” methodology of AutoFix by inferring invariants and predicates to identify suspicious program states. The counterexample-based strategy consists of a family of techniques that progressively enrich the use of verifier output: from raw counterexample extraction, to structured single-trace ranking, and to multi-trace aggregation. To validate these methods, we present an evaluation frame-work using MutDafny to generate a diverse mutant dataset from DafnyBench and measure localization effectiveness using the EXAM score. Our results show that counterexample-based approaches substantially outperform state-based localization in this setting. Structured ranking over a single trace yields the largest improvement over raw counterexample output, while multi-trace aggregation provides additional gains in robustness and debugging utility by increasing coverage and reducing path bias introduced by the solver. These findings demonstrate that effective fault localization in verification-aware languages depends both on using counterexample information, and how that information is structured and diversified. 
+
+Index Terms —Fault localization, verification-aware languages, Dafny, counterexamples, design by contract 
+
+I. I NTRODUCTION 
+
+Software is embedded in all aspects of modern life, from smartphones to medical devices, making software correctness more critical than ever. Yet, writing software free of bugs remains challenging, and locating the root cause of a bug is often an arduous and time-consuming part of debugging. Verification-aware languages, such as Dafny [1] and Verus [2], embed logical constructs, including preconditions (requires ), postconditions ( ensures ), and invariants ( invariant ), directly into code, allowing verifiers to automatically flag spec-ification violations. While this is helpful in warning developers that the implementation does not match the expected behavior, it often does not tell them where the problem is. In fact, a single failing verification condition may result from many possible fault locations, and often, the verifier feedback is too coarse for debugging. It provides the violated condition and one representative counterexample path, but not a ranked explanation of which program lines are most likely responsible for the failure. As a result, developers are left to manually identify the root cause of the problem among many potential fault locations. This is especially problematic when multiple branches can satisfy the same failing proof obligation, because the first model found by the solver may point to a branch that is not the most useful to find the bug. This work investigates automated fault localization (FL) for verification-aware languages by comparing two paradigms:  
+
+> •
+
+State-based localization (SNAP) : Based on an existing approach implemented in AutoFix [3] for Eiffel [4], this approach represents suspicious program states as “snapshots” (i.e., abstractions of a concrete property of the program state at a concrete program location) and ranks them using a combination of static and dynamic evidence.  
+
+> •
+
+Counterexample localization : We evaluate a family of counterexample-based localization techniques with in-creasing capabilities. These include raw baseline extrac-tion (CNTB), single-trace structured ranking (CNTS), and multi-trace aggregation via iterative path blocking (CNTM), our primary contribution. Besides these techniques, we also evaluate an LLM-based approach. However, because LLMs are neither deterministic nor verifier-native, this approach is included only as a baseline for comparison. A key challenge in our comparison is the architectural shift from dynamic to static verification. AutoFix was originally designed for Eiffel, where contracts are checked at runtime arXiv:2608.05399v1 [cs.SE] 5 Aug 2026 through test suites. In contrast, Dafny failures manifest as unsatisfied proof obligations during static analysis. We hypoth-esize that state-based approaches like SNAP, which reconstruct information relevant to failures indirectly, are inherently dis-advantageous compared to path-based techniques that directly exploit the verifier’s native counterexample traces. We formalize the fault localization problem in verification-aware languages by treating any program that does not ver-ify as containing an implementation fault, i.e., a defect in executable code that violates a correct specification. While specification errors (e.g., weak postconditions) are common, this study isolates faults at the implementation level, allowing for a controlled evaluation with precise ground truth. Each fault localization strategy considered in this paper takes as input a faulty program, and produces a ranking of the lines in that program according to suspiciousness , i.e., from the most to least likely to contain the fault causing the specification vio-lation. We evaluate the core techniques with a mutation-based framework built on DafnyBench [5] using MutDafny [6]. 
+
+Contributions. The main contributions of this paper are:  
+
+> •
+
+A unified framework for the side-by-side evaluation of fault localization approaches in verification-aware lan-guages.  
+
+> •
+
+SNAP: A state-based ranker adapted from the AutoFix framework that uses static snapshots and inferred predi-cates for fault localization.  
+
+> •
+
+CNTM: A multi-trace ranker that aggregates evidence across multiple diverse execution paths generated through iterative path blocking.  
+
+> •
+
+A structural ranking heuristic that prioritizes nesting depth and control-flow to isolate root causes from inci-dental execution steps.  
+
+> •
+
+An empirical study characterizing trade-offs between symbolic techniques and LLMs, identifying structural awareness as a key driver for search efficiency. To guide the empirical study, we define the following research questions: 
+
+RQ1 (State vs. Path): How do state-based FL techniques compare to counterexample-based FL techniques? 
+
+RQ2 (Ranking Ablation Study): How do individual ranking components frequency, depth, and structure compare in terms of their contribution to FL effectiveness? 
+
+RQ3 (Path Diversity): How does multi-trace aggregation compare to single-trace analysis in terms of FL effectiveness? 
+
+RQ4 (LLM Baseline Comparison): How do verifier-native FL techniques compare to a general-purpose LLM baseline? II. S NAPSHOT STATE -B ASED FAULT LOCALIZATION 
+
+We first present SNAP , a state-based approach that ranks program locations by identifying suspicious program states through the construction of a program state abstraction. SNAP is a Dafny adaptation of AutoFix’s fault localization approach, originally proposed for Eiffel and the first designed specifically for verification-aware languages. Both languages are grounded in Design by Contract (DbC), but while Eiffel is a pure Object-Oriented (OO) programming language, Dafny has a more imperative character, where OO features are available but not the most commonly used ones. This distinction is significant because part of AutoFix’s proce-dure for building a program abstraction uses its OO structure. Additionally, Eiffel supports DbC as a runtime mechanism, whereas Dafny statically verifies contracts before execution, so feedback regarding contract violations will differ in nature. The fundamental differences between the two languages mean that the same approach may yield different results, which is important to study and constitutes a foundational first step, establishing a baseline for further research on fault localization techniques for verification-aware languages. SNAP is a dynamic analysis technique, relying on program executions to gather evidence about suspicious program states. This analysis is centered on the faulty method, which we consider to be the method where the specification violation reported by Dafny’s verifier occurs. AutoFix was designed for programs with single faults, so, if the verifier flags more than one violation, SNAP simply handles the first one. Never-theless, extending this approach to iteratively handle multiple violations would be feasible but left as future work. This approach investigates the possible causes of program faults by building an abstraction of the program state based on boolean predicates collected from multiple sources. Each of these boolean predicates originates a snapshot , an abstraction of a concrete property of the program state at a concrete program location. Each snapshot is assigned a suspiciousness score derived from a combination of static and dynamic anal-ysis features. The ranking of program lines produced by the strategy is projected from the snapshot ranking, considering the program location associated with each snapshot. While most fault localization techniques that compute sus-piciousness scores do so at the program statement level, SNAP analyzes specific program states. This finer level of fault localization granularity provides a more precise guide for a future fix generation process. Its goal is to, given one of the top-ranked snapshots, attempt to avoid the state it abstracts. 
+
+A. Formal Model of Snapshots 
+
+Let B be the collection of boolean predicates abstracting the program state, each predicate p ∈ B is evaluated at each location l of the program where it is visible, resulting in a snapshot, i.e., a triple ⟨l, p, v ⟩, where v is a boolean value. Each snapshot abstracts a program execution in which p
+
+evaluates to v at location l. A snapshot with a high suspi-ciousness score indicates there is a high probability of the fault being due to predicate p taking value v at location l.
+
+B. Test cases 
+
+AutoFix relies on both contracts and tests automatically generated from the contracts as the repair oracle. There is con-siderable research on test generation from specifications [7]– [10]. Eiffel benefits from its own specification-based test generation tool, AutoTest [11], which automatically selects inputs for the program constructs under test and determines their success or failure by observing whether they satisfy their contracts when executed with those inputs. However, no approach of the sort exists in Dafny, which poses a challenge to the replication of this fault localization approach. Dafny itself provides a beta version of a counterexample-based test generation command under development 1, resulting from the integration of the work developed, first in Delfy [12], [13], and then in DTest [14]. However, this tool is insufficient for our needs because it does not support some of Dafny’s key features, such as arrays, and it only generates one test case per program path. Our approach requires a broad and diverse test suite for detecting faulty execution patterns. Additionally, it falls short because, although it is guided by the specification, it generates tests based on the implementation’s structure rather than independently from it, thus failing to distinguish between correct and incorrect implementation behavior. To address this gap, we developed D AFNY CBT, a contract-based test generator that derives both inputs and expected out-puts from contracts , independently of the implementation. This ensures that tests fail whenever the implementation deviates from its contract, and that specified behavior unreached by the code is still exercised. Test generation has two stages. First, the contract is de-composed into Disjunctive Normal Form (DNF) using impli-cation splitting that is safe under short-circuit evaluation, with each clause representing an input/output equivalence class. Z3 solves each satisfiable clause for concrete inputs and, where feasible, expected outputs. A uniqueness probe emits either a concrete pin expect result== v, a disjunctive pin over a small enumerated set, or the postcondition literals as runtime expect assertions. Then, boundary value analysis targets collection sizes (e.g., |a| ∈ { 0, 1, ≥2}) and numeric extremes from relational literals, covering off-by-one faults. Two refinements improve fault detection: an anti-trivial bias 
+
+soft-asserted in each SMT query nudges Z3 away from trivial values that mask faults; a literal relevance check inspired by Modified Condition/Decision Coverage strengthens each clause query so every literal constrains admissible outputs. A runtime check phase splits the suite into Passing and 
+
+Failing methods, containing, respectively, the set of passing tests P and of failing tests F , which are consumed by SNAP’s fault localization procedure. Tool details and sources are available at https://anonymous.4open.science/r/DafnyCBT/ 2.
+
+C. Snapshot generation 
+
+The set of boolean predicates from which snapshots are generated is identified by two different processes: (1) inference of invariants at each location of the faulty method, and (2) enumeration of boolean predicates relevant in the context of the faulty method. 
+
+1) Snapshot generation via invariant inference: An invari-ant is a property that is always true at a given program location. For SNAP, the distinction between passing and  
+
+> 1https://dafny.org/dafny/DafnyRef/DafnyRef#sec-dafny-generate-tests, ac-cessed Apr 2026.
+> 2Anonymized for double-blind review.
+
+failing invariants is fundamental in identifying faulty behavior. The set of passing invariants πl corresponds to properties that are true at program location l in every execution of the passing tests P . Conversely, the set of failing invariants 
+
+ϕl collects the properties that hold at location l for every execution of the failing tests F . The boolean predicates in 
+
+Π = {p | p ∈ ϕl ∧ p /∈ πl}, i.e., the properties that hold in failing tests but not in passing ones, are representative of potentially faulty behavior. For each invariant i ∈ Π inferred at location l, a snapshot ⟨l, i, true ⟩ is generated. We collect invariants using Daikon [15], a dynamic likely invariant inference tool. It is dynamic because it operates by observing evidence of the program’s behavior during execu-tion, through the analysis of a trace file that records values of different program variables at different program locations. In turn, likely means that the invariants are statistically likely to be true based on a number of observed executions. For some programming languages, Daikon provides frontends that automatically produce trace files from a program equipped with test cases. For the remaining languages, including Dafny, a custom frontend 3 which converts execution data into a format that Daikon can process must be provided. Our frontend was implemented by instrumenting the input Dafny program with print statements. This way, running it and redirecting the output to a file produces a trace file ready to be fed into Daikon. The first step is to print a header 4 consisting of program point declarations, i.e., the points of the program at which we want Daikon to perform invariant inference. In our case, these correspond to the faulty method’s entry, exit, and every position between statements 5. Each program point declaration contains a list of variable declarations for the variables visible at that program location, which we identify by analyzing the program prior to its instrumentation. The program traces are expressed after this initial block of declarations. Each trace record 6 consists of the identification of one of the program points previously declared, and, for each of the variables declared in that point, its value in a given execution. We achieve this by printing the value of each visible variable at each location of the faulty method. Since we want to generate passing and failing invariants sep-arately, we perform two runs of this instrumentation process: one that, in addition to inserting the print statements required for the trace generation, disables the failing tests by removing the invocation of Failing , and another that disables the                       
+
+> 3https://plse.cs.washington.edu/daikon/download/doc/developer.html#New-front-ends, accessed Apr 2026.
+> 4More information about the expected header format is available at https://plse.cs.washington.edu/daikon/download/doc/developer.html#Declarations, accessed Apr 2026.
+> 5By default, Daikon only supports invariant inference at methods’ entries and exits, but the documentation mentions a workaround that can be achieved by inserting dummy method calls, that take all visible variables as parameters, at the additional locations we wish to infer invariants at. The invariants produced by Daikon at the dummy method’s entry and exit are the invariants that hold at the call location.
+> 6For more information about the expected trace record format, visit https://plse.cs.washington.edu/daikon/download/doc/developer.html#Data-trace-records, accessed Apr 2026.
+
+passing tests by removing the invocation of Passing . As a result, in the first run, only passing executions are considered for invariant inference, while in the second, only failing executions are considered. 
+
+2) Snapshot generation via enumeration: SNAP comple-ments the generation of snapshots via invariant inference with enumeration of boolean predicates collected from different sources throughout the program, motivated by a study by Pytlik et al. [16] that discusses the limitations of the invariant inference fault localization approach. Essentially, the invariants inferred by Daikon enable the discovery of more complex and semantically rich properties about the program, while the enumeration process provides completeness due to its exhaustive coverage of basic conditions. The enumeration process is, in principle, similar to invariant inference, except that it relies on expressions directly captured from the program and on simpler templates (adopted from AutoFix), rather than using those implemented by a tool, and then checks whether they hold during execution. The set of collected boolean predicates B is defined as follows:  
+
+> •
+
+Boolean expressions . For every boolean expression b ap-pearing in the faulty method’s contract or implementation, 
+
+b ∈ B. 
+
+> •
+
+Argumentless boolean query expressions . For every argumentless boolean query q publicly available in the faulty method’s scope, q() ∈ B. In the OO paradigm, this corresponds to class getters of boolean attributes, which define properties of the object state, available in the faulty method’s class. For Dafny, this corresponds to predicates and functions with boolean return type belonging to the same class as the faulty method (or scope, in case the program does not follow the OO paradigm, as often happens in Dafny).  
+
+> •
+
+Constructed argumentless boolean queries. For every object o visible in the faulty method’s contract or im-plementation, and every argumentless boolean query q
+
+publicly available in o’s class, o.q () ∈ B. 
+
+> •
+
+Boolean expressions constructed from integer expres-sions. For every two integer expressions e and e′ appear-ing in the faulty method’s contract or implementation, or resulting from calling each available argumentless integer query on each object appearing in the faulty method’s contract or body, {e = e′, e < e ′, e ≤ e′} ⊂ B (and, by symmetry, {e′ < e, e ′ ≤ e} ⊂ B), as well as, 
+
+{e = 0 , e < 0, e ≤ 0} ⊂ B. 
+
+> •
+
+Null checks. For every nullable reference type expres-sion e appearing in the faulty method’s contract or implementation, or resulting from calling each available argumentless nullable reference type query on each ob-ject appearing in the faulty method’s contract or body, 
+
+e = null ∈ B. 
+
+> •
+
+Logical implications. For each logical implication 
+
+a =⇒ b appearing in the faulty method’s contract or in the contract of queries called in the remaining included expressions, {a =⇒ b, ¬a =⇒ b, a =⇒ ¬b, b =⇒
+
+a} ⊂ B.For each program location l, and each boolean predicate 
+
+p ∈ B capable of being evaluated at l (every variable appearing in sub-expressions of p is visible at l), a snapshot ⟨l, p, v ⟩ is generated, where the value of v is either true or f alse , as dynamically observed during test suite execution. ⟨l, p, true ⟩
+
+will be included in the set of snapshots if in at least one test execution predicate p is true at location l. The same applies to ⟨l, p, f alse ⟩.
+
+D. Suspiciousness score computation 
+
+A suspiciousness score is a metric commonly used in fault localization techniques to estimate how likely a program component is to be the cause of a fault. Several formulas for the computation of this metric have been proposed in the literature [17]–[19]. SNAP’s formula combines three factors. The two static metrics taken into consideration for calculating the suspiciousness score of a snapshot are control dependence (cd) , i.e., the distance between the snapshot’s location and the location where the contract violation occurs when taking the shortest direct path, and expression dependence (ed) , i.e., the similarity between the snapshot’s predicate and the violated contract in terms of how many sub-expressions they share. The dynamic analysis metric (dyn) consists of a weighted sum measuring how often the snapshot appears in failing test runs as opposed to passing ones, its value being higher the more it appears in failing tests and the less it appears in passing tests, following spectrum-based fault localization [18], [20]. Each of the three metrics and the overall suspiciousness score of a snapshot ⟨l, p, v ⟩ are, respectively, computed as follows: 
+
+cd (l, f ) = 1 − cdist (l, f )
+
+max {cdist (λ, f ) | λ ∈ m ∧ λ ⇝ f }
+
+where m is the faulty method, f is the location where the contract violation occurs, l1 ⇝ l2 represents the existence of a direct path from program location l1 to program location 
+
+l2, and cdist (l1, l 2) represents the length of the shortest path from l1 to l2.
+
+ed (p, c ) = eprox (p, c )
+
+max {eprox (λ, c ) | λ ∈ B}
+
+where c is the violated contract, and eprox (e1, e 2) repre-sents the number of shared sub-expressions between expres-sion e1 and expression e2.
+
+dyn (⟨l, p, v ⟩) = γ+ α
+
+1 − α (1 −β+βα #p(⟨l,p,v ⟩))−α#f (⟨l,p,v ⟩)
+
+where #p(⟨l, p, v ⟩) is the number of passing tests where the snapshot appears, #f (⟨l, p, v ⟩) is the number of failing tests where the snapshot appears, and α, β, and γ are non-negative reals. AutoFix empirically determined α = 1 /3, β = 2 /3, and 
+
+γ = 1 , which we adopt in our implementation. 
+
+susp (⟨l, p, v ⟩) = 3
+
+cd (l, f )−1 + ed (p, c )−1 + dyn (⟨l, p, v ⟩)−1
+
+This suspiciousness score formula takes the dynamic score as the primary source of evidence, and control and expression dependence as secondary criteria to discriminate between snapshots with similar dynamic score (dynamic score has a minimum of 1 while the others vary between 0 and 1). Calculating the dynamic score involves knowing how many times a snapshot appears in executions of passing and failing tests. We collect this information by instrumenting the faulty program. For each ⟨l, p ⟩ snapshot pair, we insert one print statement evaluating p at location l of the faulty method. The output of the instrumented program allows us to count how many times each snapshot appears across test executions. III. C OUNTEREXAMPLE -B ASED FAULT LOCALIZATION 
+
+Counterexample-based techniques use the diagnostic infor-mation produced by SMT solvers when a verification condition fails. These methods transform the abstract execution traces (counterexamples) into a ranked list of suspicious program lines. We categorize these techniques into three levels of increasing complexity: baseline (CNTB), structured (CNTS), and multi-trace (CNTM). CNTM is the primary technique proposed in this work, while CNTB and CNTS are simplified variants that isolate the contribution of its components. 
+
+A. Counterexample Baseline (CNTB) 
+
+CNTB extracts counterexample data directly from the diag-nostic messages produced by the Dafny CLI when run with the 
+
+counter-examples flag. This method produces exactly one counterexample for each failing verification condition (e.g., an assertion or postcondition), providing a single witness even if multiple failing paths exist for that same condition. CNTB performs no advanced heuristic weighting, it simply identifies every line involved in the reported execution path and maps it to the corresponding source code, resulting in a raw set of suspicious lines. 
+
+B. Counterexample Single-Trace Structured Ranker (CNTS) 
+
+CNTS significantly refines the raw output of the baseline by introducing code-awareness in a ranking heuristic that prioritizes program lines based on their structural properties. CNTS’s two primary functional improvements over CNTB consist of its enhanced structural extraction and formal rank-ing system. Because the tool is code-aware, it extends the diagnostic set beyond the literal lines found in the trace. It identifies and extracts the condition nodes of if , while ,and for blocks as suspicious whenever a line identified in the failing trace exists within their scope. Additionally, CNTS provides a discriminatory power that the baseline lacks by ranking these lines using line frequency, nesting depth, and node type structural heuristics. 
+
+C. Counterexample Multi-Trace Aggregator (CNTM) 
+
+CNTM addresses the primary limitation of the single-trace approach in that a single counterexample is merely one of many possible ways a program can fail. Relying on one trace per verification condition failure can lead to an incomplete exploration of the fault space. CNTM improves upon CNTS by forcing SMT solver diversity via an iterative path blocking mechanism. Upon finding a counterexample, the system iden-tifies the associated execution path and introduces a temporary constraint to block that specific path in the solver’s next search. This process is repeated to collect multiple, independent failing paths. CNTM then aggregates evidence across all collected traces, assigning higher suspiciousness to lines that appear consistently across diverse failure paths. 
+
+D. Formal Model of Counterexamples 
+
+A verification failure produces a counterexample C, for-malized as a tuple ⟨σ, π ⟩, where σ represents the valuation of variables and π = {ℓ1, ℓ 2, . . . , ℓ n} the trace path , defined as the ordered program lines executed in the counterexample. 
+
+1) Path Independence: By default, Dafny only provides one counterexample trace per failed verification condition. To improve coverage, CNTM seeks a set of independent counterexamples . Two counterexamples Ci = ⟨σi, π i⟩ and 
+
+Cj = ⟨σj , π j ⟩ are path-independent if and only if their execution paths differ: πi̸ = πj . This distinction ensures that we prioritize discovering new buggy branches over exploring different data valuations of the same logical error. The aggre-gate path set Π = {πi, π j , ..., π n} includes all the collected independent trace paths. 
+
+E. Iterative Path Extraction Algorithm 
+
+To address the limitation of the Dafny verifier providing a single counterexample path per failing condition, we im-plement an iterative instrumentation strategy to exhaustively explore alternative independent failing execution traces. The algorithm prunes previously discovered paths, forcing the SMT solver to find different ways the same verification condition might fail. For a failing verification condition v (e.g., an assertion or postcondition), the process is as follows: 1) Initial Extraction. The verifier runs to obtain an initial counterexample C for condition v, and its associated ex-ecution path π from the Dafny CLI diagnostic messages. 2) Path Pruning. Identification of the deepest branch point 
+
+within π, representing the final logical decision (e.g., an 
+
+if branch or loop entry) that led to the failure. 3) Instrumentation. Temporary instrumentation of the source code through the injection of an assume false statement at this specific branch point, effec-tively pruning the discovered path from the search space. 4) Iterative Discovery. The verifier is re-run on the instru-mented version of the code. If a new counterexample 
+
+C′ for v is identified by the solver, the new path π′ is extracted and the process is repeated from Step 2. 5) Termination. The loop terminates when condition v ei-ther verifies or no further counterexamples are generated, indicating all unique failing paths have been captured. 
+
+F. Multi-Criteria Ranking Across Counterexamples 
+
+Once the aggregate path set Π is collected, we rank each line l ∈ S Π using a hierarchical scoring system to prioritize root causes over incidental execution steps. This ensures that the most suspicious lines are presented to the developer first. The ranking is determined by the lexicographical comparison of the following tuple: rank (l) = ⟨− freq (l), −max dep (l), −is cntr (l), ord (l)⟩
+
+This order is defined by four metrics:  
+
+> •
+
+Frequency (freq (l)): The number of independent paths in Π that contain line l serves as the primary filter. Lines recurring across multiple independent paths represent a “consensus” of suspicion.  
+
+> •
+
+Maximum Depth (max dep (l)): The maximum nesting level of the statement at line l. Targets structural complex-ity, based on the heuristic that logical errors frequently hide within deeply nested blocks.  
+
+> •
+
+Control Statement (is cntr (l)): A boolean indicator of whether line l consists of a branch guard (e.g., 
+
+if/while/for ). These are prioritized to highlight the 
+
+decisions , serving as a tie-break if other lines are at the same nesting level as these control statements.  
+
+> •
+
+Trace Order (ord (l)): The relative position of line l in the sequence, used only to break ties. 
+
+G. Multi-Trace Aggregator Execution Example 
+
+To illustrate the iterative path extraction process, consider the demo method in Listing 1, which contains two distinct logical errors, in Lines 4 and 8, that violate the postcondition 
+
+y == x for positive inputs.                                                                     
+
+> 1method demo(x: int )returns (y: int )
+> 2ensures x>0==> y== x{
+> 3if x>1{// Path C2: (x=2)
+> 4y:= x+1; // Bug: yshould be x
+> 5return y;
+> 6}if x>0{// Path C1: (x=1)
+> 7// assume false
+> 8y:= x+2; // Bug: yshould be x
+> 9return y;
+> 10 }
+> 11 return x;
+> 12 }
+> Listing 1. Example of path extraction via instrumentation.
+
+For this example, the algorithm proceeds as follows: 
+
+1) Initial Counterexample Extraction ( C1). Upon the first ver-ification attempt, the SMT solver identifies a counterexample where x = 1 . The execution path π1 skips the first if block (since 1 ≯ 1) and enters the second if block ( 1 > 0). The solver returns the trace π1 = {line 6, line 8, line 9 }, where Line 8 contains the buggy assignment y := x + 2.
+
+2) Path Pruning via Instrumentation. To discover other potential faults, the algorithm instruments the second if 
+
+branch. As shown in Line 7, an assume false statement is dynamically injected at the start of the branch explored by 
+
+C1. This statement instructs the solver to ignore any execution path that enters this specific block during the next iteration. 
+
+3) Second Counterexample Extraction ( C2). With the path π1
+
+effectively blocked, the verifier is forced to explore alternative branches to satisfy the negation of the postcondition, identi-fying x = 2 . This execution path π2 explores the first if 
+
+block ( 2 > 1), yielding π2 = {line 3, line 4, line 5 }, where Line 4 contains the second buggy assignment y := x + 1.Since, after blocking these two branches, no further failing paths exist, the iteration terminates. 
+
+Resulting Ranking Input. The algorithm concludes with the aggregate set Π = {π1, π 2}. By forcing the solver to move past the first discovered error, we ensure that both if blocks are identified as candidates for fault localization. Note that if a line were shared between these two independent paths, its Frequency count would increase, correctly marking it as a highly suspicious common point of failure. IV. LLM-B ASED FAULT LOCALIZATION 
+
+As a complement to the verifier-native techniques presented above, we present LLM , a fault localization baseline that relies on a large language model to rank suspicious program lines. Given a verification failure, the model receives the numbered source code and is asked to identify the most likely line(s) responsible for the failure. In this main baseline, the model does not receive any additional information. Our goal is not to optimize LLM performance, but rather to compare verifier-native fault localization techniques against a representative LLM-based approach. Fully optimizing the LLM would introduce additional experimental variables, such as prompt engineering, model selection, retrieval mechanisms, and few-shot examples, requiring dedicated ablation studies beyond the scope of this work. Still, to strengthen the com-parison, our study includes two additional variants. LLM ER 
+
+augments the original setup with the verifier error message, and LLM ER CN constitutes a hybrid configuration com-bining verifier error messages with CNTM’s ranking, aiming to capture potential synergies. We used the following prompt:                                                                                                        
+
+> You are afault localization model. Rank suspicious lines from most likely fault to least likely fault. Output contract (strict): 1) The list is aranking: the first element must be the line most likely to contain the fault. 2) You do not have to return afull list with all the lines, prefer shorter lists. 3) Return exactly one JSON array of unique 1-based line numbers. 4) Do not return any explanation, markdown, code fences, labels, or extra text. 5) Use integers in the inclusive range[1, t_lines]. 6) If no suspicious lines are found, return []. 7) Your entire response must match this pattern: ˆ\\[(?:\\s*\\d+\\s*(?:,\\s*\\d+\\s*)*)?\\]$ Example valid response: [30, 15, 29] {verifier error if LLM_ER variant} The file has {t_lines} lines. BEGIN_FILE {numbered_source_code} END_FILE
+
+We used qwen3-coder-next model via OpenRouter (tested in April 2026). Generation followed OpenRouter’s defaults, with temperature 1.0, top p 0.95, top k 40, a max-imum output length of 66,000 tokens, and a context window of 262,144 tokens. We selected it to balance reproducibility, performance, and cost. Unlike proprietary models, which change over time and hinder exact replication, open-weight models provide fixed, versioned checkpoints that enable re-producibility. At the time of this study, the model was the latest Qwen code model and among the strongest open-weight coding LLMs available, achieving competitive results on coding benchmarks (e.g., 70% on SWE-bench [21]). V. E VALUATION 
+
+A. Experimental Procedure 
+
+We evaluate SNAP, the counterexample techniques (CNTB, CNTS, and CNTM), and the LLM techniques (LLM, LLM ER, and LLM ER CN) within a unified experimental framework on Dafny mutants derived from DafnyBench. As a reference point, we include the RAND baseline, which returns all lines of the failing method randomized, serving as a sanity check for calibration rather than as a competing technique. We generated our evaluation benchmark using MutDafny [6] and all of its mutation operators to produce mutants from the 785 programs of DafnyBench [5]. The set of generated mutants includes 68,957 that fail verification, i.e., that contain faults that are detected by Dafny’s verifier. However, MutDafny stores mutants in their post-resolution representation and, when converting them back to source code, this process can produce invalid Dafny programs. We, therefore, filtered for valid, compilable code, reducing the set to 57,925 mutants.                              
+
+> Op. Description #M
+> AOR Replacement of an arithmetic operator with another 33 ROR Replacement of a relational operator with another 51 COR Replacement of a conditional operator with another 4BBR Replacement of a relational or conditional expression with true or false
+> 20 AOI Insertion of a unary minus in an arithmetic expression 76 COI Insertion of a not operator in a conditional expression 21 AOD Deletion of a unary minus in an arithmetic expression 1COD Deletion of a not operator in a conditional expression 1LVR Replacement of a numerical literal with its increment, decrement, or zero, and of a string literal with an empty one, a default one, or a mutation of the original 50 EVR Replacement of an expression with a default literal 62 VER Replacement of same-type variables 92 LBI Insertion of a break statement at the beggining of the body of a loop 5MRR Replacement of a call with a default return-type literal 6MAP Replacement of a call with one of its arguments with the same type as the return value 1MVR Replacement of a call with a same-type variable 8SAR Swap of a call argument with another used in the same call with the same type 2CIR Replacement of a non-empty collection initializer with an empty one, and of an empty initializer with a default non-empty one 6CBE Extraction of one of the blocks of an if or if-then-else statement and deletion of the remaining ones 7DCR Replacement of a datatype constructor with another of the same datatype and with the same signature 1FAR Replacement of a class’s field access with another same-class field 1SDL Deletion of a statement or of an entire code block 28 ODL Deletion of all occurrences of a binary operator (and of one of its arguments to preserve program validity) 12 SWS Swap of a statement with a neighboring one 12 TABLE I MUTATION OPERATORS USED IN THE ARTIFICIAL FAULT DATASET . #M IS THE NUMBER OF MUTANTS GENERATED WITH EACH OPERATOR .
+
+Given the high computational cost of iterative SMT solver calls and invariant inference, we randomly sampled 500 mu-tants for processing. This sample size is statistically robust, as studies suggest that 300 to 1,000 mutants are sufficient to yield stable fault localization results and approximate mutation scores within narrow error bounds [22], [23]. Our dataset of 500 programs comprises a total of 44,242 lines of code, averaging 88 lines of code per program file. Additionally, on average each program contains five non-ghost components, which in Dafny includes methods, functions, and other similar constructs. Table I summarizes the 23 mutation operators that led to the generation of the 500 mutants included in our dataset, showcasing the variety of types of faults it tries to mimic. These include 16 mutation operators previously proposed in mutation tools for other programming languages and 7 newly proposed by MutDafny. These were designed based on an analysis of bugfix evidence from Dafny projects available on GitHub, rendering the mutants generated by them representative of real mistakes Dafny developers make. For each mutant, the ground truth, i.e., the fault location, was established by performing a diff against the original program, identifying the mutated location. Our experimental procedure consists of submitting each of the 500 faulty programs in our dataset to each of the fault localization techniques described before. For each strategy and mutant, we produce a ranked list of lines L = [ l1, . . . , l t],ordered by suspiciousness, and evaluate it against the ground-truth faulty line lgt .
+
+B. Experimental Metrics 
+
+We evaluate fault localization effectiveness using the EXAM score, which captures the effort required to locate the faulty line, Top-k success rates, and two coverage indicators: Found 
+
+rate, measuring the proportion of cases where the ground truth appears in the model’s ranking, and Empty rate, representing the proportion of cases where the model returned no lines. For the EXAM score, we adopt a normalized, 0-based formulation. Let N denote the number of candidate lines in the search scope, and let r be the number of non-fault lines appear-ing in the ranked list L inspected before matching the ground-truth faulty line lgt . It is defined as EXAM = r/ (N − 1) ,where a value of 0 indicates immediate localization and 1 indicates that the fault is found last in the ranking. Rankings are computed over absolute line numbers within the active scope (file or method). However, strategies are not required to return complete rankings. When the faulty line is absent from an output of size t, we estimate the remaining effort by assuming that the developer continues inspecting the remaining N −t lines in random order. Under this assumption, the fault is expected to appear at the midpoint of the unranked portion, and the EXAM score is computed accordingly, as proposed by Pearson et al. [24]. We assess statistical significance on EXAM scores using paired, two-sided Wilcoxon signed-rank tests. We report p-values together with matched rank-biserial correlations as effect sizes. For Top-1 localization, we use McNemar’s exact test and report paired odds ratios. 
+
+C. Dual-Scope Evaluation 
+
+We perform our empirical evaluation under two scopes capturing two different debugging scenarios:  
+
+> •
+
+File scope : Considers all executable lines in the program file, reflecting the standard fault localization setting where there are no assumptions about the fault location [24].  
+
+> •
+
+Method scope : Considers executable lines within the faulty method, reflecting a workflow where the developer has already narrowed the search space using the verifier’s error message. This evaluates localization performance within the identified faulty method. 
+
+D. Comparison with State-of-the-Art Methods 
+
+We focus on verifier-native methods for verification-aware programming languages, where specifications can provide a more reliable correctness oracle than test suites. As a result, our evaluation does not include a comparison to classical fault localization methods (e.g., spectrum-based (SBFL) and mutation-based (MBFL)), which rely solely on test suites as the correctness oracle. Porting test-based methods to Dafny would require a higher-quality test generator capable of pro-ducing a diverse suite with reliable pass/fail labels, a capability Dafny and even our DAFNYCBT prototype currently lack. Because the resulting effectiveness would be dominated by test-generation quality rather than by the localization technique itself, a fair evaluation would need to distinguish these two factors. We therefore consider a systematic comparison of test versus specification oracles for fault localization to be a distinct research contribution, outside the scope of this paper. VI. R ESULTS 
+
+Tables II-V contain the scores for the different metrics for all the fault localization models. Figure1 illustrates the distribution of results. For EXAM, CNTM significantly outperforms all non-LLM baselines ( p < 0.05 ), while differences with LLM are not significant ( p = 0 .101 ) and have a negligible effect size. For Top-1, LLM significantly outperforms CNTM ( p < 0.05 ), with CNTM outperforming all other baselines. Full statistical results are provided in the Appendix in Tables VI and VII. Thus, the answers to the research questions focus more on CNTM than on the other counterexample-based variants. 
+
+A. RQ1 (State vs. Path): How do state-based FL techniques compare to counterexample-based FL techniques? 
+
+Table II shows that our counterexample-based approach outperforms the state-based approach we adapted from lit-erature. At file scope, SNAP achieves an EXAM score of 0.324, compared to 0.109 for CNTM, with a similar gap appearing at method scope. One key factor is SNAP’s high rate of empty predictions (39.20%), which are penalized by the EXAM metric (assigned a default score of 0.5 when no ranking is produced). This high Empty rate is mostly due to limitations of the testing tool, which, as an early prototype, produces valid test files for only 387 out of the 500 programs in our dataset, lacking support for programs involving more complex lan-guage features, such as multidimensional arrays, function argu-ments, and nested types (e.g., map<int, (int, int)> ). Additionally, in 61 of the programs, though valid tests are generated, they either do not exercise the faulty method, or fail to split the tests into passing and failing, a prerequisite for SNAP. From the remaining, 11 timed out out after six hours, and another 11 failed after exhausting the available memory, since the state-based technique is also significantly more computationally expensive than the others. For the 297 programs for which all techniques produce non-empty outputs, SNAP attains an EXAM score of 0.212 at file scope and 0.359 at method scope, which is still substantially worse than CNTM. Notably, in the file setting, SNAP performs worse than the RAND baseline, which merely ranks lines uniformly at random among failing methods. Nevertheless, it performs better when evaluated at the method scope, highlight-ing the distinct behavior of the RAND baseline across scopes. RAND restricts its search exclusively to the lines of the failing method, and, because the method represents only a fraction of the file, the expected file-scope EXAM for RAND is approximately the method-to-file size ratio (around 0.19 in our dataset). Consequently, any technique that merely identifies the correct method already approaches this baseline. However, at method scope, RAND yields a score near 0.5 (0.483), representative of random line selection. The fact that SNAP outperforms RAND at this scope (EXAM of 0.359) indicates that, when the correct method has already been isolated, SNAP’s snapshot-based heuristics do carry meaningful signal for distinguishing faulty statements from correct ones. Despite this, the results still indicate that SNAP’s limitations go beyond incomplete support for certain classes of programs. Even when it produces outputs, their ranking quality remains subpar. This discrepancy is also reflected in effectiveness. In ad-dition to SNAP’s high Empty rate (39.20%), it only locates 47.00% of faults, while CNTM achieves a Found rate of 84% with only 1.4% of empty outputs. A likely contributing factor is SNAP’s reliance on test executions, its effectiveness being tied to how well the gen-erated tests exercise relevant program behavior. When paths containing fauls are insufficiently covered, SNAP may fail to produce meaningful rankings, or any output at all. In contrast, counterexample-based techniques operate directly on verifier-provided counterexamples that encode failure-inducing executions, without requiring test generation. As a result, they are less sensitive to coverage limitations. Overall, SNAP’s weaker performance appears to be the result of both limited coverage in test-based execution and lower-quality rankings, even when outputs are available. Data Strat. EX F EX M Top-1/3/5 F / E 
+
+All CNTM 0.109 0.155 43 / 71 / 78 84.00 / 1.40 SNAP 0.324 0.413 8 / 20 / 32 47.00 / 39.20 RAND 0.187 0.483 6 / 22 / 35 95.40 / 1.00 Comp. CNTM 0.092 0.138 46 / 77 / 83 87.54 / 0.00 SNAP 0.212 0.359 11 / 33 / 53 77.44 / 0.00 RAND 0.186 0.479 7 / 26 / 39 98.99 / 0.00                
+
+> TABLE II FAULT LOCALIZATION ON ALL (500 PROGRAMS )AND COMP .(THE 297
+> WITH NON -EMPTY OUTPUTS FROM ALL METHODS ). M ETRICS : EX F/EX M
+> (EXAM SCORE ,FILE /METHOD SCOPE ); T OP -k(% OF FAULTS RANKED WITHIN THE TOP K PREDICTIONS ); F (% OF CASES THAT SUCCESSFULLY LOCATE THE FAULT ); E (% THAT RETURN AN EMPTY OUTPUT ). RAND CNTB CNTS CNTM LLM SNAP Technique 0.0 0.2 0.4 0.6 0.8 1.0 EXAM Score Median Mean
+> Fig. 1. Distribution of file-scoped EXAM scores. The boxplots illustrate the median, quartiles, and outlier variability across techniques. Boxplots use Tukey whiskers (1.5×IQR); outliers are not shown.
+
+Our novel counterexample-based technique largely out-performs state-based techniques, achieving overall higher effectiveness, and across a larger number of programs. 
+
+B. RQ2 (Ranking Ablation Study): How do individual rank-ing components frequency, depth, and structure compare in terms of their contribution to FL effectiveness? 
+
+To isolate the contribution of each ranking component, we perform an ablation study on the CNTM approach and four variants. CNTM RAW uses only raw CLI counterex-ample lines without augmenting with control-flow data, and the three remaining versions respectively ignore frequency 
+
+(CNTM NF), depth (CNTM ND), and control-statement 
+
+(CNTM NC) priority in the ranking formula. The results, summarized in Table III, demonstrate that structural awareness is a significant driver of localization precision. The most significant performance drop occurs in the CNTM RAW variant. By discarding the augmented logical context, the EXAM score degrades dramatically (from 0.109 to 0.190 at file scope), meaning a developer would have to search almost twice as much code to find the fault. Furthermore, the Top-1 accuracy collapses from 43% to just 18%. Among the individual ranking heuristics, depth proved to be the most critical. Removing it (CNTM ND) caused the EXAM score to worsen significantly (rising to 0.139 at file scope and 0.244 at method scope) and slashed Top-1 performance by 
+
+Strat. EX F EX M Top-1/3/5 F / E 
+
+CNTM 0.109 0.155 43 / 71 / 78 84.00 / 1.40 CNTM RAW 0.190 0.299 18 / 39 / 58 74.40 / 1.40 CNTM NF 0.109 0.160 36 / 71 / 79 84.00 / 1.40 CNTM ND 0.139 0.244 22 / 49 / 64 84.00 / 1.40 CNTM NC 0.113 0.166 37 / 68 / 77 84.00 / 1.40    
+
+> TABLE III FAULT LOCALIZATION PERFORMANCE ACROSS STRATEGIES (500
+> PROGRAMS ). M ETRICS AS DEFINED IN TABLE II.
+
+Strat. EX F EX M Top-1/3/5 F / E 
+
+CNTB 0.243 0.322 12 / 31 / 50 61.40 / 5.20 CNTS 0.127 0.181 27 / 64 / 76 80.80 / 2.60 CNTM 0.109 0.155 43 / 71 / 78 84.00 / 1.40   
+
+> TABLE IV FAULT LOCALIZATION PERFORMANCE ACROSS STRATEGIES (500
+> PROGRAMNS ). M ETRICS AS DEFINES IN II
+
+half (22%). This confirms that the hierarchical position of a statement is a high-signal indicator of a fault’s root cause. The suppression of both the frequency (CNTM NF) and 
+
+control-flow (CTNM NC) heuristics did not cause any statisti-cally significant EXAM score changes regarding the baseline. However, in Top-1 accuracy, there is a noticeable dip from 43% to, respectively, 36% and 37%. This suggests that, while these factors are helpful for pinpointing the exact bug as the first result, structural features like depth are more vital for reducing the overall search space. Structured ranking is a major contributor to localization quality. Neglecting structural context doubles the devel-oper’s search effort (EXAM) and reduces Top-1 accuracy. 
+
+C. RQ3 (Path Diversity): How does multi-trace aggregation compare to single-trace analysis in terms of FL effectiveness? 
+
+Compared to CNTB and CNTS, CNTM consistently im-proves across all metrics, as depicted in Table IV. CNTB’s per-formance is uniformly lower and, thus, not further discussed. For CNTS, at file scope, EXAM decreases from 0.127 to 0.109 with significance but moderate effect, and, at method scope, from 0.181 to 0.155. Figure 1 shows that CNTM outperforms CNTS, exhibiting a lower median and an overall distribution shifted closer to zero, indicating it tends to discover faults earlier across the evaluated budget range. However, the gains are better reflected in Top-k perfor-mance, with Top-1 improving substantially from 27% (CNTS) to 43% (CNTM), and with corresponding improvements in Top-3 and Top-5 accuracy. Coverage also improves, with the 
+
+Found rate increasing from 80.80% to 84.00%, and the Empty 
+
+rate decreasing from 2.60% to 1.40%. Using diverse counterexample paths, multi-trace aggrega-tion significantly improves ranking quality and robustness. Strat. EX F EX M Top-1/3/5 F / E                    
+
+> CNTM 0.109 0.155 43 / 71 / 78 84.00 / 1.40 LLM 0.159 0.217 58 / 65 / 68 72.60 / 1.00 LLM ER 0.264 0.303 37 / 48 / 50 50.80 / 0.00 LLM ER CN 0.131 0.167 46 / 72 / 76 77.20 / 0.20
+> TABLE V FAULT LOCALIZATION PERFORMANCE ACROSS STRATEGIES (500
+> PROGRAMS ). M ETRICS AS DEFINED IN TABLE II.
+
+D. RQ4 (LLM Baseline Comparison): How do verifier-native FL techniques compare to a general-purpose LLM baseline? 
+
+We compare CNTM with the LLM localization baseline and the LLM ER and LLM ER CN variants to contextualize verifier-native techniques within a broader landscape. The results are presented in Table V, and show that LLM achieves higher Top-1 accuracy (58%) than CNTM (43%) (statistically significant), indicating stronger performance at placing the faulty line at the very top of the ranking. This behavior is further illustrated in Figure 1, where the LLM variants exhibit a median closer to zero than CNTM, indicating that they more frequently rank the faulty line near the top. However, they also exhibit substantially longer tails, reflecting many cases in which the faulty line is ranked much lower or is not included among the returned candidate lines. In contrast, CNTM achieves better overall ranking quality as measured by EXAM. At file scope (however, not statistically significant), CNTM attains an EXAM of 0.109, compared to 0.159 for the LLM, suggesting lower average inspection effort across the full ranking. Furthermore, CNTM exhibits higher reliability, with a higher Found rate (84.00% vs. 72.60%). These results highlight complementary strengths between the approaches. LLM is effective at prioritizing the most likely fault location (Top-1), while CNTM provides more consistent rankings and broader coverage when the top prediction is insufficient. However, the LLM baseline is intentionally under-optimized, which likely underestimates the true potential of LLM-based approaches. We use a minimal setup (code-only input without prompt engineering, few-shot examples, or di-agnostic signals such as verifier error messages) to provide a neutral reference point rather than a fully competitive config-uration. To strengthen the comparison, we evaluated the two additional variants LLM ER and LLM ER CN. LLM ER performs worse than the baseline, consistent with prior observations in Dafny [25]. Error messages are often coarse-grained and typically indicate only the failing method, which, since the model is usually good at finding the method, adds noise rather than a useful localization signal. In practice, for this variant the model frequently predicts the line of the failing postcondition, an unsurprising but uninformative answer, since that location cannot correspond to the root cause. LLM ER CN also does not improve over either standalone method, suggesting that simple combinations are insufficient and more careful integration is required to realize any benefit. A plausible explanation for CNTM’s weaker Top-1 perfor-mance is that its heuristic scoring effectively identifies the relevant code region, but gives equal suspicion to all lines of that block that have an associated counterexample state, being incapable of finer-grained findings. In other words, CNTM is good at narrowing down where the fault lies, but less effective at deciding which specific line is most suspicious. This is precisely where LLMs may have an advantage, given their ability to reason over local code semantics. 
+
+Advantages and Disadvantages. LLMs can use learned semantic patterns to achieve strong Top-1 performance, but are inherently non-deterministic and depend on external inference. In contrast, CNTM produces deterministic and reproducible rankings grounded in counterexample traces, and operates entirely within the verification pipeline. LLM achieves higher Top-1 accuracy, while CNTM pro-vides more consistent ranking quality and reliability. These approaches should be viewed as complementary, and future work may explore hybrid methods combining counterexample information with LLM reasoning. VII. T HREATS TO VALIDITY 
+
+Mutation realism. Our mutations are synthetic, generated by predefined operators. Real verification bugs may differ: they might involve complex logic errors, subtle contract misspecifications, or edge cases not well-modeled by simple mutations. However, mutation-based evaluation is standard practice in fault localization [26], [27] and provides controlled ground truth unavailable in real-world settings. In addition, the mutation operators used for our dataset come from existing work [6], where several operators resulted from analysis of bugfix evidence from Dafny projects available on GitHub. 
+
+Dataset characteristics. Since our dataset is drawn from DafnyBench, a collection of pedagogical and algorithmic programs, our results may not generalize, as industrial verifica-tion code may exhibit different patterns (e.g., more complex contracts, different mutation distributions). However, Dafny-Bench is widely used in prior work and serves as a standard benchmark for validation of Dafny-based techniques. 
+
+LLM comparison setup. The LLM baseline is included as a reference point to situate our verifier-native techniques within the emerging landscape of LLM-based fault localization approaches, not as an optimized competitor. Unlike classical test-based methods, LLMs require no test oracle and can be applied directly to source code. We deliberately avoid prompt engineering and few-shot examples for two reasons: (1) optimizing LLM performance is orthogonal to our research focus, and (2) a code-only input represents a lower bound on what an LLM can achieve without verifier integration. The reported results should be interpreted as indicative of the relative strengths of symbolic and learned approaches, and not as a ranking of which approach is superior. The further exploration of hybrid techniques is left to future work. VIII. R ELATED WORK 
+
+Traditional fault localization approaches mostly rely on test cases. SBFL [18], [20] compares the execution frequency of program statements in failing tests as opposed to passing tests, to pinpoint those most likely to be the cause of the fault. This is measured, for each statement, by a suspiciousness score , its value being higher the more a statement appears in failing tests and the less it appears in passing tests, and a statement being more suspicious the higher its suspiciousness score is. Several coefficients for computing this score have been proposed, e.g., Tarantula [17], [28], Ochiai [20], and Barinel [29]. MBFL [30], [31] extends SBFL by considering, in addition to execution frequency, how often mutating a statement affects the outcome of failing and passing tests. The more often mutating a statement changes the outcome of failing tests and the less it changes the outcome of passing tests, the more suspicious the statement is considered. The idea behind this is that these statements are the ones that contribute to test failures and, therefore, to the faulty behavior. AutoFix [3], for Eiffel, is the first Automated Program Re-pair (APR) tool to directly incorporate contracts into the fault localization process, along with tests automatically generated from those contracts. Instead of ranking suspicious statements, it ranks suspicious expressions that hold at certain locations, representing specific program states at which the program does not behave as expected. The goal of the fix generation phase is to attempt to avoid this state. Candidate fixes are generated from templates that account for the suspicious expression. Maple [32] is an APR tool whose fault localization stage uses Hoare logic to determine the program state properties that hold at each point, and then identify violations of expected logical entailments regarding the specification. This approach has also been adapted for Dafny [33]. However, in both cases, it suffers from the limitation of only identifying the path containing the faulty location, rather than specific statements. Sullivan et al. [34] studied test and mutation generation for Alloy. Although Alloy and Dafny operate under different paradigms (relational modeling versus imperative verification), their work aligns with ours in exploring the generation of diverse inputs from formal constraints, and in using mutation analysis to evaluate verification frameworks. Zheng et al. propose FLACK [35], which localizes faults in Alloy models by analyzing counterexamples produced by bounded analysis and ranking model elements. Our work shares the high-level idea that counterexamples are first-class debugging artifacts, but differs in two core ways: (1) we target verified imperative programs (Dafny) rather than relational models; (2) we local-ize source-code lines and incorporate control-structure-aware ranking extracted from Dafny traces and instrumentation. Beyer et al. [36] study fault localization using verification witnesses, i.e., artifacts that certify reachability properties and can be post-processed to identify likely fault sites. The witness perspective is complementary to ours, since it generalizes across verifiers and intermediate formats, whereas we exploit 
+
+Dafny-specific counterexample to directly rank source lines. IX. C ONCLUSION 
+
+This paper presents a study of automated fault localiza-tion for the Dafny verification-aware language. We evaluated state-based, counterexample-based, and LLM-based baselines across 500 mutants to better understand their relative strengths in identifying root causes of verification failures. Our results show that counterexample-based localization is substantially more reliable than state-based approaches in this setting. SNAP exhibits a high Empty output rate due to its reliance on a test suite, whereas counterexample-based techniques consistently produce actionable results, with Found 
+
+rates exceeding 84%. Within this family, moving from raw traces (CNTB) to structured ranking (CNTS) yields a signifi-cant improvement, and multi-path aggregation (CNTM) further improves effectiveness, reaching a Top-1 accuracy of 43%. The comparison with the LLM baseline should be inter-preted as contextual rather than competitive. The primary goal of this work is to study deterministic, verifier-native fault localization techniques, and not to develop or optimize LLM-based methods. Accordingly, the LLM is evaluated in a minimal configuration, serving as a reference point rather than a tuned baseline. In this setting, the LLM achieves higher Top-1 accuracy, while CNTM provides better overall ranking quality (lower EXAM) and higher reliability ( Found rate). Overall, these results suggest that counterexample-based techniques provide a robust and consistent foundation for fault localization in verification-aware languages. At the same time, the observed strengths of LLMs in prioritization indicate potential benefits in combining the two approaches. Exploring hybrid methods that integrate counterexample information with LLM reasoning is a promising direction for future work. X. D ATA AVAILABILITY STATEMENT 
+
+Upon acceptance of this paper, the associated tool and datasets will be submitted to the ISSRE 2026 Artifact Evalu-ation track. The full package required to reproduce the results will be released as open-source. For reviewing purposes, a pre-built, self-contained Docker image is available at Zenodo. APPENDIX AANNEX                                                                                                                                                                                                                              
+
+> M.A M.B NZ WpR-bi Sig.
+> RAND CNTB 476 48048 0.0037 -0.154 yes RAND CNTS 464 29196 1e-17 0.459 yes RAND CNTM 467 24135 1e-25 0.558 yes RAND LLM 468 44330 0.000317 0.192 yes RAND SNAP 467 26946 2e-21 -0.507 yes CNTB CNTS 352 5284 2e-41 0.830 yes CNTB CNTM 403 8116 4e-44 0.801 yes CNTB LLM 452 29727 1e-14 0.419 yes CNTB SNAP 442 32633 1e-9 -0.333 yes CNTS CNTM 288 11302 2e-11 0.457 yes CNTS LLM 404 37547 0.153 0.082 no CNTS SNAP 445 11546 1e-44 -0.767 yes CNTM LLM 338 25696 0.101 -0.103 no CNTM SNAP 450 9126 2e-51 -0.820 yes LLM SNAP 462 20552 2e-30 -0.616 yes
+> TABLE VI PAIRWISE WILCOXON SIGNED -RANK TESTS FOR FILE -LEVEL EXAM
+> SCORES . C OLUMNS REPORT COMPARED METHODS (M.A, M.B),
+> NON -ZERO DIFFERENCES (NZ), STATISTIC (W), p-VALUE ,RANK -BISERIAL EFFECT SIZE (R-BI ), AND SIGNIFICANCE (S IG ., α= 0 .05 ). M.A M.B Disc. A-O B-O pOR Sig.
+> RAND CNTB 76 24 52 0.00176 0.467 yes RAND CNTS 143 21 122 2e-18 0.176 yes RAND CNTM 216 17 199 1e-40 0.088 yes RAND LLM 270 7263 2e-68 0.028 yes RAND SNAP 56 25 31 0.504 0.810 no CNTB CNTS 105 16 89 2e-13 0.184 yes CNTB CNTM 186 16 170 1e-33 0.097 yes CNTB LLM 276 24 252 4e-49 0.097 yes CNTB SNAP 62 42 20 0.00715 2.073 yes CNTS CNTM 111 15 96 1e-15 0.161 yes CNTS LLM 265 55 210 2e-22 0.264 yes CNTS SNAP 133 114 19 1e-17 5.872 yes CNTM LLM 208 67 141 3e-7 0.477 yes CNTM SNAP 204 190 14 1e-40 13.138 yes LLM SNAP 268 259 97e-65 27.316 yes
+
+TABLE VII PAIRWISE MCNEMAR TESTS FOR FILE -LEVEL TOP -1 LOCALIZATION SUCCESS . C OLUMNS REPORT METHODS (M.A, M.B), DISCORDANT PAIRS 
+
+(D ISC .), A/B CORRECT ONLY (A-O, B-O), p-VALUE , PAIRED ODDS RATIO 
+
+(OR), AND SIGNIFICANCE (S IG ., α = 0 .05 ). 
+
+REFERENCES [1] K. R. M. Leino, “Dafny: An automatic program verifier for functional correctness,” in Logic for Programming, Artificial Intelligence, and Reasoning (E. M. Clarke and A. Voronkov, eds.), (Berlin, Heidelberg), pp. 348–370, Springer Berlin Heidelberg, 2010. [2] A. Lattuada, T. Hance, C. Cho, M. Brun, I. Subasinghe, Y. Zhou, J. Howell, B. Parno, and C. Hawblitzel, “Verus: Verifying rust programs using linear ghost types,” Proceedings of the ACM on Programming Languages , vol. 7, no. OOPSLA1, pp. 286–315, 2023. [3] Y. Pei, C. A. Furia, M. Nordio, Y. Wei, B. Meyer, and A. Zeller, “Automated fixing of programs with contracts,” IEEE Transactions on Software Engineering , vol. 40, no. 5, pp. 427–449, 2014. [4] B. Meyer, “Eiffel: A language and environment for software engineer-ing,” Journal of Systems and Software , vol. 8, no. 3, pp. 199–246, 1988. [5] C. Loughridge, Q. Sun, S. Ahrenbach, F. Cassano, C. Sun, Y. Sheng, A. Mudide, M. R. H. Misu, N. Amin, and M. Tegmark, “Dafnybench: A benchmark for formal software verification,” arXiv preprint arXidafny-benchv:2406.08467 , 2024. [6] I. Amaral, A. Mendes, and J. Campos, “Mutdafny: A mutation-based approach to assess dafny specifications,” in 2026 IEEE/ACM 48th International Conference on Software Engineering (ICSE) , 2026. [7] D. Peters and D. Parnas, “Using test oracles generated from program documentation,” IEEE Transactions on Software Engineering , vol. 24, no. 3, pp. 161–173, 1998. [8] Y. Cheon and G. T. Leavens, “A simple and practical approach to unit testing: The jml and junit way,” in Proceedings of the 16th European Conference on Object-Oriented Programming , ECOOP ’02, (Berlin, Heidelberg), p. 231–255, Springer-Verlag, 2002. [9] D. Richardson, O. O’Malley, and C. Tittle, “Approaches to specification-based testing,” SIGSOFT Softw. Eng. Notes , vol. 14, p. 86–96, Nov. 1989. [10] A. K. Petrenko, “Specification based testing: Towards practice,” in 
+
+Perspectives of System Informatics (D. Bjørner, M. Broy, and A. V. Zamulin, eds.), (Berlin, Heidelberg), pp. 287–300, Springer Berlin Heidelberg, 2001. [11] B. Meyer, A. Fiva, I. Ciupa, A. Leitner, y. Wei, and E. Stapf, “Programs that test themselves,” Computer , vol. 42, pp. 46 – 55, 10 2009. [12] P. Spettel, “Delfy: Dynamic test generation for dafny,” Master’s thesis, Eidgen¨ ossische Technische Hochschule Z¨ urich, 2013. [13] M. Christakis, R. Leino, P. M. , and V. W¨ ustholz, “Integrated en-vironment for diagnosing verification errors,” in 22nd International Conference on Tools and Algorithms for the Construction and Analysis of Systems (TACAS’16) , pp. 424–441, Springer, April 2016. [14] A. Fedchin, T. Dean, J. S. Foster, E. Mercer, Z. Rakamari´ c, G. Reger, N. Rungta, R. Salkeld, L. Wagner, and C. Waldrip, “A toolkit for automated testing of dafny,” in NASA Formal Methods: 15th Interna-tional Symposium, NFM 2023, Houston, TX, USA, May 16–18, 2023, Proceedings , (Berlin, Heidelberg), p. 397–413, Springer-Verlag, 2023. [15] M. D. Ernst, J. H. Perkins, P. J. Guo, S. McCamant, C. Pacheco, M. S. Tschantz, and C. Xiao, “The daikon system for dynamic detection of likely invariants,” Science of Computer Programming , vol. 69, no. 1, pp. 35–45, 2007. Special issue on Experimental Software and Toolkits. [16] B. Pytlik, M. Renieris, S. Krishnamurthi, and S. P. Reiss, “Automated fault localization using potential invariants,” in AADEBUG 2003: Fifth International Workshop on Automated and Algorithmic Debugging ,(Ghent, Belgium), pp. 273–276, Sept. 2003. [17] J. Jones, M. Harrold, and J. Stasko, “Visualization of test information to assist fault localization,” in Proceedings of the 24th International Conference on Software Engineering. ICSE 2002 , pp. 467–477, 2002. [18] R. Abreu, P. Zoeteweij, and A. J. Van Gemund, “An evaluation of sim-ilarity coefficients for software fault localization,” in 2006 12th Pacific Rim International Symposium on Dependable Computing (PRDC’06) ,pp. 39–46, 2006. [19] W. E. Wong, V. Debroy, R. Gao, and Y. Li, “The dstar method for effective software fault localization,” IEEE Transactions on Reliability ,vol. 63, no. 1, pp. 290–308, 2014. [20] R. Abreu, P. Zoeteweij, and A. J. van Gemund, “On the accuracy of spectrum-based fault localization,” in Testing: Academic and In-dustrial Conference Practice and Research Techniques - MUTATION (TAICPART-MUTATION 2007) , pp. 89–98, 2007. [21] R. Cao, M. Chen, J. Chen, Z. Cui, Y. Feng, B. Hui, Y. Jing, K. Li, M. Li, J. Lin, et al. , “Qwen3-coder-next technical report,” arXiv preprint arXiv:2603.00729 , 2026. [22] R. Gopinath, A. Alipour, I. Ahmed, C. Jensen, and A. Groce, “How hard does mutation analysis have to be, anyway?,” in 2015 IEEE 26th International Symposium on Software Reliability Engineering (ISSRE) ,pp. 216–227, IEEE, 2015. [23] F. Steimann, M. Frenkel, and R. Abreu, “Threats to the validity and value of empirical assessments of the accuracy of coverage-based fault locators,” in Proceedings of the 2013 International Symposium on Software Testing and Analysis , pp. 314–324, 2013. [24] S. Pearson, J. Campos, R. Just, G. Fraser, R. Abreu, M. D. Ernst, D. Pang, and B. Keller, “Evaluating and improving fault localization,” in 2017 IEEE/ACM 39th International Conference on Software Engi-neering (ICSE) , pp. 609–620, IEEE, 2017. [25] E. Mugnier, E. A. Gonzalez, N. Polikarpova, R. Jhala, and Z. Yuanyuan, “Laurel: Unblocking automated verification with large language mod-els,” Proceedings of the ACM on Programming Languages , vol. 9, no. OOPSLA1, pp. 1519–1545, 2025. [26] J. Xuan and M. Monperrus, “Test case purification for improving fault localization,” in Proceedings of the 22nd ACM SIGSOFT international symposium on foundations of software engineering , pp. 52–63, 2014. [27] Z. Li, L. Yan, Y. Liu, Z. Zhang, and B. Jiang, “Mure: making use of mutations to refine spectrum-based fault localization,” in 2018 IEEE International Conference on Software Quality, Reliability and Security Companion (QRS-C) , pp. 56–63, IEEE, 2018. [28] J. A. Jones and M. J. Harrold, “Empirical evaluation of the tarantula automatic fault-localization technique,” in Proceedings of the 20th IEEE/ACM International Conference on Automated Software Engineer-ing , ASE ’05, (New York, NY, USA), p. 273–282, Association for Computing Machinery, 2005. [29] R. Abreu, P. Zoeteweij, and A. J. van Gemund, “Spectrum-based multi-ple fault localization,” in 2009 IEEE/ACM International Conference on Automated Software Engineering , pp. 88–99, 2009. [30] S. Moon, Y. Kim, M. Kim, and S. Yoo, “Ask the mutants: Mutating faulty programs for fault localization,” in 2014 IEEE Seventh Inter-national Conference on Software Testing, Verification and Validation ,pp. 153–162, 2014. [31] M. Papadakis and Y. Le Traon, “Metallaxis-fl: mutation-based fault localization,” Software Testing, Verification and Reliability , vol. 25, p. 605–628, Aug. 2015. [32] T.-T. Nguyen, Q.-T. Ta, and W.-N. Chin, “Automatic program repair using formal verification and expression templates,” in Verification, Model Checking, and Abstract Interpretation (C. Enea and R. Piskac, eds.), (Cham), pp. 70–91, Springer International Publishing, 2019. [33] V. Wu, A. Mendes, and A. Abreu, “Specification-guided repair of arithmetic errors in dafny programs using LLMs,” in Software Engi-neering and Formal Methods: 23rd International Conference, SEFM 2025, Toledo, Spain, November 10–14, 2025, Proceedings , (Berlin, Heidelberg), p. 261–278, Springer-Verlag, 2025. [34] A. Sullivan, K. Wang, R. N. Zaeem, and S. Khurshid, “Automated test generation and mutation testing for alloy,” in 2017 IEEE International Conference on Software Testing, Verification and Validation (ICST) ,pp. 264–275, IEEE, 2017. [35] G. Zheng, T. Nguyen, S. G. Brida, G. Regis, M. F. Frias, N. Aguirre, and H. Bagheri, “Flack: Counterexample-guided fault localization for alloy models,” in 2021 IEEE/ACM 43rd International Conference on Software Engineering (ICSE) , pp. 637–648, IEEE, 2021. [36] D. Beyer, M. Kettl, and T. Lemberger, “Fault localization on verification witnesses,” in International Symposium on Model Checking Software ,pp. 205–224, Springer, 2024.
