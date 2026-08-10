@@ -1,0 +1,379 @@
+Title: Coupling Planning with Episodic Memory in LLM Agents for Software Issue Resolution
+
+URL Source: https://arxiv.org/pdf/2608.06811v1
+
+Published Time: Mon, 10 Aug 2026 00:33:50 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Coupling Planning with Episodic Memory in LLM Agents for Software Issue Resolution 
+
+Jiahao Zhang 
+
+Vanderbilt University jiahao.zhang@vanderbilt.edu 
+
+Yifan Zhang 
+
+Vanderbilt University yifan.zhang.2@vanderbilt.edu 
+
+Yu Huang 
+
+Vanderbilt University yu.huang@vanderbilt.edu 
+
+Abstract —Resolving a real software issue with a large language model (LLM) agent is a long repair episode, often tens to hun-dreds of steps spanning exploration, hypothesis, implementation, and verification. Success depends on both the base model’s local reasoning and the agent’s ability to maintain an evolving plan and remember observations across phases. Existing repository-level agents typically strengthen planning or memory in isolation, leaving long trajectories vulnerable to stale evidence, repeated failed edits, and verification inferred from the agent’s own claims instead of execution evidence. We present PMCoder, an issue-resolution agent that couples a hierarchical phase planner with episodic memory. The coupling is bidirectional: the current plan phase conditions memory retrieval, while memory-derived trajec-tory statistics inform stuck detection and replanning. When avail-able, issue-reproduction verdicts ground verification progress in execution evidence rather than self-reported completion. On SWE-bench Verified, PMCoder resolves an average of 25 more cases (+5 .0pp) than a harness-matched baseline, with gains persisting even where the reproduction gate never fires. Further Verified-500 evaluations show the same positive direction across Claude Haiku 4.5, DeepSeek-V4-Flash, and an OpenHands port, with at least 14 additional resolved cases ( +2 .8pp). Separately, evaluation on TerminalWorld’s official sample suggests that the plan–memory substrate transfers beyond issue reports. Ablation and trajectory analyses show where the gains come from: coupling planning and memory outperforms either component alone and reduces repeated failed actions, empty-patch exits, and context-window exhaustion. 
+
+Index Terms —automated software engineering, large language models, AI agents, automated program repair 
+
+I. I NTRODUCTION 
+
+An LLM agent that resolves a real software issue generally consists of four functional modules: perception, planning, memory, and action [1], [2]. Over a long repair episode, plan-ning and memory carry the agent’s evolving state, its current phase, and what it has already tried; that state, more than the base model alone, drives the outcome of the episode [3], [4]. Most progress on these agents has come from advances in individual modules. Existing repository-level software agents primarily strengthen either planning or memory. Planning-oriented approaches improve repository exploration, localization, and edit planning through search and structured reasoning [5]– [7], while memory-oriented approaches store and retrieve prior repair trajectories, demonstrations, and accumulated experience [8]–[10]. Designing the two in isolation is at odds with the nature of repository-level issue resolution. Repair is a long-horizon process that alternates between exploration, hypothesis, im-plementation, and verification. Observations discovered early in an episode may become relevant only much later, while re-peated failures should trigger a revision of the current strategy. Effective repair therefore requires planning and memory to in-teract: plans should determine which past information remains relevant, and accumulated experience should determine when plans need to change. This view echoes cognitive accounts of externalized reasoning, where plans and notes form coupled external working state: the current plan determines what evidence is relevant, and accumulated observations revise the plan itself [11]–[13]. Bidirectional coordination between planning and memory remains largely unexplored for software repair. General-agent work suggests that planning can benefit from retrieval over contextual memory [14], but this idea does not transfer directly to repository-level repair. Repair state is distributed across files, mutated by the agent’s own edits, and tied to verification outcomes that must be checked by execution. Recent issue-resolution memory work aligns retrieval with plan structure but leaves plan updates independent of memory-derived trajectory evidence [15]. To the best of our knowledge, no repository-level repair agent both guides memory retrieval by plan state and drives replanning from memory-derived signals. We present PMCoder , an issue-resolving agent that cou-ples planning and episodic memory as distinct modules for maintaining agent state. Its hierarchical phase planner tracks two levels of state, the current repair phase and active sub-task, while its episodic memory stores entries for observations, attempts, outcomes, and file metadata and retrieves a budgeted working set by beam search over maximal-marginal-relevance (MMR) [16] scores. The two structures interact in both direc-tions: the planner’s phase and sub-task guide memory retrieval, while memory-derived statistics drive stuck detection and replanning. Plan and memory context are injected through tool outputs, the channel that tool-calling models already consume. Figure 1 shows this interaction on a real SWE-bench Veri-fied trajectory. Both agents first reach the same diagnosis on 
+
+django-13516 , but the baseline later drifts to the wrong file under a self-imposed constraint. PMCoder instead re-surfaces the earlier diagnosis when the plan returns to implementation, and memory-derived edit signals trigger recovery from acorrupted edit state. The example illustrates the role of plan– memory coupling: relevant evidence remains retrievable at the arXiv:2608.06811v1 [cs.SE] 7 Aug 2026 Case study — Django issue 13516 (SWE-bench Veri fi ed), a verbatim logged trajectory: TextIOBase shadows OutputWrapper. fl ush(), so both agents reach the same correct diagnosis but differ in how they hold it.                        
+
+> Baseline
+> fl at history
+> step 30 step 70 step 106 result
+> ★OutputWrapper has no fl ush() override →
+> TextIOBase’s no-op fl ush() shadows delegation
+> Adopts a false constraint: “cannot modify the core Django classes”
+> Patches migrate.py (the call site); OutputWrapper is never touched
+> ✗
+> unresolved (0/3)
+> drifts · no memory to recover Reaches the right diagnosis, then drifts off it under a self-imposed constraint; with no memory to hold the thread, it edits the wrong fi le.
+> PMCoder
+> planning + memory
+> step 28 step 41 step 49 step 58 result
+> ★OutputWrapper has no fl ush() override →
+> TextIOBase’s no-op fl ush() shadows delegation
+> Shell edits corrupt base.py (silently duplicated / truncated)
+> Edit-integrity churn →revert base.py to clean;
+> recall re-surfaces the ★diagnosis
+> ✓De fi nes OutputWrapper. fl ush() in base.py, delegating to the wrapped stream
+> ✓
+> resolved (2/3)
+> implementation phase queries memory; diagnosis re-surfaces memory →plan: edit-integrity churn triggers revert-then-re fi x
+> Same diagnosis, opposite outcome — the plan–memory coupling holds the thread and re fi xes from a clean base.
+
+Fig. 1. A django-13516 trajectory illustrating plan–memory coupling: both agents find the same diagnosis, but PMCoder preserves and reuses it after edit recovery while the baseline drifts to the wrong file. 
+
+right phase, and repeated failed work can change the plan rather than accumulate; we return to this trajectory in Sec-tion V-B. This coupling relies on a shared notion of progress: the planner must know when to advance, and memory-derived recovery signals must be attached to a trajectory state that the agent can trust. PMCoder therefore grounds verification-phase transitions in issue-reproduction outcomes rather than in self-reported completion signals, which are often unreliable [17], [18]. These checks serve the coupling by keeping the shared plan–memory state accountable to execution evidence as the two structures exchange context and recovery signals. We evaluate PMCoder against a harness-matched baseline agent [3] on SWE-bench Verified [19], [20]. The baseline has no planner, episodic memory, or execution-grounding gates, so the primary comparison tests the complete PMCoder design. Because served FP8 models at temperature 0 are not fully run-reproducible, we repeat the evaluation three times and assess significance at the instance level. Across runs, PMCoder resolves 167 .3/500 issues ( 33 .5% ) versus 
+
+142 .3/500 (28 .5% ) for the baseline on Qwen3-Coder-30B, an average improvement of +25 .0 resolved issues ( +5 .0pp), with a per-instance cluster-bootstrap 95% confidence interval of [+14 .3, +35 .7] (p < 0.001 ). A repeated 2 × 2 component ablation further isolates planning, memory, and their interac-tion: the plan–memory interaction contributes +10 .3 resolved instances ( +2 .1pp; F (1 , 8) = 10 .92 , p = 0 .011 ; Section V-D). A behavioral mechanism analysis shows fewer failed action recurrences, empty-patch exits, and context-window failures, including on instances where no reproduction script exists. Additional evaluations across other models, a framework port, and a terminal-task benchmark provide generality evidence beyond the headline configuration. This paper makes the following contributions: 
+
+• Design insight. We identify bidirectional plan–memory coupling as a design principle for long-horizon repository repair, where plan state guides recall and accumulated trajectory evidence drives replanning. 
+
+• Approach. We propose PMCoder , which couples a hi-erarchical phase planner and episodic memory through bidirectional plan–memory coupling. 
+
+• Evaluation. Experiments on SWE-bench Verified show that PMCoder improves issue resolution over a harness-matched baseline. Repeated ablations identify a posi-tive plan–memory interaction, and additional models, a framework port, and a terminal-task benchmark provide generality evidence. The remainder of this paper is organized as follows. Sec-tion II motivates reliable plan–memory state in agentic issue resolution. Section III describes the PMCoder architecture and its co-design couplings. Section IV details the experimental setup. Section V reports results for four research questions covering effectiveness, mechanism, generality, and a compo-nent ablation. Sections VI and VII discuss implications and threats to validity, Section VIII surveys related work, and Section IX concludes. An anonymized implementation and replication package is available at https://doi.org/10.5281/zenodo.21035632. II. B ACKGROUND 
+
+A. Agentic Issue Resolution on SWE-bench Verified 
+
+An LLM issue-resolving agent runs an observe–act loop over a repository [3]. Given an issue report and a copy of the repository at the faulty commit, it alternates between emitting shell commands and reading their outputs until it submits a patch or exhausts a budget. This loop underlies systems from minimal single-tool agents to frameworks such as mini-SWE-agent [3] and OpenHands [21]. We evaluate on SWE-bench Verified, a human-validated set of 500 real GitHub issues [19], [20]. An instance is resolved only when the submitted patch passes the project’s withheld tests. This output-level grading matters: a noisy trajectory that ends in a correct patch ties a clean one, while a confident trajectory that ends wrong scores zero. The official grade ignores how the agent reached its patch, but the path is determined by trajectory-level state the agent keeps for itself. 
+
+B. Coupled Planning and Memory 
+
+Resolving one issue often takes tens to hundreds of steps across exploration, hypothesis formation, implementation, and verification. A flat transcript of that episode neither fits the context window nor stays navigable, so agents need structured state: a plan of the current phase and sub-task [22], and episodic memory of what they have read, tried, and observed. Recent repair agents also retrieve past repair experience to steer the next attempt [8]–[10]. Prior SWE repair agents commonly treat planning and memory as separate capabilities. Planners operate over the current history; memory systems retrieve against the issue text or accumulated experience, rather than being explicitly conditioned on the current phase. The long-horizon setting makes these states mutually dependent: the phase decides what is worth recalling, and accumulated evidence decides whether to continue, recover, or replan. Yet issue-resolution agents largely leave this coupling implicit. The resulting structured state governs the episode: it affects what the model sees next, when the agent stops, and which patch is submitted. Its usefulness therefore depends on the signals used to advance it. 
+
+C. The Success-Signal Problem 
+
+Inside an agentic repair trajectory, progress signals are sparse. With the official oracle withheld, the agent mainly sees execution feedback from its commands and textual claims about its own progress. Neither reliably implies resolution. Return codes are coarse: for example, ls , grep , and a diagnostic print statement can all exit 0, making success difficult to infer from return status alone. Self-written tests are also unreliable success signals, since the model that wrote the fix can also write an assertion that matches the patched behavior rather than the issue requirement [23], [24]. A free-text “the fix is verified” is a claim, not an observation. Self-reported verification is a textual success claim without an execution-backed check of the issue requirement. In a small motivating audit, we examined the first nine Qwen pilot tra-jectories we encountered whose final turn made such a claim, and observed two fabricated-verification patterns: narrative prints that echoed success without running a relevant test, and self-written always-pass tests that checked the patched code’s own behavior. This is consistent with broader reports of specification gaming and reward hacking [25]–[27]. The audit is not a prevalence estimate, but it shows why self-report is unsafe as a control signal: an agent that advances its plan state on self-reported success can turn claims into memory and recovery decisions. Large-scale agent evaluations point in the same direction, with one study observing a 22% task success rate alongside a 77% predicted success rate [28]. Execution-based validation in automated program repair traditionally judges finished patches [29]. Agentic resolution exposes a different surface: the in-episode plan state that steers retrieval, recovery, and stopping. Whether “exploration is done” or “this sub-task is verified” is not graded by SWE-bench, yet it determines the path to the final patch. PMCoder targets this process-level gap by making planning and memory share an explicit trajectory state, whose verification updates are grounded in behavioral issue-reproduction verdicts rather than self-report; Section VIII contrasts this supporting use of execution evidence with output-level program-repair oracles. III. M ETHODOLOGY 
+
+A. Overview 
+
+PMCoder keeps the observe–act loop of Section II intact: the agent still operates on a sandboxed copy of the target repository and submits a final patch. On top of this loop it adds two coupled state structures, supported by delivery through tool results and execution-grounded verification updates (Fig-ure 2). The two structures are a hierarchical phase planner that maintains explicit plan state and an episodic memory that retrieves a budgeted working set. Their bidirectional coupling is the center of the design: plan state guides retrieval, while memory-derived evidence drives stuck detection and replanning. Delivering state through tool results preserves the message history, and execution grounding keeps verification-phase updates tied to issue-reproduction behavior. The four boundary-crossing couplings are summarized at the end of the section. Two invariants hold throughout. First, PMCoder delivers added state through channels a tool-calling model already expects, without reordering or rewriting prior turns. Second, the added signals are advisory for the model and internal to PMCoder: they may update internal plan state, mark a verification sub-task incomplete, or suggest recovery, but they do not block actions, directly revert edits, or participate in official SWE-bench grading. The benchmark grader sees only the submitted patch, while RQ2 measures whether these advisory signals change observable repair behavior. 
+
+B. Hierarchical Phase Planner a) Plan state.: The planner maintains plan state as a de-terministic state machine (Figure 3) over four progress phases (EXPLORATION , HYPOTHESIS , IMPLEMENTATION , VERIFI -
+
+> CATION
+
+) ordered by a scalar rank, plus a BACKTRACK event held outside the ordering, since backtracking is a recovery transition. A single start-of-task LLM call decomposes the issue into typed sub-tasks, each tagged with its target phase, such as a verification sub-task to re-run the failing test; a parse failure falls back to a fixed skeleton instead of failing silently. This is the planner’s only LLM call. Per-step phase detection, sub-task bookkeeping, backtracking, and replanning are deterministic. 
+
+b) Phase detection.: Each step, a zero-cost rule-based detector proposes a phase from the last shell command and the model’s stated reasoning. The detector normalizes shell wrappers and then applies ordered rules over four signal classes: file-inspection behavior and exploratory language Plan–Memory Coupling 
+
+Episodic Memory 
+
+Phase-Conditioned Recall 
+
+Hierarchical Phase Planner 
+
+Zero LLM Calls / Step    
+
+> Exploration Hypothesis Implementation Veri fi cation
+
+OBSERVE – ACT LOOP 
+
+Coding LLM Action 
+
+Edit Files & Run Commands 
+
+Repository 
+
+Sandboxed Repo Checkout 
+
+Perception 
+
+Plan + Memory Observation + Verdict   
+
+> Memory Nodes MMR Beam Search Lexical + Code Graph
+
+Retrieval Progress & Stuck Signals 
+
+Execution-Grounded Fig. 2. PMCoder couples episodic memory with hierarchical planning inside the observe–act loop. Decompose issue into typed sub-tasks (one LLM call) 
+
+> Exploration
+> Hypothesis
+> Implementation
+> Veri fi cation
+> BACKTRACK event
+> revert-then-re fi x
+> repro passes?
+> sub-task complete
+> yes
+> hysteresis stuck signal re-explore still reproduces
+
+Fig. 3. The phase planner advances sub-tasks through four phases with hysteresis, backtracking, and execution-grounded verification. 
+
+map to EXPLORATION ; diagnostic commands or root-cause language map to HYPOTHESIS ; file-mutating actions map to 
+
+IMPLEMENTATION ; and test execution or explicit verification language maps to VERIFICATION . Ordered rules prioritize mutating actions over inspection and treat diagnostic one-off executions as hypothesis-building. Because the detector is cheap but noisy, the planner accepts forward phase moves immediately but requires repeated evidence before backward or lateral moves take effect. 
+
+c) Backtracking and replanning.: After a minimum-step floor, the planner declares the agent stuck on any of several signals: persistently nonzero return codes, a single file edited too many times, file reads saturated without edits, or one normalized action repeated past a threshold. The memory subsystem computes several of these signals and passes them to the planner as aggregate statistics. When a backtrack is triggered, the planner marks the active sub-task as failed. It then pushes recovery sub-tasks onto a goal stack, including ex-ecution grounding’s revert-then-refix template, which restores the edited files and re-fixes from a clean base. A cooldown and a depth bound prevent long, repetitive trajectories from inducing bursts of repeated replanning. 
+
+d) Completion and the exported signal.: A non-terminal sub-task completes once the detected phase has advanced past its own phase with minimal supporting evidence. A terminal 
+
+VERIFICATION sub-task has no higher phase to enter, so it completes only on a successful verification step, using the completion predicate hardened by execution grounding. Each step, the planner exports a compact signal: the current phase, the active sub-task, progress counts, the most-touched files, a per-phase token budget, and the backtrack flag. This exported signal is what conditions memory retrieval. 
+
+C. Episodic Memory a) Memory nodes.: Each memory node stores not only text but also structured metadata about the episode event: its message role, recency identifier, compressed content view, summary, whether the preceding command edited files, and which files it touched. Every message is mirrored into such a node, with the identifier equal to its message position, so recency and truncation follow the conversation order. For an observation node, the edit and file-touch metadata are read from the executed command in the preceding assistant mes-sage, so memory is grounded in what the agent ran, not in what the model reports running. The graph stores raw observations only; injected context mutates the live conversation, never the graph, so retrieval cannot re-ingest its own output. 
+
+b) Budgeted MMR retrieval.: Retrieval selects a work-ing set under a token budget using the maximal-marginal-relevance (MMR) selection criterion [16]. A fixed core is always kept: the task statement, the recent tail, and the anchor node, which holds the current query focus seeded from the active sub-task keywords. A beam search adds the rest, scoring each candidate v by marginal gain 
+
+g(v) = λ · rel (v) − (1 − λ) · max  
+
+> u∈S
+
+sim (v, u ),
+
+where λ is the relevance-diversity tradeoff, S is the selected set, and sim is IDF-weighted Jaccard overlap. Relevance fuses two signals, 
+
+rel (v) = wc · lex (v) + wg · graph (v).
+
+Here, wc and wg are the lexical and graph weights. lex is an IDF-weighted lexical score over anchor words, while graph 
+
+scores proximity in a code-structure file graph built incre-mentally from the trajectory (same-file co-occurrence, Python import edges, and trajectory adjacency). Import edges are extracted from observed Python snippets by AST parsing, with a conservative regex fallback when parsing fails. Fusing code structure on top of lexical match makes retrieval structure-aware rather than purely textual. Section IV-E reports the fixed retrieval parameters used in the final evaluation. 
+
+c) Phase-conditioned retrieval policy.: A memory con-troller maps the planner’s phase to retrieval parameters, so the working set adapts to the agent’s current phase. Exploration and backtracking use a large, diversity-favoring budget, re-trieving broadly while the agent orients or recovers; implemen-tation draws a small, graph-weighted budget focused tightly on the edit site. This phase-to-policy map is the plan →memory direction of the coupling; the concrete budgets and weights are given in Section IV-E. 
+
+D. In-Distribution Injection Channel 
+
+Retrieved memory and plan state must still reach the model. A natural approach, used by working-memory management agents, rewrites the message history before each query, for example by replacing past observations with summaries or swapping the raw trajectory for a selected working set [30]. In tool-call mode this needs care: the API pairs each assistant tool call with the tool-result message that answers it. Reordering those messages separates the pair and can push the request off-distribution. PMCoder therefore leaves history untouched and instead appends a compact, marker-delimited block to the most-recent tool-result message (Figure 4): a plan-state header (phase, active sub-task, progress) and the top retrieved nodes, system user assistant (tool call)                  
+
+> inserted working set tool result
+> system user assistant (tool call) tool result ⟦PLANMEM ⟧block
+> plan state + top-k memory
+> Rewrite message history before each query (swap in the working set)
+> tool_call
+> ↔tool result pair
+> ✓PMCoder: append a marker-delimited block to the latest tool result
+> append
+> Fig. 4. PMCoder delivers plan–memory state by appending amarker-delimited block to the latest tool result.
+
+bounded by the injection budget. To the model, this arrives as part of the environment’s reply, the channel a tool-calling model is trained to read, so each request stays in-distribution; our pilot design observation was that tool-result placement was more stable than a separate user-role reminder. Two filters bound growth: injection fires only when the plan state changes, and a novelty filter drops already-surfaced nodes in favor of a short prescriptive line, such as a one-line summary of the failed sub-task or a file-churn count. 
+
+E. Execution Grounding 
+
+The planner and memory create a shared plan–memory state, and the injection channel delivers that state without rewriting history. The remaining question is how this state advances through verification. Without grounding, verification depends on coarse return codes and self-reported success, the weak signals discussed in Section II. The grounding layer replaces them with a behavioral check that keeps the coupled state tied to execution evidence without changing what the agent may do. For each instance with a validated issue-reproduction script (Section IV-F), the grounding layer reruns the script after a file-mutating edit. The verdict is pass if the issue no longer reproduces and fail if it still does; instances without a validated script use the ungated completion predicate while retaining the same plan–memory substrate (the coupled planner and memory). The verdict has two consumers. As advisory text on the current tool result, it tells the model whether the once-failing reproduction now passes or still fails. As an update to internal plan state, it hardens the completion predicate. In a verification step, a zero return code counts as evidence only if the latest verdict is not a fail. A terminal verification sub-task therefore cannot complete while the issue still reproduces. Edit integrity and recovery provide a lighter grounding signal for corrupted edits. After a mutating edit to a Python file, a compile check appends a corrective note when the edit leaves the file unparsable, identifying the corrupted state before the agent compounds the error with further edits. When a sub-task fails amid heavily edited files, the planner’s recovery template first restores them to their committed state, then re-examines the failure and refixes from the clean base. This follows the delta-debugging principle of restarting from a known-good state instead of patching a corrupted one [31]. Every grounded signal remains advisory, and the harness, which alone assigns the resolution label, never reads the verdict. PMCoder’s distinction lies in where the verdict lands: on the agent’s evolving plan state mid-trajectory, the same state that conditions memory retrieval and completion checks, rather than on a finished patch. 
+
+F. Co-Design Couplings 
+
+The preceding subsections define the planner, memory, delivery channel, and grounding layer. The design depends on four explicit couplings between them, each crossing a component boundary and together realizing the bidirectional plan–memory design. 
+
+a) Phase → retrieval.: The planner’s phase selects the retrieval budget, diversity pressure, and graph weights, reduc-ing irrelevant or stale recall. 
+
+b) Sub-task → retrieval.: Keywords from the active sub-task enter the retrieval anchor, countering goal-agnostic recency bias. 
+
+c) Memory statistics → plan.: Edit counts, read satura-tion, and repeated actions inform stuck detection and replan-ning, reducing repeated failed work. 
+
+d) Verdict → plan.: Issue-reproduction pass/fail verdicts update verification-phase state, reducing premature verifica-tion. The first three couplings run between planner and memory: plan state conditions what memory surfaces, while memory statistics reshape the plan. The fourth ties execution evidence into that same plan state. These dependencies make the planner and memory a co-designed control structure rather than two independent add-ons. IV. E XPERIMENTAL SETUP 
+
+A. Benchmark and Metric 
+
+We evaluate on SWE-bench Verified, the human-validated 500-instance slice of SWE-bench [19], [20], abbreviated 
+
+Verified-500 . Each instance is graded only by the official SWE-bench harness: a submitted patch is resolved if it passes the instance’s fail-to-pass and pass-to-pass tests. All arms use the full 500-instance denominator; errored runs and non-applicable patches count as unresolved. 
+
+B. Research Questions 
+
+Our evaluation answers four questions:  
+
+> •
+
+RQ1 (Effectiveness): Does PMCoder resolve software issues more effectively?  
+
+> •
+
+RQ2 (Mechanism): What trajectory evidence explains PMCoder’s gains?  
+
+> •
+
+RQ3 (Generality): Does the effect persist beyond the headline configuration?  
+
+> •
+
+RQ4 (Component ablation): Does coupled planning and memory outperform either component alone?                                               
+
+> TABLE I SERVING AND RUNTIME CONFIGURATION .Setting Value Serving vLLM, FP8, LiteLLM tool calls Headline model Qwen3-Coder-30B-A3B-Instruct-FP8
+> DeepSeek model deepseek/deepseek-v4-flash
+> Claude model anthropic/claude-haiku-4-5
+> Sampling temperature 0.0 Context cap 65,536 tokens (vLLM) Generation cap no client-side cap Step budget 250 assistant turns Cost cap $3.0 per instance Shell timeout 60 seconds Retry policy 10 attempts, exponential backoff TABLE II FIXED PMC ODER HYPERPARAMETERS .Parameter Value Role MMR λ0.7 relevance/diversity Lexical/graph weights 0.5/0.5 base relevance mix Memory budget 16k tokens default retrieval budget Node cap 4k chars per-memory node cap Phase budgets 20k/16k/12k/16k/20k expl/hyp/impl/verif/back Phase hysteresis 2 steps debounce Min backtrack step 10 suppress early recovery Backtrack cooldown 8 steps rate-limit replanning Goal-stack depth 16 bound recovery stack Failed returns 5stuck threshold Repeated edits 6stuck threshold Read saturation 15 stuck threshold Repeated action 8stuck threshold Repro checks 4per-episode cap Repro timeout 180s per-check timeout
+
+C. Agents and Arms 
+
+All agents run in the same SWE-bench Docker environ-ments, execute shell commands over the target repository, and submit only a final patch for official grading. The baseline is the mini-SWE-agent loop with PMCoder’s planner, memory, injection, and grounding components disabled. The headline baseline and PMCoder arms use three runs. RQ4 uses the same protocol for plan-only and memory-only variants. RQ3 includes DeepSeek, Claude Haiku, OpenHands, and Terminal-World’s official 20-task sample. 
+
+D. Implementation and Model Serving 
+
+The headline Qwen3-Coder model [32] is served through vLLM [33] and accessed through LiteLLM tool calls. Table I gives the shared runtime configuration and RQ3 model iden-tifiers. 
+
+E. PMCoder Hyperparameters 
+
+Table II lists the behavioral parameters, fixed from pilot runs before the final Verified-500 evaluations. These values are the default PMCoder configuration used for all reported runs; they keep retrieval within the context budget, debounce noisy phase changes, and bound recovery frequency. Phase budgets apply when the planner is active; memory-only uses the 16k default. F. Issue-Reproduction Scripts 
+
+PMCoder’s execution grounding uses per-instance issue-reproduction scripts extracted offline from issue text alone by the same Qwen3-Coder model used in the headline system. The prompt asks for a self-contained bash or Python repro-ducer and does not expose the gold patch or hidden tests. Candidates are validated on the unmodified repository in the same Docker environment used by the agent and admitted only if they reproduce the pre-edit failure within the configured timeout. Otherwise the verdict is undefined and PMCoder falls back to the ungated completion predicate. During a run, reproduction checks use their own timeout (Table II) and verdicts are cached by (instance, patch sig-nature). These verdicts only affect internal verification-phase state and recovery choices; all reported resolution numbers come from the official SWE-bench harness. 
+
+G. Statistical Protocol 
+
+The headline Qwen comparison uses three runs per arm because FP8 serving is not bit-reproducible even at tempera-ture 0. We therefore treat each run as a replicate and aggregate the headline comparison at the instance level. For the headline confidence interval, we use an instance-level cluster bootstrap. Each replicate samples 500 instance identifiers with replacement, averages each sampled instance’s resolved indicator across the three runs per arm, and computes the mean paired difference. The reported 95% confidence interval is the percentile interval; the p value is the two-sided bootstrap tail probability around zero. As a complementary paired test, McNemar tests compare matched runs and count instances solved by only one arm. RQ4 fits a standard run-level 2 × 2 factorial model with planning, memory, and their interaction as fixed effects. RQ2 trajectory signatures are averaged per instance before paired intervals are formed. The difficulty breakdown is reported as a supporting analysis; RQ3 evaluations are costlier single-run supporting generality probes. All grading uses the official Docker harness; errored agent trajectories are retained and scored unresolved. V. R ESULTS 
+
+We organize the results around the four research questions stated in Section IV: effectiveness (RQ1), trajectory evidence explaining the gains (RQ2), generality beyond the headline configuration (RQ3), and a component ablation of coupled planning and memory (RQ4). Unless noted otherwise, all numbers are resolved-instance counts and resolve rates on Verified-500 under the official SWE-bench harness [19], [20]. 
+
+A. RQ1: Does PMCoder resolve software issues more effec-tively? 
+
+Table III reports three runs per arm under the final configu-ration. PMCoder resolves a mean of 167 .3 instances ( 33 .5% ,range 164 –170 ) against the baseline agent’s 142 .3 (28 .5% ,range 139 –144 ), a mean gap of +25 .0 instances or +5 .0 per-centage points. The two arms separate completely: the weakest                                             
+
+> TABLE III RESOLVED COUNTS AND RATES ON VERIFIED -500 ACROSS THREE RUNS .Arm Run 1 Run 2 Run 3 Mean Mean rate Baseline 139 144 144 142.3 28.5% PMCoder 170 164 168 167.3 33.5% Improvement +31 +20 +24 +25 .0+5 .0pp TABLE IV RESOLVED COUNTS BY SWE-BENCH VERIFIED DIFFICULTY .Difficulty nBaseline PMCoder Improvement
+> <15 min 194 89 101 +12
+> 15 min–1 h 261 50 67 +17
+> 1–4 h 42 02+2
+> >4 h 3000
+
+PMCoder run, 164 resolved instances ( 32 .8% ), exceeds the strongest baseline run, 144 (28 .8% ), by 20 instances. Using the repeated-run protocol in Section IV-G, the cluster bootstrap estimates the gain at +25 .0 with a 95% confidence interval of [+14 .3, +35 .7] (p < 0.001 ), and the three trial-paired McNemar tests are each significant ( p between 0.002 
+
+and 0.033 ). The improvement is therefore statistically signifi-cant and robust to serving noise. To understand where this aggregate gain lands, we stratify the first-seed paired run by the SWE-bench Verified diffi-culty estimate (OpenAI’s human fix-time annotation) [20] (Table IV). On the two tiers that the base model can solve, PMCoder raises the resolve rate by a near-constant margin: 
+
++6 .2 percentage points on the <15 min tier ( 89 → 101 ) and 
+
++6 .5 points on the 15 min–1 h tier ( 50 → 67 ). The long-fix-time tail behaves differently: across the 45 instances estimated to take more than an hour, the baseline resolves none and PMCoder resolves only two. Because the same base model under the baseline agent already resolves zero of these, we read the tail as a base-model capability ceiling. PMCoder therefore mainly reduces state-management failures within the base model’s capability frontier. 
+
+B. RQ2: What trajectory evidence explains PMCoder’s gains? a) Behavioral signatures of state management: If the plan–memory coupling helps by keeping a long repair episode aligned with accumulated evidence, the effect should be visible in how the agent behaves, not only in resolved counts. Table V reports four trace-derived signatures over the three RQ1 runs per arm. They capture repeated normalized commands after failure, terminal give-up or empty-patch outcomes, terminal context-window exhaustion, and revert-then-refix recoveries. The first three signatures are failure rates, where lower is better; the last is a recovery count, where higher indicates more successful recovery attempts. Ratios are PMCoder divided by baseline. These trajectory-level measures are computed per trajec-tory and then averaged per instance; the rate-based measures normalize for PMCoder’s slightly longer episodes ( 51 .9 vs. TABLE V TRAJECTORY -LEVEL STATE -MANAGEMENT SIGNATURES OVER THE THREE                 
+
+> RQ1 RUNS PER ARM .
+> Signature Baseline PMCoder ratio
+> Failure rates (lower is better)
+> Failed-action recurrence rate 0.0137 0.0069 0.50 ×
+> Give-up / empty-patch rate 8.3% 2.7% 0.33 ×
+> Context-window exhaustion rate 6.7% 3.0% 0.45 ×
+> Recovery count (higher is better)
+> Revert-then-refix recoveries 2.89 4.23 1.46 ×
+
+47 .3 steps). PMCoder re-issues failed commands about half as often, gives up with empty or no-op patches about one third as often, and exhausts its context window less often. It also shows more revert-then-refix recoveries, indicating that the agent more often returns to a clean state after a failed edit. The final row reports a positive recovery behavior rather than a failure rate: revert-then-refix recoveries count trajec-tories where PMCoder returns to a clean edit state before continuing. The Django case at the end of this subsection illustrates this pattern in detail. 
+
+b) Predictive validity of the repro verdict: In the Docker-validated verdict subset, the post-edit verdict is informative. It passes for 18 /20 resolved trajectories ( 90% ) but only 5/18 
+
+unresolved trajectories ( 28% ). The verdict is therefore a strong in-flight progress signal: passing verdicts concentrate among trajectories that ultimately resolve, while failing verdicts con-centrate among trajectories that still need repair. 
+
+c) Armed and unarmed strata: In the same first-seed paired run, we also separate instances by whether the issue-reproduction gate can fire. On unarmed instances, where no validated repro script is available and the gate is inert, PM-Coder improves from 94 /315 (29 .8% ) to 106 /315 (33 .7% ), a gain of +12 cases ( +3 .8pp). On armed instances, it improves from 45 /185 (24 .3% ) to 64 /185 (34 .6% ), a gain of +19 
+
+cases ( +10 .3pp). The larger armed gain shows the value of execution-grounded verification, while the unarmed gain shows that the plan–memory substrate continues to help when grounding never fires. 
+
+d) Qualitative example: We trace one Verified in-stance that PMCoder resolves and the baseline agent does not, django-13516 (Figure 1). Django’s management-command output wrapper, OutputWrapper , subclasses 
+
+io.TextIOBase and delegates missing attributes to the wrapped stream. However, TextIOBase already supplies a no-op flush() , so flush() calls never reach the wrapped stream and migrate progress remains buffered. The gold fix is to define OutputWrapper.flush() in base.py and delegate to the wrapped stream. Both agents identify this root cause. The baseline later adopts a false constraint, “cannot modify the core Django classes”, and patches migrate.py , which never touches the faulty wrapper. PMCoder also briefly corrupts base.py , but                         
+
+> TABLE VI CROSS -MODEL RESOLVED COUNTS AND RATES ON VERIFIED -500.
+> Model Baseline PMCoder Improvement DeepSeek-V4-Flash 341 (68.2%) 357 (71.4%) +16 (+3 .2pp) Claude Haiku 4.5 313 (62.6%) 327 (65.4%) +14 (+2 .8pp)
+> TABLE VII OPEN HANDS FRAMEWORK -PORT RESULTS ON VERIFIED -500 WITH
+> QWEN .Agent Solved Rate Improvement OpenHands 146 29.2% —PMCoder 169 33.8% +23 (+4 .6pp)
+
+the next injected tool result combines two state-management signals: edit-integrity statistics trigger a revert to a clean file, and memory recall re-surfaces the earlier OutputWrapper 
+
+diagnosis. With the diagnosis restored to context, PMCoder adds flush() at the gold location and resolves the issue. This trajectory instantiates two of the signatures in Table V: PMCoder stops re-issuing the corrupting edit and keeps its earlier diagnosis in view. PMCoder resolves the instance in two of three runs, while the baseline fails it in all three. 
+
+C. RQ3: Does the effect persist beyond the headline configu-ration? 
+
+RQ3 uses single-run generality checks beyond the headline Qwen configuration. 
+
+a) Across LLMs: Table VI reports cross-model checks using the served model identifiers in Table I. PMCoder improves over both matched baselines: DeepSeek-V4-Flash gains +16 instances ( +3 .2pp), and Claude Haiku 4.5 gains 
+
++14 instances ( +2 .8pp). These smaller but positive gains are consistent with PMCoder addressing state loss rather than replacing the base model’s reasoning. 
+
+b) Framework port: Table VII adds a framework di-mension by porting PMCoder’s plan–memory substrate to OpenHands V1 SDK [21] while keeping the Qwen model, step budget, and official harness matched. PMCoder improves from 146 /500 solved instances ( 29 .2% ) to 169 /500 (33 .8% ), a gain of +23 cases ( +4 .6pp), showing that the effect is not tied to the original mini-SWE-agent loop. 
+
+c) Terminal-task benchmark: On TerminalWorld [34], using the benchmark’s official 20-task sample from its human-verified subset, PMCoder resolves 7/20 tasks ( 35% ) versus 
+
+5/20 (25% ) for the matched Qwen baseline. Because these tasks are not issue reports with reproduction scripts, the result exercises the plan–memory substrate outside SWE-bench-style repair. 
+
+D. RQ4: Does coupled planning and memory outperform either component alone? 
+
+RQ4 tests whether the integrated plan–memory design out-performs either component in isolation. We run a 2 × 2 com-ponent ablation under the headline Qwen setting, comparing TABLE VIII COMPONENT ABLATION ON VERIFIED -500 USING THREE -RUN MEANS .Configuration Mean Rate Improvement Baseline 142.33 28.5% —Plan-only 148.67 29.7% +6 .3 (+1 .3pp) Memory-only 150.67 30.1% +8 .3 (+1 .7pp) Plan + memory 167.33 33.5% +25 .0 (+5 .0pp)        
+
+> Means are over three runs; effect sizes and the 2×2factorial test are computed from unrounded resolved counts. off on Episodic memory 135 140 145 150 155 160 165 170 175 Resolved (mean of 3 runs, /500)
+> +10.3 interaction
+> F(1, 8) = 10.92
+> p= 0.011 142.3 150.7 148.7 167.3 157.0 Planner o ff
+> Planner on Additive expectation
+> Fig. 5. Plan–memory interaction on Verified-500 (three-run means); the dashed line marks the additive expectation from isolated components.
+
+baseline, plan-only, memory-only, and the full plan+memory system under the identical harness, model, and budget, tog-gling only the plan and memory components (Table VIII). The factorial test for coupling is whether the plan+memory gain exceeds the additive contribution of the two isolated components. We fit a balanced 2 × 2 run-level factorial model to the resolved counts, with planning, memory, and their interaction as fixed effects and the three repeated runs in each cell as replicate observations. Let ¯Ypm denote the mean resolved count with planning p and memory m enabled (p, m ∈ { 0, 1}). We compute the interaction contrast as 
+
+¯Y11 − ¯Y10 − ¯Y01 + ¯Y00 .
+
+Using the unrounded cell means, this contrast is +10 .3 re-solved instances ( +2 .1pp); Figure 5 visualizes this as the gap between the plan+memory point and the additive expectation. This interaction is significant at the run level ( F (1 , 8) =10 .92 , p = 0.011 ). Equivalently, the integrated gain over baseline is +25 .0 instances ( +5 .0pp), larger than the +14 .7
+
+instances ( +2 .9pp) expected from stacking the unrounded single-component gains. The ablation therefore shows that coupling planning and memory performs better than adding the two isolated components. VI. D ISCUSSION 
+
+What PMCoder helps with. The gains primarily reflect better state management rather than a change in base-model reasoning ability. The difficulty split (RQ1) concentrates the improvement on the tiers the base model can already solve, while the hard tail stays difficult for both arms. The trajectory signatures (RQ2) confirm the mechanism: fewer re-issued failed actions, empty-patch exits, and context-window failures. PMCoder therefore helps when a fix is within reach but the episode is long enough to lose it. 
+
+Coupling as state management. The central contribution is the bidirectional exchange between plan state and memory. The ablation (RQ4) shows that the coupled system performs better than adding the isolated planning and memory com-ponents, and the gain persists on unarmed instances where no reproduction gate is active. Execution grounding supports this coupling by using execution evidence to update internal plan state, so verification progress becomes part of the state that conditions retrieval and stuck detection. The trajectory signatures suggest that these advisory signals affect observable repair behavior: alongside the failure-rate drops above, PM-Coder records more revert-then-refix recoveries, the signature most directly tied to acting on an injected recovery hint. 
+
+Scope of the comparison. This mechanism study holds har-ness, model, budget, and tools fixed. The primary comparison evaluates the complete PMCoder design, while RQ4 isolates the planning and memory switches under the same setting. Table IX summarizes the mechanism-level distinction. Among prior systems, execution evidence is used for localization, patch selection, or specification/review feedback, while recent memory systems condition either search on retrieved experi-ence or retrieval on sub-task structure. PMCoder combines the two missing pieces: execution evidence updates an explicit in-episode plan state, and that plan state is bidirectionally coupled with episodic memory. 
+
+Cost and deployment. Overhead is small relative to the effect. The planner adds one LLM call per episode (start-of-task decomposition); all per-step planning is deterministic, and memory retrieval is a lexical-plus-graph computation with no model call. Grounding adds at most four cached, timeout-bounded script runs per episode, over a reproduction table extracted once offline by the same model. In the headline setting, this yields +25 resolved issues with no change to weights or serving stack. The reproduction check is useful for mechanically reproducible issues (crashes, traces, wrong outputs). When no such check applies, the agent falls back to the planner–memory substrate, which the unarmed result shows still helps. In production, the offline reproduction table could be replaced by issue-reported steps or a failing CI job. VII. T HREATS TO VALIDITY 
+
+A. Internal Validity 
+
+PMCoder uses Qwen3-Coder both to extract issue-reproduction scripts and to run the headline agent. This is the lowest-cost reproducible construction path for Verified-500; using stronger API models for script extraction would likely improve script quality rather than advantage the local Qwen agent. We retain only scripts that fail on the unmod-ified repository, use their verdicts only for in-episode state, and grade all patches with the official SWE-bench harness. Residual script errors may therefore affect grounding-specific TABLE IX POSITIONING BY TRAJECTORY CONTROL , EXPLICIT MEMORY , EXECUTION -EVIDENCE TARGET , AND PLAN –MEMORY LINK .
+
+System Control Explicit memory Evidence updates Link mini-SWE-agent [3] flat tool loop – – –AutoCodeRover [5] AST/code search – localization / patch retry † –Agentless [35] localize-repair-validate – patch selection / validation –SpecRover [36] spec inference + review loop – spec / review ‡ –SWE-Exp [8] SWE-Search MCTS [7] experience bank – memory →search Shen et al. [15] functional subtasks subtask-aligned memory – plan →memory 
+
+PMCoder phase planner episodic memory plan state two-way  
+
+> †AutoCodeRover uses test execution in two ways: spectrum-based fault localization (SBFL) sharpens fault localization and context retrieval when a test suite is available, and patch validation drives a retry loop; neither updates an explicit in-episode plan state. ‡SpecRover runs a reproducer inside its review loop and feeds the verdict back to the patching and reproduction agents, but the state it updates is a natural-language specification/review, not an in-episode plan state.
+
+mechanism analyses but cannot inflate resolved counts, since the harness is the only outcome oracle. Execution-grounding claims are scoped to this validated script construction. The FP8 Qwen endpoint is not bit-reproducible even at temperature 0. We repeat the Qwen headline comparison and RQ4 ablation three times; the Claude Haiku 4.5, DeepSeek-V4-Flash, Open-Hands, and TerminalWorld evaluations are single runs under compute and API-budget constraints, read as per-model, per-framework, and per-benchmark generality probes. PMCoder’s thresholds and budgets were fixed from pilots before the final Verified-500 runs, not tuned on the final headline resolved counts. 
+
+B. Construct Validity 
+
+SWE-bench Verified resolved status is an operational proxy for issue resolution. A patch can pass the held-out tests while diverging from maintainer intent, a known risk in generate-and-validate repair [23], [24], [37]. We therefore claim im-provement on the official benchmark metric, not human-judged patch quality. RQ4 isolates the implemented planner and memory components under the fixed scaffold. It supports plan–memory coupling, but does not separately estimate the contribution of execution grounding or edit-integrity recovery. 
+
+C. External Validity 
+
+The headline evidence comes from SWE-bench Verified-500 and one open-weight 30B model under a harness-matched baseline. Transfer to other languages and private codebases remains untested. The API-model, OpenHands, and Terminal-World results provide supporting generality evidence, not a universal SWE-agent ranking. VIII. R ELATED WORK 
+
+A. Planning and Memory for LLM Agents 
+
+LLM agents are usually given explicit planning or explicit memory, rarely the two as a coupled design. Planning-centric work decomposes and searches: plan-and-solve prompt-ing [38], hierarchical planner–executor designs [22], [39], and, for code, structure-aware search and dependency-graph planning [5]–[7]; they maintain progress through an unstruc-tured transcript or a search-specific control structure, rather than through a memory-coupled plan state. Memory-centric work expands what the agent can retrieve: reflective and long-horizon stores [4], [40]–[43], and, for issue resolution, experience memories distilled from past attempts [8]–[10]; planning there stays implicit or pipeline-fixed. A few designs couple the two, but outside our setting or in one direction only. Retrieval-augmented planning and subgoal-chunked working memory are general and non-coding [14], [30]. Closer to our setting, a recent issue-resolution memory system aligns retrieval with the plan’s sub-task structure but does not let memory drive replanning [15], while an experience-bank agent reports a memory “synergy” with test-time sampling rather than planner coupling [44]. PMCoder builds on planning and memory work but couples the two: memory-derived trajectory evidence drives replanning, and verification-phase plan state stays tied to execution evidence. This makes the design a mechanism study of plan–memory coupling rather than a leaderboard comparison against systems with different models, harnesses, and orchestration pipelines. 
+
+B. Execution Oracles in Program Repair 
+
+Automated program repair has validated fixes by execu-tion since GenProg accepted patches that pass the available tests [29], and the same lineage showed the oracle is weak, as test-passing patches are often merely plausible [23], [37]. Reproduce-then-fix systems turn an issue reproduction into a patch selector that ranks or filters finished candidates [35], [36], [45]. In all of this the object judged is a completed patch. PMCoder moves the same kind of behavioral evidence one level earlier, applying it to the agent’s internal plan state during the episode rather than only to a finished patch at the output. IX. C ONCLUSION 
+
+Our results show that state loss is a consequential failure mode in long repository-level repair episodes, alongside the base model’s reasoning limits. PMCoder addresses this directly by coupling a hierarchical phase planner with an episodic memory: the plan conditions what memory retrieves, and memory-derived signals decide when to replan. Because such a shared state is only as reliable as the signal that advances it, a supporting layer grounds verification transitions in issue-reproduction outcomes instead of the model’s self-reported success. On SWE-bench Verified, this coupling resolves an average of 25 more issues than a harness-matched baseline (+5 .0pp). These results suggest that long-horizon repair ben-efits from planning and memory being designed as a coupled state system, with execution evidence keeping that shared state reliable. REFERENCES [1] T. R. Sumers, S. Yao, K. Narasimhan, and T. L. Griffiths, “Cognitive architectures for language agents,” Transactions on Machine Learning Research (TMLR) , 2024. [Online]. Available: https://arxiv.org/abs/2309.02427 [2] Y. Wang, W. Zhong, Y. Huang, E. Shi, M. Yang, J. Chen, H. Li, Y. Ma, Q. Wang, and Z. Zheng, “Agents in software engineering: Survey, landscape, and vision,” 2024. [Online]. Available: https://arxiv.org/abs/2409.09030 [3] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. R. Narasimhan, and O. Press, “SWE-agent: Agent-computer interfaces enable automated software engineering,” in The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. [Online]. Available: https://arxiv.org/abs/2405.15793 [4] N. Shinn, F. Cassano, E. Berman, A. Gopinath, K. Narasimhan, and S. Yao, “Reflexion: Language agents with verbal reinforcement learning,” in Advances in Neural Information Processing Systems 36 (NeurIPS 2023) , 2023. [Online]. Available: https://arxiv.org/abs/2303. 11366 [5] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury, “Autocoderover: Autonomous program improvement,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA 2024) . Vienna, Austria: ACM, 2024, pp. 1592–1604. [Online]. Available: https://arxiv.org/abs/2404.05427 [6] R. Bairi, A. Sonwane, A. Kanade, V. D. C., A. Iyer, S. Parthasarathy, S. Rajamani, B. Ashok, and S. Shet, “Codeplan: Repository-level coding using llms and planning,” Proceedings of the ACM on Software Engineering , vol. 1, no. FSE, Jul. 2024. [Online]. Available: https://doi.org/10.1145/3643757 [7] A. Antoniades, A. ¨Orwall, K. Zhang, Y. Xie, A. Goyal, and W. Y. Wang, “SWE-search: Enhancing software agents with monte carlo tree search and iterative refinement,” in The Thirteenth International Conference on Learning Representations (ICLR) , 2025. [Online]. Available: https://openreview.net/forum?id=G7sIFXugTX [8] S. Chen, S. Lin, Y. Shi, H. Lian, X. Gu, L. Yun, D. Chen, L. Cao, J. Liu, N. Xia, and Q. Wang, “Swe-exp: Experience-driven software issue resolution,” 2025. [Online]. Available: https://arxiv.org/abs/2507.23361 [9] F. Mu, J. Wang, L. Shi, S. Wang, S. Li, and Q. Wang, “EXPEREPAIR: Dual-memory enhanced llm-based repository-level program repair,” 2026, accepted by FSE 2026. [Online]. Available: https://arxiv.org/abs/2506.10484 [10] S. Wong, Z. Qi, Z. Wang, N. Hu, S. Lin, J. Ge, E. Gao, W. Chen, Y. Du, M. Yu, and Y. Zhang, “Confucius code agent: Scalable agent scaffolding for real-world codebases,” 2025. [Online]. Available: https://arxiv.org/abs/2512.10398 [11] A. Clark and D. J. Chalmers, “The extended mind,” Analysis , vol. 58, no. 1, pp. 7–19, 1998. [Online]. Available: https://doi.org/10.1093/ analys/58.1.7 [12] E. F. Risko and S. J. Gilbert, “Cognitive offloading,” Trends in Cognitive Sciences , vol. 20, no. 9, pp. 676–688, 2016. [13] E. Hutchins, Cognition in the Wild . Cambridge, MA: MIT Press, 1995. [14] T. Kagaya, T. J. Yuan, Y. Lou, J. Karlekar, S. Pranata, A. Kinose, K. Oguri, F. Wick, and Y. You, “RAP: Retrieval-augmented planning with contextual memory for multimodal LLM agents,” 2024. [Online]. Available: https://arxiv.org/abs/2402.03610 [15] K. Shen, J. Zhang, C. Sun, W. Zeng, and Y. Yue, “Structurally aligned subtask-level memory for software engineering agents,” 2026. [Online]. Available: https://arxiv.org/abs/2602.21611 [16] J. Carbonell and J. Goldstein, “The use of MMR, diversity-based reranking for reordering documents and producing summaries,” in 
+
+Proceedings of the 21st Annual International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR ’98) .New York, NY, USA: ACM, 1998, pp. 335–336. [Online]. Available: https://doi.org/10.1145/290941.291025 [17] J. Huang, X. Chen, S. Mishra, H. S. Zheng, A. W. Yu, X. Song, and D. Zhou, “Large language models cannot self-correct reasoning yet,” in The Twelfth International Conference on Learning Representations (ICLR) , 2024. [Online]. Available: https://openreview.net/forum?id=IkmD3fKBPQ [18] Z. Gou, Z. Shao, Y. Gong, Y. Shen, Y. Yang, N. Duan, and W. Chen, “CRITIC: Large language models can self-correct with tool-interactive critiquing,” in The Twelfth International Conference on Learning Representations (ICLR) , 2024. [Online]. Available: https://arxiv.org/abs/2305.11738 [19] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. R. Narasimhan, “SWE-bench: Can language models resolve real-world Github issues?” in The Twelfth International Conference on Learning Representations (ICLR) , 2024. [Online]. Available: https://openreview.net/forum?id=VTF8yNQM66 [20] OpenAI, “Introducing SWE-bench Verified,” OpenAI, 2024. [Online]. Available: https://openai.com/index/introducing-swe-bench-verified/ [21] X. Wang, B. Li, Y. Song, F. F. Xu, X. Tang, M. Zhuge, J. Pan, Y. Song, B. Li, J. Singh, H. H. Tran, F. Li, R. Ma, M. Zheng, B. Qian, Y. Shao, N. Muennighoff, Y. Zhang, B. Hui, J. Lin, R. Brennan, H. Peng, H. Ji, and G. Neubig, “OpenHands: An open platform for AI software developers as generalist agents,” in 
+
+International Conference on Learning Representations (ICLR) , 2025. [Online]. Available: https://openreview.net/forum?id=OJd3ayDDoF [22] A. Prasad, A. Koller, M. Hartmann, P. Clark, A. Sabharwal, M. Bansal, and T. Khot, “ADaPT: As-needed decomposition and planning with language models,” in Findings of the Association for Computational Linguistics: NAACL 2024 , K. Duh, H. Gomez, and S. Bethard, Eds. Mexico City, Mexico: Association for Computational Linguistics, Jun. 2024, pp. 4226–4252. [Online]. Available: https://aclanthology.org/2024.findings-naacl.264/ [23] Z. Qi, F. Long, S. Achour, and M. Rinard, “An analysis of patch plausibility and correctness for generate-and-validate patch generation systems,” in Proceedings of the 2015 International Symposium on Software Testing and Analysis (ISSTA 2015) . Baltimore, MD, USA: ACM, 2015, pp. 24–36. [Online]. Available: https: //doi.org/10.1145/2771783.2771791 [24] E. K. Smith, E. T. Barr, C. Le Goues, and Y. Brun, “Is the cure worse than the disease? overfitting in automated program repair,” in 
+
+Proceedings of the 2015 10th Joint Meeting on Foundations of Software Engineering (ESEC/FSE 2015) . Bergamo, Italy: ACM, 2015, pp. 532–543. [Online]. Available: https://doi.org/10.1145/2786805.2786825 [25] A. Pan, K. Bhatia, and J. Steinhardt, “The effects of reward misspecification: Mapping and mitigating misaligned models,” in 
+
+The Tenth International Conference on Learning Representations (ICLR) , 2022. [Online]. Available: https://openreview.net/forum?id= JYtwGwIL7ye [26] J. Skalse, N. H. R. Howe, D. Krasheninnikov, and D. Krueger, “Defining and characterizing reward hacking,” in Advances in Neural Information Processing Systems 35 (NeurIPS 2022) , 2022. [Online]. Available: https://arxiv.org/abs/2209.13085 [27] C. Denison, M. MacDiarmid, F. Barez, D. Duvenaud, S. Kravec, S. Marks, N. Schiefer, R. Soklaski, A. Tamkin, J. Kaplan, B. Shlegeris, S. R. Bowman, E. Perez, and E. Hubinger, “Sycophancy to subterfuge: Investigating reward-tampering in large language models,” arXiv preprint arXiv:2406.10162 , 2024. [Online]. Available: https://arxiv.org/abs/2406.10162 [28] J. Kaddour, S. Patel, G. Dovonon, L. Richter, P. Minervini, and M. J. Kusner, “Agentic uncertainty reveals agentic overconfidence,” 2026. [Online]. Available: https://arxiv.org/abs/2602.06948 [29] C. Le Goues, T. Nguyen, S. Forrest, and W. Weimer, “GenProg: A generic method for automatic software repair,” IEEE Transactions on Software Engineering , vol. 38, no. 1, pp. 54–72, 2012. [Online]. Available: https://doi.org/10.1109/TSE.2011.104 [30] M. Hu, T. Chen, Q. Chen, Y. Mu, W. Shao, and P. Luo, “HiAgent: Hierarchical working memory management for solving long-horizon agent tasks with large language model,” in Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , W. Che, J. Nabende, E. Shutova, and M. T. Pilehvar, Eds. Vienna, Austria: Association for Computational Linguistics, Jul. 2025, pp. 32 779–32 798. [Online]. Available: https: //aclanthology.org/2025.acl-long.1575/ [31] A. Zeller and R. Hildebrandt, “Simplifying and isolating failure-inducing input,” IEEE Transactions on Software Engineering , vol. 28, no. 2, pp. 183–200, 2002. [Online]. Available: https://doi.org/10.1109/32.988498 [32] Q. Team, “Qwen3 technical report,” 2025. [Online]. Available: https://arxiv.org/abs/2505.09388 [33] W. Kwon, Z. Li, S. Zhuang, Y. Sheng, L. Zheng, C. H. Yu, J. E. Gonzalez, H. Zhang, and I. Stoica, “Efficient memory management for large language model serving with PagedAttention,” in Proceedings of the 29th Symposium on Operating Systems Principles (SOSP) . ACM, 2023, pp. 611–626. [Online]. Available: https://arxiv.org/abs/2309.06180 [34] Z. Chu, J. Hu, X. Jiang, P. Zou, H. Li, C. Peng, P. O’Hearn, E. T. Barr, M. Harman, F. Sarro, and H. Ye, “TerminalWorld: Benchmarking agents on real-world terminal tasks,” 2026. [Online]. Available: https://arxiv.org/abs/2605.22535 [35] C. S. Xia, Y. Deng, S. Dunn, and L. Zhang, “Agentless: Demystifying LLM-based software engineering agents,” Proceedings of the ACM on Software Engineering , vol. 2, no. FSE, pp. 801–824, 2025, proceedings of the 33rd ACM SIGSOFT International Symposium on the Foundations of Software Engineering (FSE 2025). [Online]. Available: https://arxiv.org/abs/2407.01489 [36] H. Ruan, Y. Zhang, and A. Roychoudhury, “Specrover: Code intent extraction via llms,” in 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) , 2025, pp. 963–974. [Online]. Available: https://arxiv.org/abs/2408.02232 [37] Y. Xiong, X. Liu, M. Zeng, L. Zhang, and G. Huang, “Identifying patch correctness in test-based program repair,” in Proceedings of the 40th International Conference on Software Engineering (ICSE) .Gothenburg, Sweden: ACM, 2018, pp. 789–799. [Online]. Available: https://doi.org/10.1145/3180155.3180182 [38] L. Wang, W. Xu, Y. Lan, Z. Hu, Y. Lan, R. K.-W. Lee, and E.-P. Lim, “Plan-and-solve prompting: Improving zero-shot chain-of-thought reasoning by large language models,” in Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) . Toronto, Canada: Association for Computational Linguistics, Jul. 2023, pp. 2609–2634. [Online]. Available: https://aclanthology.org/2023.acl-long.147/ [39] H. Sun, Y. Zhuang, L. Kong, B. Dai, and C. Zhang, “Adaplanner: Adaptive planning from feedback with language models,” 2023. [Online]. Available: https://arxiv.org/abs/2305.16653 [40] J. S. Park, J. O’Brien, C. J. Cai, M. R. Morris, P. Liang, and M. S. Bernstein, “Generative agents: Interactive simulacra of human behavior,” in Proceedings of the 36th Annual ACM Symposium on User Interface Software and Technology , ser. UIST ’23. New York, NY, USA: Association for Computing Machinery, 2023, pp. 1–22. [Online]. Available: https://doi.org/10.1145/3586183.3606763 [41] C. Packer, S. Wooders, K. Lin, V. Fang, S. G. Patil, I. Stoica, and J. E. Gonzalez, “MemGPT: Towards LLMs as operating systems,” arXiv preprint arXiv:2310.08560 , 2023. [Online]. Available: https://arxiv.org/abs/2310.08560 [42] G. Wang, Y. Xie, Y. Jiang, A. Mandlekar, C. Xiao, Y. Zhu, L. Fan, and A. Anandkumar, “Voyager: An open-ended embodied agent with large language models,” Transactions on Machine Learning Research (TMLR) , 2024. [Online]. Available: https://arxiv.org/abs/2305.16291 [43] W. Xu, Z. Liang, K. Mei, H. Gao, J. Tan, and Y. Zhang, “A-MEM: Agentic memory for LLM agents,” in Advances in Neural Information Processing Systems (NeurIPS) , 2025. [Online]. Available: https://arxiv.org/abs/2502.12110 [44] S. Ouyang, J. Yan, I.-H. Hsu, Y. Chen, K. Jiang, Z. Wang, R. Han, L. T. Le, S. Daruki, X. Tang, V. Tirumalashetty, G. Lee, M. Rofouei, H. Lin, J. Han, C.-Y. Lee, and T. Pfister, “ReasoningBank: Scaling agent self-evolving with reasoning memory,” in International Conference on Learning Representations (ICLR) , 2026. [Online]. Available: https://arxiv.org/abs/2509.25140 [45] S. Kang, J. Yoon, and S. Yoo, “Large language models are few-shot testers: Exploring LLM-based general bug reproduction,” in Proceedings of the 45th International Conference on Software Engineering (ICSE) ,ser. ICSE ’23. IEEE Press, 2023, pp. 2312–2323. [Online]. Available: https://arxiv.org/abs/2209.11515
