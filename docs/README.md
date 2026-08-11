@@ -6,65 +6,74 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-10
-- 运行时间：2026-08-10 20:42:19 UTC
+- 最新运行日期：2026-08-11
+- 运行时间：2026-08-11 21:23:10 UTC
 - 运行状态：成功
-- 本次总论文数：14
-- 精读区：3
+- 本次总论文数：17
+- 精读区：6
 - 速读区：11
 
 ### 今日简报（AI）
-- 今日共生成 14 篇推荐（精读 3 篇，速读 11 篇）
-- 精读：《Self-Evolving Coding Agents》（8.5/10）, 《Online Monitoring and Corrective Steering of Programming Agents》（8.5/10）
-- 速读：《CyberForge: Verified Vulnerability Injection at Repository Level for Cybersecurity Agent Training》（7.5/10）, 《Understanding and Improving Model Editing for Secure Code Generation》（7.5/10）, 《EffiHolmes: Differential Profiling-Guided Repository Level Time Inefficiency Fix Localization》（7.0/10）
+- 今日共生成 17 篇推荐（精读 6 篇，速读 11 篇）
+- 精读：《Independent Patch Verification for Coding Agents with a Bidirectional Reconstruct-and-Verify Framework》（10.0/10）, 《On the Robustness of LLMs' Internal Representation of Code Correctness》（9.0/10）
+- 速读：《P$^{3}$: Joint Program-and-Proof Planning for Verified Code Generation》（7.5/10）, 《TeXFix-Bench: An Empirically Grounded Multi-Format Benchmark for LLM-Based Document Source Repair》（7.0/10）, 《LLM-Based Embeddings for Program Analysis and Optimization》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202608/10/README](/202608/10/README)
+- 详情：[/202608/11/README](/202608/11/README)
 
 ### 精读区论文标签
-1. [Self-Evolving Coding Agents](/202608/10/2608.03392v1-self-evolving-coding-agents)  
+1. [Independent Patch Verification for Coding Agents with a Bidirectional Reconstruct-and-Verify Framework](/202608/11/2608.08950v1-independent-patch-verification-for-coding-agents-with-a-bidirectional-reconstruct-and-verify-framework)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：独立的补丁验证与评估补丁正确性
+2. [On the Robustness of LLMs' Internal Representation of Code Correctness](/202608/11/2608.08266v1-on-the-robustness-of-llms-internal-representation-of-code-correctness)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：代码正确性的内部表示，无需测试执行即可判断候选方案
+3. [Security Tests as Executable Specifications for LLM Code Generation: Benefits, Trade-offs, and Coverage Limits](/202608/11/2608.09740v1-security-tests-as-executable-specifications-for-llm-code-generation-benefits-trade-offs-and-coverage-limits)  
    标签：评分：8.5/10、query:apr-oracle
-   evidence：对执行测试、调试故障并生成补丁的编程智能体的综述
-2. [Online Monitoring and Corrective Steering of Programming Agents](/202608/10/2608.06701v1-online-monitoring-and-corrective-steering-of-programming-agents)  
-   标签：评分：8.5/10、query:apr-oracle
-   evidence：监控并纠正编程代理，以确保在长周期任务中生成有效的补丁
-3. [Coupling Planning with Episodic Memory in LLM Agents for Software Issue Resolution](/202608/10/2608.06811v1-coupling-planning-with-episodic-memory-in-llm-agents-for-software-issue-resolution)  
+   evidence：使用安全测试作为可执行规范的迭代修复
+4. [Can Coding Agents Solve Repository-Level Issues with Rendered Code? An Exploratory Study of Visual Representations](/202608/11/2608.09268v1-can-coding-agents-solve-repository-level-issues-with-rendered-code-an-exploratory-study-of-visual-representations)  
    标签：评分：8.0/10、query:apr-oracle
-   evidence：用于软件问题解决和通过执行证据进行验证的LLM智能体
+   evidence：在仓库级修复工作流和补丁验证中评估编码智能体
+5. [SWE-Bench ProMax: Benchmarking Agents on Large-Scale Multilingual Code Refactoring](/202608/11/2608.09802v1-swe-bench-promax-benchmarking-agents-on-large-scale-multilingual-code-refactoring)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：在代码重构上对代理进行基准测试，并审计现有修复基准中的缺陷测试
+6. [Detecting Behavioral Changes in Python Refactoring Implementations with Foundation Models](/202608/11/2608.09919v1-detecting-behavioral-changes-in-python-refactoring-implementations-with-foundation-models)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：用于检测重构中行为变化的基座模型预言
 
 ### 速读区论文标签
-1. [CyberForge: Verified Vulnerability Injection at Repository Level for Cybersecurity Agent Training](/202608/10/2608.06471v1-cyberforge-verified-vulnerability-injection-at-repository-level-for-cybersecurity-agent-training)  
+1. [P$^{3}$: Joint Program-and-Proof Planning for Verified Code Generation](/202608/11/2608.09277v1-p3-joint-program-and-proof-planning-for-verified-code-generation)  
    标签：评分：7.5/10、query:apr-oracle
-   evidence：修复复杂漏洞与动态验证
-2. [Understanding and Improving Model Editing for Secure Code Generation](/202608/10/2608.06848v1-understanding-and-improving-model-editing-for-secure-code-generation)  
-   标签：评分：7.5/10、query:apr-oracle
-   evidence：针对安全代码生成的模型级加固与功能正确性评估
-3. [EffiHolmes: Differential Profiling-Guided Repository Level Time Inefficiency Fix Localization](/202608/10/2608.03558v1-effiholmes-differential-profiling-guided-repository-level-time-inefficiency-fix-localization)  
+   evidence：在补丁代码和补丁证明之间交替的脆弱修复循环
+2. [TeXFix-Bench: An Empirically Grounded Multi-Format Benchmark for LLM-Based Document Source Repair](/202608/11/2608.07617v1-texfix-bench-an-empirically-grounded-multi-format-benchmark-for-llm-based-document-source-repair)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：针对时间效率低下错误的仓库级修复定位
-4. [Learning Globally Reusable Skills for Coding Agents](/202608/10/2608.06153v1-learning-globally-reusable-skills-for-coding-agents)  
+   evidence：基于故障分类法的LLM文档源码修复基准
+3. [LLM-Based Embeddings for Program Analysis and Optimization](/202608/11/2608.07894v1-llm-based-embeddings-for-program-analysis-and-optimization)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：通过回放驱动的验证解决编程智能体中过拟合的技能更新问题
-5. [MIRA: Evidence-Verified Repair Memory for Text-to-SQL Correction](/202608/10/2608.06950v1-mira-evidence-verified-repair-memory-for-text-to-sql-correction)  
+   evidence：基于大模型的程序分析与优化嵌入
+4. [Refining LLM-based Directed Test Input Generation via Runtime Value Feedback](/202608/11/2608.07926v1-refining-llm-based-directed-test-input-generation-via-runtime-value-feedback)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：基于证据验证的修复记忆以确保语义正确性
-6. [Stylometric Defenses Against Author Impersonation in Software Repositories](/202608/10/2608.02695v1-stylometric-defenses-against-author-impersonation-in-software-repositories)  
+   evidence：运行时反馈引导的测试输入生成改进
+5. [FailForge: Distilling Procedural Competence from Persistent Failures into Code Agents](/202608/11/2608.08570v1-failforge-distilling-procedural-competence-from-persistent-failures-into-code-agents)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：基于学习的代码代理以及从失败中生成补丁
+6. [SmellCC: A Tool for Automated Code Smells Remediation](/202608/11/2608.09477v1-smellcc-a-tool-for-automated-code-smells-remediation)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：基于大语言模型的代码异味自动检测与重构流水线
+7. [Improving Debugging in Verification-Aware Languages Through Automated Fault Localization: A Case Study in Dafny](/202608/11/2608.05399v2-improving-debugging-in-verification-aware-languages-through-automated-fault-localization-a-case-study-in-dafny)  
    标签：评分：6.5/10、query:apr-oracle
-   evidence：通过文体分析评估补丁级提交的神经表示模型
-7. [Relational Response Fields: A General Theory of Black-Box LLM Response Consistency and Recovery](/202608/10/2608.04552v1-relational-response-fields-a-general-theory-of-black-box-llm-response-consistency-and-recovery)  
+   evidence：Dafny中静态正确性检查的自动故障定位
+8. [Accelerating Accurate Assignment Authoring Using Solution-Generated Autograders](/202608/11/2608.06572v1-accelerating-accurate-assignment-authoring-using-solution-generated-autograders)  
    标签：评分：6.5/10、query:apr-oracle
-   evidence：使用执行或验证器等锚点验证黑盒大模型响应的可靠性
-8. [Explanation-Guided Metamorphic Testing of Specialized Language Models: An Empirical Study](/202608/10/2608.07076v1-explanation-guided-metamorphic-testing-of-specialized-language-models-an-empirical-study)  
+   evidence：用于准确分类提交内容的解决方案生成自动评分器
+9. [Entropy-based Code Adversarial Translation for Real-world Repository Migration](/202608/11/2608.09273v1-entropy-based-code-adversarial-translation-for-real-world-repository-migration)  
    标签：评分：6.5/10、query:apr-oracle
-   evidence：使用蜕变测试检测专用语言模型中的脆弱行为
-9. [Algorithm-driven Development: A Proactive Approach to Improving Software Quality and Reducing Defects](/202608/10/2608.01533v1-algorithm-driven-development-a-proactive-approach-to-improving-software-quality-and-reducing-defects)  
+   evidence：判别器使用代码熵衡量迁移质量
+10. [Quality-Diversity Stress Tests for Process Reward Models:What Archive Coverage Can and Cannot Certify](/202608/11/2608.08008v1-quality-diversity-stress-tests-for-process-reward-modelswhat-archive-coverage-can-and-cannot-certify)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：从作为规范的算法流程图中系统地导出验收测试
-10. [PRWeaver: Evaluating LLM-Based Code Auditors against Long-Horizon Malicious Pull Requests](/202608/10/2608.02693v1-prweaver-evaluating-llm-based-code-auditors-against-long-horizon-malicious-pull-requests)  
+   evidence：对奖励模型进行正确性和修复边界的压力测试
+11. [SimP: Unifying Syntax- and Semantic-Guided Techniques for Efficient Program Reduction](/202608/11/2608.08352v1-simp-unifying-syntax--and-semantic-guided-techniques-for-efficient-program-reduction)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：针对恶意拉取请求和仓库演进评估代码审计器
-11. [Towards Assurance Closure in AI-Native Large-Scale Agile Software Development](/202608/10/2608.07317v1-towards-assurance-closure-in-ai-native-large-scale-agile-software-development)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：AI原生开发中的保证闭环与证据可信度判断
+   evidence：基于LLM的语法和语义引导的程序缩减用于调试
 
 
 <div class="dpr-home-promo-card">

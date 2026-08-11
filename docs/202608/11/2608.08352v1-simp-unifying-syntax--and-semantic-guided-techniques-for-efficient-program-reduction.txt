@@ -1,0 +1,584 @@
+Title: SimP: Unifying Syntax- and Semantic-Guided Techniques for Efficient Program Reduction
+
+URL Source: https://arxiv.org/pdf/2608.08352v1
+
+Published Time: Tue, 11 Aug 2026 00:57:46 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# SimP: Unifying Syntax- and Semantic-Guided Techniques for Efficient Program Reduction 
+
+# Based on the version submitted for peer review in May 2026, with minor revisions. 
+
+## Ye Xiong 
+
+Institute of Software, Chinese Academy of Sciences Beijing, China 
+
+xiangyug@cs.washington.edu 
+
+## Xiangyu Gao 
+
+University of Washington Seattle, WA, USA 
+
+xiangyug@cs.washington.edu 
+
+## Jocelyn Qiaochu Chen 
+
+University of Alberta Edmonton, Alberta, Canada 
+
+jocelyn.chen@ualberta.ca 
+
+## Mingyu Li 
+
+Institute of Software, Chinese Academy of Sciences Beijing, China 
+
+limingyu@ios.ac.cn 
+
+## Haibo Chen 
+
+Institute of Software, Chinese Academy of Sciences Beijing, China 
+
+haibochen@ios.ac.cn 
+
+## Abstract 
+
+Compiler bugs are pervasive in modern compiler systems, but the test programs that trigger them are often too large for practical debugging. Program reduction addresses this by minimizing test program size while preserving the original bug-triggering behavior. Existing approaches mainly rely on syntax-guided, rule-based deletion strategies that iteratively remove parts of the program in a trial-and-error manner. While effective in reduction quality, these approaches suffer from slow reduction speed. This paper presents SimP, a program reduction framework that combines traditional reduction with LLM-based syntax-and semantic-guided reduction. SimP leverages customized prompt design to guide the reduction process. SimP synergis-tically combines rule-based and LLM-based reduction stages to optimize the reduction performance. The results show that SimP improves reduction efficiency while achieving compa-rable reduction quality, with negligible LLM monetary cost. 
+
+## 1 Introduction 
+
+Bugs are pervasive and detrimental in production compilers. A single compiler bug can cause the generated executable to exhibit behavior that deviates from the semantics of the input program, potentially leading to serious system failures. Detecting and fixing these bugs is essential to the perfor-mance and reliability of the compiler. Despite decades of engineering effort, fixing compiler bugs remains an ongoing process: widely used compilers across domains (e.g., GCC [3], TVM [9], P4 [7]) continue to receive a steady stream of bug-fixing patches. Existing techniques for compiler validation broadly fall into two categories: formal methods and testing-based ap-proaches. Formal verification and translation validation tech-niques [21] aim to prove compiler correctness, while testing-based approaches (e.g., random program generation [20, 30] and equivalence-based testing [18]) are more widely adopted in practice. The latter generate test programs and run them through the compiler: when a program triggers an incorrect compilation outcome (e.g., a crash or miscompilation), it indi-cates the presence of a bug. While effective at exposing bugs, these techniques do not control the size or complexity of the programs they generate. As a result, bug-triggering test pro-grams are often large and complex: tools such as Csmith [30] and YARPGen [20] routinely produce programs with hun-dreds to thousands of lines of code, which are difficult for developers to analyze directly. Despite their size, much of the code in these test programs is irrelevant to triggering the bug. Program reduction exploits this fact: it automatically simplifies a large test program into a much smaller version that still triggers the same bug and is manageable for human developers. State-of-the-art program reduction techniques can be broadly divided into two categories: language-generic and language-specific reducers. Language-generic reducers (e.g., Perses [27] and HDD [22]) are applicable across many programming lan-guages, but lack language-specific techniques for deep simpli-fication. Language-specific reducers, such as C-Reduce [25] and ddSMT [16], leverage language-specific syntax and se-mantics to achieve better reduction quality, but do not gen-eralize across languages. Recent work such as LPR [31] uses large language models to enable language-aware reduction across multiple languages. All these tools belong to the syntax-guided program reduc-tion category, where the reducer follows a trial-and-error process: it removes parts of the program based on its syntac-tic structure (e.g., abstract syntax tree), tests the validity of the reduced program (e.g., syntactic correctness and preser-vation of bug-triggering behavior), and then moves on to the next iteration. However, syntax-guided reducers are slow in practice. On publicly available benchmarks, we observe that 
+
+> 1arXiv:2608.08352v1 [cs.PL] 8 Aug 2026 Ye Xiong, Xiangyu Gao, Jocelyn Qiaochu Chen, Mingyu Li, and Haibo Chen time
+> program size
+> SimP:
+> switch to hybrid mode
+> (LLM + rule-based) after initial reduction
+> long-tail:
+> trials continue, but not much reduction
+> time saved by SimP
+> efficient reduction
+> comparable reduction size
+> Existing Reducers:
+> rule-based iterative deletion throughout
+
+Figure 1. State-of-the-art syntax-guided reducers can quickly remove bug-irrelevant code in the early stage, but their reduction speed gradually slows down later. Our ap-proach (called SimP) reuses the efficient initial reduction of existing approaches until the long-tail is detected. It then switches to a hybrid mode that combines LLM-guided se-mantic and syntactic reasoning with rule-based techniques to continue reduction. This avoids the long-tail behavior and improves reduction efficiency while achieving comparable reduction size. a representative reducer, LPR, requires more than 1 hour to complete reduction in over 80% of the cases, with over 25% taking more than 7 hours. Early in the reduction process, these reducers efficiently delete bug-irrelevant code from the input program. However, as the program becomes smaller, a growing fraction of candidate transformations fail to trigger the bug or become syntactically invalid, producing a long-tail in which the reducer spends most of its time making little progress (Obs. 1 of §3). The root cause is that syntax-guided reducers only perform local AST edits, which cannot make the global, coordinated changes the remaining program still admits. Spending excessive time on reduction delays the reporting of bugs to compiler developers and significantly hurts development productivity. To remedy this issue, we propose SimP, a hybrid program reduction framework that combines syntax-guided and LLM-driven reduction. The two paradigms are complementary: syntax-guided reduction handles fast bulk deletion, while LLMs can make the global semantic edits that syntax-guided reducers cannot. As is shown in Figure 1, SimP starts with the traditional syntax-guided strategy to quickly delete bug-irrelevant code, then switches to LLM+rule-based hybrid reduction mode once the long-tail appears. Realizing this design poses two challenges: (1) when and how to switch between syntax-guided and LLM-driven re-duction, and (2) how to use LLMs reliably for reduction, both in what we ask them to do and in how we cope with the instability of their outputs. To address the first challenge, SimP uses a lightweight runtime detector that triggers the switch once two condi-tions hold: the program has shrunk substantially relative to the original input, and recent reduction speed has dropped below a threshold—conditions that together distinguish the long-tail from transient plateaus. To further improve the collaboration between the two paradigms, we also remove several overly time-consuming operations from the tradi-tional reduction workflow that contribute little to the final reduction quality. To address the second challenge, SimP customizes how it uses LLMs at each phase of reduction. We observe that naive prompting strategies often lead LLMs toward incorrect reduc-tions (Obs. 3 in §3), so we design phase-specific prompts: for semantic-guided LLM reduction, prompts that guide LLMs to generate reduced programs from scratch by analyzing the root cause of the bug; for syntax-guided LLM mutation, prompts that transform the program into reduction-friendly forms that the syntax-guided reducer can shrink further. To handle the instability of LLM outputs, SimP adopts a best-of-𝑁 generation strategy: it produces multiple reduction candidates and selects the best one for the next phase. We evaluate SimP against two state-of-the-art program reducers, LPR [31] and Perses [27], on a collection of open-source and real-world compiler bug benchmarks (§5). The results show that SimP significantly improves reduction effi-ciency, achieving 1.75 × speedup on average and up to 2.55 ×
+
+speedup in the best case, while maintaining reduction qual-ity comparable to other approaches. On average, SimP saves about one hour of reduction time per benchmark. The mon-etary cost of using LLMs in SimP is small (less than $0.5 per task on average), and is far outweighed by the time saved. Our ablation study further shows that both the hybrid in-teraction between rule-based and LLM-based stages and the customized prompt design are essential to these improve-ments. Our contributions can be summarized as follows: 
+
+• A hybrid syntax- and semantic-guided program re-duction framework. We build SimP, a hybrid program reduction framework that combines traditional rule-based, syntax-guided deletion with LLM-based syntax- and semantic-guided reduction. SimP alternates between rule-based and LLM-based stages to optimize reduction performance. 
+
+• Customized prompt design for program reduction. 
+
+We design customized prompts with human insights incor-porated to guide LLMs toward preserving bug-triggering semantics while making more effective reduction deci-sions. 
+
+• Empirical improvement in reduction efficiency. Eval-uation shows that on real-world compiler bug benchmarks, SimP reduces reduction time while achieving reduction quality comparable to existing approaches. 
+
+> 2
+
+## 2 Background 
+
+2.1 Compiler bug detection 
+
+Despite decades of engineering effort, modern compilers such as GCC [3], LLVM [17], TVM [9], and domain-specific com-pilers (e.g., P4 [7]) continue to exhibit correctness issues, and substantial effort is devoted to identifying and fixing such bugs. To detect compiler bugs, prior work falls into two broad categories. Testing-based approaches, such as random program generation [20, 26, 30] and equivalence-based test-ing [18], generate a large number of input programs and check whether the compiled outputs satisfy expected se-mantic properties. Formal verification techniques [21], by contrast, prove the correctness of compiler transformations directly, without relying on concrete test inputs. In this work, we focus on testing-based detection, which surfaces concrete failing programs that compiler developers must then diag-nose. A common class of bugs surfaced this way manifests as inconsistencies in compiler behavior: the same input pro-gram may lead to different execution results under different compilation settings. For instance, if we use GCC to compile the same input program using 2 different optimization levels (e.g., -O1 vs. -O2 ) but the execution results are different un-der these two scenarios (e.g., segmentation fault vs. normal execution), it indicates the existence of compiler bugs in at least one of the optimization modes. 
+
+2.2 Program reduction 
+
+Program reduction [11, 14, 16, 22, 25, 27, 29], is the process of simplifying an input program and preserving its property at the same time. Formally, given an input program 𝑃 and a property 𝜙 (e.g., triggering a compiler bug), program re-duction aims to produce a reduced program 𝑃 ′ such that: (i) 𝑃 ′ preserves the property 𝜙 , and (ii) 𝑃 ′ is smaller than 𝑃 
+
+according to a given size metric (e.g., lines of code or number of tokens). In practice, automatically generated test programs are of-ten large and complex, which makes them difficult to debug: a compiler developer must understand the program, pinpoint the code responsible for triggering the bug, and produce a fix, all of which become substantially harder as program size grows. Program reduction addresses this challenge by stripping away code that is irrelevant to triggering the bug, yielding a minimal test case that is far more tractable for human analysis. 
+
+## 3 Characterizing Program Reduction Approaches 
+
+We examine representative state-of-the-art syntax-guided reducers as well as a pure LLM-based baseline, and list three observations that expose their limitations, which motivate our design. 0 20 40 60 10 2            
+
+> 10 3
+> 10 4
+> Program size (tokens)
+> Perses LPR
+> 010 20 30 10 3
+> 10 4
+> 10 5
+> Program size (bytes)
+> C-Reduce
+> 20 30 40 50 60
+> Reduction time (minutes)
+> 200 400
+> Tokens, zoomed
+> 15.0 17.5 20.0 22.5 25.0 27.5
+> Reduction time (minutes)
+> 200 400 600 800
+> Bytes, zoomed
+
+Figure 2. Long-tail phenomenon on the gcc107176 bench-mark. The top row shows the full reduction trajectory of Perses, LPR, and C-Reduce; the bottom row enlarges the shaded long-tail region of each plot. 
+
+Observation 1: Long-tail phenomenon affects the reduction speed. We record the procedure of existing program reduc-tion tools (e.g., Perses [27], LPR [31], and C-Reduce [25]). Al-though they can achieve high reduction speed during certain stages, they often suffer from long-tail effects throughout the reduction process. Figure 2 illustrates this pattern on the gcc107176 benchmark. In the beginning, all three reduc-ers make rapid progress and eliminate a large number of tokens efficiently. However, they slow down significantly in later stages, requiring substantial time to eliminate even a small number of tokens. For instance, LPR reduces the in-put from roughly 51K tokens down to around 390 tokens in the first 20 minutes, but then needs another 38 minutes to shrink the remaining program from 390 to 110 tokens; the zoomed-in panels make this disparity explicit, and Perses and C-Reduce exhibit the same shape. We observe that this phenomenon consistently appears across other benchmarks: such plateau and long-tail behaviors are common in existing syntax-guided program reducers. 
+
+Observation 2: Diminishing successful program reduction rate due to local syntactic search. We further look into the reasons behind this plateau and long-tail phenomenon by analyzing the intermediate output programs. Syntax-guided reduction tools typically follow a trial-and-error approach: they reduce the current program into a smaller version, test the syntactic validity of the new program, and check whether the new program still triggers the bug or not. If the candi-date program still triggers the bug, the reducer continues reducing this new program; otherwise, it falls back to the previous version and retries other transformations. We refer to the former as a positive program (one that still triggers the bug) and the latter as a negative program (one that becomes syntactically invalid or fails to reproduce the bug). Figure 3 shows the cumulative counts of these two types of intermediate programs in the reduction process of Perses on gcc107176. The gap between the number of negative     
+
+> 3Ye Xiong, Xiangyu Gao, Jocelyn Qiaochu Chen, Mingyu Li, and Haibo Chen 010 20 30 40
+> Reduction time (minutes)
+> 01000 2000 3000 4000 5000 6000 7000 8000
+> Cumulative variants
+> early: gap ≈ 544 late: gap ≈ 6276
+> Cumulative variant outcomes — gap grows over time (gcc107176)
+> Gap (negative − positive) Negative (cumulative) Positive (cumulative)
+
+Figure 3. Cumulative counts of negative and positive vari-ants generated by Perses on gcc107176. The gap between the two curves grows by more than an order of magnitude between the early and late phases of reduction. and positive programs is relatively small in the initial phase (≈544 in the first 10 minutes), but grows significantly as the reduction process proceeds, reaching ≈6276 by the end. This is because in early stages, there is ample room for reduction, so most candidate transformations succeed. However, as the program becomes smaller, the remaining bug-triggering code fragments become increasingly difficult to simplify, and a growing fraction of candidate transformations fail. Consequently, reducers spend more time exploring effective program variants in the later stages of reduction. The fundamental cause is that syntax-guided reducers primarily perform local program transformations based on syntactic structures such as abstract syntax trees (ASTs). For example, Perses categorizes AST nodes into different types (e.g., regular nodes and Kleene nodes) and iteratively removes or rewrites these nodes during reduction. Such re-ductions are largely guided by local syntactic properties rather than a global understanding of the program’s bug-triggering semantics. While these local transformations can effectively eliminate large amounts of irrelevant code during the early stages of reduction, the remaining reductions in later stages often require coordinated modifications across multiple program regions (e.g., removing a function together with its callers and any types only it uses). No single AST-local edit performs such a coordinated change, so the reducer accumulates many failed attempts before finding a sequence of moves that yields a smaller bug-preserving program – precisely the widening gap shown in Figure 3. Tools that build on Perses, such as LPR, inherit the same limitation. 
+
+Observation 3: Pure LLM-driven program reduction is not sufficient. Given the wide adoption of LLMs across code-related tasks, a natural question is whether they can perform program reduction directly, bypassing the trial-and-error search used by syntax-guided tools. We evaluate the feasibil-ity of this approach by performing program reduction using LLMs with straightforward prompt design (e.g., please re-duce the program with the bug-triggering feature preserved).  
+
+> “Reduce the input program while preserving the bug trigger”
+> Repeated hypothesis switching: LLM
+> Macro hypothesis
+> #ifdef __OPTIMIZE__ printf("3525F824"); #else printf("A0552CB1"); #endif
+> Pointer hypothesis
+> int *p = &x, **pp = &p; int ***ppp = &pp; *pp = &p3; if (p4) ****pppp = ...;
+> bug-preserving validation fails; next trial changes track
+
+Figure 4. Naive LLM-driven reduction alternates between plausible but invalid hypotheses. The macro and pointer snip-pets, shown inside the switching loop, respectively fabricate optimization-level behavior and follow a pointer-nesting prototype; both fail validation because neither preserves the true bug trigger. Unfortunately, this does not achieve good reduction perfor-mance. On the one hand, large input programs consume a substantial number of tokens, leading to high inference cost. More seriously, the generated reduced programs are often of poor quality. For instance, Figure 4 shows snippets from two intermedi-ate reduction outputs produced by an LLM for a very large Csmith-style testcase that exhibits different behavior under different optimization modes ( -Os vs. -O0 ) in gcc-10.1.0. The macro hypothesis shows that the LLM tries to reproduce the bug-triggering feature by using the __OPTIMIZE__ macro. However, this incorrectly attributes the root cause of the bug to the optimization flags themselves rather than to the underlying compiler miscompilation behavior. The pointer hypothesis shows another completely different reduction trial using a hierarchy of pointers. Both trials fail to trigger the compiler bug. We check the cause of this phenomenon by analyzing LLM’s reasoning. It shows that without guidance, LLM can, at most, identify the testcase as a miscompilation bug, but cannot provide any further diagnosis. The LLM reasons more like how to generate a program that behaves differently under different compilation configurations , rather than how to gener-ate a program that follows the trigger logic of the bug . Hence, it either (1) observes that the program produces different outputs when compiled under different optimization levels or (2) extracts from the original testcase a specific structure that matches a compiler-bug prototype during training. Finally, naive prompt designs cause LLMs to frequently switch between unrelated program reduction hypotheses (e.g., pointer nesting and macro variables). In practice, we ob-serve intermediate outputs similar to the macro and pointer snippets in Figure 4 periodically appear throughout the re-duction process. As summarized by the switching loop in 
+
+> 4
+
+Figure 4, the reduction goes back and forth between differ-ent reduction tracks, preventing the LLM from consistently making progress. 
+
+Takeaway: Traditional syntax-guided program reduction tools rely on iterative and heuristic-driven reduction. Although effective in some cases, they can suffer from a long reduc-tion time. Besides, LLM-based reduction with naive prompt design also exhibits unsatisfactory performance. These obser-vations motivate us to explore a hybrid program reduction approach that combines both syntax-guided and semantic-guided reduction using both traditional rule-based and emerg-ing LLM-based techniques. 
+
+## 4 Our syntax- and semantic-guided reduction design 
+
+The design of SimP is guided by a simple principle: apply different reduction strategies at different stages of reduc-tion, so that each strategy is used where it is most effective. In the early stage, the input program is large and contains many bug-irrelevant code fragments, so SimP uses a tradi-tional syntax-guided reducer (e.g., Perses) to quickly remove large AST-level structures. Once the program enters the long-tail stage discussed in Section 3, local AST-level edits stall; SimP then switches to two LLM-based components that com-plement deletion. One reasons about the program’s bug-triggering semantics and synthesizes smaller bug-preserving programs from scratch. The other rewrites the program into forms that are easier for the syntax-guided reducer to shrink. Figure 5 shows the resulting workflow. SimP consists of three components: (1) a syntax-guided deletion reducer that handles early-stage reduction and includes a lightweight detector for the long-tail transition; (2) a semantic-guided LLM reducer that reasons about why the program triggers the bug and synthesizes smaller candidate programs that preserve the bug-triggering behavior; and (3) a syntax-guided LLM mutator that rewrites the program into a structurally simpler form, exposing further reduction opportunities for the deletion reducer. The rest of this section describes each component in detail. 
+
+4.1 Modified traditional deletion-based reduction 
+
+Syntax-guided deletion is the cheapest reduction primitive available to SimP: when the program still admits local AST edits that remove bug-irrelevant code, no other component can match its speed. SimP therefore uses it in two phases of the reduction loop. The first is an initial run-to-long-tail phase that removes the bulk of bug-irrelevant code before any LLM is invoked. The second is a fast cleanup pass after each LLM stage that strips easy-to-spot fragments that LLM outputs may still contain. Both phases build on the Perses reducer [27], but each tailors it to its goal: the initial phase adds a runtime detector that decides when to hand off to Full Perses 
+
+> Del-only
+> Perses
+> Del-only
+> Perses
+> Semantic Reducer
+> Syntactic Mutator
+> Rule-based
+> LLM-based
+> Input Program
+> Long-tail Detected
+> Reduced Program
+> Reduced Program
+> Reduced Program
+> Reduced Program
+> +
+> Pos/Neg
+> Programs
+> Reduced
+> Program
+
+Figure 5. Program reduction workflow in SimP. SimP con-sists of five major stages that combine rule-based deletion and LLM-based reduction. The workflow starts with full Perses reduction to remove redundant bug-irrelevant code. Once the long-tail phenomenon is detected, SimP switches to the LLM-based pipeline, which performs semantic reduc-tion and syntactic mutation to further simplify the program. The generated programs are then fed back into deletion-only Perses stages for additional quick reduction. the LLM, while the cleanup phase disables expensive rewrite operations that the LLM mutator handles more effectively. 
+
+4.1.1 Run-to-long-tail deletion. SimP first applies Perses to perform syntax-guided reduction on the input program. As discussed earlier, syntax-guided deletion is effective during the early stage of reduction because large AST-level struc-tures can often be removed quickly while the bug-triggering behavior is preserved. The key challenge is knowing when this strategy stops being effective: running Perses to conver-gence wastes time in the long-tail, but switching too early forfeits Perses’s strength on bulk deletion. To find the right switching point, SimP continuously mon-itors the reduction progress at runtime and switches to the LLM reducer once two conditions hold: (1) the program size has been substantially reduced relative to the original in-put, and (2) the recent reduction speed has dropped signif-icantly. The first condition prevents premature switching while Perses is still making bulk progress; the second catches the transition into the long-tail regime documented in §3. 
+
+Concrete mechanism to detect long-tail. The main difficulty in detecting the long-tail is distinguishing it from a transient 
+
+plateau . SimP addresses this with two complementary sig-nals. The first is an absolute token threshold 𝜆 that guards against switching too early. While 𝑡𝑜𝑘𝑒𝑛 𝑡 > 𝜆 , where 𝑡𝑜𝑘𝑒𝑛 𝑡 
+
+denotes the token count at time 𝑡 , SimP keeps Perses running regardless of its instantaneous speed: a still-large program al-most certainly contains bulk irrelevant code that Perses can remove cheaply. The second is a 𝑠𝑐𝑜𝑟𝑒 that captures whether 
+
+> 5Ye Xiong, Xiangyu Gao, Jocelyn Qiaochu Chen, Mingyu Li, and Haibo Chen
+
+reduction has structurally slowed down: 
+
+𝑠𝑐𝑜𝑟𝑒 𝑡 = 𝑟 𝑡 + 𝑝 · 𝑐 𝑡 
+
+where 𝑟 𝑡 = 𝑡𝑜𝑘𝑒𝑛 𝑡 
+
+𝑡𝑜𝑘𝑒𝑛 0
+
+, 𝑐 𝑡 = 𝑡𝑜𝑘𝑒𝑛 𝑡 (1− 𝑗 %) − 𝑡𝑜𝑘𝑒𝑛 𝑡 
+
+𝑡𝑜𝑘𝑒𝑛 0 − 𝑡𝑜𝑘𝑒𝑛 𝑡 
+
+Here, 𝑟 𝑡 is the remaining token ratio relative to the original program; 𝑐 𝑡 is the fraction of tokens removed within the most recent elapsed-time window of length 𝑗 % × 𝑡 , normal-ized by the total reduction achieved so far; and 𝑝 is a tunable weight balancing the two terms. A small 𝑟 𝑡 indicates that most removable code has already been eliminated, while a small 𝑐 𝑡 indicates that recent reduction progress has slowed compared with historical progress. SimP declares the long-tail phase entered (and hands off to LLM-based components) once both 𝑡𝑜𝑘𝑒𝑛 𝑡 ≤ 𝜆 and 𝑠𝑐𝑜𝑟𝑒 𝑡 ≤ 𝐾 hold. Concrete param-eters’ values are mentioned in §C in the appendix. 
+
+4.1.2 Fast-and-coarse reduction. After the LLM-based reducer (§4.2) and mutator (§4.3) return a candidate program, SimP runs syntax-guided deletion again to clean up the easy-to-spot bug-irrelevant fragments that the LLM’s output may still contain. This pass uses a streamlined version of Perses: we preserve only the AST-node-level deletion and simplifi-cation operations, and terminate as soon as a complete AST traversal yields no further reductions. The original Perses additionally performs localized pro-gram rewrites to escape local minima during reduction. While effective in some cases, this exploration is expensive: it enu-merates a large number of candidate variants per iteration. In SimP, we disable this rewrite-based exploration and instead rely on the LLM mutator to escape local optima. 
+
+4.2 Semantic-guided LLM reducer 
+
+Once Perses enters the long-tail, the remaining edits typically require coordinated changes across multiple program regions that no single local AST edit can express (Obs. 2 in §3). SimP uses an LLM to reason about the program globally: instead of incrementally deleting fragments, the LLM identifies what makes the program trigger the bug and synthesizes a smaller program that preserves the same behavior. As is shown in Obs. 3 in §3, however, naively prompting an LLM to do this is unreliable – the model often switches between unrelated hypotheses about the bug’s root cause. SimP addresses this with three design choices: contrastive examples collected from the prior Perses run, a structured reasoning guide in the prompt, and best-of-𝑁 selection across multiple sampled candidates. Algorithm 1 summarizes the overall workflow. 
+
+4.2.1 Example collection from the prior reduction phase. The LLM cannot identify the bug-triggering features from the program alone, since whether a fragment matters depends on the compiler and its configuration. SimP there-fore supplies this information indirectly through contrastive examples mined from the preceding Perses run. Each Perses 
+
+Algorithm 1: LLM-guided semantic reduction work-flow 
+
+Input: A set of positive and negative programs 
+
+𝑃 = 𝑃 + ∪ 𝑃 − , candidate count 𝑁 
+
+Output: A reduced program 𝑝 ∗
+
+C ← ∅ 
+
+foreach 𝑖 ∈ { 1, . . . , 𝑁 } do 
+
+C ← C ∪ { LLMReduce (𝑃 +, 𝑃 − )} Cvalid ← { 𝑝 𝑖 ∈ C | TriggersBug (𝑝 𝑖 )} 
+
+𝑝 ∗ ← arg min 𝑝 𝑖 ∈ C valid sizeof (𝑝 𝑖 ) // Best-of-N selection 
+
+return 𝑝 ∗
+
+Procedure 2: LLMReduce (𝑃 +, 𝑃 − ) procedure 
+
+Input: Positive examples 𝑃 +, negative examples 𝑃 −
+
+Output: Reduced program 𝑝 
+
+Step 1: Semantic Modeling 
+
+Analyze call chains Analyze control/data flow Infer the program’s observable behavior 
+
+Step 2: Bug Semantic Analysis 
+
+Compare positive and negative examples Identify semantic differences that explain bug triggering 
+
+Step 3: Reduction Planning 
+
+Identify must-keep semantic units Remove likely-irrelevant code structures Generate reduced draft 
+
+Step 4: Constraint Validation 
+
+Preserve bug-triggering behavior Ensure compilability Avoid introducing new undefined behavior (UB) iteration produces a candidate program along with its com-pilation result: candidates that still trigger the bug serve as positive examples , and those that no longer do serve as 
+
+negative examples . The pairwise differences between them implicitly localize which features are responsible for trigger-ing the bug. To balance prompt size and information content, SimP selects two positive and two negative examples generated shortly before SimP switches away from Perses, when the candidates are closest in size to the program being handed off. These contrastive examples help the LLM infer which semantic features matter for this specific reduction task. 
+
+4.2.2 Guided semantic reasoning. Without explicit struc-ture, the LLM tends to jump between bug hypotheses (Obser-vation 3) and produces unreliable reductions. SimP therefore includes a structured reasoning guide in the prompt that walks the LLM through four steps before it commits to a re-duced program. Procedure 2 shows the general structure; we 
+
+> 6
+
+additionally optimize the concrete prompt using DSPy [15], and the final template is available in our artifact [4]. First, the LLM models the expected semantics of each posi-tive and negative example independently. This includes iden-tifying the call chain, summarizing the control-flow skeleton, tracking data-flow dependencies, and describing the pro-gram’s observable behavior. Second, the LLM performs bug semantic analysis by comparing positive and negative exam-ples: it analyzes which compiler configurations expose the semantic gap, identifies code structures associated with the gap, and examines how textual differences between positive and negative examples affect program semantics. Third, the LLM constructs a reduction plan by mapping the inferred bug semantics to concrete semantic units in the program (e.g., loop structures, call chains, aliasing patterns), and clas-sifies each unit as must-keep , uncertain , or likely-irrelevant .Based on this classification, it produces a reduced draft pro-gram as a high-confidence reproduction hypothesis. Take Figure 6 as an example. Guided by its understanding of the compilation differences in the semantic level, SimP identifies the infinite loop as the root cause of the bug. It therefore reproduces the bug-triggering feature by preserving the for loop with other irrelevant components eliminated. Finally, the LLM checks the reduced draft against a check-list of mandatory constraints set based on human experience: the draft must remain consistent with the inferred bug se-mantics and must be valid under the given compilation con-figurations. SimP uses this checklist as a guardrail against obvious failure modes – for instance, it prevents the LLM from simply replaying a previously seen positive example. Beyond the reduced program, SimP also allows the LLM to output its reasoning trace. The trace is not consumed by downstream components, but offers useful diagnostic information for understanding why the LLM kept or removed particular program fragments. 
+
+4.2.3 Best-of-𝑁 program selection. Even under a fixed prompt, an LLM’s outputs vary across runs because of the stochastic nature of autoregressive decoding. SimP turns this variability into an advantage by exploring multiple reduction candidates in parallel: rather than asking for a single reduced program, the prompt instructs the LLM to emit 𝑁 candidates (Program 1, Program 2, ..., Program N ) in a single call ( 𝑁 = 6in our implementation). Each candidate is then compiled and executed to check whether it still triggers the original bug; among the surviving candidates, SimP selects the smallest one for the next reduction stage. 
+
+4.3 Syntax-guided LLM mutator 
+
+After a round of syntax-guided deletion, the program is often as small as local AST edits can make it but still contains struc-tural patterns – nested expressions, indirect calls, redundant typedefs, and the like – that hide further reduction oppor-tunities from the deletion-based reducer. The LLM mutator 
+
+Algorithm 3: LLM-guided mutation workflow 
+
+Input: Input program 𝑝 , mutation strategies M,regions R
+
+Output: A reduced program 𝑝 ∗
+
+C ← ∅ 
+
+foreach 𝑚 ∈ M do foreach 𝑟 ∈ R do 
+
+// single-strategy mutation 
+
+C ← C ∪ { LLMMutate (𝑝, 𝑚, 𝑟 )} 
+
+// Bug-preservation filter 
+
+Cvalid ← { 𝑐 ∈ C | BugPreserveValidate (𝑐 )} 
+
+// Synthesize surviving mutations 
+
+𝑝 ∗ ← LLMSynthesize (𝑝, Cvalid )
+
+return 𝑝 ∗
+
+closes this gap. Unlike the semantic reducer, which synthe-sizes a new program from scratch, the mutator preserves the program’s overall structure and applies targeted rewrites that flatten and canonicalize these patterns, transforming the program into a form that the next round of syntax-guided deletion can shrink more effectively. 
+
+4.3.1 Prompt design for mutation. The prompt lists a fixed set of mutation strategies and asks the LLM to apply one strategy at a time, starting from the input program. Restrict-ing each invocation to a single strategy keeps the resulting mutations independent of each other, which is essential for the filtering step described below: it lets SimP judge which strategies are bug-preserving on this program without their effects being entangled. Even within a single strategy, however, we observe that applying the mutation everywhere it could fire often destroys the bug-triggering feature. To mitigate this, SimP restricts each mutation to a subset of the program, increasing the probability that some regional variants can preserve the bug. We design five categories of mutators: 
+
+• Declaration Simplifiers. These mutators simplify the declaration system by removing redundant decla-rations and canonicalizing aliases such as typedef s. 
+
+• Function Inliners. These mutators inline simple func-tion calls directly into their call sites to simplify the call graph and expose more reduction opportunities. 
+
+• Variable-Oriented Reducers. These mutators sim-plify complex variable structures and reduce variable usages through techniques such as aggregate unfold-ing, temporary-variable inlining, parameter propaga-tion, constant substitution, and variable merging. 
+
+• Branch/Loop Reducers. These mutators simplify control-flow structures by pruning unreachable branches and unrolling small fixed-trip loops, resulting in a flat-ter AST structure. 
+
+• Expression Simplifiers. These mutators simplify expressions by lifting nested expressions, reducing                                              
+
+> 7Ye Xiong, Xiangyu Gao, Jocelyn Qiaochu Chen, Mingyu Li, and Haibo Chen
+> unsigned f1 (...) {...}
+> unsigned f2 (...) {...}
+> unsigned f3 (...) {...}
+> long long f4 (...) {...} ... // Global Var init
+> void func_1 ( void ){
+> int l0 =...;
+> char l1 =...; for(g0=1; g0>=0; g0-=1); l0 &= f3 (...); for (; (char)f4(...)+g1; g1 = (1687512307) + g1); }
+> int main () {func_1 (); }
+> (a)
+> configurations : -gcc -14.1.0 -O3 --> No termination, infinite loop -gcc -14.1.0 -O0 --> return 0
+> (b)
+> ... // Global Var init
+> long long f4 (...) {...}
+> int main () {for(g0=1; g0>=0; g0-=1); for (; (char)f4(...)+g1; g1 = (1687512307) + g1); }
+> (c)
+
+Figure 6. (a) Input bug-triggering program. (b) Compiler behaviors: -O3 produces an infinite loop, while -O0 operates normally. LLM semantically analyzes the behavior and gen-erates an output program (c) with only for loops preserved. dereference operations, canonicalizing equivalent ex-pressions, and simplifying arithmetic computations. Each mutator generates three variants, yielding 15 can-didate programs in total. Algorithm 3 gives the concrete generation procedure. Figure 7 shows representative outputs generated by differ-ent mutators in SimP. Each mutator produces a separate can-didate program that only applies the transformation strategy specified in its prompt. For example, the Declaration Sim-plifier only rewrites declaration-related constructs, while the Function Inliner only performs local function inlining. This design allows SimP to independently explore multiple directions. 
+
+4.3.2 Program filtering and synthesis. 
+
+Bug-preservation filter. SimP compiles and executes each of the 15 candidate programs under different compiler configu-rations (e.g., optimization modes) and compares their execu-tion results. If the observed behaviors remain inconsistent across compiler configurations, the candidate is considered to still trigger the original compiler bug and is preserved. Candidates that no longer exhibit the bug-triggering behav-ior are filtered out. Only the surviving candidates are passed to the next step. 
+
+Mutation synthesis with the LLM. Each surviving candidate carries the effect of exactly one mutation strategy applied to one region of the program, so any single candidate captures only a partial improvement. SimP therefore invokes the LLM once more to synthesize a final program that combines the useful mutations across all surviving candidates from a global view. The synthesized program is then fed into the next syntax-guided deletion stage. Figure 7 shows four representative mutation-specific can-didates. The candidate produced by the Variable-oriented Reducer is filtered out because it no longer preserves the orig-inal bug-triggering behavior. All other mutated programs can still trigger the compiler bug. LLM is finally invoked to synthesize these surviving transformations. As shown in Figure 8, the final synthesized program preserves only the bug-preserving transformations from these candidates. 
+
+## 5 Evaluation 
+
+We evaluate SimP by answering the following two questions: Q1) Reduction performance: Does SimP reduce pro-grams faster than state-of-the-art approaches without sacrificing the size of the reduced program? (§5.2) Q2) Component contributions: Which components of SimP are responsible for these gains? (§5.3) 
+
+5.1 Experiment Setup 
+
+Baselines. We compare SimP against Perses [27] and LPR [31], two state-of-the-art program reducers. Perses iteratively re-moves syntactic structures from the input program using grammar-aware transformations, and is widely used as a representative deletion-based reducer. LPR builds on top of Perses and incorporates an additional LLM-based refinement pass to further improve reduction quality. Both Perses and LPR belong to the syntax-guided program reduction cat-egory, since their reduction process is driven by iterative syntactic modifications of the program. 
+
+Benchmarks. We use 23 open-source compiler benchmarks from prior work [1, 2], all of which trigger miscompila-tion bugs in the compiler. Compiler bugs broadly divide into two categories: miscompilation bugs, where the com-piler successfully produces an executable but the resulting program exhibits incorrect semantics, and internal com-piler errors (ICEs), where the compiler itself crashes dur-ing compilation (e.g., a segmentation fault). Prior studies have shown that ICE-triggering programs can be reduced relatively quickly [25], and we confirm in our own runs that existing reducers complete on these inputs within min-utes. Miscompilation-triggering benchmarks are substan-tially more challenging to reduce, so we focus our evaluation on this category to stress-test SimP on the harder scenario. 
+
+Metrics. We report three metrics: end-to-end reduction time, the size of the final reduced program, and, for the LLM-based tools, the monetary cost of API calls. We measure program size in tokens rather than lines of code to remain consistent with the metric used by Perses [27] and LPR [31]. 
+
+Environment setup. We run our experiments on a machine running Ubuntu 24.04 with a 120-core, 240-hyperthread Intel Xeon Platinum 8581C and 487 GB of RAM. We think that any comparable Linux x86_64 machine should reproduce the results. For all tools that invoke LLMs, we use GPT-5.1, 
+
+> 8
+
+Declaration Simplifier                            
+
+> int printf (...); long long g=1 LL ; long long func_3 ( int p14 , unsigned p15 , int p16 ){
+> return p15 ; }
+> void func_1 ( void ){
+> for (g =0; g<1;) g= func_3 (g +59 , g -90 , g -30)+90+1; }
+> int main ( void ){func_1 (); printf ("% lld \n" , g );
+> return 0; }
+
+Expression Simplifier                              
+
+> typedef long long int64_t ;
+> typedef int int32_t ;
+> typedef unsigned uint32_t ;
+> int printf (...); int64_t g=1 LL ; int64_t func_3 ( int32_t p14 , uint32_t p15 , int32_t p16 ) {
+> return p15 ; }
+> void func_1 ( void ){
+> for (g =0; g <1;) g= func_3 ( g +59 ,g -90 ,g -30 )+ 91 ; }
+> int main ( void ){func_1 (); printf ("% lld \n" , g );
+> return 0; }
+
+Function Inliner                        
+
+> typedef long long int64_t ;
+> typedef int int32_t ;
+> typedef unsigned uint32_t ;
+> int printf (...); int64_t g=1 LL ; int64_t func_3 ( int32_t p14 , uint32_t p15 , int32_t p16 ){
+> return p15 ; }
+> int main ( void ){for (g=0; g < 1;) g=func_3( g+59,g-90,g-30 )+90+1; printf ("% lld \n" , g );
+> return 0; }
+
+Variable-oriented Reducer                                
+
+> typedef long long int64_t ;
+> typedef int int32_t ;
+> typedef unsigned uint32_t ;
+> int printf (...); int64_t g=1 LL ; int64_t func_3 ( int32_t p_14 , int32_t p_16 ){
+> return g-90 ; }
+> void func_1 ( void ){
+> for (g =0; g<1;) g=func_3 (g ,g )+90+1; }
+> int main () {func_1 (); printf ("% lld \n" , g ); }
+
+Figure 7. Intermediate mutation results for the input program in Figure 8. We highlight in the code snippet that is mutated from the input program. Green mutated programs preserve bug-trigger feature while red mutated program does not have it. which we found to provide a good balance between reduction quality and API cost. 
+
+5.2 Reduction Performance 
+
+We compare SimP against Perses and LPR along three axes: reduction speed (§5.2.1), final reduction size (§5.2.2), and mon-etary cost for the LLM-based tools (§5.2.3). The first addresses the limitations raised in §3 (long reduction time); the second checks that the gains do not come at the expense of reduction quality; the third quantifies the additional cost SimP incurs from invoking LLMs. Detailed per-benchmark results are reported in Table 1 in the appendix. 
+
+5.2.1 Reduction speed. We report the end-to-end time each tool takes to complete reduction. On average, SimP finishes in 4,920 seconds per benchmark, compared with ap-proximately 8,500 seconds for Perses and 11,200 seconds for LPR. LPR is slower than Perses on 18 of 23 benchmarks be-cause it performs an additional LLM-based refinement pass on top of Perses’ output (consistent with prior work [31]); on the remaining five, LPR is faster. To make the compar-ison conservative, we report SimP’s speedup against the per-benchmark better of Perses and LPR rather than against either tool individually. As shown by the CDF in Figure 9, SimP consistently out-performs both baselines across all benchmarks. Concretely, SimP achieves a 1.75 × geometric-mean speedup over the better of Perses and LPR, with a maximum speedup of 2.55 ×.On several benchmarks, this turns reduction time from hours into minutes. The speedup comes from collapsing the long-tail phase that dominates the runtime of the state-of-the-art syntax-guided reducers (Obs. 1 of §3). Figure 12 illustrates this on gcc107176: Perses and LPR enter a plateau around 200–350 tokens and spend the next 20–40 minutes shaving off a small number of tokens at a time, whereas SimP’s LLM-driven passes drop directly through this region in about two minutes and converge to a smaller final program (62 tokens) within 22 minutes. By the time Perses and LPR finish (at 41 and 58 minutes respectively), SimP has already produced a strictly smaller reduced program. 
+
+Summary. SimP reduces programs faster than both base-lines on every benchmark, with a 1.75 × geometric-mean speedup over the better of Perses and LPR. The maxi-mum speedup is 2.55 ×, dropping from >7 hours to ≈100 minutes. 
+
+> 9Ye Xiong, Xiangyu Gao, Jocelyn Qiaochu Chen, Mingyu Li, and Haibo Chen
+
+Input program                       
+
+> typedef long long int64_t; typedef int int32_t; typedef unsigned uint32_t;
+> int printf (...); int64_t g=1 LL ; int64_t func_3 ( int32_t p14 , uint32_t p15 , int32_t p16 ) {
+> return p15 ; }
+> void func_1 ( void ){
+> for (g =0; g <1;) g= func_3 ( g +59 , g-90 ,g -30 )+ 90+1 ; }
+> int main ( void ){func_1(); printf ("% lld \n" , g );
+> return 0; }
+
+Synthesized output program                 
+
+> int printf (...); long long g=1 LL ; long long func_3 ( int p14 , unsigned p15 ,
+> int p16 ) {
+> return p15 ; }
+> int main ( void ){for (g=0; g < 1;) g=func_3( g+59,g-90,g-30 )+ 91 ); printf ("% lld \n" , g );
+> return 0; }
+
+Figure 8. Synthesized output program maintains mutations on input programs that preserve bug-triggering features. Each color represents one mutation direction in Figure 7. Since variable-oriented reducer fails to trigger the compiler bug, all other mutations except this one are reflected in the final synthesized output. 10 4
+
+> Reduction time (seconds, log scale)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Fraction of benchmarks completed
+> LPR Perses SimP
+
+Figure 9. Cumulative distribution of end-to-end reduction time across the 23 benchmarks. SimP’s curve lies strictly to the left of Perses and LPR, corresponding to a 1.75 ×
+
+geometric-mean speedup over the better of the two. 
+
+5.2.2 Reduction size. We measure final reduction quality by the number of tokens in the output program. Figure 10 shows the distribution of token counts across all reducers. All three tools produce substantial reductions: every output is more than 99% smaller than the original benchmark, and LPR Perses SimP 0100 200 300 400 
+
+> Final tokens
+
+Figure 10. Distribution of final reduced-program size (in tokens) across the 23 benchmarks for Perses, LPR, and SimP. The three reducers produce outputs of comparable size, with no single reducer dominating across all benchmarks. every reduced program is under 60 LoC, which is compact enough for a junior developer to read and understand the bug-triggering behavior directly. No single reducer consistently produces the smallest out-put across all benchmarks. LPR often achieves the smallest reduced programs because it performs an additional LLM-based refinement pass on top of Perses’ output, while SimP matches or beats both Perses and LPR on several benchmarks without such a refinement stage. The biggest gap between LPR and SimP over all bench-marks is on gcc116906 (Figure 11), where SimP’s output is more than 2 × larger than LPR’s. Figure 11 explains why this larger output is still easy to inspect: the top panel ab-stracts the shared bug schema from the highlighted frag-ments in the two concrete programs below it. The root cause of gcc116906 lies in GCC’s Partial Redundancy Elimination (PRE) optimization, which incorrectly hoists may-trap ex-pressions in the presence of control-flow edges that may never execute. In LPR’s output, function bf() contains a guarded modulo operation: 𝑘 % 𝑎 should not execute when a == 0. The surrounding nonterminating loop creates the control-flow context that lets PRE hoist the modulo before the guard, eventually evaluating it with a zero divisor. SimP reproduces the same bug-triggering schema with a differ-ent construction, using pointers, arrays, and goto , which increases the token count. Even on this benchmark, where LPR achieves its largest reduction advantage over SimP, the size difference does not noticeably increase the difficulty of human inspection. Fur-ther closing such size gaps in an efficient way can be left for future work. 
+
+> 10
+
+Shared bug schema (abstracts highlighted code below) What the program does             
+
+> for (;;) {
+> if ( a == 0 ) continue ;// guard r=k % a ; // protected by guard }
+
+GCC’s PRE 
+
+=⇒
+
+hoists k % a 
+
+What GCC -O2 actually runs            
+
+> r=k % a ; // hoisted past the guard for (;;) {
+> if ( a == 0 ) continue ;}
+
+⇓ LPR instance ⇓ SimP instance 
+
+LPR (115 tokens)                                           
+
+> int c , f;
+> int bf ( long k , unsigned a) {
+> if ( a == 0U )
+> return a;
+> return k % a ; }
+> int bi ( unsigned bt , int a_val , long f_val ) {for (;;) {
+> unsigned k; f&= bt ;
+> if (f) k=1U;
+> else
+> k=0U; c=bf ( f_val , f_val );
+> if (k)
+> return a_val ; }}
+> int bz () {bi (c , 0U , c );
+> return c; }
+> int main () {bz (); }
+
+SimP (260 tokens)                                                                                     
+
+> unsigned b( unsigned n , unsigned o) {
+> return n%o; }
+> unsigned c( unsigned n , unsigned o) {
+> return o == 0 ? n : n % o ; }
+> struct s{long a; };
+> int d;
+> int e=2L;
+> int f;
+> struct sg;
+> unsigned ** h [8];
+> unsigned i [3][2][2];
+> unsigned *** j;
+> int *k;
+> int *l( unsigned n , int *o , int *p , int *q , long r) {
+> int s; t:;
+> unsigned *** u =h; s=(i [1][0][0] &= (( j =u) != 0) <n) && 247 UL ; g.a =c (0 xFCB1L , n );
+> if (s)
+> return &f; goto t; }
+> int *m( unsigned n) {
+> int o=0 xDBE583C6L ; l(b(o , e), &d , &f , &o , 0);
+> return k; }
+> int main () {m (0); }
+
+Figure 11. Qualitative comparison of reduced programs for gcc116906 , the benchmark where SimP’s output is largest relative to LPR (260 vs. 115 tokens). Top: a compact schema abstracted from the highlighted fragments below. Bottom: the concrete LPR and SimP outputs that instantiate this schema; LPR builds it with plain functions and a for loop, while SimP uses pointers, arrays, and goto , which accounts for its larger size. Both outputs remain short and of similar interpretation difficulty for a human developer. 
+
+Summary. SimP achieves reduction quality comparable to existing approaches: all reducers shrink the original benchmarks to under 60 LoC, making the resulting pro-grams easy for human developers to understand. 
+
+5.2.3 Monetary cost. Both LPR and SimP invoke LLMs during the reduction process. SimP incurs a slightly higher monetary cost than LPR. However, for both tools, the total reduction cost per benchmark remains below $0.5, and the per-benchmark cost difference is ≤$0.3. Given that SimP saves around 1h of reduction time per benchmark on average, this modest cost increase is a worthwhile trade-off. 
+
+Summary. Running SimP on a single benchmark costs less than $0.5, which is worthwhile, especially given the saved reduction time. 
+
+5.3 Ablation 
+
+We isolate the contribution of each component of SimP by running four ablation variants: 
+
+• Without mutator: the syntax-guided LLM mutator dis-abled. 
+
+• Without reducer: the semantic-guided LLM reducer dis-abled.       
+
+> 11 Ye Xiong, Xiangyu Gao, Jocelyn Qiaochu Chen, Mingyu Li, and Haibo Chen 20 30 40 50 60
+> Reduction time (minutes)
+> 0100 200 300 400 500
+> Program size (tokens)
+> SimP finishes (22 min, 62 tokens)
+> Perses LPR SimP
+
+Figure 12. Reduction trajectory on gcc107176, zoomed into the long-tail region of Figure 2. SimP converges to 62 tokens in 22 minutes; Perses and LPR are still in their plateau phase at that point and finish at 135 and 110 tokens after 41 and 58 minutes, respectively. 10 3 10 4
+
+> Reduction time (seconds, log scale)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Fraction of benchmarks completed
+> SimP −Reducer
+> SimP −Mutator
+> SimP −Perses
+> SimP(Naive) SimP
+
+(a) Cumulative distribution of end-to-end reduction time. SimP −Reducer 
+
+> SimP −Mutator
+> SimP −Perses
+> SimP(Naive) SimP 0200 400 600 800
+> Final tokens
+
+(b) Distribution of final reduced-program size (in tokens). 
+
+Figure 13. Ablation of SimP’s components across the 23 benchmarks. The syntax-guided mutator and the semantic reducer form a quality–speed trade-off, while Perses and the structured prompt design each independently improve reduction quality. 
+
+• Without Perses: the Perses-based deletion stage disabled. 
+
+• Naive prompt: the structured prompts in both LLM com-ponents are replaced by a prompt that simply asks the LLM to reduce the program while preserving the bug-triggering behavior. Concretely, the semantic-guided re-ducer is prompted only to synthesize a smaller bug-preserving program, without the four-step reasoning guide; the syntax-guided mutator is prompted only to rewrite the program into a form that is easier to reduce further, without a fixed set of mutation strategies. Figures 13a and 13b summarize the time and size distribu-tions across these variants; per-benchmark numbers appear in Table 2 in the appendix. The two LLM components contribute to a higher quality reduction result. Enabling the syntax-guided mutator pro-duces final programs 50% smaller on average (up to 73%), but adds about 10 minutes of reduction time per benchmark on average. Disabling the semantic-guided reducer has the opposite effect—final programs become 47% larger on av-erage (up to 81%) while reduction is only about two min-utes faster—indicating that the reducer accounts for most of SimP’s reduction quality at modest runtime cost. Perses and the prompt design contribute to the reduction quality as well. Removing Perses produces final programs 41% larger on average (up to 68%) while saving ≈10 minutes of reduction time, showing that traditional syntax-guided, AST-based reduction remains a load-bearing component of SimP: the LLM-driven passes alone do not match the quality achieved when Perses handles the early-stage bulk deletion. Replacing our structured prompts with the naive prompt pro-duces final programs 25% larger on average (up to 75%) and also slows the reduction time, confirming that our prompt design improves both reduction quality and efficiency. 
+
+Summary. Every component contributes measurably to SimP’s overall performance. The semantic-guided LLM re-ducer and the syntax-guided LLM mutator form a quality-speed trade-off, while Perses and our prompt design each independently improve reduction quality. 
+
+## 6 Related Work 
+
+Compiler bug fix. Several works focus on detecting bugs in existing compiler implementations through static analysis, symbolic execution, differential testing, and fuzzing. For ex-ample, compiler fuzzers generate large numbers of random or coverage-guided test programs to trigger crashes, miscom-pilations, and undefined behaviors. SimP is complementary to existing compiler bug detection and fix techniques by providing a more efficient reduction framework. This helps developers better understand compiler bugs and accelerate their debugging process. 
+
+Program Reduction. Program reduction is important for helping compiler developers debug compiler bugs by min-imizing large bug-triggering programs into compact test cases. Existing reduction techniques mainly rely on syntax-level transformations and iterative trial-and-error validation. These approaches often suffer from a long-tail bottleneck where further reduction becomes increasingly difficult. SimP takes a fundamentally different approach by incorporating 
+
+> 12
+
+LLM-based semantic understanding into the reduction pro-cess. SimP exhibits faster reduction speed. 
+
+LLMs for code generation and optimization Large Language Models (LLMs) have been widely adopted for a variety of programming tasks, including code generation [8, 19, 23], program understanding [12, 13], and optimization [10, 24]. Recent work has demonstrated that LLMs can effectively reason about program semantics and synthesize non-trivial programs. These LLM models [5, 6, 28] are trained on large-scale code bases, learning statistical patterns and structural regularities in programs. All these efforts belong to the do-main of leveraging LLM to optimize the software engineering workflow. This is orthogonal to our usage of LLMs in the domain of program reduction. 
+
+## 7 Conclusion 
+
+Program reduction is important to help developers detect and fix hidden compiler bugs. Existing tools mainly rely on syntax-guided reduction approaches and suffer from long-tail reduction issues. We build SimP, a tool that consists of both syntax-guided and semantic-guided components to do program reduction. SimP has better reduction performance than state-of-the-art approaches. We believe that the key insight behind SimP can generalize and benefit program reduction tasks in many other domains, such as SMT solvers, database engines, and other complex software systems. 
+
+## References 
+
+[1] 2024. CReal Artifact. Retrieved May 15, 2026 from https://zenodo. org/records/10802596 
+
+[2] 2025. LegoFuzz Artifact. Retrieved May 15, 2026 from https://zenodo. org/records/15761520 
+
+[3] 2026. GCC: GNU Compiler Collection. Retrieved May 15, 2026 from 
+
+https://gcc.gnu.org/ 
+
+[4] 2026. SimP Artifact. Retrieved May 15, 2026 from https://anonymous. 4open.science/r/SimP-1FE7/ 
+
+[5] Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. 2023. Gpt-4 technical report. 
+
+arXiv preprint arXiv:2303.08774 (2023). [6] Xiao Bi, Deli Chen, Guanting Chen, Shanhuang Chen, Damai Dai, Chengqi Deng, Honghui Ding, Kai Dong, Qiushi Du, Zhe Fu, et al. 2024. Deepseek llm: Scaling open-source language models with longtermism. 
+
+arXiv preprint arXiv:2401.02954 (2024). [7] Pat Bosshart, Dan Daly, Glen Gibb, Martin Izzard, Nick McKeown, Jennifer Rexford, Cole Schlesinger, Dan Talayco, Amin Vahdat, George Varghese, et al. 2014. P4: Programming protocol-independent packet processors. ACM SIGCOMM Computer Communication Review (2014). [8] Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde De Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, et al. 2021. Evaluating large language models trained on code. arXiv preprint arXiv:2107.03374 (2021). [9] Tianqi Chen, Thierry Moreau, Ziheng Jiang, Lianmin Zheng, Eddie Yan, Haichen Shen, Meghan Cowan, Leyuan Wang, Yuwei Hu, Luis Ceze, et al. 2018. {TVM }: An automated {End-to-End } optimizing compiler for deep learning. In USENIX OSDI .[10] Chris Cummins, Volker Seeker, Dejan Grubisic, Mostafa Elhoushi, Youwei Liang, Baptiste Roziere, Jonas Gehring, Fabian Gloeckle, Kim Hazelwood, Gabriel Synnaeve, et al. 2023. Large language models for compiler optimization. arXiv preprint arXiv:2309.07062 (2023). [11] Alastair F. Donaldson, Paul Thomson, Vasyl Teliman, Stefano Milizia, André Perez Maselco, and Antoni Karpiński. 2021. Test-case reduction and deduplication almost for free with transformation-based compiler testing. In ACM PLDI .[12] Zhangyin Feng, Daya Guo, Duyu Tang, Nan Duan, Xiaocheng Feng, Ming Gong, Linjun Shou, Bing Qin, Ting Liu, Daxin Jiang, et al. 2020. Codebert: A pre-trained model for programming and natural lan-guages. In Findings of the association for computational linguistics: EMNLP 2020 .[13] Daya Guo, Shuo Ren, Shuai Lu, Zhangyin Feng, Duyu Tang, Shujie Liu, Long Zhou, Nan Duan, Alexey Svyatkovskiy, Shengyu Fu, et al. 2020. Graphcodebert: Pre-training code representations with data flow. arXiv preprint arXiv:2009.08366 (2020). [14] Christian Gram Kalhauge and Jens Palsberg. 2019. Binary reduction of dependency graphs. In Proceedings of the 2019 27th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering .[15] Omar Khattab, Arnav Singhvi, Paridhi Maheshwari, Zhiyuan Zhang, Keshav Santhanam, Saiful Haq, Ashutosh Sharma, Thomas Joshi, Hanna Moazam, Heather Miller, et al. 2024. DSPy: compiling declara-tive language model calls into state-of-the-art pipelines. In Interna-tional Conference on Learning Representations , Vol. 2024. 54928–54958. [16] Gereon Kremer, Aina Niemetz, and Mathias Preiner. 2021. ddSMT 2.0: Better Delta Debugging for the SMT-LIBv2 Language and Friends. In 
+
+International Conference on Computer-Aided Verification .[17] Chris Lattner and Vikram Adve. 2004. LLVM: A compilation frame-work for lifelong program analysis & transformation. In International symposium on code generation and optimization (CGO). 
+
+[18] Vu Le, Mehrdad Afshari, and Zhendong Su. 2014. Compiler validation via equivalence modulo inputs. In ACM PLDI . ACM New York, NY, USA. [19] Yujia Li, David Choi, Junyoung Chung, Nate Kushman, Julian Schrit-twieser, Rémi Leblond, Tom Eccles, James Keeling, Felix Gimeno, Agustin Dal Lago, et al. 2022. Competition-level code generation with alphacode. Science (2022). [20] Vsevolod Livinskii, Dmitry Babokin, and John Regehr. 2020. Random testing for C and C++ compilers with YARPGen. In ACM OOPSLA .ACM New York, NY, USA. [21] Nuno P. Lopes, Juneyoung Lee, Chung-Kil Hur, Zhengyang Liu, and John Regehr. 2021. Alive2: bounded translation validation for LLVM. In ACM PLDI .[22] Ghassan Misherghi and Zhendong Su. 2006. HDD: hierarchical delta debugging. In ACM/IEEE ICSE .[23] Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan Wang, Yingbo Zhou, Silvio Savarese, and Caiming Xiong. 2022. Codegen: An open large language model for code with multi-turn program synthesis. 
+
+arXiv preprint arXiv:2203.13474 (2022). [24] Alexander Novikov, Ngân V ˜ u, Marvin Eisenberger, Emilien Dupont, Po-Sen Huang, Adam Zsolt Wagner, Sergey Shirobokov, Borislav Ko-zlovskii, Francisco JR Ruiz, Abbas Mehrabian, et al. 2025. Alphaevolve: A coding agent for scientific and algorithmic discovery. arXiv preprint arXiv:2506.13131 (2025). [25] John Regehr, Yang Chen, Pascal Cuoq, Eric Eide, Chucky Ellison, and Xuejun Yang. 2012. Test-case reduction for C compiler bugs. In ACM PLDI . 335–346. [26] Fabian Ruffy, Jed Liu, Prathima Kotikalapudi, Vojtech Havel, Hanneli Tavante, Rob Sherwood, Vladyslav Dubina, Volodymyr Peschanenko, Anirudh Sivaraman, and Nate Foster. 2023. P4Testgen: An Extensible Test Oracle For P4. In ACM SIGCOMM .[27] Chengnian Sun, Yuanbo Li, Qirun Zhang, Tianxiao Gu, and Zhendong Su. 2018. Perses: Syntax-Guided Program Reduction. In ACM/IEEE ICSE .13 Ye Xiong, Xiangyu Gao, Jocelyn Qiaochu Chen, Mingyu Li, and Haibo Chen 
+
+[28] Gemini Team, Rohan Anil, Sebastian Borgeaud, Jean-Baptiste Alayrac, Jiahui Yu, Radu Soricut, Johan Schalkwyk, Andrew M Dai, Anja Hauth, Katie Millican, et al. 2023. Gemini: a family of highly capable multi-modal models. arXiv preprint arXiv:2312.11805 (2023). [29] Yongqiang Tian, Xueyan Zhang, Yiwen Dong, Zhenyang Xu, Mengx-iao Zhang, Yu Jiang, Shing-Chi Cheung, and Chengnian Sun. 2023. On the Caching Schemes to Speed Up Program Reduction. ACM Trans. Softw. Eng. Methodol. (2023). [30] Xuejun Yang, Yang Chen, Eric Eide, and John Regehr. 2011. Finding and understanding bugs in C compilers. In ACM PLDI .[31] Mengxiao Zhang, Yongqiang Tian, Zhenyang Xu, Yiwen Dong, Shin Hwei Tan, and Chengnian Sun. 2024. LPR: Large Language Models-Aided Program Reduction. In ACM ISSTA .14
