@@ -1,0 +1,1183 @@
+Title: CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing
+
+URL Source: https://arxiv.org/pdf/2608.10613v1
+
+Published Time: Wed, 12 Aug 2026 00:45:36 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+## CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing 
+
+LINHAO WU, Peking University, China 
+
+YIZHOU CHEN, Peking University, China 
+
+ZHEN YANG, Shandong University, China 
+
+PENGYU XUE, Hong Kong Polytechnic University, China 
+
+DAN HAO ∗, Peking University, China Automated Program Repair (APR) aims to automatically fix buggy programs. In recent years, with the rapid advancement of Large Language Models (LLMs), LLM-based APR techniques have achieved significant progress. Despite their potential, the effectiveness of LLMs relies heavily on the quality of the provided repair context. However, existing LLM-based APR approaches suffer from a causality gap when constructing such contexts. Specifically, on the test side, existing methods struggle with test context ambiguity arising from noise interference or dependency absence; meanwhile, on the source side, existing retrieval-augmented methods primarily rely on static analysis and inevitably introduce static over-approximation, resulting in contexts filled with unexecuted code and noise. Consequently, these contexts mislead LLMs, hindering them from identifying the true root cause and leading to incorrect fixes. To bridge this gap, we introduce the concept of minimal causal context, defined as the essential set of dependencies required to explain a specific failure. Based on this, we propose CausalRepair, a novel conversation-driven APR framework that instantiates this concept through a synergistic dual-slicing strategy. Specifically, CausalRepair employs context-aware static slicing on the test side to purify test semantics, and utilizes execution-trace-based dynamic slicing on the source side to capture precise runtime dependencies. This constructs a high-quality context causally relevant to the bug, which filters out irrelevant code and guides the iterative repair process. We evaluate CausalRepair on the widely used Defects4J (V1.2 and V2.0) and the latest Defects4J-Trans benchmarks. To ensure a fair comparison, we unify the backbone model as DeepSeek-V3 in all experiments. The results demonstrate that CausalRepair correctly fixes 313 bugs on Defects4J, significantly outperforming state-of-the-art approaches such as ReinFix and TSAPR, while reducing the average repair cost to $0.029 per bug, achieving a dual optimization of effectiveness and efficiency. CCS Concepts: • Software and its engineering → Software testing and debugging .Additional Key Words and Phrases: Automated Program Repair, Large Language Models, Program Slicing 
+
+ACM Reference Format: 
+
+Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao. 2026. CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing. Proc. ACM Softw. Eng. 3, ISSTA, Article ISSTA134 (October 2026), 24 pages. https://doi.org/10.1145/3832225 
+
+> ∗
+
+Corresponding author. Authors’ Contact Information: Linhao Wu, wulinhao@mail.sdu.edu.cn, School of Electronic and Computer En-gineering, Peking University Shenzhen Graduate School, Peking University, Shenzhen, China; Yizhou Chen, yizhouchen@stu.pku.edu.cn, Key Laboratory of High Confidence Software Technologies (Peking University), MoE, School of Computer Science, Peking University, Beijing, China; Zhen Yang, zhenyang@sdu.edu.cn, School of Computer Science and Technology, Shandong University, Qingdao, China; Pengyu Xue, xuepengyu@mail.sdu.edu.cn, Department of Computing, Hong Kong Polytechnic University, Hong Kong, China; Dan Hao, haodan@pku.edu.cn, School of Electronic and Computer Engineering, Peking University Shenzhen Graduate School, Peking University, Shenzhen, China. 
+
+This work is licensed under a Creative Commons Attribution 4.0 International License. © 2026 Copyright held by the owner/author(s). ACM 2994-970X/2026/10-ARTISSTA134 https://doi.org/10.1145/3832225 Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. arXiv:2608.10613v1 [cs.SE] 11 Aug 2026 ISSTA134:2 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao 
+
+1 Introduction 
+
+Automated Program Repair (APR) aims to automatically fix software bugs [18, 33, 83], serving as a critical technique for enhancing software reliability and development efficiency. Early APR research primarily evolved from traditional techniques, i.e., heuristic-based [24, 31, 62], constraint-based [17, 30, 47], and template-based [40, 41, 46], to learning-based approaches [11, 26, 36, 37, 45, 48]. Recently, with the rapid advancement of Large Language Models (LLMs) and their swift adoption in software engineering practices [50, 70, 72, 73], LLM-based approaches [22, 28, 67, 81, 82] have emerged as the state-of-the-art in APR, serving as the dominant paradigm in this field. Despite the potential of LLMs, their repair effectiveness relies heavily on the quality of the repair context provided in the prompt [54, 59, 74]. To construct more effective contexts, existing works generally fall into two paradigms. The first is the execution-feedback driven paradigm [22, 28, 67], which dynamically evolves the repair context by incorporating error messages or pass-rate feedback from previous executions, providing feedback-augmented context that guides the LLM to progressively refine candidate patches and avoid repeating prior mistakes. The other is the retrieval-augmented context-aware paradigm [9, 81, 82], which enriches the repair context by introducing similar examples from the codebase and supplements the LLM with semantic dependencies and domain knowledge that are lacking in the local context. Although more context is provided, existing approaches still struggle to precisely align the repair context with the true cause of program failures. These contexts either do not match the semantics of the failures or contain a large amount of irrelevant noise. This issue is mainly manifested in the following two aspects. 
+
+Limitation 1: Test Context Ambiguity. On the test side, existing methods either offer overly complete test code, introducing multiple assertions and blurring the intent of failure; or only provide isolated failure assertions, ignoring the crucial execution context that the assertions rely on. In both cases, the model struggles to accurately understand the violated behavioral constraints, thereby weakening the guidance of test information for repair. 
+
+Limitation 2: Source Context Over-approximation. On the source side, existing approaches retrieve source code context using static analysis. Static analysis includes all possible dependencies and control-flow paths. Many of these paths are not executed when the failure occurs. Failure-related statements are mixed with irrelevant code. The LLM cannot tell which code actually causes the failure. This often leads to incorrect or hallucinated patches. 
+
+Heuristically, effective APR depends on providing precise repair context that explicitly captures the causal relationship between test failures and the code statements that trigger them. To address these limitations, we introduce the concept of minimal causal context , defined as the essential set of dependencies required to explain a specific failure. Building upon this concept, we propose CausalRepair, an LLM-based APR approach that instantiates this concept through a synergistic dual-end slicing strategy. To be specific, CausalRepair progressively refines the repair context through slicing on both the test side and the source code side, which is causally responsible for the observed test failure. On the test side, CausalRepair performs dependency-aware slicing on failing tests to remove assertions and execution scenarios unrelated to the observed failure. This process retains only the violated verification logic together with its required initialization and state dependencies. On the source code side, CausalRepair collects concrete runtime execution traces triggered by the refined test and conducts backward dynamic slicing. Unlike static analysis, dynamic slicing strictly follows the actual execution path and preserves only those statements that directly influence the failed assertion. Finally, CausalRepair integrates the sliced verification logic from the test side with the dynamically sliced execution trace from the source code side to construct the minimal causal context that fully explains the failure. This context is then provided to the LLM to guide patch generation.  
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:3
+
+To evaluate the effectiveness of CausalRepair, we conduct extensive experiments on the widely used Defects4J (V1.2 and V2.0) benchmark and the latest Defects4J-Trans benchmark. Specifi-cally, we compare CausalRepair with 15 state-of-the-art baselines, covering template-based [41], learning-based [25, 26, 49, 66, 77, 78, 85], and LLM-based [9, 22, 28, 67, 80–82] APR approaches. The experimental results show that CausalRepair outperforms prior APR tools. For example, Causal-Repair can fix a total of 313 bugs on Defects4J, repairing 77 more bugs than the second-ranked ReinFix (236 bugs), representing a 32.6% improvement. On Defects4J-Trans, CausalRepair can fix 289 bugs, achieving a 44.5% improvement over state-of-the-art methods. Additionally, benefiting from the high signal-to-noise ratio context provided by dual-slicing, CausalRepair significantly reduces token consumption while substantially improving repair rates, with an average cost of only $0.029 per successfully fixed bug, which is significantly lower than or on par with current state-of-the-art methods, achieving a dual optimization of effectiveness and cost. In summary, the main contributions of this paper are as follows: 
+
+• Novel Perspective. We introduce the concept of minimal causal context, defined as the essential set of dependencies required to explain a failure. Building upon this, we propose CausalRepair, an LLM-based APR framework that instantiates this concept through a synergistic dual-slicing strategy. 
+
+• Extensive Evaluation. We evaluate CausalRepair on the widely used Defects4J (V1.2 and V2.0) and the latest Defects4J-Trans benchmark datasets. We compare CausalRepair with 15 state-of-the-art baselines. Experimental results show that CausalRepair can fix a total of 313 bugs on Defects4J, outperforming all studied baselines, while reducing repair costs. 
+
+• Open Science. To facilitate reproducibility and further research, we release the full implementa-tion of CausalRepair, including the source code, experiment configurations, and experimental results. The project is publicly available at: https://doi.org/10.5281/zenodo.20953899. 
+
+2 Motivation 
+
+This section utilizes a real-world case from Defects4J to demonstrate the limitations of existing LLM-based APR methods in context construction and thereby elucidate the necessity of CausalRepair’s introduction of causal information. 
+
+2.1 Motivating Example 
+
+Figure 1-(a) and -(b) present the Lang-61 bug from the Apache Commons Lang project within Defects4J, along with its failure test information. This bug resides in the indexOf method of the 
+
+StrBuilder.java file, which searches for the index of the first occurrence of a string starting at the given index. Specifically, StrBuilder internally maintains a character array buffer and a size 
+
+variable representing the actual character length. The root cause of the bug lies in the yellow line, where thisBuf.length (i.e., the total capacity of the buffer) is erroneously used instead of size 
+
+(the actual content length) to calculate the search boundary len . This bug is triggered by the test 
+
+testIndexOfLang294 . As shown in the test snippet, the program first initializes a StringBuilder 
+
+object sb and then calls sb.deleteFirst(...) to remove a portion of the characters. This operation reduces size , but the buffer array retains the deleted characters. Because the buggy indexOf 
+
+method uses the buffer capacity as the boundary, the search logic traverses beyond the valid region, incorrectly matching the deleted substring and resulting in an erroneous index return (Expected -1 but was 6). The developer’s standard fix (as shown by the green line) not only replaces 
+
+thisBuf.length with size but also adjusts the boundary calculation logic to int len = size - strLen + 1; to accommodate the < len loop condition. In practice, any fix that correctly delimits the valid content range (e.g., using <= in conjunction with size - strLen ) is semantically 
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026.
+
+ISSTA134:4 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao src/java/org/apache/commons/lang/text/StrBuilder.java 
+
+@@ -1773,7 +1773,7 @@ public int indexOf(String str, int startIndex) { 
+
+return -1; 
+
+}
+
+char[] thisBuf = buffer; 
+
+- int len = thisBuf.length - strLen; 
+
++ int len = size - strLen + 1; 
+
+outer: 
+
+for (int i = startIndex; i < len; i++) { 
+
+for (int j = 0; j < strLen; j++) { 
+
+if (str.charAt(j) != thisBuf[i + j]) { 
+
+continue outer; 
+
+}
+
+}
+
+return i; 
+
+}
+
+return -1; 
+
+}
+
+Failing Test : testIndexOfLang294 
+
+Test Function :
+
+public void testIndexOfLang294() { 
+
+StrBuilder sb = new StrBuilder("onetwothree"); 
+
+sb.deleteFirst("three"); 
+
+assertEquals(-1, sb.indexOf("three")); 
+
+}
+
+Failing Line : assertEquals(-1, sb.indexOf("three")); 
+
+Error Message : AssertionFailedError: expected:<-1> but was:<6> 
+
+(a) Buggy Function of Lang-61 
+
+Developer Patch 
+
+(b) Test Information of Lang-61                  
+
+> The code fails on this test: testIndexOfLang294
+> on this test line: assertEquals(-1, sb.indexOf("three"));
+> with the following test error: expected:<-1> but was:<6>
+> class StrBuilder {
+> ···
+> protected char[] buffer;
+> protected int size;
+> ···
+> public int indexOf(char ch, int startIndex) { ... }
+> (Omitted other declarations or methods irrelevant to the failure.)
+> public StrBuilder append(String str) { ... }
+> public StrBuilder replace(int start, int end) { ... }
+> }
+> ··· other context ···
+> ···
+> for (int i = startIndex; i < len; i++) {
+> for (int j = 0; j < strLen; j++) {
+> if (str.charAt(j) != thisBuf[i + j]) {
+> continue outer;
+> }
+> }
+> -return i;
+> +if (i + strLen <= size) {
+> +return i;
+> +}
+> }
+> return -1; Incorrect Patch
+> ···
+> char[] thisBuf = buffer;
+> -int len = thisBuf.length - strLen;
+> +int len = size - strLen;
+> outer:
+> for (int i = startIndex; i < len; i++) {
+> for (int j = 0; j < strLen; j++) {
+> ··· Incorrect Patch
+> public void testIndexOfLang294() {
+> StrBuilder sb = new StrBuilder("onetwothree");
+> sb.deleteFirst("three");
+> assertEquals(-1, sb.indexOf("three"));
+> }
+> ...
+> public StrBuilder deleteFirst(String str) {
+> ...
+> deleteImpl(index, index + len, len);
+> }
+> private void deleteImpl(int startIndex, int endIndex, int len) {
+> ...
+> size -= len;
+> }
+> ··· other context ···
+> Key Action: Deletion
+> Test Side Context
+
+Source Side Context 
+
+(c) Context A (Ambiguous Test Context) 
+
+(d) Context B (Noisy Source Context) 
+
+(e) Context C (Causal Context)       
+
+> ···
+> char[] thisBuf = buffer;
+> -int len = thisBuf.length - strLen;
+> +int len = size - strLen;
+> outer:
+> -for (int i = startIndex; i < len; i++) {
+> +for (int i = startIndex; i <= len; i++) {
+> for (int j = 0; j < strLen; j++) {
+> ··· Correct Patch
+
+Omits the critical deleteFirst operation, unaware of the stale data. The model generate a overfitting patch. 
+
+Lacking runtime traces and filled with 
+
+noise, the model ignores the adjustment of the loop logic. 
+
+Retains the key operation that causes the bug and its execution trace, enabling the model to generate the correct patch. 
+
+Fig. 1. Motivation Example of CausalRepair. 
+
+equivalent and correct. Therefore, to repair this bug, the model must understand state dependency, meaning the valid search space should be determined by the dynamically changing size .
+
+Context A: Ambiguous Test Context. When the repair prompt includes only the failing assertion and error message, as shown in Figure 1-(c), the LLM observes that indexOf("three") unexpectedly returns a positive index but has no visibility into the preceding state mutation. Without observing the critical operation deleteFirst("three") , the model cannot infer the existence of stale data in the buffer . Consequently, it attributes the failure to local loop logic and generates an overfitting patch that satisfies the observed test but fails to address the underlying root cause. 
+
+Context B: Noisy Source Context. In contrast, Figure 1-(d) illustrates a context constructed by augmenting the prompt with extensive static source code. Although this context exposes the declaration of size , it fails to convey its runtime evolution. The critical statement size -= len ,which causally invalidates the original loop boundary, is buried among unrelated definitions. As a result, the LLM treats size as a static attribute without correctly adjusting the loop boundary semantics. 
+
+Context C: Causal Context. As shown in Figure 1-(e), Context C explicitly preserves causally relevant information from both the test and the program execution. On the test side, the context explicitly preserves the mutation operation sb.deleteFirst("three") immediately preceding the failing assertion, signaling that the failure depends on a prior state change. On the program side, dynamic slicing traces this operation to the execution of deleteImpl , exposing the critical state update size -= len . By jointly presenting the state-mutating action and its execution trace, Context C enables the LLM to establish a direct causal link: since size is reduced before indexOf 
+
+is executed, the loop boundary must be constrained by size . This causal context allows the LLM to correctly repair the boundary computation, yielding a correct patch. 
+
+2.2 Insight 
+
+From this example, we draw a key insight: correct APR does not require more context, but causal context . We propose CausalRepair, a causality-aware APR framework that constructs a minimal causal context . CausalRepair selectively combines test-side slicing to retain failure-relevant actions with program-side dynamic slicing to capture execution traces that causally affect the buggy computation. By explicitly encoding cause–effect relationships, CausalRepair enables LLMs to reason about root causes and generate a correct patch. 
+
+Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:5 @Test // Test Method 
+
+> public void testX(){
+> setup() ;
+> int local = … ;
+> assert (local == expected);
+> }
+> // Setup/Helper Method
+> public void setup(){
+> … ;
+> global_state = init ;
+> }
+> Inter-context
+> Intra-dependency
+> Buggy
+> Location
+> Dead Code
+> Context-Aware
+> Static Slicing
+> Source Code
+> Backward
+> Dependency Analysis
+> Precise Runtime Dependencies
+> Bug-related Dependencies
+> Data &
+> Control
+> Execution-Trace
+> Dynamic Slicing
+> Source Code
+> Failing Test
+> Test Context
+> Source Context
+> Minimal
+> Causal Context
+
+Phase 1: Constructing Minimal Causal Context  
+
+> LLM
+> Validation
+> Feedback Candidate
+> Patch
+> Plausible Patch(es)
+> Plausible
+> Patch
+> Correct Patch
+> Phase 2:
+> Conversation-driven Repair
+> Phase 3: Patch Augmentation
+> Prompt
+> Construction
+> & Update
+> Test Side
+> Source Side
+
+Fig. 2. Overview of CausalRepair. 
+
+3 Approach 3.1 Framework Overview 
+
+In this section, we present the overall workflow of CausalRepair (as illustrated in Figure 2), which consists of three distinct phases. In the Constructing Minimal Causal Context phase (Section 3.2), a dual-slicing strategy extracts purified test context and dynamic execution paths to construct a refined prompt capturing the minimal causal dependencies of the bug. In the Conversation-driven Iterative Repair phase (Section 3.3), the repair process enters a multi-turn conversation in which the LLM iteratively refines the patch based on validation feedback to produce a plausible patch. In the Patch Augmentation phase (Section 3.4), the verified plausible patch serves as a reference to generate diverse variations, enhancing patch diversity and mitigating test overfitting. 
+
+3.2 Phase 1: Constructing Minimal Causal Context 
+
+Existing LLM-based APR approaches often face a dilemma in repair context construction: test context ambiguity, arising from noise in full tests or dependency absence when using only the failing line. Additionally, source code retrieval based solely on static analysis suffers from over-approximation, introducing unexecuted dead code that misleads the LLM. To bridge this gap, we propose a dual-slicing strategy that constructs a minimal causal context by applying context-aware static slicing on the test side and execution-trace-based dynamic slicing on the source side. 
+
+3.2.1 Context-Aware Static Slicing on the Test Side. The primary objective of this process is to resolve test context ambiguity by distilling the original test into a purified context that isolates the specific failure logic. We achieve this by applying context-aware static slicing, which removes failure-irrelevant statements while preserving the structural and semantic cues needed for the LLM to understand the violated verification logic. To formalize this process, we define a test function as a sequence of statements 𝑇 = ⟨𝑠 1, 𝑠 2, ..., 𝑠 𝑛 ⟩, where 𝑠 𝑓 𝑎𝑖𝑙 ∈ 𝑇 denotes the failing line that triggers the bug. Our goal is to derive a purified test context C𝑡𝑒𝑠𝑡 by retaining statements causally related to 
+
+𝑠 𝑓 𝑎𝑖𝑙 and filtering out irrelevant test scenarios. 
+
+Intra-procedural Dependency Analysis. Inspired by Yang et al. [76], we construct a System Dependence Graph (SDG) where edges represent dependencies between statements: 
+
+• Data Dependence ( 𝑠 𝑖 𝑑𝑑 
+
+−−→ 𝑠 𝑗 ): Exists if a variable 𝑣 defined at 𝑠 𝑖 is used at 𝑠 𝑗 , with no redefinition of 𝑣 in between. 
+
+• Control Dependence ( 𝑠 𝑖 𝑐𝑑 
+
+−−→ 𝑠 𝑗 ): Exists if the execution of 𝑠 𝑖 (e.g., a predicate) determines whether 𝑠 𝑗 is executed. 
+
+Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:6 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao 
+
+We define the slicing criterion as 𝜅 = ⟨𝑠 𝑓 𝑎𝑖𝑙 , 𝑉 𝑓 𝑎𝑖𝑙 ⟩, where 𝑉 𝑓 𝑎𝑖𝑙 is the set of variables referenced in 
+
+𝑠 𝑓 𝑎𝑖𝑙 . Based on the SDG, we compute the backward slice of 𝑠 𝑓 𝑎𝑖𝑙 to obtain the intra-procedural slice set, denoted as S𝑖𝑛𝑡𝑟𝑎 . This set contains all statements 𝑠 𝑖 in 𝑇 that transitively affect 𝑠 𝑓 𝑎𝑖𝑙 :
+
+S𝑖𝑛𝑡𝑟𝑎 = {𝑠 𝑖 ∈ 𝑇 | 𝑠 𝑖 
+
+> ∗
+
+−→ 𝑠 𝑓 𝑎𝑖𝑙 } ∪ { 𝑠 𝑓 𝑎𝑖𝑙 }
+
+where ∗
+
+−→ denotes the transitive closure of Data Dependence ( 𝑑𝑑 
+
+−−→) and Control Dependence ( 𝑐𝑑 
+
+−−→). This step eliminates redundant lines targeting other test scenarios, clarifying the testing intent. 
+
+Inter-procedural Context Extraction. Merely retaining intra-procedural dependencies is insufficient, as test execution often relies on the external environment (e.g., fields, helper methods). To address the dependency absence problem, we extend the analysis to inter-procedural dependen-cies. Specifically, for any statement 𝑠 ∈ S 𝑖𝑛𝑡𝑟𝑎 , if it invokes a method 𝑚 or references a field 𝑓 , we recursively resolve their definitions into an external dependency set E.Finally, we merge S𝑖𝑛𝑡𝑟𝑎 with E to form C𝑡𝑒𝑠𝑡 . Additionally, we explicitly attach the concrete failing line 𝑠 𝑓 𝑎𝑖𝑙 and the corresponding runtime error information to C𝑡𝑒𝑠𝑡 . Through this strategy, the resulting C𝑡𝑒𝑠𝑡 constitutes a semantically purified and dependency-complete test fragment that not only makes the testing intent explicit but also provides a precise entry point for subsequent source-side dynamic slicing. 
+
+3.2.2 Execution-Trace-Based Dynamic Slicing on the Source Side. While C𝑡𝑒𝑠𝑡 clarifies the testing intent, retrieving source code via static analysis inherently suffers from static over-approximation, often introducing noise from unexecuted statements. To address this problem, we employ execution-trace-based dynamic slicing to capture the precise runtime causality. This strategy rigorously filters out irrelevant logic, retaining only the statements that contributed to the specific failure. 
+
+Trace Capture and Criterion Mapping. We utilize Slicer4J [6], a high-precision dynamic slicer, to capture the runtime behavior. We execute the buggy program 𝑃 driven by the purified test context C𝑡𝑒𝑠𝑡 . The execution trace is recorded as a sequence of events T = ⟨𝑒 1, 𝑒 2, ..., 𝑒 𝑘 ⟩, where each 
+
+𝑒 𝑖 represents an execution instance of a statement. To initiate slicing, we map the static failing line 
+
+𝑠 𝑓 𝑎𝑖𝑙 to its corresponding runtime event. We define the dynamic slicing criterion as 𝜅 𝑑𝑦𝑛 = 𝑒 𝑡𝑎𝑟𝑔𝑒𝑡 ,where 𝑒 𝑡𝑎𝑟𝑔𝑒𝑡 ∈ T is the last execution instance corresponding to 𝑠 𝑓 𝑎𝑖𝑙 . This ensures the analysis is strictly scoped to the specific error manifestation. 
+
+Backward Slicing on Dynamic Dependence Graph. Starting from the criterion 𝑒 𝑡𝑎𝑟𝑔𝑒𝑡 , we construct a Dynamic Dependence Graph (DDG) over the execution trace T . Unlike static analysis, dynamic dependencies are strictly defined by the actual interactions during execution: 
+
+• Dynamic Data Dependence: Exists between events 𝑒 𝑖 and 𝑒 𝑗 (𝑖 < 𝑗 ) if 𝑒 𝑖 defines a value consumed by 𝑒 𝑗 , and the value is not redefined between them. 
+
+• Dynamic Control Dependence: Exists if the outcome of 𝑒 𝑖 (e.g., a branch predicate) directly determined the execution of 𝑒 𝑗 .To obtain the final code context, we map the identified causal events back to the source code. Let 𝑠 
+
+denote a static statement in the buggy program. We compute the backward transitive closure of 
+
+𝑒 𝑡𝑎𝑟𝑔𝑒𝑡 to extract the minimal set of causal statements S𝑑𝑦𝑛 :
+
+S𝑑𝑦𝑛 = {𝑠 | ∃ 𝑒 ∈ T , stmt (𝑒 ) = 𝑠 ∧ 𝑒 𝑑𝑦𝑛 ∗
+
+−−−−→ 𝑒 𝑡𝑎𝑟𝑔𝑒𝑡 }
+
+Here, 𝑑𝑦𝑛 ∗
+
+−−−−→ denotes the transitive dependence relation on the DDG, and stmt (𝑒 ) is the mapping function that returns the static statement 𝑠 corresponding to event 𝑒 . This process physically filters out dead code and logic that, although executed, did not contribute to the specific failure. 
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026.
+
+CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:7 The following Java function contains a bug:       
+
+> public TimeSeries createCopy(int start, int end)
+> throws CloneNotSupportedException {
+> ...
+> TimeSeries copy = (TimeSeries) super.clone();
+> copy.data = new java.util.ArrayList(); // Buggy Line
+> if (this.data.size() > 0) {
+> ...
+> }
+> Buggy lines are marked with '// Buggy Line' as hints. The actual fix may involve changes around these lines or adding new statements if necessary.
+> The function fails on the following test(s):
+> Test Method: testCreateCopy3
+> Failing Test Snippet:
+> public void testCreateCopy3() throws CloneNotSupportedException {
+> TimeSeries s1 = new TimeSeries("S1");
+> s1.add(new Year(2009), 100.0);
+> s1.add(new Year(2010), 101.0);
+> s1.add(new Year(2011), 102.0);
+> TimeSeries s2 = s1.createCopy(0, 1);
+> assertEquals(101.0, s2.getMaxY(), EPSILON);
+> }
+> Failing Line in Test: assertEquals(101.0, s2.getMaxY(), EPSILON);
+> Error Message: AssertionFailedError: expected:<101.0> but was:<102.0>
+> This test relies on the following external methods: ...
+> This test depends on these external fields/variables: ...
+> The following code lines, extracted through dynamic slicing, represent the minimal
+> dependencies required to reproduce this bug. They provide additional context that may clarify the underlying cause:
+> File: Chart-3/source/org/jfree/data/time/TimeSeries.java
+> /**
+> * Creates a new time series by copying a subset of the data in this time series.
+> ...
+> */
+> public TimeSeries createCopy(int start, int end) {
+> Line 10: copy.data = new java.util.ArrayList();
+> }
+> ...
+> Please provide a correct fix for the bug.
+> Your response must enclose the entire function within a ```java ... ``` block.
+
+Test Context 
+
+Source Context 
+
+Minimal Causal Context 
+
+Repair Prompt Template 
+
+> You are a helpful assistant that fixes Java code.
+
+Fig. 3. Illustration of the Prompt Construction. 
+
+3.2.3 Structural Reconstruction of Causal Context. Although S𝑑𝑦𝑛 captures precise causal state-ments, they are physically fragmented. Directly feeding such discrete code lines to LLMs can lead to the "lost in the middle" [43] phenomenon due to the lack of structural context. To address this, we propose an Abstract Syntax Tree (AST)-based reconstruction strategy to restore semantic coherence, resulting in the final structured source context C𝑠𝑜𝑢𝑟𝑐𝑒 .
+
+Hierarchical Encapsulation. We process the discrete statements in S𝑑𝑦𝑛 to rebuild a valid code skeleton. First, we aggregate the statements by their originating files. For each file, we parse the statements to identify their enclosing Class and Method nodes. We then construct a Skeleton Tree that retains the original class definitions and method signatures, back-filling the sliced statements into their respective bodies. Code lines not selected by the slice are omitted, maximizing context compression while preserving the structural integrity required for LLM understanding. 
+
+Semantic Anchor Injection. To further enhance the LLM’s spatial and functional reasoning, we inject multi-dimensional meta-data into C𝑠𝑜𝑢𝑟𝑐𝑒 :
+
+• File Path Headers: To clarify cross-module boundaries, we inject the file path (e.g., // File: .../TimeSeries.java ) as a header at the beginning of the code block for each distinct file. 
+
+• Intent Preservation: We explicitly preserve Javadoc and comments associated with the retained classes and methods. These natural language descriptions provide high-level intent, bridging the gap between code implementation and semantic purpose. 
+
+• Position-Aware Markers: Relative line numbers (e.g., // Line 10: ) are appended to each sliced statement to help the LLM establish spatial awareness for patch generation. Finally, C𝑠𝑜𝑢𝑟𝑐𝑒 is combined with the test context C𝑡𝑒𝑠𝑡 to form the final prompt. Figure 3 illustrates the constructed prompt using a specific example (Chart-3 bug). This structured input eliminates noise while preserving the complete chain of evidence and program context, enabling the LLM to perform precise causal reasoning. 
+
+3.3 Phase 2: Conversation-Driven Iterative Repair 
+
+Following the construction of the causal context in Phase 1, we incorporate this context into a conversation-driven APR process [28, 67]. Instead of simple repeated sampling or one-shot generation, this phase adopts a debugging process analogous to human developers, employing a closed-loop “generate–validate–feedback” mechanism that enables the LLM to progressively refine 
+
+Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:8 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao 
+
+Algorithm 1: CausalRepair 
+
+Input: 𝐹𝑢𝑛𝑐 : the buggy function, T : the test suite, 𝑚 : the maximum number of repair attempts, 𝑛 : the maximum number of iterative interactions per attempt 
+
+Output: 𝑃𝐹𝑢𝑛𝑐𝑠 : the plausible patch(es)  
+
+> 1
+
+𝑇 𝑓 𝑎𝑖𝑙 := IdentifyFail (T , 𝐹𝑢𝑛𝑐 ); // locate the failing test function  
+
+> 2
+
+𝐶 𝑡𝑒𝑠𝑡 := StaticSlice (𝑇 𝑓 𝑎𝑖𝑙 ); // Phase 1: purify test context  
+
+> 3
+
+𝐶 𝑠𝑜𝑢𝑟𝑐𝑒 := DynamicSlice (𝐹𝑢𝑛𝑐, 𝐶 𝑡𝑒𝑠𝑡 ); // Phase 1: extract source context  
+
+> 4
+
+𝑖𝑡𝑒𝑟 1 := 0; // initiate the number of repair attempts  
+
+> 5
+
+while 𝑖𝑡𝑒𝑟 1 < 𝑚 do  
+
+> // restart repair from original function
+> 6
+
+𝐻 := ∅; // initialize conversation history  
+
+> 7
+
+𝑡𝑚𝑝 := 𝐹𝑢𝑛𝑐  
+
+> 8
+
+𝑖𝑡𝑒𝑟 2 := 0; // initiate the number of iterative interactions per attempt  
+
+> 9
+
+while 𝑖𝑡𝑒𝑟 2 < 𝑛 do  
+
+> // continuous repair from previous patch
+> 10
+
+if 𝑖𝑡𝑒𝑟 2 = 0 then  
+
+> 11
+
+𝑝𝑟𝑜𝑚𝑝𝑡 := ConstructInit (𝑡𝑚𝑝, 𝐶 𝑡𝑒𝑠𝑡 , 𝐶 𝑠𝑜𝑢𝑟𝑐𝑒 ); // construct causal context  
+
+> 12
+
+else  
+
+> 13
+
+𝑝𝑟𝑜𝑚𝑝𝑡 := ConstructFeed (𝑉 , 𝐻 ); // construct feedback from validation and history  
+
+> 14
+
+𝐹𝑢𝑛𝑐 ′ := LLM (𝑝𝑟𝑜𝑚𝑝𝑡 ); // Phase 2: query LLM for repair  
+
+> 15
+
+𝑉 := Validate (𝐹𝑢𝑛𝑐 ′, T ) ; // validate the patched function  
+
+> 16
+
+if 𝑉 = True then  
+
+> 17
+
+𝑃𝐹𝑢𝑛𝑐𝑠 := PatchAug (𝐹𝑢𝑛𝑐 ′); // Phase 3: generate alternative patches  
+
+> 18
+
+return 𝑃𝐹𝑢𝑛𝑐𝑠 ; // return plausible patches  
+
+> 19
+
+𝐻 := UpdateHistory (𝐻, 𝑝𝑟𝑜𝑚𝑝𝑡, 𝐹𝑢𝑛𝑐 ′); // accumulate context  
+
+> 20
+
+𝑡𝑚𝑝 := 𝐹𝑢𝑛𝑐 ′; // update current function  
+
+> 21
+
+𝑖𝑡𝑒𝑟 2 = 𝑖𝑡𝑒𝑟 2 + 1;  
+
+> 22
+
+𝑖𝑡𝑒𝑟 1 = 𝑖𝑡𝑒𝑟 1 + 1;  
+
+> 23
+
+return ∅; // fail to repair 
+
+patches through multi-turn conversation. By leveraging negative feedback from previous iterations, the model incrementally corrects errors rather than restarting the repair process from scratch. Algorithm 1 outlines the overall repair process of CausalRepair. Given a buggy function and its test suite, the algorithm aims to generate plausible patch(es) that pass all tests. In each iteration, CausalRepair constructs a prompt (Line 11 or Line 13) and queries the LLM to generate one candidate patch at a time (Line 14). The generated patch is then immediately injected into the project, compiled, and validated using the test suite (Line 15). The validation result determines the subsequent flow of the repair process. If the patch passes all tests (including both triggering and regression tests), it is identified as a plausible patch, at which point the iterative repair process terminates and CausalRepair proceeds to the patch augmentation phase (Phase 3). However, if the patch fails validation, CausalRepair does not simply discard it; instead, it initiates the feedback mechanism. Specifically, to guide the LLM towards effective self-correction, we design an iterative prompting strategy incorporating negative feedback. This prompt consists of two key components: (1) the incorrect candidate patch generated in the previous iteration, and (2) the failing test(s) and the specific error messages (e.g., compilation errors or runtime exceptions) captured during validation. We then request the LLM to analyze the failure and provide a corrected function.  
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:9
+
+This process continues until a plausible patch is generated or the preset maximum number of interactions is reached. By combining the causal context extracted in Phase 1 with the iterative validation feedback, CausalRepair can effectively converge to correct repairs through multi-turn interactions, enhancing the overall repair effectiveness. 
+
+3.4 Phase 3: Patch Augmentation 
+
+While Phase 2 successfully produces a plausible patch that passes all test cases, this does not mark the end of the repair task. Existing APR research [25, 26, 67] indicates that due to test suite incompleteness, passing tests alone cannot guarantee semantic correctness; patches are often merely overfitting solutions tailored to specific test inputs. To mitigate this problem, following prior work [28, 67], CausalRepair introduces the patch augmentation phase. In this phase, the plausible patch generated in Phase 2 is treated as a high-value reference rather than the final output. The intuition behind this is that even if a plausible patch is not fully correct, it often captures essential logic or structural patterns required to fix the bug. Therefore, rather than generating from scratch, it is more effective to explore the solution space surrounding this existing solution. Specifically, CausalRepair instructs the LLM to produce alternative implementations that are logically similar to the reference patch. These variations are then validated against the test suite and the validated candidates are returned as outputs. This process effectively increases patch diversity, thereby improving the likelihood that the final results presented to developers contain the correct patch, and mitigating the potential bias introduced by relying on a single plausible patch. 
+
+4 Experimental Setup 4.1 Research Questions 
+
+We evaluate CausalRepair on the following research questions (RQs): 
+
+• RQ1 (Repair Effectiveness): How does the repair effectiveness of CausalRepair compare to state-of-the-art APR techniques? 
+
+This question evaluates the repair effectiveness of CausalRepair in Java bug repair and compares its performance to existing state-of-the-art APR baselines. 
+
+• RQ2 (Repair Scenarios): How does CausalRepair perform across different repair scenar-ios? 
+
+This question investigates CausalRepair’s performance in three distinct repair scenarios (i.e., single-function, single-hunk, and single-line bugs). 
+
+• RQ3 (Ablation Study): How does each design choice of CausalRepair affect its repair effectiveness? 
+
+This question investigates the individual contribution of key components and further evaluates the impact of key hyperparameter settings on the overall repair effectiveness. 
+
+• RQ4 (Data Contamination Analysis): Is CausalRepair’s effectiveness affected by poten-tial training-data contamination? 
+
+Considering the potential data leakage risk caused by LLMs, this question evaluates whether CausalRepair maintains its repair effectiveness on a contamination-reduced benchmark that is less likely to appear in the model’s training corpus. 
+
+• RQ5 (Cost Analysis): How does the cost of CausalRepair compare to existing LLM-based methods? 
+
+Considering the use of LLMs may lead to higher repair costs, this question evaluates the time and monetary overhead of CausalRepair to assess its practical feasibility.  
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:10 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao
+
+4.2 Benchmarks 
+
+• Defects4J. To evaluate the repair effectiveness, we adopt the widely used benchmark De-fects4J [27]. Following prior APR studies [22, 65, 67, 71, 81, 82], we divide Defects4J into two versions, V1.2 and V2.0. Defects4J V1.2 consists of 391 bugs in 6 different Java projects, while Defects4J V2.0 consists of 438 new bugs across 9 additional projects. Consistent with prior studies [22, 67, 81, 82, 85], we further categorize Defects4J into three repair scenarios: single-function (SF), single-hunk (SH), and single-line (SL). Specifically, single-function refers to bugs where the fix is confined within a single method, whereas single-hunk and single-line represent finer-grained scenarios requiring modifications to a continuous code block and a single line, respectively. Note that the single-line category is a subset of the single-hunk category, and the single-hunk category is a subset of the single-function category. The statistics of each scenario in Defects4J is presented in Table 1. 
+
+• Defects4J-Trans. To assess potential data-leakage effects, we further conduct experiments on a recent contamination-reduced benchmark, namely Defects4J-Trans [35]. Defects4J-Trans consists of 483 bugs, which are generated by applying semantic-preserving transformations to the 483 single-function bugs in the Defects4J benchmark (versions 1.2 and 2.0). Similar to Defects4J, Defects4J-Trans can also be categorized into three repair scenarios (i.e., SF, SH, and SL). The statistics for each scenario in Defects4J-Trans are also presented in Table 1. Since Defects4J-Trans was first released in October 2024 (i.e., later than the cutoff date of DeepSeek-V3’s training corpus), it serves as a benchmark that is less prone to data contamination for providing a contamination-reduced setting for evaluating repair performance.                          
+
+> Table 1. Statistics of studied benchmarks.
+> Benchmarks V1.2 V2.0
+> # Total Bugs # SF Bugs # SH Bugs # SL Bugs # Total Bugs # SF Bugs # SH Bugs # SL Bugs
+> Defects4J 391 255 154 80 438 228 159 78
+> Defects4J-Trans 255 255 154 80 228 228 159 78
+
+4.3 Baselines 
+
+To evaluate the effectiveness, we compare CausalRepair against 15 state-of-the-art baselines across different categories, including seven learning-based APR methods (i.e., AlphaRepair [66], CURE [26], RewardRepair [78], Recoder [85], SelfAPR [77], TENURE [49], and KNOD [25]), one template-based traditional APR method (i.e., TBar [41]), and seven LLM-based APR methods (i.e., ChatRepair [67], ContrastRepair [28], ThinkRepair [81], RepairAgent [9], AdverIntent-Agent [80], TSAPR [22], and ReinFix [82]). Additionally, following prior work [28, 67, 81], we construct an LLM-based baseline named BaseDeepSeek, which directly uses DeepSeek-V3 for repair without providing additional feedback and slicing information, serving as a foundational comparison. Following the common practice in the APR community [28, 64, 66, 67, 81, 85], we reuse the reported results from previous studies for non-LLM baselines, while all LLM-based baselines are reproduced under a unified model to ensure fair comparison. 
+
+4.4 Evaluation Metrics 
+
+Following previous work [22, 25, 26, 28, 81, 82], we consider two widely used metrics to evaluate the effectiveness of both CausalRepair and baselines: 
+
+• Plausible Fixes: Refers to the number of bugs which can pass all the test cases after fixing, without any additional verification. 
+
+• Correct Fixes: Counts the number of bugs that have been properly repaired based on a manual review of the plausible patches generated by each tool. 
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026.
+
+CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:11 
+
+4.5 Implementation 
+
+For the experiments, we utilize DeepSeek-V3 and GPT-4o as the backbone models for CausalRepair, using the APIs provided by SiliconFlow [2] and OpenAI [1], respectively. Crucially, to ensure a fair comparison and eliminate the confounding variable of model capability, we move beyond the reported results in prior work. Instead, we establish a unified evaluation benchmark by reproducing all compared LLM-based APR methods (i.e., ChatRepair [67], ContrastRepair [28], ThinkRepair [81], RepairAgent [9], AdverIntent-Agent [80], TSAPR [22], and ReinFix [82]) using the same DeepSeek-V3 backbone. During reproduction, apart from replacing the backbone model with DeepSeek-V3, we strictly adhere to the default architectural designs and hyperparameter settings described in their original papers, ensuring that any performance divergence is solely attributable to the methodology itself rather than the underlying model. For CausalRepair, following previous work [28, 67, 81, 82], we set the sampling temperature to 1.0 to obtain a diverse set of potential patches. In terms of fault localization (FL), to avoid additional biases introduced by FL tools, we also follow recent works [22, 28, 67, 81, 82] and adopt the perfect fault localization setting. Regarding the repair budget, we set the number of repair attempts ( 𝑚 ) to 5, with the maximum number of iterative interactions per attempt ( 𝑛 ) set to 3. Additionally, we set the number of queries for the patch augmentation stage to 10. Therefore, the total maximum patch space explored by CausalRepair for each bug is 25 (i.e., 5 × 3 + 10). This budget is lower than the number of patches generated by state-of-the-art methods such as TSAPR [22] and ReinFix [82]. We allocate a time budget of 5 minutes for dynamic slicing; if a timeout or crash occurs, the dynamic context is omitted. All experimental evaluations are conducted on one server running Ubuntu 20.04. 
+
+5 Experimental Results 5.1 RQ1: Repair Effectiveness 
+
+To answer RQ1, we compare the numbers of plausible and correct fixes produced by CausalRepair and the baseline methods on Defects4J V1.2 and V2.0. The results, including overall performance and the number of project-level bug fixes, are presented in Table 2. 
+
+Table 2. Repair results (correct fixes / plausible fixes) for CausalRepair and baselines on Defects4J.                                                                                                                                                                                        
+
+> Category APR Method Patch Size Chart Closure Lang Math Mockito Time #Total (D4J V1.2) #Total (D4J V2.0) Template-based TBar [41] -11/-16/-13/-22/-3/-3/-68/95 8/25 AlphaRepair [66] 5000 9/-23/-13/-21/-5/-3/-74/109 36/-CURE [26] 5000 10/-14/-9/-19/-4/-1/-57/-19/-RewardRepair [78] 200 5/-15/-7/-19/-3/-1/-50/-25/-Recoder [85] 100 11/-22/-9/-22/-1/-2/-67/-18/-SelfAPR [77] 150 7/-20/-10/-22/-3/-3/-65/79 45/51 TENURE [49] 500 7/-26/-16/-22/-4/-4/-79/-50/-Learning-based KNOD [25] 1000 10/11 23/29 11/13 20/25 5/5 2/2 71/85 50/85 BaseDeepSeek 25 9/13 11/13 20/31 31/43 5/6 2/7 78/113 79/96 ChatRepair [67] 500 13/15 11/13 26/40 38/64 10/13 5/11 103/156 42/53 ContrastRepair [28] 160 13/16 41/59 31/39 35/51 8/8 5/9 133/182 48/66 ThinkRepair [81] 125 11/14 22/32 20/24 27/40 5/8 2/4 87/122 93/129 RepairAgent [9] 160 10/12 23/26 15/16 31/32 4/5 2/2 85/93 87/94 AdverIntent-Agent [80] 36 10/11 20/23 16/18 31/34 5/5 2/2 84/93 87/96 TSAPR [22] 32 12/13 25/41 20/24 36/48 10/11 5/9 108/146 116/150 ReinFix [82] 45 11/15 34/54 26/36 37/58 6/11 4/7 118/181 118/171 LLM-based (DeepSeek-V3) CausalRepair 25 14/16 46/53 35/38 51/61 10/12 6/11 162/191 151/174
+> ReinFix [82] 45 14/-38/-25/-34/-9/-4/-124/-130/-LLM-based (GPT-4o) CausalRepair 25 12/15 46/57 34/37 41/52 11/13 8/10 152/184 145/175
+
+“-”: indicates no results reported in the original work. Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:12 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao 
+
+Overall Effectiveness. As shown in Table 2, CausalRepair achieves the best performance among all 15 baseline methods. Note that to ensure a fair comparison, all LLM-based APR methods are reproduced under a unified experimental setting, where DeepSeek-V3 is used as the backbone model. Specifically, when instantiated with DeepSeek-V3, CausalRepair correctly fixes a total of 313 bugs. Compared to the best-performing baselines reproduced under the same model, CausalRepair fixes 77 and 89 more bugs than ReinFix (236 bugs) and TSAPR (224 bugs), respectively. Additionally, compared to BaseDeepSeek (157 bugs) which directly uses the model for repair, CausalRepair fixes 156 more bugs, demonstrating its effectiveness in improving repair performance. Furthermore, CausalRepair demonstrates consistent effectiveness across different dataset versions. On Defects4J V1.2, CausalRepair fixes 162 bugs, surpassing the previous state-of-the-art methods ContrastRepair (133 bugs) and ReinFix (118 bugs). On the more challenging Defects4J V2.0, which contains more complex logic errors and longer functions, CausalRepair maintains its advantage by fixing 151 bugs. In contrast, ReinFix and TSAPR only fix 118 and 116 bugs, respectively. These results demonstrate the superiority of CausalRepair. 
+
+Impact of Backbone Models. To evaluate the generalizability of CausalRepair across different LLMs, we further implement CausalRepair using GPT-4o and compare it with the GPT-4o-based results reported by ReinFix [82]. As shown at the bottom of Table 2, CausalRepair with GPT-4o correctly fixes a total of 297 bugs (152 in Defects4J V1.2 and 145 in Defects4J V2.0), which exceeds the performance reported by ReinFix with GPT-4o (254 bugs). This result indicates that the effectiveness of CausalRepair is not limited to specific model architectures. Instead, providing accurate causal dependency information can consistently enhance the repair capability of LLMs. 
+
+Overlap and Unique Fixes Analysis. We further analyze the overlap of fixed bugs among the top-performing methods, including ReinFix, TSAPR, ContrastRepair, and ThinkRepair. Figure 4 presents the Venn diagrams of unique and shared fixes on Defects4J V1.2 and Defects4J V2.0. Figure 4(a) and Figure 4(b) show that 39 and 16 bugs on Defects4J V1.2 and V2.0, respectively, can be successfully repaired by all these methods. This overlap indicates that all these approaches are highly effective and exhibit considerable similarity in their repair capabilities. This similarity can be attributed to the fact that all these methods are implemented on the same backbone model. Despite that, CausalRepair is still able to uniquely fix 12 and 16 bugs on Defects4J V1.2 and V2.0, respectively, which are not fixed by any other methods. These results suggest that CausalRepair serves as a complement to existing work and highlights the unique advantage of CausalRepair in capturing fine-grained causal dependencies. 2 71000055111011    
+
+> 12
+> 11 4635210 10 7919 711 739
+> CausalRepair ContrastRepair ThinkRepair TSAPR ReinFix
+> (a) Venn on Defects4J V1.2 663733320121101
+> 16
+> 10 13 22 10 6430 244615216
+> CausalRepair ContrastRepair ThinkRepair TSAPR ReinFix (b) Venn on Defects4J V2.0
+
+Fig. 4. Bug Fix Venn Diagram on Defects4J (CausalRepair, ContrastRepair, ThinkRepair, TSAPR, ReinFix) 
+
+Case Study. To provide qualitative evidence on how dual-slicing context helps CausalRepair, we analyze Lang-18, a unique bug fixed only by CausalRepair, as shown in Figure 5 and 6. Lang-18 
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026.
+
+CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:13 
+
+is a function-level bug in FastDateFormat , triggered by a compound date pattern containing year tokens of different lengths, i.e., yyyy yyy yy y . In the original test, the failing assertion is surrounded by many unrelated formatting checks. As shown in Figure 6-(a), test-side slicing removes these irrelevant scenarios while preserving the dependencies of the failing assertion, making the violated behavior explicit: only the two-letter year token should be formatted as a two-digit year. Figure 6-(b) shows the source-side dynamic slice, which reconstructs the actual runtime path from 
+
+FastDateFormat.getInstance(pattern) to parsePattern() and the case ’y’ branch. This slice exposes the root cause: the buggy condition routes all year tokens with tokenLen < 4 to 
+
+TwoDigitYearField . Since TwoDigitYearField truncates the year using Calendar.YEAR % 100 
+
+and emits exactly two digits, yyy and y are incorrectly formatted as 03 instead of 2003 . Together with the preserved Javadoc semantic anchor, which states that only two-letter year patterns should be truncated, the dual-slicing context provides a complete causal chain from the failing test pattern to the incorrect rule selection. Based on this evidence, CausalRepair infers the general repair rule that only tokenLen == 2 should use TwoDigitYearField , producing a patch that is syntactically different from but semantically equivalent to the developer patch, as shown in Figure 5. @@  -492,10 +492,10 @@ private void init() { 
+
+rule = new TextField(Calendar.ERA, ERAs); 
+
+break; 
+
+case 'y': // year (number) 
+
+- if (tokenLen >= 4) { 
+
++ if (tokenLen == 2) { 
+
+- rule = selectNumberRule(Calendar.YEAR, tokenLen); 
+
+- } else { 
+
+rule = TwoDigitYearField.INSTANCE; 
+
++ } else { 
+
++ rule = selectNumberRule(Calendar.YEAR, tokenLen < 4 ? 4 : tokenLen); 
+
+}
+
+break; 
+
+case 'M': // month in year (text and number) 
+
+Ground-truth Patch From Developers  Correct Patch From CausalRepair 
+
+@@  -492,10 +492,10 @@ private void init() { 
+
+rule = new TextField(Calendar.ERA, ERAs); 
+
+break; 
+
+case 'y': // year (number) 
+
+- if (tokenLen >= 4) { 
+
++ if (tokenLen == 2) { 
+
+- rule = selectNumberRule(Calendar.YEAR, tokenLen); 
+
+- } else { 
+
+rule = TwoDigitYearField.INSTANCE; 
+
++ } else { 
+
++ rule = selectNumberRule(Calendar.YEAR, Math.max(tokenLen, 4)); 
+
+}
+
+break; 
+
+case 'M': // month in year (text and number) 
+
+Fig. 5. Unique Fix Generated by CausalRepair for Lang-18. FastDateFormat.getInstance(pattern)  File: Lang-18/src/main/java/org/apache/commons/lang3/time/ 
+
+FastDateFormat.java 
+
+/** · ··*/ 
+
+static public FastDateFormat getInstance(String pattern) { 
+
+Line 2: return cache.getInstance(pattern, null, null); 
+
+}
+
+File: Lang-18/src/main/java/org/apache/commons/lang3/time/FormatCache.java 
+
+/** · ··*/ 
+
+public F getInstance(String pattern, TimeZone timeZone, Locale locale) { 
+
+···
+
+Line 14: format = createInstance(pattern, timeZone, locale); 
+
+}
+
+FormatCache.getInstance(...) 
+
+File: Lang-18/src/main/java/org/apache/commons/lang3/time/FastDateFormat.java 
+
+protected FastDateFormat createInstance(String pattern, TimeZone timeZone, Locale locale) { 
+
+Line 2: return new FastDateFormat(pattern, timeZone, locale); 
+
+}
+
+createInstance(...) 
+
+new FastDateFormat(...) File: Lang-18/src/main/java/org/apache/commons/lang3/time/FastDateFormat.java 
+
+/** · ··*/ 
+
+protected FastDateFormat(String pattern, TimeZone timeZone, Locale locale) { 
+
+···
+
+Line 5: init(); 
+
+}
+
+File: Lang-18/src/main/java/org/apache/commons/lang3/time/FastDateFormat.java 
+
+/** · ··*/ 
+
+private void init() { 
+
+Line 2: List<Rule> rulesList = parsePattern(); 
+
+}
+
+parsePattern() 
+
+init() 
+
+File: Lang-18/src/main/java/org/apache/commons/lang3/time/FastDateFormat.java 
+
+/**· ··
+
+* <p>Javadoc cites for the year pattern: <i>For formatting, if the number of 
+
+* pattern letters is 2, the year is truncated to 2 digits; otherwise it is 
+
+* interpreted as a number.</i> Starting with Java 1.7 a pattern of 'Y’ or 
+
+* 'YYY' will be formatted as '2003', while it was '03' in former Java 
+
+* versions. FastDateFormat implements the behavior of Java 7.</p> 
+
+*/ 
+
+Fields in class FastDateFormat { 
+
+Line 38: private static final FormatCache<FastDateFormat> cache= new FormatCache<FastDateFormat>() { 
+
+}
+
+protected List<Rule> parsePattern() { 
+
+···
+
+switch (c) { 
+
+case 'G': · ··// era designator (text) 
+
+case 'y': // year (number) 
+
+if (tokenLen >= 4) { 
+
+rule = selectNumberRule(Calendar.YEAR, tokenLen); 
+
+} else { 
+
+rule = TwoDigitYearField.INSTANCE; 
+
+}
+
+break; 
+
+case 'M': · ··// month in year (text and number) 
+
+case 'd': · ··// day in month (number) 
+
+···other case · ··
+
+case '\'': · ··// literal text 
+
+···
+
+}
+
+File: Lang-18/src/main/java/org/apache/commons/lang3/time/FastDateFormat.java 
+
+/** · ··*/ 
+
+protected NumberRule selectNumberRule(int field, int padding) { 
+
+Line 2: switch (padding) { 
+
+Line 8: return new PaddedNumberField(field, padding); 
+
+}
+
+/** · ··*/ 
+
+PaddedNumberField(int field, int size) { 
+
+Line 5: mField = field; 
+
+Line 6: mSize = size; 
+
+}
+
+selectNumberRule() 
+
+TwoDigitYearField 
+
+File: Lang-18/src/main/java/org/apache/commons/lang3/time 
+
+/FastDateFormat.java 
+
+/** · ··*/ 
+
+private static class TwoDigitYearField implements NumberRule { 
+
+···
+
+Line 20: public void appendTo(StringBuffer buffer, Calendar calendar) { 
+
+Line 21: appendTo(buffer, calendar.get(Calendar.YEAR) % 100); 
+
+···
+
+Line 27: public final void appendTo(StringBuffer buffer, int value) { 
+
+Line 28: buffer.append((char)(value / 10 + '0')); 
+
+Line 29: buffer.append((char)(value % 10 + '0')); 
+
+}
+
+Dynamic slicing reconstructs the actual failure path, which explains why the buggy condition misclassifies `yyy` and `y` as two-digit years. Combined with the preserved Javadoc semantic anchor, the source-side dynamic slice provides the LLM with sufficient causal evidence to infer the correct patch. Buggy Function 
+
+public void testFormat() { 
+
+···
+
+try { 
+
+Locale.setDefault(Locale.US); 
+
+TimeZone.setDefault(TimeZone.getTimeZone("America/New_York")); 
+
+GregorianCalendar cal1 = new GregorianCalendar(2003, 0, 10, 15, 33, 20); 
+
+Date  date1 = cal1.getTime(); 
+
+FastDateFormat fdf = FastDateFormat.getInstance("yyyy -MM -
+
+dd'T'HH:mm:ss"); 
+
+SimpleDateFormat sdf = new SimpleDateFormat("yyyy -MM -
+
+dd'T'HH:mm:ss"); 
+
+String pattern = 
+
+"GGGG GGG GG G yyyy yyy yy y MMMM MMM MM M" 
+
++ " dddd ddd dd d DDDD DDD DD D EEEE EEE EE E" 
+
++ " aaaa aaa aa a zzzz zzz zz z"; 
+
+fdf = FastDateFormat.getInstance(pattern); 
+
+sdf = new SimpleDateFormat(pattern); 
+
+assertEquals(sdf.format(date1).replaceAll( “2003 03 03 03 ”, “2003 2003 03 
+
+2003 ”), fdf.format(date1)); 
+
+}
+
+···
+
+}
+
+public void testFormat() { 
+
+···
+
+try { 
+
+Locale.setDefault(Locale.US); 
+
+TimeZone.setDefault(TimeZone.getTimeZone("America/New_York")); 
+
+GregorianCalendar cal1 = new GregorianCalendar(2003, 0, 10, 15, 33, 20); 
+
+GregorianCalendar cal2 = new GregorianCalendar(2003, 6, 10, 9, 0, 0); 
+
+Date date1 = cal1.getTime(); 
+
+Date date2 = cal2.getTime(); 
+
+···
+
+FastDateFormat fdf = FastDateFormat.getInstance("yyyy -MM -
+
+dd'T'HH:mm:ss"); 
+
+SimpleDateFormat sdf = new SimpleDateFormat("yyyy -MM -
+
+dd'T'HH:mm:ss"); 
+
+assertEquals(sdf.format(date1), fdf.format(date1)); 
+
+assertEquals("2003 -01 -10T15:33:20", fdf.format(date1)); 
+
+assertEquals("2003 -01 -10T15:33:20", fdf.format(cal1)); 
+
+assertEquals("2003 -01 -10T15:33:20", fdf.format(millis1)); 
+
+···
+
+fdf = FastDateFormat.getInstance("Z"); 
+
+assertEquals(" -0500", fdf.format(date1)); 
+
+assertEquals(" -0500", fdf.format(cal1)); 
+
+assertEquals(" -0500", fdf.format(millis1)); 
+
+···
+
+fdf = FastDateFormat.getInstance("ZZ"); 
+
+assertEquals(" -05:00", fdf.format(date1)); 
+
+assertEquals(" -05:00", fdf.format(cal1)); 
+
+assertEquals(" -05:00", fdf.format(millis1)); 
+
+···
+
+String pattern = 
+
+"GGGG GGG GG G yyyy yyy yy y MMMM MMM MM M" 
+
++ " dddd ddd dd d DDDD DDD DD D EEEE EEE EE E" 
+
++ " aaaa aaa aa a zzzz zzz zz z"; 
+
+fdf = FastDateFormat.getInstance(pattern); 
+
+sdf = new SimpleDateFormat(pattern); 
+
+assertEquals(sdf.format(date1).replaceAll( “2003 03 03 03 ”, “2003 2003 03 
+
+2003 ”), fdf.format(date1)); 
+
+assertEquals(sdf.format(date2).replaceAll( “2003 03 03 03 ”, “2003 2003 03 
+
+2003 ”), fdf.format(date2)); 
+
+···
+
+}
+
+unrelated 
+
+test scenarios 
+
+The original full test includes substantial irrelevant test scenarios, 
+
+leading to noise interference. By applying context-aware static slicing 
+
+on the test side, CausalRepair filters out irrelevant noise while retaining the prerequisite dependency statements of the failing assertion, yielding a semantically purified and dependency-complete test context that clarifies the violated behavior. 
+
+failing assertion 
+
+Purified Test Original Test 
+
+Failing Line in Test: assertEquals(sdf.format(date1).replaceAll("2003 03 03 03", "2003 2003 03 2003"), fdf.format(date1)); 
+
+Error Message: junit.framework.ComparisonFailure: expected:<AD AD AD AD 2003 2003 03 2003 January Jan 01 1 ...> but was:<AD AD AD AD 2003 03 03 03 January Jan 01 1 ...> 
+
+(a) Context-Aware Static Slicing on the Test Side  (b) Execution-Trace-Based Dynamic Slicing on the Source Side 
+
+Fig. 6. Dual-Slicing Context for the Lang-18 Case Study. 
+
+5.2 RQ2: Repair Scenarios 
+
+To answer RQ2, we categorize the bugs in Defects4J into three repair scenarios based on granularity: single-function (SF), single-hunk (SH), and single-line (SL). The single-function scenario is generally considered the most challenging because it requires the model to understand the logic of the entire function and handle potential multiple modifications, whereas the single-line scenario is relatively simple. Table 3 details the number of plausible and correct fixes achieved by different LLM-based methods under these scenarios. Note that the results for ChatRepair and ContrastRepair in the SF and SH scenarios on Defects4J V2.0 are denoted as ‘-’, as their original studies only evaluate the SL scenario for this version. We adhere to their original experimental settings during our reproduction. 
+
+Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:14 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao 
+
+Robustness in Complex Scenarios. As shown in Table 3, CausalRepair demonstrates a sub-stantial advantage in the most challenging single-function scenario. Under the unified experimental setting using DeepSeek-V3, CausalRepair fixes 162 and 151 SF bugs on Defects4J V1.2 and V2.0, respectively. In comparison, the second best baseline ReinFix fixes only 118 and 118 SF bugs on the two versions, respectively, while TSAPR fixes 108 and 116 bugs, respectively. A similar performance gap is observed in the single-hunk scenario. Specifically, on Defects4J V1.2, CausalRepair fixes 109 SH bugs, outperforming TSAPR (87 bugs) and ReinFix (83 bugs). On Defects4J V2.0, CausalRepair maintains this lead by fixing 115 SH bugs, whereas both ReinFix and TSAPR fix only 89 bugs. This indicates that the causal context constructed through dual slicing enables CausalRepair to effectively filter out unexecuted code, helping the LLM maintain a precise focus on the root cause in complex repair scenarios. 
+
+Table 3. Repair results (correct fixes / plausible fixes) of different repair scenarios for CausalRepair and baselines on Defects4J.                                                                                        
+
+> Defects4J V1.2 Defects4J V2.0 LLM APR Method # SF Bugs # SH Bugs # SL Bugs # SF Bugs # SH Bugs # SL Bugs Total BaseDeepSeek 78/105 57/72 36/45 68/83 54/67 30/38 146/188 ChatRepair 103/156 51/67 45/56 --42/53 145/209 ThinkRepair 87/122 66/89 38/48 93/129 68/98 35/51 180/251 ContrastRepair 133/182 86/124 60/69 --48/66 181/248 RepairAgent 85/93 67/73 48/52 87/94 72/78 45/48 172/187 AdverIntent-Agent 84/93 66/74 47/51 87/96 70/77 46/51 171/189 TSAPR 108/146 87/115 50/66 116/150 89/114 46/63 224/296 ReinFix 118/181 83/120 47/66 118/171 89/128 47/63 236/352 DeepSeek-V3 CausalRepair 162/191 109/123 62/69 151/174 115/128 57/63 313/365
+> ReinFix 124/-93/-57/-130/-103/-56/-254/-GPT-4o CausalRepair 152/184 105/122 62/70 145/175 109/131 53/60 297/359
+
+Effectiveness in Simple Scenarios. For the relatively simple single-line bugs, CausalRepair also maintains its leading performance. On Defects4J V1.2 and V2.0, CausalRepair correctly fixes 62 and 57 SL bugs, respectively, outperforming ReinFix, which fixes 47 bugs on both versions, and ContrastRepair, which fixes 51 and 48 bugs, respectively. These results suggest that even for simple single-line repairs, the purified test context and the source context containing runtime traces provided by CausalRepair offer effective guidance, thereby achieving comprehensive superiority across different repair scenarios. 
+
+5.3 RQ3: Ablation Study 
+
+To evaluate the contribution of each core component in CausalRepair across its three phases, we construct five variants for ablation studies. The results are summarized in Table 4. 
+
+Variant Settings. First, to investigate the necessity of different context components, we design three context variants: 1) w/o Source Dynamic Slicing removes the dynamic slicing information on the source side while keeping other components unchanged. 2) w/o Test Static Slicing (Full) replaces the purified test context with the full test function to examine the impact of noise interference. 3) 
+
+w/o Test Static Slicing (Line) provides only the failing line and error message to assess the impact of dependency absence. Second, to evaluate the effectiveness of our multi-stage repair pipeline, we additionally introduce two variants: 4) w/o Iterative Repair disables the conversation-driven repair loop, forcing the LLM to generate patches in a single-shot manner. 5) w/o Patch Augmentation 
+
+disables the final patch augmentation phase, outputting the first plausible patch found without exploring alternative implementations.  
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:15
+
+Impact of Source Context. As shown in Table 4, removing source-side dynamic slicing substan-tially degrades repair performance, reducing the number of correct fixes by 26.5%. This result shows that runtime execution traces provide critical causal evidence for repair. Without such source-side context, the LLM lacks explicit guidance on how the failure propagates through the executed code, making root-cause identification more difficult. 
+
+Impact of Test Context. Test-side slicing is also crucial. w/o Test Static Slicing (Line) suffers the largest drop of 38.3%, indicating that using only the failing line and error message causes severe dependency absence and prevents the LLM from understanding the test intent. In contrast, w/o Test Static Slicing (Full) drops by 10.0%, showing that full-test context introduces redundant noise. These results demonstrate that context-aware test slicing strikes a better balance by preserving failure-relevant dependencies while filtering irrelevant test scenarios. 
+
+Impact of Iterative Repair and Patch Augmentation. Beyond context construction, the subsequent repair phases also play crucial roles. Disabling the iterative repair loop ( w/o Iterative Repair ) results in an 18.5% drop in correct fixes (from 313 to 255), highlighting that without closed-loop validation feedback, the LLM cannot progressively refine its initial generated incorrect patch. Furthermore, disabling the final patch augmentation phase ( w/o Patch Augmentation ) leads to a 16.9% decrease in correct fixes (from 313 to 260). Due to test suite incompleteness, the initial plausible patch generated is often not semantically correct. By using this initial plausible patch as a reference to explore the surrounding solution space, the augmentation phase effectively increases the likelihood of generating a correct patch. 
+
+Table 4. Ablation results (correct fixes / plausible fixes) of CausalRepair with different components.                                  
+
+> Variants Defects4J V1.2 Defects4J V2.0 Total Drop Rate w/o Source Dynamic Slicing 106/142 124/154 230/296 ↓26.5% w/o Test Static Slicing (Full) 144/167 138/162 282/329 ↓10.0% w/o Test Static Slicing (Line) 88/106 105/118 193/224 ↓38.3% w/o Iterative Repair 131/151 124/140 255/291 ↓18.5% w/o Patch Augmentation 131/191 129/174 260/365 ↓16.9%
+> CausalRepair 162 / 191 151 / 174 313/365 -
+
+Parameter Sensitivity. We further investigate the impact of the repair budget settings, i.e., the number of repair attempts ( 𝑚 ) and iterative interactions ( 𝑛 ), on CausalRepair’s effectiveness. Figure 7 illustrates the number of correct fixes under varying repair budget settings of Phase 2, where Phase 3 is disabled to isolate the impact of 𝑚 and 𝑛 without the additional cost of patch augmentation. As shown in Figure 7, we observe that the repair performance generally improves as 𝑚 and 𝑛 increase, as a larger search space allows the LLM to explore more potential solutions. However, the performance gain diminishes and saturates after 𝑚 = 5 and 𝑛 = 3. Considering the trade-off between repair effectiveness and computational cost (e.g., time and token consumption), we identify 𝑚 = 5 and 𝑛 = 3 as the optimal configuration for our main experiments. 
+
+5.4 RQ4: Data Contamination Analysis 
+
+Considering the potential risk that LLMs may memorize training data, we conduct additional experiments on the recently released Defects4J-Trans [35] benchmark to mitigate potential data leakage risks and to evaluate the robustness of CausalRepair against data memorization. This dataset is constructed by applying semantic-preserving code transformations to the original bugs in Defects4J, and its release date (October 2024) is later than the training data cutoff of DeepSeek-V3. Therefore, Defects4J-Trans further reduces the risk of data leakage during the repair process. Under this experimental setting, we compare CausalRepair with BaseDeepSeek as well as the current state-of-the-art LLM-based approach ReinFix [82]. 
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026.
+
+ISSTA134:16 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao 1 2 3 4 5 6 7 8 9 10      
+
+> Number of Repair Attempts ( m)
+> 180 200 220 240 260 280
+> Number of Correct Fixes
+> Selected Setting (m=5, n=3)
+> Iterative Interactions ( n)
+> n= 1
+> n= 2
+> n= 3
+> n= 4
+> n= 5
+
+Fig. 7. Impact of hyperparameter settings ( 𝑚 and 𝑛 ) on repair effectiveness. 
+
+As shown in Table 5, CausalRepair repairs a total of 289 bugs on Defects4J-Trans, significantly outperforming ReinFix with 200 repaired bugs and BaseDeepSeek with 97 repaired bugs. Specifically, CausalRepair repairs 144 and 145 bugs on versions V1.2 and V2.0, respectively, achieving the best repair performance on both versions. These results highlight CausalRepair’s robustness against data contamination, suggesting that its effectiveness is unlikely to be solely attributable to memorization. 
+
+Table 5. Repair results (correct fixes / plausible fixes) for CausalRepair and baselines on Defects4J-Trans.                                  
+
+> Defects4J-Trans V1.2 Defects4J-Trans V2.0 APR Method Patch Size # SF Bugs # SH Bugs # SL Bugs # SF Bugs # SH Bugs # SL Bugs Total BaseDeepSeek 25 50/84 38/57 28/37 47/81 35/58 18/30 97/165 ReinFix 45 102/159 71/110 39/63 98/141 74/104 34/49 200/300 CausalRepair 25 144/163 106/117 61/68 145/161 106/119 49/58 289/324
+
+5.5 RQ5: Cost Analysis 
+
+To evaluate the cost of CausalRepair, we measure the average repair time (including preprocessing, LLM inference, and validation) and monetary costs of various LLM-based methods on Defects4J, as presented in Table 6. The results demonstrate that CausalRepair maintains the lowest time and monetary costs while achieving the best repair effectiveness. Specifically, CausalRepair requires only 23.28 minutes (including ∼2.53 minutes for dynamic slicing) and $0.029 on average to fix a bug. Compared to the current state-of-the-art method ReinFix, the time overhead of CausalRepair is only 49.1% of that of ReinFix, and the monetary cost is merely 17.9%. Furthermore, although the monetary cost of CausalRepair is on par with TSAPR (both at $0.029), our repair time is substantially shorter, with a larger number of fixed bugs. 
+
+Table 6. Cost analysis for CausalRepair and baselines on Defects4J.                                 
+
+> Method ChatRepair ThinkRepair ContrastRepair RepairAgent AdverIntent-Agent TSAPR ReinFix CausalRepair Patch Size 500 125 160 160 36 32 45 25
+> Time/Bug 363.04 min 326.29 min 251.17 min 139.53 min 78.76 min 42.32 min 47.42 min 23.28 min
+> Money/Bug $0.745 $0.438 $0.103 $0.429 $0.387 $0.029 $0.162 $0.029
+
+6 Discussion 6.1 Evaluation on Recent Real-World Benchmarks 
+
+Although Defects4J is the most widely used benchmark in APR, relying solely on Defects4J may limit the external validity of the evaluation. To further assess the practical applicability and general-izability of CausalRepair, we conduct additional experiments on two recent real-world benchmarks, i.e., RWB and GitBug-Java, which have been widely used to evaluate the generalization capability of APR methods [9, 57, 81, 82]. 
+
+Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:17 
+
+• RWB. RWB (Real-World Bugs) was constructed by Yin et al. [81], a benchmark for evaluating recent real-world bugs collected from high-quality open-source projects. RWB contains two versions: RWB V1.0 consists of 44 SF bugs collected from bug-fixing commits after October 2021, and RWB V2.0 consists of 29 SF bugs collected after March 2023. 
+
+• GitBug-Java. GitBug-Java [58] is a reproducible benchmark of 199 recent Java bugs collected from the 2023 commit histories of 55 open-source repositories. GitBug-Java contains more diverse and complex repair scenarios. Among the 199 bugs, 132 are SF bugs, 47 are multi-function (MF) bugs, and the remaining 20 involve buggy code elements outside functions (Other Bugs). Additionally, 17 of these bugs require cross-file modifications, indicating that GitBug-Java includes repair tasks whose fixes span broader program scopes. Therefore, GitBug-Java provides a more realistic benchmark for evaluating repair capability beyond curated SF settings. All additional experiments are conducted using the same DeepSeek-V3 backbone and configura-tions as our main evaluation. Table 7 reports the results on RWB. CausalRepair correctly fixes 31 out of 44 bugs on RWB V1.0 and 21 out of 29 bugs on RWB V2.0, achieving repair rates of 70.5% and 72.4%, respectively. Table 8 further presents the results on GitBug-Java. CausalRepair correctly fixes 101 out of 199 bugs. For SF bugs, it fixes 73 out of 132 bugs, achieving a repair rate of 55.3%. Notably, CausalRepair also fixes 21 out of 47 MF bugs and 7 out of 20 Other bugs, indicating that the proposed dual-slicing strategy remains applicable when the repair scope extends beyond a single function. Overall, these results demonstrate the effectiveness of CausalRepair on recent and realistic repair benchmarks beyond Defects4J. 
+
+Table 7. Repair Performance of CausalRepair on RWB.                                      
+
+> Project RWB V1.0 RWB V2.0 # Correct Fixes # Bugs # Correct Fixes # Bugs Cli 4444Codec 4544Collections 11--Compress 5824Csv 12--Jsoup 12 18 711 Lang 4646Total (Rate) 31 (70.5%) 44 21 (72.4%) 29
+
+Table 8. Repair performance of CausalRepair on GitBug-Java.                
+
+> Bug Type # Bugs # Correct Fixes Repair Rate # SF Bugs 132 73 55.3% # MF Bugs 47 21 44.7% # Other Bugs 20 735.0% Total 199 101 50.8%
+
+6.2 Robustness under Realistic Fault Localization 
+
+In the preceding RQs, we evaluate CausalRepair under the assumption of perfect FL, which is widely adopted in the APR community to ensure a controlled environment for comparing isolated patch generation capabilities. Nevertheless, in practical APR scenarios, the FL is usually provided by automated FL tools, which are inherently imprecise. To mitigate this threat to validity and assess the practical applicability of CausalRepair, we further evaluate its performance under a realistic FL setting on Defects4J. Following prior studies [24, 36, 41, 42, 62, 69, 79], we utilize Spectrum-Based Fault Localization (SBFL). Specifically, we employ the widely used GZoltar [10] framework alongside the Ochiai [3]  
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:18 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao
+
+formula to compute the suspiciousness score for each statement. Following [79], we consider the top-50 most suspicious statements as repair candidates for each bug. For each candidate, we supply its enclosing function to CausalRepair to construct the causal context by dual-slicing and execute the repair process. We utilize the same DeepSeek-V3 backbone as in our main experiments, and the remaining repair configuration is kept the same. Under this realistic FL setting, CausalRepair correctly fixes 232 bugs on Defects4J, showing that it remains effective when the initial FL is produced by an imperfect automated FL tool. This effectiveness stems from the dual-slicing design: once a suspicious candidate covers failure-relevant code, CausalRepair can refine the repair context by preserving relevant test semantics and executed dependencies, rather than relying solely on the initial suspicious statement. Overall, these results are promising and suggest that CausalRepair is robust to noisy localization signals and remains practically useful under more realistic APR settings. 
+
+7 Threats to Validity 
+
+Construct Validity. The primary threat to construct validity lies in the subjectivity of patch correctness assessment. Since a plausible fix is not necessarily semantically correct, we rely on manual inspection to identify correct patches. To mitigate this threat, we follow prior work [65, 67, 77] and adopt a rigorous validation mechanism. Specifically, each patch is independently reviewed by two experienced Java researchers for semantic equivalence to the developer patch. Disagreements are resolved by involving a third developer until consensus is reached. Furthermore, we have open-sourced our generated patches for public assessment [39]. 
+
+Internal Validity. The main threat to internal validity is the risk of data leakage; that is, some developer-generated patches may overlap with the training data used by LLMs. To mitigate this threat, in addition to the widely used Defects4J dataset, we evaluate CausalRepair on an additional dataset, Defects4J-Trans, which is less likely to be affected by data contamination. Additionally, all experiments are conducted under a unified LLM setting to ensure a fair comparison among different LLM-based methods. Under this controlled setting, CausalRepair consistently achieves the best performance across both datasets. These results suggest that the effectiveness of CausalRepair is unlikely to be significantly affected by data contamination issues. 
+
+External Validity. External validity mainly concerns the generalizability of our approach. First, a potential limitation is that our current implementation targets only Java programming language (PL), primarily because the dynamic slicing tool we employ, Slicer4J , is designed for the Java ecosystem. However, as one of the most widely used PLs in both industry and academia, Java is highly representative. Moreover, our proposed dual-slicing paradigm is PL-agnostic and can be adapted to other languages, which we plan to explore in future work. Second, regarding dataset generalizability, we conduct extensive evaluations across multiple datasets. Beyond the widely recognized Defects4J and its transformed variant Defects4J-Trans, we incorporate recent real-world benchmarks including RWB and GitBug-Java. These diverse datasets encompass a wide range of realistic repair scenarios. Therefore, our comprehensive evaluation shows the broad applicability and effectiveness of CausalRepair. 
+
+8 Related Work 8.1 Automated Program Repair 
+
+Automated Program Repair (APR) aims to assist developers in localizing and fixing program bugs automatically. Existing APR techniques can be broadly classified into traditional APR approaches, learning-based APR approaches, and Large Language Model (LLM)-based APR approaches.  
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:19
+
+Traditional APR Approaches. Traditional APR approaches mainly fall into three categories: heuristic-based [24, 31, 32, 62], constraint-based [12, 17, 30, 44, 47], and template-based [19, 23, 40, 41, 46]. Heuristic-based approaches follow the generate-and-validate paradigm, exploring candidate patches guided by test cases. Constraint-based approaches formulate repair as a constraint satisfac-tion problem, extracting semantic constraints via symbolic execution and synthesizing patches with solvers. Template-based approaches, often regarded as the most effective traditional techniques, generate patches by matching predefined fix patterns. However, traditional APR approaches have limited generality, as they are often tailored to specific bug types or constrained by a restricted patch search space, making it difficult to repair previously unseen or complex logical bugs. 
+
+Learning-based APR Approaches. With the rapid advancement of deep learning techniques, a variety of learning-based APR approaches have been proposed [11, 14, 25, 26, 36–38, 45, 48]. These approaches introduce Neural Machine Translation (NMT) techniques and model program repair as a translation task from buggy code to correct code. For example, SequenceR [11] and CoCoNut [45] leverage sequence-to-sequence models to learn repair patterns from large-scale code corpora. Subsequent work further incorporates domain-specific enhancements, such as syntax-guided decoding in Recoder [85] and execution-aware optimization in RewardRepair [78]. Although these methods significantly improve generalization capability, their performance remains constrained by the scale and diversity of training data, limiting their ability to handle unseen bug types. 
+
+LLM-based APR Approaches. Benefiting from the superior code understanding and generation capabilities of LLMs, LLM-based APR has emerged as the dominant paradigm in recent years. Early work such as AlphaRepair [66] adopts a cloze-style generation scheme to exploit the zero-shot repair capability of LLMs. ChatRepair [67] introduces a conversation-driven paradigm, where test-execution feedback guides multi-round repair, and ContrastRepair [28] further incorporates contrastive test cases to improve conversational repair. To enrich repair context, approaches such as ReinFix [82] and ThinkRepair [81] adopt retrieval-augmented strategies, using static analysis or vector-based retrieval to collect relevant definitions, method signatures, or repair templates. Recent studies have also explored agentic workflows for APR. For example, RepairAgent [9] and AdverIntent-Agent [80] formulate APR as an agent-driven process that analyzes failures, invokes tools, and iteratively refines patches. Other agentic systems, such as AutoCodeRover [84], Agentless [63], and Prometheus [53], target broader repository-level issue resolution on SWE-bench-style benchmarks. Unlike test-driven APR, these issue-resolution systems start from a natural-language issue description and the repository codebase, without assuming that an exposed failing test is available to the repair system; the official failing tests are hidden and used only for final evaluation. In contrast, CausalRepair focuses on test-driven APR, where the bug has already been reproduced by at least one failing test, and the failing test serves as an executable specification for constructing failure-specific causal repair context. Therefore, CausalRepair and SWE-bench-style issue-resolution agents are built upon different problem formulations, assumptions, and inputs. Despite the substantial progress of LLM-based APR, a causality gap in context construction remains. Test-side contexts either provide limited information or include redundant test scenarios, resulting in context ambiguity, while source-side contexts rely on static-analysis-based retrieval and introduce over-approximated dependencies. Consequently, the absence of precise runtime causal dependencies impedes accurate root cause localization, leading to incorrect patches. To bridge this gap, CausalRepair integrates precise runtime causal chains, captured via dual slicing, into a conversation-driven framework, preserving iterative feedback while providing LLMs with a high-signal causal context for more effective patch generation.  
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:20 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao
+
+8.2 Program Slicing 
+
+Program slicing, originally formally defined by Mark Weiser [61], is a semantics-based code decom-position technique designed to extract parts irrelevant to a specific point of interest (i.e., slicing criterion) from complex programs to construct a semantically consistent but smaller program subset. Based on the utilization of runtime information, slicing techniques are primarily catego-rized into static slicing and dynamic slicing [60, 68]. Static slicing analyzes all possible execution paths by constructing a Program Dependence Graph (PDG) or a System Dependence Graph (SDG) [15, 21]. Since static analysis must conservatively assume all possible branches and pointer aliases, it typically suffers from static over-approximation [8], resulting in slices containing a significant amount of redundant code that is not actually executed. In contrast, dynamic slicing relies on the execution trace of a specific input. It can precisely eliminate unexecuted paths and dead code, thereby capturing more accurate dependency relationships [5, 29]. Program slicing has been widely applied across a range of software engineering tasks [60, 68], including debugging and fault localization [13, 16, 34], regression testing and impact analysis [4, 7, 16, 20], as well as security analysis (e.g., taint analysis for vulnerability detection) [51, 52, 55]. With the rise of LLMs, program slicing has re-emerged as a key technique for semantically compressing input context, helping LLMs overcome context window limit and the “lost-in-the-middle” [43] phenomenon. For example, the RESCUE [56] framework utilizes security-focused static program slicing to eliminate irrelevant code noise retrieved in Retrieval-Augmented Generation (RAG) systems, thereby enhancing the security of generated code. LLMxCPG [34] performs slicing using Code Property Graphs (CPG), reducing the code volume for vulnerability detection tasks by over 90%. Additionally, ReduceFix [75] draws on slicing concepts (specifically delta debugging) to automatically reduce error-inducing test inputs to fit within the LLM’s context window. However, existing works integrating LLMs are mostly limited to static slicing or input data reduction, leaving limitations in APR tasks. Existing retrieval-augmented APR approaches rely on static analysis for context retrieval. This inevitably introduces substantial unexecuted code and static noise, obscuring the causal chain triggering the error. Although dynamic slicing offers a high signal-to-noise ratio, its potential in LLM-based APR has not yet been fully exploited. CausalRepair bridges this gap by combining static slicing on the test side with dynamic slicing on the source code, filtering out code irrelevant to the failure and constructing a causal context for the LLM. 
+
+9 Conclusion 
+
+In this paper, we first introduce the concept of minimal causal context. Based on this concept, we propose CausalRepair, a novel framework that instantiates this concept through a synergistic dual-slicing strategy. Specifically, CausalRepair performs context-aware static slicing on the test side to purify test semantics and utilizes execution-trace-based dynamic slicing on the source side, thereby constructing the minimal causal context to guide the iterative repair process. Our experiments on Defects4J demonstrate that CausalRepair can fix a total of 313 bugs, which significantly outperforms state-of-the-art baselines. Compared to existing LLM-based APR tools, CausalRepair is more efficient and reduces the average repair cost to $0.029 per bug. 
+
+10 Data-Availability Statement 
+
+To support reproducibility, the replication package and experimental results of this work are publicly available at: https://doi.org/10.5281/zenodo.20953899 [39]. 
+
+Acknowledgments 
+
+This work was supported by the National Key Research and Development Program of China under Grant No. 2024YFE0204200. 
+
+> Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026.
+
+CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:21 
+
+References 
+
+[1] [n. d.]. Model - OpenAI API. [Online; accessed 2025-11-30]. https://platform.openai.com/docs/models/gpt-4o? snapshot=gpt-4o-2024-05-13 [2] [n. d.]. SiliconFlow – AI Infrastructure for LLMs & Multimodal Models. [Online; accessed 2026-01-16]. https: //www.siliconflow.com/ [3] Rui Abreu, Peter Zoeteweij, and Arjan JC Van Gemund. 2007. On the accuracy of spectrum-based fault localization. In 
+
+Testing: Academic and industrial conference practice and research techniques-MUTATION (TAICPART-MUTATION 2007) .IEEE, 89–98. doi:10.1109/taic.part.2007.13 [4] Mithun Acharya and Brian Robinson. 2011. Practical change impact analysis based on static program slicing for industrial software systems. In Proceedings of the 33rd international conference on software engineering . 746–755. doi:10.1145/1985793.1985898 [5] Hiralal Agrawal and Joseph R Horgan. 1990. Dynamic program slicing. ACM SIGPlan Notices 25, 6 (1990), 246–256. doi:10.1145/93548.93576 [6] Khaled Ahmed, Mieszko Lis, and Julia Rubin. 2021. Slicer4J: a dynamic slicer for Java. In Proceedings of the 29th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering .1570–1574. doi:10.1145/3468264.3473123 [7] David Binkley. 1998. The application of program slicing to regression testing. Information and software technology 40, 11-12 (1998), 583–594. doi:10.1016/s0950-5849(98)00085-8 [8] David Binkley and Mark Harman. 2004. A survey of empirical results on program slicing. Advances in Computers 62, 105178 (2004), 105–178. doi:10.1016/s0065-2458(03)62003-6 [9] Islem Bouzenia, Premkumar Devanbu, and Michael Pradel. 2025. Repairagent: An autonomous, llm-based agent for program repair. In 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . IEEE, 2188–2200. doi:10.1109/icse55347.2025.00157 [10] José Campos, André Riboira, Alexandre Perez, and Rui Abreu. 2012. Gzoltar: an eclipse plug-in for testing and debugging. In Proceedings of the 27th IEEE/ACM international conference on automated software engineering . 378–381. doi:10.1145/2351676.2351752 [11] Zimin Chen, Steve Kommrusch, Michele Tufano, Louis-Noël Pouchet, Denys Poshyvanyk, and Martin Monperrus. 2019. Sequencer: Sequence-to-sequence learning for end-to-end program repair. IEEE Transactions on Software Engineering 
+
+47, 9 (2019), 1943–1959. doi:10.1109/tse.2019.2940179 [12] Favio DeMarco, Jifeng Xuan, Daniel Le Berre, and Martin Monperrus. 2014. Automatic repair of buggy if conditions and missing preconditions with smt. In Proceedings of the 6th international workshop on constraints in software testing, verification, and analysis . 30–39. doi:10.1145/2593735.2593740 [13] Richard A DeMillo, Hsin Pan, and Eugene H Spafford. 1996. Critical slicing for software fault localization. ACM SIGSOFT Software Engineering Notes 21, 3 (1996), 121–134. doi:10.1145/229000.226310 [14] Dawn Drain, Colin B Clement, Guillermo Serrato, and Neel Sundaresan. 2021. Deepdebug: Fixing python bugs using stack traces, backtranslation, and code skeletons. arXiv preprint arXiv:2105.09352 (2021). doi:10.48550/arxiv.2105.09352 [15] Jeanne Ferrante, Karl J Ottenstein, and Joe D Warren. 1987. The program dependence graph and its use in optimization. 
+
+ACM Transactions on Programming Languages and Systems (TOPLAS) 9, 3 (1987), 319–349. doi:10.1145/24039.24041 [16] Keith Gallagher and David Binkley. 2008. Program slicing. In 2008 Frontiers of Software Maintenance . IEEE, 58–67. doi:10.1109/fosm.2008.4659249 [17] Xiang Gao, Bo Wang, Gregory J. Duck, Ruyi Ji, Yingfei Xiong, and Abhik Roychoudhury. 2021. Beyond Tests: Program Vulnerability Repair via Crash Constraint Extraction. ACM Trans. Softw. Eng. Methodol. 30, 2, Article 14 (Feb. 2021), 27 pages. doi:10.1145/3418461 [18] Luca Gazzola, Daniela Micucci, and Leonardo Mariani. 2018. Automatic software repair: A survey. In Proceedings of the 40th International Conference on Software Engineering . 1219–1219. doi:10.1109/tse.2017.2755013 [19] Ali Ghanbari, Samuel Benton, and Lingming Zhang. 2019. Practical program repair via bytecode mutation. In Proceedings of the 28th ACM SIGSOFT International Symposium on Software Testing and Analysis . 19–30. doi:10.1145/3293882.3330559 [20] Rajiv Gupta, Mary Jean Harrold, and Mary Lou Soffa. 1996. Program slicing-based regression testing techniques. 
+
+Software Testing, Verification and Reliability 6, 2 (1996), 83–111. doi:10.1002/(sici)1099-1689(199606)6:2<83::aid-stvr112> 3.0.co;2-9 [21] Susan Horwitz, Thomas Reps, and David Binkley. 1990. Interprocedural slicing using dependence graphs. ACM Transactions on Programming Languages and Systems (TOPLAS) 12, 1 (1990), 26–60. doi:10.1145/77606.77608 [22] Haichuan Hu, Ye Shang, Weifeng Sun, and Quanjun Zhang. 2025. TSAPR: A Tree Search Framework For Automated Program Repair. arXiv preprint arXiv:2507.01827 (2025). doi:10.48550/arxiv.2507.01827 [23] Jinru Hua, Mengshi Zhang, Kaiyuan Wang, and Sarfraz Khurshid. 2018. Sketchfix: a tool for automated program repair approach using lazy candidate generation. In Proceedings of the 2018 26th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering . 888–891. doi:10.1145/3236024. Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:22 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao 
+
+3264600 [24] Jiajun Jiang, Yingfei Xiong, Hongyu Zhang, Qing Gao, and Xiangqun Chen. 2018. Shaping program repair space with existing patches and similar code. In Proceedings of the 27th ACM SIGSOFT international symposium on software testing and analysis . 298–309. doi:10.1145/3213846.3213871 [25] Nan Jiang, Thibaud Lutellier, Yiling Lou, Lin Tan, Dan Goldwasser, and Xiangyu Zhang. 2023. Knod: Domain knowledge distilled tree decoder for automated program repair. In 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) . IEEE, 1251–1263. doi:10.1109/icse48619.2023.00111 [26] Nan Jiang, Thibaud Lutellier, and Lin Tan. 2021. Cure: Code-aware neural machine translation for automatic program repair. In 2021 IEEE/ACM 43rd International Conference on Software Engineering (ICSE) . IEEE, 1161–1173. doi:10.1109/ icse43902.2021.00107 [27] René Just, Darioush Jalali, and Michael D Ernst. 2014. Defects4J: A database of existing faults to enable controlled testing studies for Java programs. In Proceedings of the 2014 international symposium on software testing and analysis .437–440. doi:10.1145/2610384.2628055 [28] Jiaolong Kong, Xiaofei Xie, Mingfei Cheng, Shangqing Liu, Xiaoning Du, and Qi Guo. 2025. Contrastrepair: Enhancing conversation-based automated program repair via contrastive test case pairs. ACM Transactions on Software Engineering and Methodology 34, 8 (2025), 1–31. doi:10.1145/3719345 [29] Bogdan Korel and Janusz Laski. 1988. Dynamic program slicing. Information processing letters 29, 3 (1988), 155–163. doi:10.1016/0020-0190(88)90054-3 [30] Xuan-Bach D Le, Duc-Hiep Chu, David Lo, Claire Le Goues, and Willem Visser. 2017. S3: syntax-and semantic-guided repair synthesis via programming by examples. In Proceedings of the 2017 11th Joint Meeting on Foundations of Software Engineering . 593–604. doi:10.1145/3106237.3106309 [31] Xuan Bach D Le, David Lo, and Claire Le Goues. 2016. History driven program repair. In 2016 IEEE 23rd international conference on software analysis, evolution, and reengineering (SANER) , Vol. 1. IEEE, 213–224. doi:10.1109/saner.2016.76 [32] Claire Le Goues, ThanhVu Nguyen, Stephanie Forrest, and Westley Weimer. 2011. Genprog: A generic method for automatic software repair. Ieee transactions on software engineering 38, 1 (2011), 54–72. doi:10.1109/tse.2011.104 [33] Claire Le Goues, Michael Pradel, and Abhik Roychoudhury. 2019. Automated program repair. Commun. ACM 62, 12 (2019), 56–65. doi:10.1145/3318162 [34] Ahmed Lekssays, Hamza Mouhcine, Khang Tran, Ting Yu, and Issa Khalil. 2025. {LLMxCPG }:{Context-Aware }
+
+vulnerability detection through code property {Graph-Guided } large language models. In 34th USENIX Security Symposium (USENIX Security 25) . USENIX Association, Seattle, WA, 489–507. https://www.usenix.org/conference/ usenixsecurity25/presentation/lekssays [35] Fengjie Li, Jiajun Jiang, Jiajun Sun, and Hongyu Zhang. 2025. Evaluating the Generalizability of LLMs in Automated Program Repair. In 2025 IEEE/ACM 47th International Conference on Software Engineering: New Ideas and Emerging Results (ICSE-NIER) . IEEE, 91–95. doi:10.1109/icse-nier66352.2025.00024 [36] Yi Li, Shaohua Wang, and Tien N Nguyen. 2020. Dlfix: Context-based code transformation learning for automated program repair. In Proceedings of the ACM/IEEE 42nd international conference on software engineering . 602–614. doi:10. 1145/3377811.3380345 [37] Yi Li, Shaohua Wang, and Tien N Nguyen. 2022. Dear: A novel deep learning-based approach for automated program repair. In Proceedings of the 44th international conference on software engineering . 511–523. doi:10.1145/3510003.3510177 [38] Bo Lin, Shangwen Wang, Ming Wen, Liqian Chen, and Xiaoguang Mao. 2024. One size does not fit all: Multi-granularity patch generation for better automated program repair. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . 1554–1566. doi:10.1145/3650212.3680381 [39] Linhao. 2026. CausalRepair. Software artifact. doi:10.5281/zenodo.20953899 [40] Kui Liu, Anil Koyuncu, Dongsun Kim, and Tegawendé F Bissyandé. 2019. Avatar: Fixing semantic bugs with fix patterns of static analysis violations. In 2019 IEEE 26th International Conference on Software Analysis, Evolution and Reengineering (SANER) . IEEE, 1–12. doi:10.1109/saner.2019.8667970 [41] Kui Liu, Anil Koyuncu, Dongsun Kim, and Tegawendé F Bissyandé. 2019. TBar: Revisiting template-based automated program repair. In Proceedings of the 28th ACM SIGSOFT international symposium on software testing and analysis .31–42. doi:10.1145/3293882.3330577 [42] Kui Liu, Anil Koyuncu, Kisub Kim, Dongsun Kim, and Tegawendé F Bissyandé. 2018. LSRepair: Live search of fix ingredients for automated program repair. In 2018 25th Asia-Pacific Software Engineering Conference (APSEC) . IEEE, 658–662. doi:10.1109/apsec.2018.00085 [43] Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. 2024. Lost in the middle: How language models use long contexts. Transactions of the Association for Computational Linguistics 12 (2024), 157–173. doi:10.1162/tacl_a_00638 [44] Fan Long and Martin Rinard. 2015. Staged program repair with condition synthesis. In Proceedings of the 2015 10th Joint Meeting on Foundations of Software Engineering . 166–178. doi:10.1145/2786805.2786811 Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. CausalRepair: Bridging the Causality Gap in LLM-Based Automated Program Repair via Dual-Slicing ISSTA134:23 
+
+[45] Thibaud Lutellier, Hung Viet Pham, Lawrence Pang, Yitong Li, Moshi Wei, and Lin Tan. 2020. Coconut: combining context-aware neural translation models using ensemble for program repair. In Proceedings of the 29th ACM SIGSOFT international symposium on software testing and analysis . 101–114. doi:10.1145/3395363.3397369 [46] Matias Martinez and Martin Monperrus. 2016. Astor: A program repair library for java. In Proceedings of the 25th international symposium on software testing and analysis . 441–444. doi:10.1145/2931037.2948705 [47] Sergey Mechtaev, Jooyong Yi, and Abhik Roychoudhury. 2016. Angelix: Scalable multiline program patch synthesis via symbolic analysis. In Proceedings of the 38th international conference on software engineering . 691–701. doi:10.1145/ 2884781.2884807 [48] Xiangxin Meng, Xu Wang, Hongyu Zhang, Hailong Sun, and Xudong Liu. 2022. Improving fault localization and program repair with deep semantic features and transferred knowledge. In Proceedings of the 44th International Conference on Software Engineering . 1169–1180. doi:10.1145/3510003.3510147 [49] Xiangxin Meng, Xu Wang, Hongyu Zhang, Hailong Sun, Xudong Liu, and Chunming Hu. 2023. Template-based neural program repair. In 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) . IEEE, 1456–1468. doi:10.1109/icse48619.2023.00127 [50] Daye Nam, Andrew Macvean, Vincent Hellendoorn, Bogdan Vasilescu, and Brad Myers. 2024. Using an llm to help with code understanding. In Proceedings of the IEEE/ACM 46th International Conference on Software Engineering . 1–13. doi:10.1145/3597503.3639187 [51] James Newsome and Dawn Xiaodong Song. 2005. Dynamic Taint Analysis for Automatic Detection, Analysis, and SignatureGeneration of Exploits on Commodity Software. In Network and Distributed System Security Symposium .https://api.semanticscholar.org/CorpusID:99191 [52] Yu Nong, Haoran Yang, Long Cheng, Hongxin Hu, and Haipeng Cai. 2025. {APPATCH }: Automated adaptive prompting large language models for {Real-World } software vulnerability patching. In 34th USENIX Security Symposium (USENIX Security 25) . USENIX Association, Seattle, WA, 4481–4500. https://www.usenix.org/conference/usenixsecurity25/ presentation/nong [53] Yue Pan, Zimin Chen, Siyu Lu, Zhaoyang Chu, Xiang Li, Han Li, Yang Feng, Claire Le Goues, Federica Sarro, Martin Monperrus, and He Ye. 2025. Prometheus: Towards Long-Horizon Codebase Navigation for Repository-Level Problem Solving. doi:10.48550/arXiv.2507.19942 [54] Nikhil Parasaram, Huijie Yan, Boyu Yang, Zineb Flahy, Abriele Qudsi, Damian Ziaber, Earl T. Barr, and Sergey Mechtaev. 2025. The Fact Selection Problem in LLM-Based Program Repair. (2025), 2574–2586. doi:10.1109/ICSE55347.2025.00162 [55] Solmaz Salimi and Mehdi Kharrazi. 2022. VulSlicer: Vulnerability detection through code slicing. Journal of Systems and Software 193 (2022), 111450. doi:10.1016/j.jss.2022.111450 [56] Jiahao Shi and Tianyi Zhang. 2025. RESCUE: Retrieval Augmented Secure Code Generation. arXiv preprint arXiv:2510.18204 (2025). doi:10.48550/arxiv.2510.18204 [57] André Silva, Sen Fang, and Martin Monperrus. 2025. Repairllama: Efficient representations and fine-tuned adapters for program repair. IEEE Transactions on Software Engineering (2025). doi:10.1109/tse.2025.3581062 [58] André Silva, Nuno Saavedra, and Martin Monperrus. 2024. Gitbug-java: A reproducible benchmark of recent java bugs. In Proceedings of the 21st International Conference on Mining Software Repositories . 118–122. doi:10.1145/3643991.3644884 [59] Xiaolong Tian. 2024. Evaluating the repair ability of LLM under different prompt settings. In 2024 IEEE International Conference on Software Services Engineering (SSE) . IEEE, 313–322. doi:10.1109/sse62657.2024.00053 [60] Frank Tip. 1994. A survey of program slicing techniques. J. Program. Lang. 3 (1994). https://api.semanticscholar.org/ CorpusID:9882901 [61] Mark Weiser. 1984. Program Slicing. IEEE Transactions on Software Engineering SE-10, 4 (1984), 352–357. doi:10.1109/ TSE.1984.5010248 [62] Ming Wen, Junjie Chen, Rongxin Wu, Dan Hao, and Shing-Chi Cheung. 2018. Context-aware patch generation for better automated program repair. In Proceedings of the 40th international conference on software engineering . 1–11. doi:10.1145/3180155.3180233 [63] Chunqiu Steven Xia, Yinlin Deng, Soren Dunn, and Lingming Zhang. 2025. Demystifying LLM-Based Software Engineering Agents. Proc. ACM Softw. Eng. 2, FSE, Article FSE037 (June 2025), 24 pages. doi:10.1145/3715754 [64] Chunqiu Steven Xia, Yifeng Ding, and Lingming Zhang. 2023. The plastic surgery hypothesis in the era of large language models. In 2023 38th IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE, 522–534. doi:10.1109/ase56229.2023.00047 [65] Chunqiu Steven Xia, Yuxiang Wei, and Lingming Zhang. 2023. Automated program repair in the era of large pre-trained language models. In 2023 IEEE/ACM 45th International Conference on Software Engineering (ICSE) . IEEE, 1482–1494. doi:10.1109/icse48619.2023.00129 [66] Chunqiu Steven Xia and Lingming Zhang. 2022. Less training, more repairing please: revisiting automated program repair via zero-shot learning. In Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering . 959–971. doi:10.1145/3540250.3549101 Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026. ISSTA134:24 Linhao Wu, Yizhou Chen, Zhen Yang, Pengyu Xue, and Dan Hao 
+
+[67] Chunqiu Steven Xia and Lingming Zhang. 2024. Automated program repair via conversation: Fixing 162 out of 337 bugs for $0.42 each using chatgpt. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . 819–831. doi:10.1145/3650212.3680323 [68] Baowen Xu, Ju Qian, Xiaofang Zhang, Zhongqiang Wu, and Lin Chen. 2005. A brief survey of program slicing. ACM SIGSOFT Software Engineering Notes 30, 2 (2005), 1–36. doi:10.1145/1050849.1050865 [69] Jifeng Xuan, Matias Martinez, Favio Demarco, Maxime Clement, Sebastian Lamelas Marcote, Thomas Durieux, Daniel Le Berre, and Martin Monperrus. 2016. Nopol: Automatic repair of conditional statement bugs in java programs. IEEE Transactions on Software Engineering 43, 1 (2016), 34–55. doi:10.1109/tse.2016.2560811 [70] Pengyu Xue, Linhao Wu, Zhen Yang, Chengyi Wang, Xiang Li, Yuxiang Zhang, Jia Li, Ruikai Jin, Yifei Pei, Zhaoyan Shen, et al. 2025. ClassEval-T: Evaluating Large Language Models in Class-Level Code Translation. Proceedings of the ACM on Software Engineering 2, ISSTA (2025), 1421–1444. doi:10.1145/3728940 [71] Pengyu Xue, Linhao Wu, Zhen Yang, Zhongxing Yu, Zhi Jin, Ge Li, Yan Xiao, Shuo Liu, Xinyi Li, Hongyi Lin, et al. 2024. Exploring and Lifting the Robustness of LLM-powered Automated Program Repair with Metamorphic Testing. 
+
+arXiv preprint arXiv:2410.07516 (2024). doi:10.48550/arxiv.2410.07516 [72] Pengyu Xue, Linhao Wu, Zhongxing Yu, Zhi Jin, Zhen Yang, Xinyi Li, Zhenyu Yang, and Yue Tan. 2024. Automated commit message generation with large language models: An empirical study and beyond. IEEE Transactions on Software Engineering (2024). doi:10.1109/tse.2024.3478317 [73] Pengyu Xue, Kunwu Zheng, Zhen Yang, Yifei Pei, Linhao Wu, Jiahui Dong, Xiapu Luo, Yan Xiao, Fei Liu, Yuxuan Zhang, Xiran Lyu, Xianhang Li, Xuanyu Zhu, and Chengyi Wang. 2026. TransLibEval: Demystify Large Language Models’ Capability in Third-Party Library-Targeted Code Translation. Proc. ACM Softw. Eng. 3, FSE, Article FSE042 (June 2026), 23 pages. doi:10.1145/3797137 [74] Boyang Yang, Zijian Cai, Fengling Liu, Bach Le, Lingming Zhang, Tegawendé F Bissyandé, Yang Liu, and Haoye Tian. 2025. A Survey of LLM-based Automated Program Repair: Taxonomies, Design Paradigms, and Applications. arXiv preprint arXiv:2506.23749 (2025). doi:10.48550/arxiv.2506.23749 [75] Boyang Yang, Luyao Ren, Xin Yin, Jiadong Ren, Haoye Tian, and Shunfu Jin. 2025. Input Reduction Enhanced LLM-based Program Repair. arXiv preprint arXiv:2507.15251 (2025). doi:10.48550/arxiv.2507.15251 [76] Chen Yang, Lin Yang, Ziqi Wang, Dong Wang, Jianyi Zhou, and Junjie Chen. 2025. Clarifying Semantics of In-Context Examples for Unit Test Generation. (2025), 3046–3057. doi:10.1109/ASE63991.2025.00250 [77] He Ye, Matias Martinez, Xiapu Luo, Tao Zhang, and Martin Monperrus. 2022. Selfapr: Self-supervised program repair with test execution diagnostics. In Proceedings of the 37th IEEE/ACM International Conference on Automated Software Engineering . 1–13. doi:10.1145/3551349.3556926 [78] He Ye, Matias Martinez, and Martin Monperrus. 2022. Neural program repair with execution-based backpropagation. In Proceedings of the 44th international conference on software engineering . 1506–1518. doi:10.1145/3510003.3510222 [79] He Ye and Martin Monperrus. 2024. Iter: Iterative neural repair for multi-location patches. In Proceedings of the 46th IEEE/ACM international conference on software engineering . 1–13. doi:10.1145/3597503.3623337 [80] He Ye, Aidan ZH Yang, Chang Hu, Yanlin Wang, Tao Zhang, and Claire Le Goues. 2025. Adverintent-agent: Adversarial reasoning for repair based on inferred program intent. Proceedings of the ACM on Software Engineering 2, ISSTA (2025), 1398–1420. doi:10.1145/3728939 [81] Xin Yin, Chao Ni, Shaohua Wang, Zhenhao Li, Limin Zeng, and Xiaohu Yang. 2024. Thinkrepair: Self-directed automated program repair. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis . 1274–1286. doi:10.1145/3650212.3680359 [82] Jiayi Zhang, Kai Huang, Jian Zhang, Yang Liu, and Chunyang Chen. 2025. Repair Ingredients Are All You Need: Improving Large Language Model-Based Program Repair via Repair Ingredients Search. arXiv preprint arXiv:2506.23100 
+
+(2025). doi:10.48550/arxiv.2506.23100 [83] Quanjun Zhang, Chunrong Fang, Yuxiang Ma, Weisong Sun, and Zhenyu Chen. 2023. A survey of learning-based automated program repair. ACM Transactions on Software Engineering and Methodology 33, 2 (2023), 1–69. doi:10.1145/ 3631974 [84] Yuntong Zhang, Haifeng Ruan, Zhiyu Fan, and Abhik Roychoudhury. 2024. Autocoderover: Autonomous program improvement. In Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis .1592–1604. doi:10.1145/3650212.3680384 [85] Qihao Zhu, Zeyu Sun, Yuan-an Xiao, Wenjie Zhang, Kang Yuan, Yingfei Xiong, and Lu Zhang. 2021. A syntax-guided edit decoder for neural program repair. In Proceedings of the 29th ACM joint meeting on European software engineering conference and symposium on the foundations of software engineering . 341–353. doi:10.1145/3468264.3468544 
+
+Received 2026-01-30; accepted 2026-06-25 
+
+Proc. ACM Softw. Eng., Vol. 3, No. ISSTA, Article ISSTA134. Publication date: October 2026.
