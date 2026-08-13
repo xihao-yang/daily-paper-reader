@@ -6,41 +6,50 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-12
-- 运行时间：2026-08-12 21:30:30 UTC
+- 最新运行日期：2026-08-13
+- 运行时间：2026-08-13 21:13:32 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：2
-- 速读区：4
+- 本次总论文数：9
+- 精读区：1
+- 速读区：8
 
 ### 今日简报（AI）
-- 今日共生成 6 篇推荐（精读 2 篇，速读 4 篇）
-- 精读：《Security Tests as Executable Specifications for LLM Code Generation: Benefits, Trade-offs, and Coverage Limits》（9.0/10）, 《CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing》（9.0/10）
-- 速读：《A Unified Issue Resolution Benchmark for Requirement Clarification, Planning, and Code Generation for Coding Agents》（7.0/10）, 《Can Coding Agents Solve Repository-Level Issues with Rendered Code? An Exploratory Study of Visual Representations》（7.0/10）, 《SWE-Bench ProMax: Benchmarking Agents on Large-Scale Multilingual Code Refactoring》（7.0/10）
+- 今日共生成 9 篇推荐（精读 1 篇，速读 8 篇）
+- 精读：《CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing》（10.0/10）
+- 速读：《SpecPath: Testing Coding Agents Across Contract-Equivalent Specification Histories》（7.5/10）, 《ZhuLong: Execution-Grounded LLM Agent for EDA Scripting with Offline API Self-Exploration》（7.0/10）, 《Entropy-based Code Adversarial Translation for Real-world Repository Migration》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202608/12/README](/202608/12/README)
+- 详情：[/202608/13/README](/202608/13/README)
 
 ### 精读区论文标签
-1. [Security Tests as Executable Specifications for LLM Code Generation: Benefits, Trade-offs, and Coverage Limits](/202608/12/2608.09740v2-security-tests-as-executable-specifications-for-llm-code-generation-benefits-trade-offs-and-coverage-limits)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：将安全测试作为迭代修复和补丁验证的可执行规范
-2. [CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing](/202608/12/2608.10613v1-causalrepair-bridging-the-causality-gap-in-large-language-model-based-automated-program-repair-via-dual-slicing)  
-   标签：评分：9.0/10、query:apr-oracle
-   evidence：基于LLM的自动程序修复框架，专注于因果上下文和故障解释
+1. [CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing](/202608/13/2608.10613v1-causalrepair-bridging-the-causality-gap-in-large-language-model-based-automated-program-repair-via-dual-slicing)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：基于大模型的自动程序修复框架，使用双重切片获取因果上下文
 
 ### 速读区论文标签
-1. [A Unified Issue Resolution Benchmark for Requirement Clarification, Planning, and Code Generation for Coding Agents](/202608/12/2608.09072v1-a-unified-issue-resolution-benchmark-for-requirement-clarification-planning-and-code-generation-for-coding-agents)  
+1. [SpecPath: Testing Coding Agents Across Contract-Equivalent Specification Histories](/202608/13/2608.09799v1-specpath-testing-coding-agents-across-contract-equivalent-specification-histories)  
+   标签：评分：7.5/10、query:apr-oracle
+   evidence：在契约等价的规范历史中测试编码代理
+2. [ZhuLong: Execution-Grounded LLM Agent for EDA Scripting with Offline API Self-Exploration](/202608/13/2608.07925v1-zhulong-execution-grounded-llm-agent-for-eda-scripting-with-offline-api-self-exploration)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于表征不成功轨迹如何偏离正确补丁要求的基准测试
-2. [Can Coding Agents Solve Repository-Level Issues with Rendered Code? An Exploratory Study of Visual Representations](/202608/12/2608.09268v1-can-coding-agents-solve-repository-level-issues-with-rendered-code-an-exploratory-study-of-visual-representations)  
+   evidence：具有基于断言执行的执行落地LLM代理，用于脚本修复
+3. [Entropy-based Code Adversarial Translation for Real-world Repository Migration](/202608/13/2608.09273v2-entropy-based-code-adversarial-translation-for-real-world-repository-migration)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：用于评估和验证可执行补丁的视觉表示
-3. [SWE-Bench ProMax: Benchmarking Agents on Large-Scale Multilingual Code Refactoring](/202608/12/2608.09802v1-swe-bench-promax-benchmarking-agents-on-large-scale-multilingual-code-refactoring)  
+   evidence：自动程序修复及衡量迁移质量的判别器
+4. [GraphAlignCoder: Aligning Program and Proof Graphs for Code Generation](/202608/13/2608.11394v1-graphaligncoder-aligning-program-and-proof-graphs-for-code-generation)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：基准测试代理修复并识别有缺陷的测试或过窄的测试
-4. [ELMER: Evolutionary Language Model that Explores and Refines](/202608/12/2608.10196v1-elmer-evolutionary-language-model-that-explores-and-refines)  
+   evidence：对齐程序和证明图，将显式正确性结构转移到代码生成中
+5. [Diagnosis Before Recovery: Turning Agent Failures into Selective Self-Correction](/202608/13/2608.11772v1-diagnosis-before-recovery-turning-agent-failures-into-selective-self-correction)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：针对编码任务中代理失败的选择性自我纠正
+6. [EvoMem: Memory-Augmented Evolution for Code Optimization](/202608/13/2608.10795v1-evomem-memory-augmented-evolution-for-code-optimization)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：用于程序演化和语义变异的进化语言模型
+   evidence：基于大语言模型的进化程序搜索与变异知识重用
+7. [Harnessing LLMs for Document-Guided Fuzzing of Python Libraries](/202608/13/2608.11744v1-harnessing-llms-for-document-guided-fuzzing-of-python-libraries)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：提取参数规范用于模糊测试预言
+8. [Claim-Level Reliability Assessment for Efficient Test-Time Reasoning](/202608/13/2608.11994v1-claim-level-reliability-assessment-for-efficient-test-time-reasoning)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：针对解法正确性的目标验证与语义证伪
 
 
 <div class="dpr-home-promo-card">

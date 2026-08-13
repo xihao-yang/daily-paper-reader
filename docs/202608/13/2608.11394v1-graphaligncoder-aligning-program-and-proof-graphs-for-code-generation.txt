@@ -1,0 +1,312 @@
+Title: GraphAlignCoder: Aligning Program and Proof Graphs for Code Generation
+
+URL Source: https://arxiv.org/pdf/2608.11394v1
+
+Published Time: Thu, 13 Aug 2026 00:16:05 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# GraphAlignCoder: Aligning Program and Proof Graphs for Code Generation 
+
+## Yueke Zhang, Zihan Fang, Kevin Leach, Yu Huang 
+
+Vanderbilt University Nashville, TN 37015 USA 
+
+Abstract 
+
+Code large language models (LLMs) can generate syntac-tically plausible programs that nevertheless violate hidden semantic constraints. Existing execution-feedback training methods identify whether a completed program fails, but pro-vide limited supervision about how a correct solution should be organized. We introduce GraphAlignCoder, a training framework that transfers explicit correctness structure into code generation. GraphAlignCoder constructs an implementation graph that captures control and dependence among program regions. In parallel, a constrained Lean pipeline produces proof traces, from which we extract a formal proof-flow graph. The model first learns executable code together with graph-derived de-scriptions of why individual program regions are correct, and then consolidates this knowledge into code generation. GraphAlignCoder consistently outperforms the base model, code-only SFT, and CodeRL across all benchmarks. Com-pared with CodeRL, it increases the solved count from 38 to 50 on LiveCodeBench v6 and from 16 to 23 on BigCodeBench Hard, corresponding to relative gains of 31.6% and 43.8%, while also improving BigCodeBench Full from 359 to 363 tasks. The ablation study further shows that verification-graph injection produces the initial reasoning gain, while verification to code consolidation is essential for robust cross-benchmark transfer. 
+
+## Introduction 
+
+Large language models (LLMs) for code have rapidly moved from research prototypes to widely used programming assis-tants (Chen et al. 2021; Li et al. 2022; Rozière et al. 2023; Lozhkov et al. 2024; Guo et al. 2024; Hui et al. 2024). These advances have also changed how programming is practiced: developers increasingly rely on code models for drafting im-plementations, completing functions, explaining APIs, and repairing errors (Peng et al. 2023; Jain et al. 2025). Despite this progress, code LLMs remain vulnerable to hallucination. In natural language, hallucination often ap-pears as fluent but unsupported content (Huang et al. 2025; Pearce et al. 2022). This problem is subtle in programming because generated code may look reasonable, compile suc-cessfully, and even pass a small number of examples while still failing hidden tests or violating implicit correctness con-straints (Spracklen et al. 2025; Agarwal et al. 2024; Zhang et al. 2025b). Prior studies have shown that AI-generated 
+
+Figure 1: Shared Algorithmic Skeleton Between Lean Proof and Python Control Flow. A Lean proof plan ex-poses case splits, branch obligations, and final conclusions that align with the branch and return structure of an exe-cutable Python program. code can contain insecure patterns, package hallucinations, and repository-level inconsistencies, suggesting that correct-ness failures are not merely surface-level syntax errors but often reflect missing semantic structure (Kim et al. 2026; Ravichander et al. 2025; Si et al. 2026). Therefore, improv-ing code generation requires more than making models fluent in programming syntax; it requires helping them recover the latent structure that makes a program correct. Formal proof provides an opportunity to fill this gap be-cause it exposes reasoning as an explicit structure rather than as an implicit byproduct of final code (de Moura et al. 2015; Leino 2010). Figure 1 illustrates the key observation behind this work: a proof plan for even a simple property, such as nonnegativity of an absolute-value computation, contains a case split and conclusion structure that mirrors the control-flow branches and return sites of the corresponding Python program. Proof assistants such as Lean decompose a theorem into proof states, subgoals, tactic applications, case splits, obligations, and lemma invocations, which can be viewed as a tactic graph describing how a solution is semantically organized (de Moura et al. 2015; Yang et al. 2023; Jiang et al. 2023; Azerbayev et al. 2024). Similarly, a Python im-plementation can be represented as a program graph, such as an abstract syntax tree, control-flow graph, or data-flow graph, where nodes and edges capture how computation pro-ceeds through branches, loops, calls, state updates, and re-arXiv:2608.11394v1 [cs.SE] 11 Aug 2026 turns (Aho et al. 2006; Ferrante, Ottenstein, and Warren 1987; Yamaguchi et al. 2014). Although Lean tactic graphs and Python control-flow graphs are written in different lan-guages of reasoning, they often share a latent algorithmic structure: proof case splits correspond to program branches, invariant-preservation obligations correspond to loop bodies, inductive decomposition corresponds to recursion, and wit-ness construction corresponds to return-value assembly. This structural correspondence suggests that graph similarity can serve as a bridge between formal reasoning and executable program generation, providing process-level supervision that is richer than pass/fail execution feedback but more grounded than free-form natural language critique. In this paper, we propose GraphAlignCoder, a train-ing framework based on a principle: correct programs have structure, formal obligations make correctness structure ex-plicit, and graph alignment can transfer this structure into code LLM training. Our approach extracts program graphs from solutions first, including control-flow, data-flow, and region-level structures such as loops and returns. In parallel, we construct graphs that encode semantic obligations, tactic skeletons, and subgoals. This design gives code LLMs an au-ditable semantic scaffold for learning the organization of cor-rect programs. The resulting framework has two parts. First, GraphAlignCoder constructs a filtered structural scaffold by aligning correctness obligations with concrete regions of trusted Python programs. Second, it adapts the model un-der code generation: the model may learn from structural annotations during training, but the final deployed behavior remains ordinary Python generation from the task alone. This paper makes the following contributions: 
+
+• We introduce GraphAlignCoder, a framework that con-nects executable program structure with proof-flow struc-ture. It aligns implementation regions and Lean proof transitions, injects this structure into a code model, and consolidates it into Python generation. 
+
+• GraphAlignCoder consistently outperforms the base model, code-only SFT, and CodeRL across all three benchmarks. Compared with CodeRL, it improves the solved count by 31.6% on LiveCodeBench v6 (50 versus 38) and 43.8% on BigCodeBench Hard (23 versus 16). 
+
+• Ablations validate the complementary roles of structural injection and consolidation. Structural injection increases LiveCodeBench v6 from 33 to 44 solved tasks, while consolidation further raises it to 49 and recovers Big-CodeBench Full from 339 to 352. 
+
+## Motivating Example 
+
+Motivating Example 
+
+Figure 2 shows a representative example from Big-CodeBench where both the base code model and the CodeRL baseline fail, while GraphAlignCoder succeeds. The task asks the model to scrape the first HTML table from a web page and convert it into a Pandas DataFrame. Although this task appears to be a simple library-usage problem, it re-quires the implementation to preserve several implicit obli-gations: fetch the page safely, locate the first table, extract headers, skip the header row when collecting data, preserve the column–row alignment, and return a DataFrame with the expected schema. The base model generates plausible code using 
+
+requests , BeautifulSoup , and pandas , but it as-sumes that the table body is explicitly wrapped in a tbody 
+
+element. When the benchmark page does not follow this exact structure, the implementation fails with ValueError("No table data found.") . The CodeRL baseline repairs part of the structure by iterating over table rows, but it ex-tracts all th elements as headers while also processing rows in a way that creates a mismatch between the number of columns and the number of values. As a result, it still fails when constructing the DataFrame. GraphAlignCoder succeeds because its generated pro-gram follows a more obligation-preserving structure. It first checks that a table exists, then checks that rows exist, extracts headers from th cells, iterates over data rows after the header row, extracts td cells consistently, and finally constructs the DataFrame using the aligned header and data lists. This ex-ample illustrates the central motivation of our approach: the difference between failure and success is not merely whether the model knows the right library calls, but whether it orga-nizes those calls according to the semantic structure of the task. From the Python side, the correct solution contains a control-flow structure with a connection guard, a table-existence guard, a row-existence guard, a header-extraction region, a data-row extraction loop, and a return-construction region. From the proof side, the same solution can be de-scribed as a set of obligations: the page must be reach-able, the target table must exist, headers must define the DataFrame schema, each data row must match the schema, and the returned object must preserve the extracted table content. GraphAlignCoder uses this alignment between operational regions and obligations as auxiliary supervision, while still using Python code as the executable target. 
+
+## Related Work 
+
+Code Language Models and Code Generation 
+
+Large language models for code have made code genera-tion a central task in software engineering research. Codex showed that pretrained language models can synthesize func-tional programs from natural-language prompts (Chen et al. 2021; Li et al. 2022). Recent open code models, including Code Llama and Qwen-Coder, further improve completion, instruction following, and multilingual programming ability through large-scale code pretraining and instruction tuning (Rozière et al. 2023; Hui et al. 2024). These advances are increasingly evaluated on benchmarks that stress different forms of programming competence (Jain et al. 2025; Zhuo et al. 2025). 
+
+Formal Proof Guidance for Reasoning 
+
+Formal proof assistants expose reasoning as explicit inter-mediate structure, making them a natural source of supervi-sion for models that must preserve correctness constraints. Lean represents proofs through states, subgoals, tactics, case Figure 2: Motivating Example: Structural Failure and Graph-Aligned Correction. The task requires scraping the first HTML table into a Pandas DataFrame. The base model fails by assuming a specific tbody structure, and CodeRL fails by mismatching header and row flows. GraphAlignCoder succeeds by aligning the Python control-flow graph with obligation-level constraints such as table existence, row/schema consistency, and DataFrame construction. splits, lemma applications, and obligation discharge, which provides a structured view of how a theorem is solved (de Moura et al. 2015). Recent work has used this structure to train or guide theorem-proving systems: LeanDojo sup-ports retrieval-augmented theorem proving, Draft-Sketch-Prove uses informal proof sketches to guide formal proof search, and Llemma develops language models specialized for mathematical reasoning (Yang et al. 2023; Jiang et al. 2023; Azerbayev et al. 2024; Ospanov, Farnia, and Mohit 2026). These systems show that proof artifacts can provide useful process-level signals beyond final answers (Zhang et al. 2025a). However, theorem-proving supervision does not directly solve Python code generation. Formal proofs operate over explicit logical statements, while programming benchmarks require executable implementations that satisfy tests, APIs, input formats, and hidden edge cases (Cao et al. 2025; Zhou et al. 2024). 
+
+Program Graphs and Structural Code Representations 
+
+Program graphs provide a long-standing way to represent code beyond token sequences (Allamanis, Brockschmidt, and Khademi 2017). Classical compiler analysis uses ab-stract syntax, control flow, data flow, and program depen-dence graphs to capture how computation is organized across branches, loops, definitions, uses, and state updates (Aho et al. 2006; Ferrante, Ottenstein, and Warren 1987). More recent work extends these ideas to learning-based code anal-ysis: code property graphs combine syntactic, control-flow, and data-flow information for vulnerability discovery, while GraphCodeBERT incorporates data-flow structure into code representation learning (Yamaguchi et al. 2014; Guo et al. 2021). Formal verification provides a complementary struc-tural view: Floyd–Hoare logic attaches assertions to pro-gram points and uses branch conditions and loop invari-ants to derive correctness obligations, while modern veri-fiers such as Dafny automate these obligations for executable programs (Floyd 1967; Hoare 1969; Leino 2010). 
+
+## Methodology 
+
+GraphAlignCoder follows the four-stage pipeline in Fig-ure 3. Panels A and B expose complementary structures from Python code. Panel C turns its correspondence into Verification-Graph Injection Training. Panel D then removes the auxiliary outputs and consolidates the structure into Python code. 
+
+Executable Structure: Implementation Graph 
+
+For task i, let xi contain the natural-language specification, starter code, and visible tests, and let yi be a correct Python code snippet provided by the benchmark. Thus, yi defines what the model should produce, while the graph below ex-poses how that solution is organized. We deterministically parse yi with Python’s AST and construct the implementa-tion graph 
+
+GIi = GI (yi) = ( V Ii , E Ii , R i), (1) where V Ii contains function-entry and statement nodes, Ri
+
+groups source spans into regions such as guards, loops, calls, recursive sites, updates, and returns, and EIi contains control-flow, call, and dominance relations. The graph converts a whole-program target into region-level structure. As visual-ized in Figure 3A, correctness descriptions can be attached to a specific boundary, update, or return rather than to the program as an undifferentiated sequence. Figure 3: Overview of GraphAlignCoder. (A) We parse a solution into an implementation graph whose regions expose boundaries, updates, and return relations. (B) Template-constrained Lean construction turns formal hints into kernel-checked goal transitions and a formal proof-flow graph. (C) Region–proof correspondences produce three complementary training targets— executable code, verification roles, and region-grounded conditions—that update one shared code model. (D) Verification-to-Code Consolidation continues from the structure-aware checkpoint using executable Python alone; auxiliary outputs are removed before deployment. 
+
+Formal Structure: Lean Proof-Flow Graph 
+
+A formal proof-flow graph contains proof states as nodes and tactic-driven goal transformations as edges. We construct it through two constrained teacher LLM passes with GPT-5.2. The first teacher reads xi, yi, and the region inventory Ri
+
+to identify boundary, invariant, progress, and return require-ments. The second maps these requirements to a formal hint set 
+
+HFi = LLM F
+
+ xi, y i, summary( GIi ), T  , (2) where the fixed library T contain theorem templates and tac-tic skeletons. Each hint hij ∈ HFi specifies a known theorem shape, tactic plan, proof roles, and lemma families. Restrict-ing the teacher to these libraries makes it select controlled formal building blocks instead of generating an unrestricted Lean program. Lean turns each accepted hint into the explicit process shown in Figure 3B. First, the generator selects the theorem schema and tactic skeleton whose declared roles match hij :
+
+τij = Select T (hij ). (3) Second, it instantiates the schema’s types, variables, hypothe-ses, and conclusion with task-specific symbols. The resulting Lean declaration has context Γij , proposition φij , and a tactic block inserted after := by :
+
+P Lean  
+
+> ij
+
+= Instantiate( τij , x i, h ij ). (4) Then, the tactic engine executes the skeleton as a sequence of state transformations, 
+
+g0 
+
+> ij
+
+−→ g1 
+
+> ij
+
+−→ · · · − → gLij . (5) where each gℓij is the current list of unresolved goals. For ex-ample, cases creates branch-specific goals, induction 
+
+creates base and step goals, rw applies a typed equality, 
+
+have adds a proved fact to Γij , and exact or simpa 
+
+closes a goal. Successful execution ends with gLij = ∅. The elaborator compiles a successful trace into a proof term, and Lean’s kernel independently checks the term. Rather than using the proof term as an opaque certifi-cate, we extract the goal-state trajectory that produced it. Let 
+
+P Lean  
+
+> i
+
+= {P Lean  
+
+> ij
+
+}j denote the generated artifacts for task i;then 
+
+GFi = ExtractTacticGraph  P Lean  
+
+> i
+
+, H Fi
+
+ = ( V Fi , E Fi ).
+
+(6) The extractor connects goal states with tactic-labeled edges and records whether transitions perform case analysis, induc-tion, rewriting, invariant propagation, or witness construc-tion. Together, the implementation and proof-flow graphs form the scaffold 
+
+Si = ( GIi , G Fi , H Fi ) (7) that preserves the provenance of both executable regions and formal transitions. The dashed links between Panels A and B represent shared semantic roles. Verification-Graph Injection Training 
+
+In Panel C, we show three complementary examples and convert these scaffolds into one code model. In step C1, we project the graph nodes and transitions into compact roles. Let CIi and CFi denote the roles recovered from the im-plementation and proof-flow graphs, and let Ai retain their shared semantic support: 
+
+CIi = πI
+
+ Roles( GIi ) , (8) 
+
+CFi = πF
+
+ Roles( GFi ) , (9) 
+
+Ai = CIi ∩ CFi . (10) We retain only implementation roles supported by the source and use cross-graph overlap as alignment evidence. Con-trolled schemas then translate each retained role into a region-level condition—for example, a loop update must preserve its invariant, or a return must establish the required output relation: 
+
+Ci = Filter C (CIi ; Ai, G Ii , y i), (11) 
+
+eOi = Gen( Ci, R i), (12) 
+
+Oi = Filter O ( eOi; GIi , y i). (13) We serialize these accepted sets consistently as 
+
+ci = ser( Ci), oi = ser( Oi). (14) In step C2, each scaffold yields three separate prompt– target pairs: code generation xi → yi, concept prediction 
+
+qCi → ci, and obligation prediction qOi → oi. The graphs are not appended as privileged text to the Python prompt. Instead, step C3 routes all three examples through the same model parameters. Consequently, predicting an invariant or boundary condition updates the same representation later used by pθ (yi | xi).For prompt q, response a = ( a1, . . . , a T ), and example weight w, prompt and padding tokens are masked and the response-token loss is 
+
+ℓθ (q, a ; w) = − wT
+
+> T
+
+X
+
+> t=1
+
+log pθ (at | q, a <t ). (15) The three objectives specialize this common loss to ex-ecutable tokens, shared verification concepts, and region-grounded obligations: 
+
+Lcode = − X
+
+> i
+
+1
+
+|yi| log pθ (yi | xi), (16) 
+
+Lconcept = − X
+
+> i
+
+1
+
+|ci| log pθ (ci | qCi ), (17) 
+
+Lobligation = − X
+
+> i
+
+1
+
+|oi| log pθ (oi | qOi ). (18) The reported injection objective is therefore 
+
+Linject = Lcode + Lconcept + Lobligation . (19) 
+
+Verification-to-Code Consolidation 
+
+Finally, we convert the structure-aware model back to the out-put contract required at deployment. After injection, we stop requesting concept and obligation responses and continue training the same checkpoint on task-to-Python examples. This removes the auxiliary output channels while carrying their parameter updates into the code-only phase. Let θ0 denote the initial trainable parameters and θ1 the checkpoint produced by Verification-Graph Injection Train-ing. For the consolidation set Dcon = {(xi, y i)}Ncon  
+
+> i=1
+
+, where 
+
+yi = ( yi, 1, . . . , y i,T i ) is an executable reference implemen-tation, we initialize θ ← θ1 and optimize the code loss 
+
+Lcon (θ) = − 1
+
+Ncon 
+
+> Ncon
+
+X
+
+> i=1
+
+1
+
+TiTiX
+
+> t=1
+
+log pθ (yi,t | xi, y i,<t ) .
+
+(20) where Ti is the target length and yi,<t is the target prefix. Optimization yields θ2, the consolidated checkpoint shown at the end of Panel D. Let SI and SC be the numbers of injection and consolida-tion steps. The two-phase curriculum can be written as 
+
+L(s)curr (θ) = 
+
+(Linject (θ), 1 ≤ s ≤ SI,
+
+Lcon (θ), SI < s ≤ SI + SC. (21) Injection and consolidation therefore serve comple-mentary purposes. Injection makes boundaries, invariants, progress conditions, and return relations explicit; consolida-tion rewards the model for realizing the same organization in Python. At inference, θ2 receives the ordinary programming input and emits one Python solution, with no implementation graph or proof-flow graph. 
+
+## Evaluation 
+
+Benchmarks and Inference Protocol 
+
+We evaluate on two complementary code-generation bench-marks. LiveCodeBench v6 contains 175 held-out algorithmic programming tasks and tests generalization beyond the Live-CodeBench v1–v4 tasks used for training. BigCodeBench Complete contains 1,140 function-level tasks emphasizing API usage, dependency handling, data manipulation, and realistic function completion; its Hard subset contains 148 tasks with stricter functional requirements. BigCodeBench is used only for evaluation. The main metric is Pass@1 un-der the single-sample greedy contract above. All compared models follow the same evaluation contract: each receives the ordinary programming-task input and produces one Python solution with greedy decoding. Pass@1 is the fraction of tasks for which the single generated program passes the offi-cial execution suite. 
+
+Baselines and Ablations 
+
+Baselines Approach We compare GraphAlignCoder against base-model and execution-feedback baselines. Base Model is the original Qwen code model. This baseline measures how much performance is already present in the pretrained code model. Code-only SFT (Supervised Fine-Tuning) is a diagnostic checkpoint trained only on Python Table 1: Overall Pass@1 performance. Values are solved counts with rates in parentheses; N is the benchmark size.                     
+
+> Bench. NBase Code-only SFT CodeRL GAC
+> LCB v6 175 15 (.086) 33 (.189) 38 (.217) 50 (.286)
+> BCB Hard 148 9 (.061) 15 (.101) 16 (.108) 23 (.155)
+> BCB Full 1140 209 (.183) 354 (.311) 359 (.315) 363 (.318)
+
+implementations. CodeRL denotes the reported execution-feedback baseline, which improves code generation using execution outcomes. It is evaluated with the same input, de-coding, and one-sample contract as the other models (Le et al. 2022). 
+
+Ablation Variants Verification-graph injection is a di-agnostic checkpoint that adds the active auxiliary concept-prediction and obligation targets to the primary executable-code target. This measures loss-level graph injection. 
+
+Consolidation-only is initialized directly from the base model and trained to generate executable Python from tasks augmented with graph-derived verification information, such as region-level obligations. 
+
+Category and Difficulty Annotation 
+
+We use a separate GPT-5.2 annotation pipeline only for analy-sis grouping. The script batches evaluation tasks, sends com-pact task summaries to the GPT-5.2 endpoint with tempera-ture 0, and requires output containing the task identifier, one allowed category, an estimated difficulty label, a confidence score, and a short rationale. For LiveCodeBench, the allowed categories are algorithmic families such as array, string, dy-namic programming and others. For BigCodeBench, the al-lowed categories are function-oriented groups such as data science, plotting/visualization, filesystem/OS, web/text pro-cessing, crypto/encoding and other. 
+
+Training and Hardware Setting 
+
+All GraphAlignCoder checkpoints are initialized from 
+
+Qwen/Qwen3.5-4B-Base and trained with LoRA adapters. The training data follows the executable-reference policy defined in Methodology. Verification-to-Code Con-solidation contains 514 code-only examples and runs for 65 optimization steps. All checkpoints use LoRA rank 16, and the final checkpoint uses adapter tensor scale 0.55 . Train-ing and checkpoint construction run on a local workstation with 2× NVIDIA RTX A6000 GPUs. Final results are com-puted from saved greedy generations with the official Live-CodeBench and BigCodeBench evaluators. 
+
+## Results 
+
+RQ1: How does GraphAlignCoder compare with the base model, code-only SFT, and CodeRL? 
+
+Table 1 demonstrates that GraphAlignCoder consistently achieves the best Pass@1 across all three evaluation set-tings. On LiveCodeBench v6, GraphAlignCoder solves 50 tasks, compared with 15 for the base-matched model, 33 Table 2: Difficulty-level Pass@1 by bucket. Values are solved count with rate in parentheses                             
+
+> Diff. NCode-only SFT CodeRL GAC
+> LiveCodeBench v6
+> Easy 43 25 (.581) 25 (.581) 32 (.744)
+> Medium 52 6 (.115) 9 (.173) 10 (.192)
+> Hard 80 2 (.025) 4 (.050) 8 (.100)
+> BigCodeBench
+> Easy 396 164 (.414) 163 (.412) 160 (.404) Medium 638 178 (.279) 185 (.290) 189 (.296)
+> Hard 106 12 (.113) 11 (.104) 14 (.132)
+
+Table 3: Representative category-level Pass@1.                                                 
+
+> Category NCode-only SFT CodeRL GAC
+> LiveCodeBench v6
+> Array 10 5 (.500) 4 (.400) 7 (.700)
+> DP 35 0 (.000) 0 (.000) 1 (.029)
+> Graph 19 2 (.105) 2 (.105) 4 (.211)
+> Simulation 12 3 (.250) 4 (.333) 4 (.333)
+> Sorting 52 (.400) 2 (.400) 1 (.200) String 19 9 (.474) 10 (.526) 12 (.632)
+> BigCodeBench
+> API/Lib 84 34 (.405) 33 (.393) 30 (.357) Crypto 47 12 (.255) 12 (.255) 15 (.319)
+> FS/OS 186 45 (.242) 49 (.263) 57 (.306)
+> Plot/Vis. 264 79 (.299) 80 (.303) 81 (.307)
+> Web/Text 88 19 (.216) 19 (.216) 26 (.295)
+
+for code-only SFT, and 38 for CodeRL. Thus, GraphAlign-Coder solves more than three times as many tasks as the base model and improves the solved count over code-only SFT and CodeRL by 51.5% and 31.6%, respectively. The improve-ment over both the base and adapted baselines shows that the gain cannot be explained solely by the pretrained model’s existing capability or by additional code-only training. The improvement is similarly pronounced on Big-CodeBench Hard. GraphAlignCoder solves 23 tasks, com-pared with 9 for the base model, 15 for code-only SFT, and 16 for CodeRL. This corresponds to 155.6% more solved tasks than the base model, 53.3% more than code-only SFT, and 43.8% more than CodeRL. On BigCodeBench Full, GraphAlignCoder solves 363 tasks, exceeding the base model’s 209 solved tasks and improving over code-only SFT and CodeRL, which solve 354 and 359 tasks, respec-tively. GraphAlignCoder retains their general function-level capability while achieving much larger gains on Live-CodeBench v6 and BigCodeBench Hard. 
+
+RQ2: Where Does GraphAlignCoder Generalize? Analysis Across Difficulty Levels and Task Categories 
+
+Table 2 shows that the LiveCodeBench improvement extends across all difficulty levels. On easy problems, GraphAlign-Coder solves 32 of 43 tasks, seven more than either base-line. On medium problems, it achieves the best result with 10 solved tasks. Most notably, GraphAlignCoder solves 8 hard tasks, twice as many as CodeRL and four times as many as code-only SFT. A similar advantage appears in Table 4: Deployed code-generation performance.                
+
+> Model LCB v6 BCB BCB-H
+> Code-only SFT 33 (.189) 354 (.311) 15 (.101) GraphAlignCoder-Structural injection 44 (.251) 339 (.297) 17 (.115) GraphAlignCoder-Consolidation-Only 49 (.280) 352 (.309) 19 (.128) GraphAlignCoder 50 (.286) 363 (.318) 23 (.155)
+
+the more demanding portions of BigCodeBench. Although GraphAlignCoder is slightly below the baselines on easy tasks, it obtains the best results on both medium and hard tasks, solving 189 and 14 problems, respectively. In particu-lar, it improves over CodeRL from 11 to 14 solved tasks in the hard bucket, corresponding to a 27.3% relative gain. Thus, the overall improvement of GraphAlignCoder is concen-trated in the settings where maintaining structural consis-tency is more difficult. The category-level results in Table 3 provide further evidence for this interpretation. On LiveCodeBench v6, GraphAlignCoder achieves clear improvements in array, graph, and string problems. On BigCodeBench, the largest gains over CodeRL occur in filesystem/OS and web/text pro-cessing, where GraphAlignCoder solves 8 and 7 additional tasks, respectively. It also improves in crypto/encoding and plotting/visualization. These categories frequently require a sequence of dependent operations—such as preserving in-termediate state and constructing a valid return object— that closely matches the region-level obligations used by our method. Its strongest gains consistently appear in categories where correct execution depends on organizing operations into a coherent, constraint-preserving program. 
+
+RQ3: Which Training Components Drive the Performance Gains of GraphAlignCoder? 
+
+Effect of structural injection. Adding graph-aligned structural supervision to code-only SFT substantially im-proves LiveCodeBench v6, increasing the solved count from 33 to 44 and Pass@1 from 18.9% to 25.1%. It also improves BigCodeBench Hard from 15 to 17 solved tasks. These gains demonstrate that verification concepts and region-grounded obligations provide useful supervision beyond executable-code imitation. In particular, the 11-task improvement on LiveCodeBench indicates that structural injection helps the model organize algorithmic solutions more effectively. Struc-tural injection alone, however, reduces BigCodeBench Full performance from 354 to 339 solved tasks. This result high-lights an important role of the subsequent training stages: directly introducing auxiliary structural targets improves structure-sensitive generation, but can temporarily shift the model away from its original Python-only output distribu-tion. Thus, structural supervision is effective, but it must be consolidated before the resulting checkpoint can serve as a broadly capable code generator. 
+
+Effect of Verification-to-Code Consolidation. 
+
+Consolidation-only tests whether graph-derived obli-gations can directly guide Python generation without verification-graph injection. Compared with code-only SFT, which learns only from task-to-code pairs, consolidation-only improves LiveCodeBench v6 from 33 to 49 solved tasks and BigCodeBench Hard from 15 to 19, while remaining nearly unchanged on BigCodeBench Full (352 versus 354). These results indicate that exposing the base model to explicit correctness obligations, even when Python is the only training output, improves algorithmic and hard-task generation. Consolidation-only is nevertheless weaker than the complete GraphAlignCoder model, which reaches 50, 363, and 23 solved tasks on LiveCodeBench v6, BigCodeBench Full, and BigCodeBench Hard, respectively. The full model exceeds consolidation-only by 1, 11, and 4 tasks, showing that obligation-guided Python generation is beneficial but cannot replace the richer representation learned through verification-graph injection. The best performance arises when auxiliary structural learning and consolidation are combined. 
+
+## Conclusion 
+
+This paper presented GraphAlignCoder, a training frame-work that uses graph-aligned correctness obligations to im-prove code generation. The key idea is to connect the exe-cutable structure of Python programs with the correctness structure. The model first learns executable code together with graph-derived descriptions of why program regions are correct, and then consolidates this knowledge into the Python-only output distribution required at deployment. GraphAlignCoder solves 50/175 LiveCodeBench v6 tasks, 23/148 BigCodeBench Hard tasks, and 363/1140 Big-CodeBench Full tasks, outperforming both code-only SFT and CodeRL. The ablation study shows that structural injec-tion improves LiveCodeBench v6 from 33 to 44 solved tasks, while consolidation-only provides further benefits by reach-ing 49 LiveCodeBench and 19 BigCodeBench Hard tasks. However, it remains below the complete GraphAlignCoder model across the three settings. GraphAlignCoder offers a practical way to transfer mechanically checked correct-ness structure into ordinary code generation. Future work can extend this framework to richer obligations, additional programming languages, and repository-level generation. 
+
+## References 
+
+Agarwal, V.; Pei, Y.; Alamir, S.; and Liu, X. 2024. CodeMi-rage: Hallucinations in Code Generated by Large Language Models. arXiv preprint arXiv:2408.08333 .Aho, A. V.; Lam, M. S.; Sethi, R.; and Ullman, J. D. 2006. 
+
+Compilers: Principles, Techniques, and Tools . Addison-Wesley, 2 edition. ISBN 978-0-321-48681-3. Allamanis, M.; Brockschmidt, M.; and Khademi, M. 2017. Learning to represent programs with graphs. arXiv preprint arXiv:1711.00740 .Azerbayev, Z.; Schoelkopf, H.; Paster, K.; Dos Santos, M.; McAleer, S. M.; Jiang, A. Q.; Deng, J.; Biderman, S.; and Welleck, S. 2024. Llemma: An Open Language Model for Mathematics. In The Twelfth International Conference on Learning Representations .Cao, J.; Lu, Y.; Li, M.; Ma, H.; Li, H.; He, M.; Wen, C.; Sun, L.; Zhang, H.; Qin, S.; et al. 2025. From informal to formal– incorporating and evaluating llms on natural language re-quirements to verifiable formal proofs. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , 26984–27003. Chen, M.; Tworek, J.; Jun, H.; Yuan, Q.; Ponde de Oliveira Pinto, H.; Kaplan, J.; Edwards, H.; Burda, Y.; Joseph, N.; Brockman, G.; et al. 2021. Evaluating Large Language Models Trained on Code. arXiv preprint arXiv:2107.03374 .de Moura, L.; Kong, S.; Avigad, J.; van Doorn, F.; and von Raumer, J. 2015. The Lean Theorem Prover (Sys-tem Description). In Automated Deduction—CADE-25 , vol-ume 9195 of Lecture Notes in Computer Science , 378–388. Springer. Ferrante, J.; Ottenstein, K. J.; and Warren, J. D. 1987. The Program Dependence Graph and Its Use in Optimization. 
+
+ACM Transactions on Programming Languages and Systems ,9(3): 319–349. Floyd, R. W. 1967. Assigning Meanings to Programs. In Schwartz, J. T., ed., Mathematical Aspects of Computer Sci-ence , volume 19 of Proceedings of Symposia in Applied Mathematics , 19–32. American Mathematical Society. Guo, D.; Ren, S.; Lu, S.; Feng, Z.; Tang, D.; Liu, S.; Zhou, L.; Duan, N.; Svyatkovskiy, A.; Fu, S.; Tufano, M.; Deng, S. K.; Clement, C.; Drain, D.; Sundaresan, N.; Yin, J.; Jiang, D.; and Zhou, M. 2021. GraphCodeBERT: Pre-training Code Representations with Data Flow. In The Ninth International Conference on Learning Representations .Guo, D.; Zhu, Q.; Yang, D.; Xie, Z.; Dong, K.; Zhang, W.; Chen, G.; Bi, X.; Wu, Y.; Li, Y. K.; Luo, F.; Xiong, Y.; and Liang, W. 2024. DeepSeek-Coder: When the Large Language Model Meets Programming—The Rise of Code Intelligence. 
+
+arXiv preprint arXiv:2401.14196 .Hoare, C. A. R. 1969. An Axiomatic Basis for Computer Programming. Communications of the ACM , 12(10): 576– 580, 583. Huang, L.; Yu, W.; Ma, W.; Zhong, W.; Feng, Z.; Wang, H.; Chen, Q.; Peng, W.; Feng, X.; Qin, B.; and Liu, T. 2025. A Survey on Hallucination in Large Language Models: Prin-ciples, Taxonomy, Challenges, and Open Questions. ACM Transactions on Information Systems , 43(2): 1–55. Hui, B.; Yang, J.; Cui, Z.; Yang, J.; Liu, D.; Zhang, L.; Liu, T.; Zhang, J.; Yu, B.; Lu, K.; Dang, K.; Fan, Y.; Zhang, Y.; Yang, A.; Men, R.; Huang, F.; Zheng, B.; Miao, Y.; Quan, S.; Feng, Y.; Ren, X.; Ren, X.; Zhou, J.; and Lin, J. 2024. Qwen2.5-Coder Technical Report. arXiv preprint arXiv:2409.12186 .Jain, N.; Han, K.; Gu, A.; Li, W.-D.; Yan, F.; Zhang, T.; Wang, S.; Solar-Lezama, A.; Sen, K.; and Stoica, I. 2025. LiveCodeBench: Holistic and Contamination Free Evalua-tion of Large Language Models for Code. In The Thirteenth International Conference on Learning Representations .Jiang, A. Q.; Welleck, S.; Zhou, J. P.; Lacroix, T.; Liu, J.; Li, W.; Jamnik, M.; Lample, G.; and Wu, Y. 2023. Draft, Sketch, and Prove: Guiding Formal Theorem Provers with Informal Proofs. In The Eleventh International Conference on Learning Representations .Kim, J.; Guo, W.; Song, D.; Berkeley, U.; and Santa Barbara, U. 2026. Sok: Attack and defense landscape of agentic ai systems. In 35nd USENIX Security Symposium (USENIX Security 26) .Le, H.; Wang, Y.; Gotmare, A. D.; Savarese, S.; and Hoi, S. C. H. 2022. CodeRL: Mastering Code Generation through Pretrained Models and Deep Reinforcement Learning. In 
+
+Advances in Neural Information Processing Systems , vol-ume 35, 21314–21328. Leino, K. R. M. 2010. Dafny: An Automatic Program Veri-fier for Functional Correctness. In Logic for Programming, Artificial Intelligence, and Reasoning , volume 6355 of Lec-ture Notes in Computer Science , 348–370. Springer. Li, Y.; Choi, D.; Chung, J.; Kushman, N.; Schrittwieser, J.; Leblond, R.; Eccles, T.; Keeling, J.; Gimeno, F.; Dal Lago, A.; et al. 2022. Competition-Level Code Generation with AlphaCode. Science , 378(6624): 1092–1097. Lozhkov, A.; Li, R.; Ben Allal, L.; Cassano, F.; Lamy-Poirier, J.; Tazi, N.; Tang, A.; Pykhtar, D.; Liu, J.; Wei, Y.; et al. 2024. StarCoder 2 and The Stack v2: The Next Generation. arXiv preprint arXiv:2402.19173 .Ospanov, A.; Farnia, F.; and Mohit, R. 2026. Apollo: Auto-mated llm and lean collaboration for advanced formal rea-soning. Advances in Neural Information Processing Systems ,38: 41599–41633. Pearce, H.; Ahmad, B.; Tan, B.; Dolan-Gavitt, B.; and Karri, R. 2022. Asleep at the Keyboard? Assessing the Security of GitHub Copilot’s Code Contributions. In 2022 IEEE Symposium on Security and Privacy , 754–768. IEEE. Peng, S.; Kalliamvakou, E.; Cihon, P.; and Demirer, M. 2023. The Impact of AI on Developer Productivity: Evidence from GitHub Copilot. arXiv preprint arXiv:2302.06590 .Ravichander, A.; Ghela, S.; Wadden, D.; and Choi, Y. 2025. Halogen: Fantastic llm hallucinations and where to find them. In Proceedings of the 63rd Annual Meeting of the Associa-tion for Computational Linguistics (Volume 1: Long Papers) ,1402–1425. Rozière, B.; Gehring, J.; Gloeckle, F.; Sootla, S.; Gat, I.; Tan, X. E.; Adi, Y.; Liu, J.; Sauvestre, R.; Remez, T.; et al. 2023. Code Llama: Open Foundation Models for Code. arXiv preprint arXiv:2308.12950 .Si, S.; Zhao, H.; Gao, C.; Bai, Y.; Wang, Z.; Gao, B.; Luo, K.; Li, W.; Huang, Y.; Chen, G.; et al. 2026. Teaching large language models to maintain contextual faithfulness via synthetic tasks and reinforcement learning. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 40, 33001–33009. Spracklen, J.; Wijewickrama, R.; Sakib, A. H. M. N.; Maiti, A.; Viswanath, B.; and Jadliwala, M. 2025. We Have a Pack-age for You! A Comprehensive Analysis of Package Halluci-nations by Code Generating LLMs. In 34th USENIX Secu-rity Symposium (USENIX Security 25) , 3687–3706. USENIX Association. ISBN 978-1-939133-52-6. Yamaguchi, F.; Golde, N.; Arp, D.; and Rieck, K. 2014. Modeling and Discovering Vulnerabilities with Code Prop-erty Graphs. In 2014 IEEE Symposium on Security and Privacy , 590–604. IEEE. Yang, K.; Swope, A. M.; Gu, A.; Chalamala, R.; Song, P.; Yu, S.; Godil, S.; Prenger, R. J.; and Anandkumar, A. 2023. Le-anDojo: Theorem Proving with Retrieval-Augmented Lan-guage Models. In Advances in Neural Information Process-ing Systems , volume 36, 21573–21612. Zhang, Y.; Zhang, Y.; Leach, K.; and Huang, Y. 2025a. Code-Grad: Integrating Multi-Step Verification with Gradient-Based LLM Refinement. arXiv:2508.10059. Zhang, Z.; Wang, C.; Wang, Y.; Chen, J.; and Zheng, Z. 2025b. LLM Hallucinations in Practical Code Generation: Phenomena, Mechanism, and Mitigation. Proceedings of the ACM on Software Engineering , 2(ISSTA): 481–503. Zhou, J.; Staats, C.; Li, W.; Szegedy, C.; Weinberger, K.; and Wu, Y. 2024. Don’t Trust: Verify–Grounding LLM Quantitative Reasoning with Autoformalization. In Inter-national Conference on Learning Representations , volume 2024, 2544–2563. Zhuo, T. Y.; Vu, M. C.; Chim, J.; Hu, H.; Yu, W.; Widyasari, R.; Yusuf, I. N. B.; Zhan, H.; He, J.; Paul, I.; et al. 2025. Big-CodeBench: Benchmarking Code Generation with Diverse Function Calls and Complex Instructions. In The Thirteenth International Conference on Learning Representations .

@@ -1,0 +1,428 @@
+Title: Harnessing LLMs for Document-Guided Fuzzing of Python Libraries
+
+URL Source: https://arxiv.org/pdf/2608.11744v1
+
+Published Time: Thu, 13 Aug 2026 00:35:51 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+> TRANSACTIONS ON SOFTWARE ENGINEERING 1
+
+# Harnessing LLMs for Document-Guided Fuzzing of Python Libraries 
+
+Bin Duan 1, Tarek Mahmud 2, Meiru Che 3, Yan Yan 4, Naipeng Dong 1, Dan Dongseong Kim 1, Guowei Yang 1∗
+
+> 1
+
+School of Electrical Engineering and Computer Science, The University of Queensland, Australia 
+
+> 2
+
+Department of Computer Science at Texas A&M University–Kingsville, USA 
+
+> 3
+
+College of Information and Communications Technology, Central Queensland University, Australia 
+
+> 4
+
+Department of Computer Science, University of Illinois Chicago, USA b.duan@uq.edu.au, tarek.mahmud@tamuk.edu, m.che@cqu.edu.au, yyan55@uic.edu, n.dong@uq.edu.au, dan.kim@uq.edu.au, guowei.yang@uq.edu.au 
+
+Abstract —Python libraries underpin deep learning, scientific computing, data analysis, and computer vision, making their reliability critical to downstream applications. Testing their APIs requires inputs that satisfy both per-parameter constraints and dependencies among parameters. Existing approaches either leave such constraints implicit in generated programs or rely on library-specific parsing rules. This paper introduces V ISTA FUZZ ,a document-guided fuzzing technique that uses a locally served open-sourced LLM to extract parameter specifications from API documents and generate inputs that satisfy both parame-ter constraints and inter-parameter dependencies. We evaluate VISTA FUZZ on 7,718 APIs across twelve Python libraries. Inter-parameter relationships occur in 40.1% of tested APIs, and disabling their resolution reduces the valid generation rate on those APIs from above 95% to 31.6%–52.8%. VISTA FUZZ 
+
+reports 74 issues, of which 43 have been confirmed by developers and 29 have been fixed. 
+
+Index Terms —Fuzzing, Python Libraries, Large Language Models 
+
+I. I NTRODUCTION 
+
+Python libraries such as PyTorch [1], TensorFlow [2], NumPy [3], SciPy [4], scikit-learn [5], and OpenCV [6] provide fundamental functionality for deep learning, scientific computing, data analysis, and computer vision, and defects in them propagate silently into downstream applications [7], [8]. Their APIs accept heterogeneous inputs involving ten-sors, arrays, scalar values, shapes, optional arguments, and dependencies among parameters. Generating executable test cases for these APIs is challenging because each invocation must satisfy both general Python semantics and API-specific constraints on types, dimensions, value ranges, and parameter relationships [9], [10]. Traditional library fuzzers construct valid API invocations using manually defined rules, seed programs, or mined code examples [9], [10], or exercise libraries indirectly through generated neural networks [11]–[14] and relational API equiv-alences [15]. LLM-based approaches reduce much of this man-ual effort: TitanFuzz [16] synthesizes and mutates programs for deep-learning libraries, FuzzGPT [17] conditions on his-torical bug-triggering programs to elicit unusual API usages, 
+
+> *Corresponding author.
+
+and Fuzz4All [18] generalizes LLM-based generation across input languages and systems. Common to these approaches is that the LLM emits complete test programs, leaving API constraints implicit in the generated code. The generator thus stays in the loop throughout a campaign, and the constraints never become an object that can be validated against the library, reused, or deliberately perturbed to sample boundary and violating values. API documents, by contrast, state param-eter types, shapes, value ranges, defaults, and dependencies explicitly for most released APIs. DocTer [9] shows that such documents can be translated into constraints, but requires annotated patterns and learned per-library parsing rules, so the cost recurs for every library; corpus-based approaches such as FreeFuzz [10] are likewise bounded by what their mined invocations contain. What is missing is a way to turn heterogeneous API documents into a persistent and machine-checkable description of what each API accepts—at a cost that scales with the API surface rather than the number of libraries or the length of a campaign, and expressive enough to capture inter-parameter dependencies. We present V ISTA FUZZ , a document-guided fuzzing ap-proach for Python libraries. For each API, V ISTA FUZZ collects its API documentation and signature, and uses an LLM to con-vert them into a standardized parameter specification (Param-Spec ) that captures parameter types, shapes, value ranges, default values, individual constraints, and inter-parameter re-lationships normalized into three patterns (shape following, rank-bounded axes, and type following). It validates each specification against the signature, which removes hallucinated or stale parameters before generation, and materializes it into library-native arrays, tensors, scalars, and structured arguments for test execution. The LLM is invoked once per API using a locally served open-soured LLM with greedy decoding, so extraction is deterministic, reproducible, and reusable, with inference cost scaling with the API surface rather than the testing budget. V ISTA FUZZ employs two complementary test oracles: a crash oracle that detects abnormal process termina-tion and unexpected exceptions on constraint-satisfying inputs, and a NaN oracle that flags non-finite outputs inconsistent with documented behavior on constraint-satisfying inputs. We evaluate V ISTA FUZZ on twelve Python libraries: Py-arXiv:2608.11744v1 [cs.SE] 12 Aug 2026 TRANSACTIONS ON SOFTWARE ENGINEERING 2
+
+Fig. 1: Overview of V ISTA FUZZ 
+
+Torch, TensorFlow, JAX, Keras, PaddlePaddle, OneFlow, MindSpore, Chainer, NumPy, SciPy, scikit-learn, and OpenCV. Inter-parameter relationships appear in 40.1% of the tested APIs, and disabling relationship resolution reduces the valid generation rate on such APIs from above 95% to 31.6%– 52.8%. Across 7,718 APIs, V ISTA FUZZ reports 74 issues, of which 43 have been confirmed by developers as real bugs and 29 have already been fixed. Under a unified testing budget, V ISTA FUZZ reaches more APIs and achieves higher line coverage than DocTer and FreeFuzz on PyTorch and TensorFlow, while the same core extraction and generation pipeline is applied across all twelve libraries. We release the implementation of V ISTA FUZZ [19]. This article extends our IEEE ICSME 2025 paper [20], which focused on document-guided fuzzing of OpenCV. The methodological extension is the transition from an OpenCV-oriented representation to a cross-library ParamSpec that com-bines API documents with signatures and represents recur-ring dependencies as three normalized relationship patterns. Replacing GPT-4 with a locally served open-sourced LLM is primarily a reproducibility improvement. Experimentally, the study expands from 330 APIs in one library to 7,718 APIs across twelve libraries and adds controlled baseline com-parisons, component ablations, and analyses of dependency prevalence, generalizability, and cost. II. A PPROACH 
+
+Figure 1 presents the workflow of V ISTA FUZZ . For each target API, V ISTA FUZZ collects its official API documents and signature and provides them to an LLM. The LLM converts heterogeneous natural-language descriptions into structured parameter specifications, including individual constraints and the inter-parameter relationships supported by V ISTA FUZZ .The extracted specifications are validated against the signature and then used to initialize and generate API arguments. During generation, V ISTA FUZZ varies parameter types, sizes, and values, resolves the supported relationships using already generated arguments, and materializes the resulting values into the runtime objects required by the target library. Finally, VISTA FUZZ invokes the target API and applies the crash and NaN oracles. 
+
+A. Standardizing API Information 
+
+Python libraries use heterogeneous document formats and parameter conventions. Some APIs provide complete signa-tures and detailed descriptions, whereas others omit types, shapes, valid ranges, defaults, or relationships among param-eters. V ISTA FUZZ therefore converts the API documents and information of each API into a standardized representation before generating test inputs. 
+
+1) Information Collection: For each target API, V ISTA -FUZZ collects its official API documents and signature. The API documents provide natural-language descriptions of pa-rameter types, shapes, value domains, defaults, and relation-ships. The signature provides concrete invocation information, including parameter names, positions, required and optional parameters, default values, and calling forms. The two sources are complementary. API documents contain richer semantic information but may be incomplete, inconsis-tent, or expressed using library-specific terminology. signa-tures reliably describe how an API is invoked but generally provide limited information about value domains, shapes, and relationships among parameters. 
+
+2) Prompt Construction and Parameter Specification Ex-traction: VISTA FUZZ uses an LLM to convert the collected information into structured parameter specifications. For each target API, the prompt consists of four parts: (1) a task in-struction defining the extraction objective; (2) the API context, including the API name, signature, and raw API documents; (3) the required output schema; and (4) representative input– output examples demonstrating how descriptions in the doc-uments are mapped into standardized parameter information. Figure 2 summarizes this prompt structure. The task instruction asks the LLM to return one parameter specification for each parameter in the signature rather than generate an executable test program. The LLM extracts the pa-rameter kind, supported data types, shape or rank information, default value, numerical and enumerated constraints, and doc-umented relationships with other parameters. It is instructed to preserve supported information from the API documents, align parameter names with the signature, leave unavailable attributes unspecified, and avoid introducing constraints that cannot be justified by the supplied context. To prevent relationships from remaining as unrestricted free-form text, the prompt asks the LLM to normalize each sup-ported relationship into one of three forms: shape following ,in which one array or tensor follows the shape of another parameter; rank-bounded axis , in which an axis-like parameter refers to the rank of another input; and type following , in which one parameter follows the data type of another parameter. Relationships outside these supported forms remain associated with the original API documents but are not enforced during generation. 
+
+3) Structured LLM Output: A ParamSpec is a structured record of a single parameter that describes both how the parameter is passed to the API and what values it may TRANSACTIONS ON SOFTWARE ENGINEERING 3            
+
+> Task: Convert the supplied API information into structured parameter specifications for test-input generation.
+> Input:
+> •API name and signature;
+> •raw API documents; and
+> •representative extraction examples.
+> Output: One ParamSpec candidate for each parameter in the signature.
+> Requirements:
+> •do not generate executable test code;
+> •do not introduce unsupported constraints;
+> •normalize supported relationships as shape following, rank-bounded axis, or type following;
+> •retain unsupported relationships only in the document field; and
+> •leave unavailable information unspecified.
+
+Fig. 2: Structure of the prompt used for API-information extraction. take. The LLM returns one ParamSpec candidate for each parameter. A ParamSpec records the fields name , kind , re-quired , default , position , call kind , constraints , enum values ,
+
+dtype candidates , shape , and doc . The calling-related fields describe how the parameter appears in an invocation, while the remaining fields describe the values and structures that may be generated. Supported relationships are encoded in the relevant 
+
+shape or constraints information together with a reference to the source parameter. Table I illustrates the content of the returned specifica-tions using an abstract API with the signature API(x, y, axis=-1, dtype=None, keepdims=False) . The ta-ble also shows how the extracted information is subsequently instantiated during input initialization. It presents the se-mantic content of the ParamSpec records rather than an implementation-specific serialization format. The valid variants of each parameter are derived on demand from its required status, default value, kind, candidate values, and extracted constraints. 
+
+4) Signature Validation: Before test generation, V ISTA -FUZZ validates the LLM-returned ParamSpec candidates against the signature. Parameter names, positions, required status, calling forms, and default values are aligned with the information exposed by the target API. When the extracted calling information conflicts with the signature, the runtime information takes precedence. Parameters absent from the signature are removed, while document-derived kinds, data types, shapes, value constraints, and supported relationships are retained when compatible with the signature. APIs with unresolved signature conflicts are excluded from test genera-tion. 
+
+B. Constraint Processing and Input Initialization 
+
+After validation, V ISTA FUZZ converts each ParamSpec into generation constraints and constructs an initial argument list for the target API. 
+
+1) Individual Parameter Constraints: The individual con-straints of a parameter determine its candidate runtime values. They describe its general Python or library-specific kind, candidate numerical data types, fixed or variable rank and shape, numerical range, enumerated values, and required or default status. Required parameters are initialized using values compatible with these constraints. Optional parameters may retain their defaults or be included using valid alternatives de-rived from their specifications. If V ISTA FUZZ cannot construct a supported value for an essential parameter, the corresponding invocation is skipped. 
+
+2) Relationship Resolution: VISTA FUZZ currently normal-izes and executes three recurring relationship patterns sup-ported by its generator: shape following, rank-bounded axes, and type following. We select these patterns because they can be represented unambiguously in the parameter specification and resolved directly from the concrete properties of another generated argument. When a documented relationship cannot be normalized into one of these forms, V ISTA FUZZ retains it in the document field but does not enforce it during generation. The affected parameter is generated using only its individual type, shape, value, and default constraints. 
+
+3) Input Materialization: The standardized representation is independent of a particular Python library. Before invo-cation, V ISTA FUZZ materializes the initialized values into the concrete runtime objects expected by the target API. Depending on the parameter specification, these objects may be Python scalars, Boolean values, strings, lists, tuples, dic-tionaries, NumPy arrays, or library-native tensors and arrays. Materialization preserves the selected parameter kind, nu-merical data type, rank, and shape. Relationships have already been resolved during argument construction, so dependent arguments are materialized using the concrete properties se-lected for their referenced inputs. This separation allows the same document-processing and constraint-generation pipeline to support heterogeneous Python libraries while producing their required runtime objects. 
+
+C. Test Input Generation 
+
+Starting from the initialized argument list, VISTA FUZZ 
+
+repeatedly generates new test inputs. For each parameter, it derives the valid alternatives permitted by the corresponding 
+
+ParamSpec . Parameters without valid alternatives retain their initialized or default values. For the remaining parameters, VISTA FUZZ applies type, size, and value generation. Sup-ported inter-parameter relationships are resolved through the procedure described in Section II-B2. 
+
+1) Type Generation: The type strategy selects among the supported parameter kinds and numerical data types recorded in a ParamSpec . When multiple alternatives are avail-able, V ISTA FUZZ generates inputs using different compatible choices. Library-specific type names are converted into their corresponding runtime objects during materialization. 
+
+2) Size and Shape Generation: The size strategy varies the length, rank, dimensions, or shape of an input according to its ParamSpec . Fixed-size parameters retain their documented structures, whereas variable-size arrays and tensors are gener-ated using different supported ranks and dimensions. Relative shape and rank restrictions are handled by the relationship-resolution procedure rather than independently resampled in this strategy. TRANSACTIONS ON SOFTWARE ENGINEERING 4
+
+TABLE I: Illustrative ParamSpec output and subsequent input initialization.                                  
+
+> Param. Signature-Aligned Information LLM-Extracted Information Normalized Relationship Generated Value
+> x
+> required: True
+> default: — position: 0 call kind: positional/keyword kind: array/tensor dtype candidates: float32 ,float64
+> shape: generated rank and dimensions —float64 tensor shape (3 ,5)
+> y
+> required: True
+> default: — position: 1 call kind: positional/keyword kind: array/tensor relative shape information relative data-type information shape following x
+> type following xfloat64 tensor shape (3 ,5)
+> axis
+> required: False
+> default: −1
+> position: 2 call kind: positional/keyword kind: axis integer parameter associated with the rank of x
+> rank-bounded axis of x1dtype
+> required: False
+> default: None
+> position: 3 call kind: keyword kind: dtype candidates: float32 ,float64 —float64 keepdims
+> required: False
+> default: False
+> position: 4 call kind: keyword kind: Boolean enum values: True ,False —False
+
+3) Value Generation: The value strategy varies the contents of a generated input while preserving its selected kind, data type, and structure. For numerical parameters, V ISTA FUZZ 
+
+generates ordinary random values, boundary values, extreme values, and non-finite values when permitted by the corre-sponding parameter specification. For image-like arrays and tensors, V ISTA FUZZ applies the three value-generation strategies:  
+
+> •
+
+Adding Noise : adding numerical perturbations to selected values;  
+
+> •
+
+Random Masking : replacing selected elements or regions with a valid masking value; and  
+
+> •
+
+Division : dividing selected values by non-zero numerical factors. For other numerical APIs, VISTA FUZZ applies type-appropriate random, boundary, extreme, and mathematically sensitive values according to the extracted constraints. 
+
+D. Fuzzing Automation 
+
+Algorithm 1 summarizes the complete workflow. For each API, V ISTA FUZZ invokes the LLM to obtain candidate pa-rameter specifications, validates them against the signature, initializes an argument list, repeatedly generates new argu-ments, materializes them into library-native objects, invokes the target API, and applies the applicable test oracles. 
+
+E. Test Oracles 
+
+VISTA FUZZ employs two complementary test oracles: crash and NaN. 
+
+1) Crash Oracle: The crash oracle is applied to every generated invocation and records process crashes, aborts, ab-normal exit codes, and unexpected runtime exceptions. 
+
+2) NaN Oracle: The NaN oracle is applied whenever an API produces numerical outputs. Since V ISTA FUZZ generates inputs according to the documented constraints, it flags a non-finite output ( NaN or infinity) when that output is inconsistent 
+
+Algorithm 1 Document-Guided Fuzzing                                                                
+
+> 1: procedure VISTA FUZZ (T argetAP I, Documents, Signature )2: RawSpecs ←LLM Extract (Documents, Signature )
+> 3: P aramSpecs ←V alidateW ithSignature (RawSpecs, Signature )
+> 4: SeedArgs ←Initialize (P aramSpecs )
+> 5: Oracles ←SelectOracles (T argetAP I )
+> 6: while testing budget remains do
+> 7: N ewArgs ←Copy (SeedArgs )
+> 8: for P ar in P aramSpecs do
+> 9: Spec ←P aramSpecs [P ar ]
+> 10: V ariants ←DeriveV ariants (Spec, N ewArgs )
+> 11: if V ariants ̸=∅then
+> 12: Strategy ←Select (T ype, Size, V alue )
+> 13: N ewArgs [P ar ]←
+> Generate (Spec, N ewArgs, V ariants, Strategy )
+> 14: end if
+> 15: end for
+> 16: N ativeArgs ←M aterialize (T argetAP I, N ewArgs )
+> 17: Execution ←Invoke (T argetAP I, N ativeArgs )
+> 18: for Oracle in Oracles do
+> 19: if Oracle (Execution, N ativeArgs )reports an error then
+> 20: Record (T argetAP I, N ativeArgs, Oracle )
+> 21: end if
+> 22: end for
+> 23: end while
+> 24: end procedure
+
+with the documented behavior for the generated input. Each flagged case is minimized and checked against the API docu-ments before being reported. III. E VALUATION 
+
+VISTA FUZZ tests a Python library through its individual APIs: each test case is an argument list for one target API, and the per-API budget and covered-API metric are defined at this granularity. 
+
+A. Research Questions 
+
+RQ1: (Bug Detection) How effective is V ISTA FUZZ in detect-ing bugs across heterogeneous Python libraries? 
+
+RQ2: (Comparison) How does VISTA FUZZ compare with state-of-the-art library fuzzing approaches? TRANSACTIONS ON SOFTWARE ENGINEERING 5
+
+TABLE II: Target libraries and tested APIs.                            
+
+> Library Version # Tested APIs
+> PyTorch 2.12.0 745 TensorFlow 2.21.0 1,043 JAX 0.10.1 658 Keras 3.14.0 197 PaddlePaddle 3.3.1 900 OneFlow 0.9.0 213 MindSpore 2.9.0 1,209 Chainer 7.8.1 137 NumPy 2.2.6 643 SciPy 1.16.3 1,405 scikit-learn 1.8.0 238 OpenCV 4.10.0 330
+> Total 7,718
+
+RQ3: (Ablation) How do the individual components and con-figurations of V ISTA FUZZ contribute to its effectiveness? 
+
+RQ4: (Generalizability and Cost) How well does V ISTA FUZZ 
+
+generalize across libraries, and at what cost? For RQ1, we apply V ISTA FUZZ to twelve Python libraries and report detected, confirmed, and fixed bugs, broken down by library and by oracle type (crash and NaN). For RQ2, we compare V ISTA FUZZ against two representative approaches (FreeFuzz and DocTer) on PyTorch and TensorFlow, the two libraries supported by both baselines, in terms of code coverage and the number of APIs each tool exercises under a unified testing budget. We also examine the library-specific resources that restrict the released baseline configurations to their supported target libraries. For RQ3, we ablate the gen-eration strategies, the relationship-resolution component, and the signature-validation step on three representative libraries (one per library family), and analyze the effect of the per-API testing budget. For the relationship ablation, we stratify APIs by whether their specifications carry at least one normalized inter-parameter relationship, so that the effect of dependency handling can be isolated from unrelated factors. For RQ4, we quantify generalizability and cost along five dimensions: per-library extraction and generation statistics (including the prevalence of inter-parameter relationships), the contribution of the API documents and signature inputs to extraction quality, the effect of the choice of LLM, robustness to API document evolution across library versions, and the one-time cost of the extraction phase. 
+
+B. Experimental Setup 
+
+Target libraries. We evaluate V ISTA FUZZ on twelve Python libraries spanning deep learning, scientific computing, data analysis, and computer vision. We first identify 9,114 doc-umented numerical API candidates and then apply four ex-clusion criteria: APIs without usable documents or signatures (512), APIs requiring external files or unavailable external devices (268), APIs without outputs applicable to our test oracles (357), and APIs whose invocation requires substantial state or setup through other APIs (259). After these exclusions, 7,718 APIs remain for testing, as summarized in Table II. 
+
+Testing budget. VISTA FUZZ allocates a 60-second testing budget to each API. For the baseline comparison in RQ2, all tools are run under the same wall-clock time budget on identical hardware, since the tools differ in what constitutes a single test case. To account for variance, we repeat each RQ2 run five times and each RQ3 ablation run three times, reporting averages. 
+
+Environment. All experiments run on a workstation with an AMD Ryzen Threadripper PRO 7985WX (64 cores), 502 GiB RAM, and two NVIDIA RTX 6000 Ada GPUs (48 GB each, CUDA 12.8), running Ubuntu 24.04 with Python 3.13 (Mind-Spore, Chainer, and OneFlow use separate Python 3.11/3.10 environments due to wheel availability). For specification extraction, V ISTA FUZZ uses qwen2.5-coder:32b [21], an open-soured served locally via Ollama [22] with greedy de-coding (temperature 0), which makes extraction deterministic and reproducible at no per-request cost. 
+
+C. Metrics 
+
+Detected issues. Following prior work [9], [10], we report the issues V ISTA FUZZ detected and submitted to the developers of each library, together with their triage outcome. We re-reviewed the status of every submitted issue on August 8, 2026. An issue is confirmed if a maintainer acknowledges it as a bug or repository triage labels it as a bug; a confirmed issue is additionally counted as fixed if a fixing pull request is linked or referenced, so fixed bugs form a subset of confirmed bugs. Issues with no substantive maintainer response yet are 
+
+pending , and issues judged to be duplicates, expected behavior, or otherwise not independent real bugs are excluded from the bug counts. 
+
+Valid generation rate (VGR). The percentage of generated test cases that execute the target API without being rejected by its input validation. 
+
+Code coverage. Following prior work [15], [17], we measure line coverage for all evaluated libraries using coverage.py 
+
+for Python code and GCOV for C/C++ code. 
+
+Covered APIs. The number of target APIs a tool exercises at least once within the testing budget, reflecting how much of the library’s API surface each approach can reach. 
+
+Extraction success rate. The percentage of tested APIs whose LLM-extracted ParamSpec s pass runtime-signature validation and thus enter test generation. 
+
+Relationship prevalence. The percentage of tested APIs whose validated specifications contain at least one normalized inter-parameter relationship (shape following, rank-bounded axis, or type following). 
+
+D. Baselines 
+
+We compare VISTA FUZZ with two representative API-level testing approaches on PyTorch and TensorFlow, the only two target libraries supported by both of them: Free-Fuzz [10] mines API invocations from open-source code and document examples to fuzz PyTorch and TensorFlow. 
+
+DocTer [9] extracts input constraints from API documents using sub-tree mining and rule learning, targeting PyTorch and TensorFlow. We use their released public implementations. TRANSACTIONS ON SOFTWARE ENGINEERING 6
+
+TABLE III: Issues detected by V ISTA FUZZ .                                                                                                  
+
+> Library Crash NaN Reported Confirmed Fixed Pending Excluded
+> PyTorch 0996503TensorFlow 0777300JAX 013 13 6634Keras 011 11 8703PaddlePaddle 1895140OneFlow 0111000MindSpore 0880080Chainer 0220020NumPy 0110010SciPy 1231011scikit-learn 1010010OpenCV 8199700
+> Total 11 63 74 43 29 20 11
+
+Like V ISTA FUZZ , both baselines generate argument lists for one target API per test case, so the number of covered APIs and the resulting coverage can be attributed identically across all three tools. We exclude LLM fuzzers from this comparison. TitanFuzz [16] emits complete programs in which the inputs of the API under test are themselves constructed through calls to further APIs, so a single program exercises many APIs and its coverage cannot be attributed to individual APIs on a common basis with argument-level tools. Fuzz4All [18] generates free-form programs for a system as a whole without enumerating target APIs, so a per-API budget and the covered-API metric are not defined for it. 
+
+Applicability across libraries. The released baseline imple-mentations rely on library-specific resources: FreeFuzz uses mined API invocations, while DocTer derives and applies constraint-extraction rules from annotated document patterns. We therefore restrict the controlled comparison to PyTorch and TensorFlow, the two target libraries shared by both base-lines and V ISTA FUZZ , rather than modifying the baselines to support additional libraries. In contrast, V ISTA FUZZ uses the same ParamSpec schema, extraction prompt, relationship resolver, generation strategies, and oracles across all twelve evaluated libraries, with only library-facing document collec-tors and materialization adapters. IV. R ESULTS AND ANALYSIS 
+
+A. RQ1: Bug Detection of VISTA FUZZ 
+
+Table III summarizes the outcome of all issues V ISTA FUZZ 
+
+detected across the twelve libraries, broken down by oracle type and triage status. In total, VISTA FUZZ detected and reported 74 issues, of which 43 have been confirmed by developers as real bugs, and 29 of these have already been fixed; 20 issues are pending triage, and 11 were excluded as duplicates, expected behavior, or otherwise not independent real bugs. By oracle type, the NaN oracle accounts for 63 reported issues (35 confirmed) and the crash oracle for 11 (8 confirmed). Two observations stand out. First, the two oracles play com-plementary roles across library families: NaN issues dominate in the deep-learning libraries, whose numerical kernels silently propagate non-finite values, whereas crash issues dominate in OpenCV, whose native implementation terminates abnormally on constraint-satisfying inputs. Second, confirmation outcomes track project responsiveness: all seven TensorFlow issues were                       
+
+> 1x=torch.tensor(
+> 2[[float("nan"), float("inf"), -float("inf")],
+> 3[-0.026216749101877213, 0.11177391558885574, -0.04212268441915512]],
+> 4dtype=torch.float32)
+> 5out =F.gelu(x, approximate="none")
+> 6print(out)
+> 1output:
+> 2tensor([[ nan, nan, nan],
+> 3[-0.0128, 0.0609, -0.0204]])
+
+Listing 1: Unexpected NaN in PyTorch                                                 
+
+> 1src =np.zeros((500, 500), dtype=np.uint8)
+> 2corners =np.array([
+> 3[63.23869, 233.98373], [24.23986, 21.29863],
+> 4[123.34534, 499.52298], [225.45345, 56.35624],
+> 5[32.87236, 217.28916], [124.59836, 166.02876],
+> 6], dtype=np.float32).reshape(-1, 1, 2)
+> 7criteria =(cv2.TERM_CRITERIA_EPS +cv2. TERM_CRITERIA_MAX_ITER, 20, 0.1)
+> 8out =cv2.cornerSubPix(src, corners, (3, 3), (-1, -1), criteria)
+> 1output:
+> 2cv2.error: (-215:Assertion failed) Rect(0, 0, src.cols, src .rows).contains(cT) in function ’cv::cornerSubPix’
+
+Listing 2: Unexpected Crash in OpenCV confirmed, while all MindSpore and Chainer issues remain pending triage, reflecting the maintenance status of those projects rather than the validity of the reports. We next illustrate three representative confirmed bugs. Listing 1 shows an unexpected NaN bug in PyTorch detected by the NaN oracle. The input tensor was pro-duced by the value strategy, which injects non-finite val-ues into an otherwise ordinary generated tensor. For the exact (non-approximate) GELU formulation, gelu(+ ∞) =+∞ and gelu( −∞ ) = 0 by their limiting values, while the input NaN should remain NaN. However, 
+
+torch.nn.functional.gelu with approximate="none" 
+
+returns NaN for both +∞ and −∞ , while all finite elements are computed correctly. PyTorch developers triaged the report as an edge-case bug and have fixed it (PyTorch #185770). Note that mining- and example-based approaches can hardly reach this bug, since real-world usage corpora rarely contain invo-cations that pass non-finite values to gelu , whereas V ISTA -FUZZ ’s value strategy injects them systematically whenever the documented domain permits. Listing 2 shows a bug in OpenCV detected by the crash oracle. Every generated corner coordinate lies within the bounds of the 500 × 500 input image, satisfying the doc-umented constraints of cv2.cornerSubPix ; nevertheless, the invocation fails with an internal assertion because the refinement window around a corner close to the image border (here y ≈ 499 .5) extends beyond the image, a condition the implementation neither documents as a restriction nor handles gracefully. OpenCV developers confirmed and fixed this bug (OpenCV #25139). Listing 3 shows an unexpected Inf bug in SciPy detected by the NaN oracle: scipy.special.i0(713.0) returns 
+
+inf although the correct value, approximately 6.71 × 10 307 ,is finite and representable in float64 , so the input lies within the supported domain of the API. The triggering input was produced by the boundary-value strategy, which TRANSACTIONS ON SOFTWARE ENGINEERING 71 x = np.float64(713.0)       
+
+> 2output =scipy.special.i0(x)
+> 3print(output)
+> 1output:
+> 2inf
+
+Listing 3: Unexpected Inf in SciPy TABLE IV: Comparison with baselines on PyTorch and Ten-sorFlow. 
+
+Tool PyTorch TensorFlow #APIs #Cov #APIs #Cov 
+
+VISTA FUZZ 745 42,479 1043 49,283 FreeFuzz 688 40,382 470 42,372 DocTer 498 38,831 911 47,944 
+
+probes the documented numerical domain near representation limits; approaches that synthesize idiomatic API usages can hardly generate such inputs, since values like 713 .0 are unremarkable in training corpora and are only distinguished by their proximity to the representation limit of the documented output domain. Notably, because VISTA FUZZ applies the same standardized generation pipeline to every library, the identical strategy exposed the same latent defect family in the corresponding APIs of six further libraries— numpy.i0 ,
+
+tf.math.bessel_i0 , jax.numpy.i0 , paddle.i0 ,
+
+mindspore.ops.i0 , and torch.special.i0 —and the reports have so far been confirmed by the SciPy, TensorFlow, and PyTorch developers (SciPy #25823, TensorFlow #124772, PyTorch #192293). Such systematic cross-library replication of a shared defect is only practical with a uniform, library-agnostic testing pipeline. Together, the three cases span both oracle types and three library families (deep learning, scientific computing, and computer vision), and each triggering input satisfies the documented constraints of its target API, which is precisely the input region that V ISTA FUZZ ’s document-guided gener-ation targets: failures on such inputs are, by construction, attributable to the library rather than to invalid test data. 
+
+B. RQ2: Comparison with Existing Approaches 
+
+Table IV compares V ISTA FUZZ with the two baselines on PyTorch and TensorFlow under the unified budget described above, reporting the number of covered APIs (#APIs) and line coverage (#Cov), averaged over five runs. We restrict the com-parison to these two metrics because the tools employ different oracle definitions and cross-tool bug deduplication involves subjective judgment, whereas API reach and code coverage are oracle-independent and can be measured identically for every tool. Figure 3 shows the coverage trend of each tool over the per-API testing budget, where the solid line shows the average across the five runs and the shaded band indicates the minimum and maximum. V ISTA FUZZ outperforms both baselines on both metrics and both libraries. 
+
+a) API reach.: On PyTorch, V ISTA FUZZ exercises 745 APIs, compared with 688 for FreeFuzz (+8.3%) and 498 for 0 10 20 30 40 50 60 Time (s) 05000 10000 15000 20000 25000 30000 35000 40000 45000 Coverage (lines) 
+
+> Coverage Trend on PyTorch
+> VistaFuzz FreeFuzz DocTer
+
+(a) PyTorch 0 10 20 30 40 50 60 Time (s) 010000 20000 30000 40000 50000 Coverage (lines)  
+
+> Coverage Trend on TensorFlow
+> VistaFuzz FreeFuzz DocTer
+
+(b) TensorFlow 
+
+Fig. 3: Coverage trend of V ISTA FUZZ against the baselines. DocTer (+49.6%); on TensorFlow, it exercises 1,043 APIs, 2.2 × more than FreeFuzz (470) and 14.5% more than DocTer (911). These differences trace directly to each tool’s knowl-edge source. FreeFuzz derives inputs from a mined corpus of document snippets, developer tests, and open-source client code, so it can only reach APIs that happen to appear in that corpus; its reach is consequently uneven across libraries— reasonable on PyTorch, whose ecosystem is well represented in its corpus, but covering fewer than half of TensorFlow’s tested APIs. DocTer, conversely, depends on hand-engineered rules for parsing each library’s document format, so its reach is bounded by how well those rules generalize: the rules transfer well to TensorFlow’s uniformly structured docstrings but break down on the more heterogeneous PyTorch docu-ments. V ISTA FUZZ is subject to neither bound: it synthesizes and validates a specification for every documented API, so any API whose specification passes validation becomes a fuzzing target, yielding the highest reach on both libraries simultaneously rather than excelling on only the library its knowledge source happens to fit. 
+
+b) Code coverage.: The coverage results follow a similar pattern. V ISTA FUZZ covers 42,479 lines on PyTorch (+5.2% over FreeFuzz, +9.4% over DocTer) and 49,283 lines on TensorFlow (+16.3% over FreeFuzz, +2.8% over DocTer). Part of this advantage follows directly from API reach: exercising more APIs exposes additional implementation code, making broad API reach itself an important contributor to library-level coverage. This correspondence is consistent with V ISTA -FUZZ ’s generality objective: its document-guided specification construction enables it to exercise a broader portion of the API surface without relying on library-specific usage corpora or parsing rules. The trend curves in Figure 3 make this dynamic visible. V ISTA FUZZ separates from both baselines within the first ten seconds of the per-API budget and maintains its lead throughout: although all three tools decelerate as the easily reachable code is exhausted, the gap does not close—on PyTorch V ISTA FUZZ stays above FreeFuzz and DocTer over the entire budget, and on TensorFlow it remains consistently above DocTer while FreeFuzz trails far behind. The narrow min–max bands further show that this advantage is stable: across the five runs, V ISTA FUZZ ’s worst run remains above the best run of either baseline for most of the budget on both libraries. Across the five runs, the coverage differences are statistically significant for all four pairwise comparisons be-tween V ISTA FUZZ and the baselines (exact two-sided Mann– TRANSACTIONS ON SOFTWARE ENGINEERING 8
+
+TABLE V: Ablation of generation strategies.                                             
+
+> Variant PyTorch NumPy OpenCV Cov #Issue Cov #Issue Cov #Issue
+> VISTA FUZZ 42,479 931,284 148,670 9VISTA FUZZ -noT 41,612 830,921 146,438 8VISTA FUZZ -noS 40,984 830,468 145,577 7VISTA FUZZ -noRand 41,936 930,774 146,211 8VISTA FUZZ -noBound 41,745 730,652 047,568 8VISTA FUZZ -noNF 42,105 531,101 148,211 9
+
+Whitney U , p = 0 .0079 ; Holm-adjusted p = 0 .0317 ), with Vargha–Delaney ˆA12 = 1 .00 in each comparison. Finally, we note that this comparison is only possible on PyTorch and TensorFlow at all: FreeFuzz and DocTer are inapplicable to the remaining ten libraries by construction, since the former has no mined corpus and the latter no parsing rules for them, whereas V ISTA FUZZ applies the same core extraction and generation pipeline across all twelve libraries. 
+
+C. RQ3: Ablation Study 
+
+We conduct all ablations on three representative libraries— PyTorch (deep learning), NumPy (scientific computing), and OpenCV (computer vision)—selected to cover one library from each major family in our target set while keeping computational cost manageable. Each configuration uses the same 60-second per-API budget as RQ1 and is repeated three times, and we report averages across runs. Throughout this RQ, #Issue counts the issues detected under our two oracles, before developer triage. 
+
+1) Generation Strategies: We evaluate five leave-one-out variants, each disabling a single generation strategy: V ISTA -FUZZ -noT (no type generation), V ISTA FUZZ -noS (no size generation), and V ISTA FUZZ -noRand, V ISTA FUZZ -noBound, and V ISTA FUZZ -noNF, which disable the random, boundary, and non-finite value strategies, respectively. Table V reports line coverage and detected issues for each variant on the three libraries. The full configuration achieves the highest coverage and the highest or tied-highest issue count on all three libraries, and the losses of each variant map directly onto the issue population. Disabling non-finite injection (V ISTA FUZZ -noNF) misses 4 of PyTorch’s 9 issues, including the gelu family of Listing 1, while leaving OpenCV’s crash issues untouched; disabling boundary values (V ISTA FUZZ -noBound) misses the 
+
+i0 overflow family of Listing 3, dropping NumPy to zero issues; and disabling size generation (V ISTA FUZZ -noS) costs OpenCV 2 of its 9 issues together with the largest coverage loss ( −6.4% ), reflecting that window and kernel dimensions gate its deep native paths. Coverage differences between vari-ants (at most 6.4%) are far smaller than their issue differences (up to 44% of a library’s issues), indicating that the strategies are complementary primarily in which defect-triggering inputs they reach rather than in how much code they touch. 
+
+2) Relationship Resolution: We disable the resolution of the three normalized relationship patterns (shape following, rank-bounded axis, type following); dependent parameters are then generated using only their individual constraints (V ISTA FUZZ -noRel). This ablation isolates the contribution of V ISTA FUZZ ’s explicit relationship-resolution component: all extracted individual parameter constraints are retained, but cross-parameter references are no longer enforced during generation. To attribute the effect specifically to dependency handling, we stratify the tested APIs of each library into those whose validated specifications carry at least one normalized relationship ( R+; 41.3%, 35.8%, and 58.5% of the tested APIs of PyTorch, NumPy, and OpenCV, respectively; cf. Table VIII) and those that carry none ( R−), and report VGR separately for each stratum in Table VI. Disabling relationship resolution collapses valid generation on the R+ stratum: VGR drops from 95.8% to 43.2% on PyTorch, from 97.2% to 52.8% on NumPy, and from 98.8% to 31.6% on OpenCV, whereas on R− APIs the two configura-tions differ by at most 0.4 percentage points. This contrast attributes the drop to unresolved dependencies rather than to any other difference between the configurations: without resolution, a dependent argument (e.g., a second operand or an axis) is consistent with its referenced input only by coin-cidence, so most invocations are rejected by input validation and terminate in shallow error paths. The collapse propagates downstream: V ISTA FUZZ -noRel loses 5.1%–14.4% coverage and detects 13 rather than 19 issues across the three libraries. The drop is also uneven in an informative way: NumPy retains the highest residual R+ VGR (52.8%) because broadcasting tolerates many shape mismatches that other libraries reject, whereas OpenCV falls furthest (31.6%) because its native argument checking rejects inconsistent geometry outright— the benefit of dependency modeling grows with how strictly a library validates its inputs. This ablation further shows why dependency handling remains important even after an API is reached: on APIs with documented relationships, jointly valid arguments substantially increase valid execution and downstream coverage. 
+
+3) Signature Validation: We skip the validation of LLM-returned ParamSpec s against signatures (V ISTA FUZZ -noVal), feeding the raw extraction output directly into generation. Across the three libraries, 9.8% of APIs (168 of 1,718) have at least one conflict between the extracted specifica-tion and the signature: hallucinated or missing parameters (4.0%), incorrect required status or default values (3.1%), and incorrect positional/keyword calling forms (2.6%); these percentages are rounded independently. Without validation these errors manifest downstream: VGR drops from 96.2%– 98.9% to 84.9%–91.6%, and the budget wasted on malformed invocations costs detection, with V ISTA FUZZ -noVal missing 2 of the 19 issues; moreover, exceptions raised by malformed calls would surface as spurious crash-oracle reports were they not excluded before generation. This quantifies the LLM-hallucination threat discussed in Section V: validation converts extraction errors from silent false positives into cases excluded before generation. 
+
+4) Testing Budget: We vary the per-API budget over 15, 30, 60, and 120 seconds on the three representative libraries; Table VII reports coverage and cumulative detected issues per budget. Coverage grows steeply up to 60 seconds but gains only 0.8%–1.1% from 60 to 120 seconds, and all 19 issues are already detected within 60 seconds, with the doubled budget TRANSACTIONS ON SOFTWARE ENGINEERING 9
+
+TABLE VI: Component ablations.                                                      
+
+> Library Config. VGR-R+(%) VGR-R−(%) VGR (%) Cov #Issue
+> PyTorch VISTA FUZZ 95.8 96.4 96.2 42,479 9VISTA FUZZ -noRel 43.2 96.0 74.2 38,861 6VISTA FUZZ -noVal 87.2 88.4 87.9 40,612 8NumPy VISTA FUZZ 97.2 97.5 97.4 31,284 1VISTA FUZZ -noRel 52.8 97.3 81.4 29,702 1VISTA FUZZ -noVal 91.0 92.0 91.6 30,409 1OpenCV VISTA FUZZ 98.8 99.0 98.9 48,670 9VISTA FUZZ -noRel 31.6 98.7 59.5 41,678 6VISTA FUZZ -noVal 84.1 86.0 84.9 45,920 8
+
+TABLE VII: Effect of the per-API testing budget (average of three runs). 
+
+Budget PyTorch NumPy OpenCV Cov #Issue Cov #Issue Cov #Issue 
+
+15 s 39,856 5 28,932 0 44,216 530 s 41,612 7 30,476 1 47,201 760 s 42,479 9 31,284 1 48,670 9120 s 42,887 9 31,623 1 49,053 9adding none; the 60-second budget therefore remains the cost-effective threshold across library families, generalizing the saturation analysis of the conference study and consistent with the trends in Figure 3. 
+
+D. RQ4: Generalizability and Cost 
+
+This RQ examines the cross-library generalizability hypoth-esis underlying this article: whether a common document-guided pipeline can maintain effective extraction and valid input generation across heterogeneous Python libraries with limited library-specific adaptation. We examine how well extraction and generation transfer across document styles, how broadly the normalized relationship patterns capture documented dependencies, whether both prompt inputs are necessary, the effect of LLM choice, the adaptation required for a new library, robustness to API document evolution, and extraction cost. 
+
+1) Per-Library Extraction and Generation: Table VIII re-ports, for each of the twelve libraries, the extraction success rate, the relationship prevalence, the average number of gen-eration constraints per API, and the VGR. Extraction succeeds for 95.6%–100.0% of APIs across the twelve libraries (mean 98.9%), despite document styles ranging from TensorFlow’s uniformly structured docstrings to OpenCV’s automatically generated bindings of C++ sig-natures, indicating that the single prompt design absorbs the format heterogeneity that rule-based extraction must be re-engineered for. Relationship prevalence confirms that inter-parameter dependencies are pervasive rather than an OpenCV idiosyncrasy: 40.1% of all tested APIs carry at least one normalized relationship, ranging from 28.6% (scikit-learn) to 58.5% (OpenCV). VGR is likewise stable across families (91.7%–98.9%), with the lowest values on Chainer and Mind-Spore, whose documents most often omit concrete types and value domains. Together with the stratified ablation of Sec-tion IV-C2, these numbers support the central argument of this article: dependencies appear throughout the ecosystem (this TABLE VIII: Per-library extraction and generation statistics. Extr.: extraction success rate; Rel.: relationship prevalence; Constr.: average generation constraints per API. 
+
+Library Extr. (%) Rel. (%) Constr. VGR (%) 
+
+PyTorch 100.0 41.3 6.3 96.2 TensorFlow 100.0 44.7 6.7 96.8 JAX 99.2 42.2 5.9 95.7 Keras 100.0 39.6 5.6 96.5 PaddlePaddle 98.8 43.1 6.1 94.9 OneFlow 97.7 36.6 5.2 93.8 MindSpore 96.9 40.8 5.7 92.6 Chainer 95.6 31.4 4.8 91.7 NumPy 99.7 35.8 5.1 97.4 SciPy 99.1 33.7 4.6 96.1 scikit-learn 98.7 28.6 4.9 94.5 OpenCV 100.0 58.5 8.5 98.9 
+
+Overall 98.9 40.1 5.8 95.5 
+
+table), and failing to model them collapses valid generation precisely on the APIs that carry them (Table VI). To examine whether the three normalized relationship pat-terns are representative beyond individual libraries, we further inspect the manually labeled sample of 180 APIs used in the LLM analysis. The annotators identify 286 documented inter-parameter relationships in total. Of these, 258 (90.2%) can be represented by V ISTA FUZZ ’s three patterns: 127 shape-following, 68 rank-bounded-axis, and 63 type-following re-lationships. The remaining 28 relationships (9.8%) mainly involve value-dependent or conditional constraints that cannot be expressed by the current representation. Thus, the three patterns do not cover every possible dependency, but capture the large majority of the documented relationships observed across the twelve libraries. 
+
+2) Contribution of API Documents and Signature Inputs: 
+
+The extraction prompt supplies two complementary sources (Section II-A): the raw API documents and the signature. To verify that both are necessary rather than merely convenient, we re-run extraction on a stratified sample of 240 APIs (20 per library) under three input configurations: the full prompt (Doc+Sig), API documents only (Doc-only), and signature only (Sig-only); Table IX reports the validation pass rate and the downstream VGR of each. Doc-only extraction loses reliable calling information, with 15.4% of its specifications failing signature validation versus 1.2% for the full prompt, while Sig-only extraction passes validation almost trivially (99.6%) but strips the semantic content: its downstream VGR falls to 62.8%, approaching unguided generation, because value domains, dtype candidates, and all inter-parameter rela-tionships originate exclusively in the API documents. The full prompt dominates both single-source variants on both metrics, substantiating the complementarity argued in Section II-A: the signature anchors how an API is called, and the API documents determine what may be passed. 
+
+3) Choice of LLM: On a sample of 180 APIs (15 per library) with manually labeled ground-truth specifications (labeled independently by two authors, with disagreements resolved by discussion; Cohen’s κ = 0 .91 ), we compare the 
+
+qwen2.5-coder:32b model used throughout our evalu-TRANSACTIONS ON SOFTWARE ENGINEERING 10 
+
+TABLE IX: Contribution of prompt inputs (sampled APIs). 
+
+Prompt Input Validation Pass (%) VGR (%) 
+
+Doc+Sig (full) 98.8 95.7 Doc-only 84.6 91.3 Sig-only 99.6 62.8 
+
+TABLE X: Effect of extraction-model choice.             
+
+> Model Field Acc. (%) Rel. Recall (%) Valid. Pass (%) VGR (%)
+> qwen2.5-coder:32b 95.2 91.8 98.9 95.6 qwen2.5-coder:7b 90.8 78.4 95.0 89.9
+
+ation against the smaller qwen2.5-coder:7b variant; Ta-ble X reports field-level extraction accuracy against the ground truth, relationship-extraction recall over the relationships rep-resentable by the three normalized patterns, validation pass rate, and downstream VGR. The 32B model reaches 95.2% field-level accuracy versus 90.8% for the 7B variant, and the gap concentrates precisely in relationship extraction (91.8% versus 78.4% recall) while simple fields such as defaults and required status are extracted comparably; this translates into a 5.7-point difference in downstream VGR (95.6% versus 89.9%). Converting API documents into a fixed schema is thus a constrained transformation task for which a locally served 32B open-soured LLM suffices, whereas the 7B variant measurably degrades exactly the dependency information that RQ3 shows to be critical. 
+
+4) Robustness to API Document Evolution: A practical dimension of generalizability is whether the pipeline keeps up as libraries evolve, since new releases continuously add and re-document APIs. We take PyTorch 2.12 →2.13, iden-tify the 27 newly documented APIs in the newer release, and apply the existing pipeline without any modification: no prompt change, no schema change, no code change. Extraction succeeds for 26 of the 27 new APIs (96.3%), with a VGR of 95.9%—in line with the library-wide figures in Table VIII. The released baseline resources do not directly cover these new APIs: the existing DocTer rules match none of the 27 API documents, while the frozen FreeFuzz corpus contains no recorded invocation of them. This small version-to-version study provides preliminary evidence that, once a library-facing adapter is available, API documents can serve as a relatively self-updating knowledge source for newly introduced APIs. 
+
+5) Adaptation and Cost: We first quantify the library-specific adaptation required by V ISTA FUZZ . We count the non-comment source lines added for the document collector and materialization backend of each of the eleven libraries introduced beyond the original OpenCV implementation. The median adaptation is 112 lines of code per library (range: 64– 189), including a median of 38 lines for document collection and 74 lines for materialization. No library requires changes to the extraction prompt, ParamSpec schema, relationship resolver, generation strategies, or test oracles. Thus, supporting a new library requires a small library-facing adapter while leaving the core testing pipeline unchanged. Table XI reports the one-time extraction cost per library. Extracting specifications for all 7,718 APIs took 23.2 hours TABLE XI: One-time extraction cost per library.                                           
+
+> Library Wall-Clock (h) GPU Time (h) Sec./API
+> PyTorch 2.15 2.15 10.4 TensorFlow 2.93 2.93 10.1 JAX 1.79 1.79 9.8 Keras 0.48 0.48 8.7 PaddlePaddle 2.78 2.78 11.1 OneFlow 0.56 0.56 9.4 MindSpore 3.90 3.90 11.6 Chainer 0.32 0.32 8.5 NumPy 1.64 1.64 9.2 SciPy 4.84 4.84 12.4 scikit-learn 0.71 0.71 10.7 OpenCV 1.08 1.08 11.8
+> Total / Avg. 23.17 23.17 10.8
+
+in total (10.8 seconds per API on average) on a single locally served model, at zero request cost. This cost is structural rather than recurring: V ISTA FUZZ invokes the LLM exactly once per API, and the resulting ParamSpec s are reusable across fuzzing campaigns, across library versions whose documents are un-changed, and under any future oracle extension. Program-synthesis fuzzers such as TitanFuzz and Fuzz4All [16], [18], by contrast, pay LLM inference for every generated test case, so their inference cost scales with the testing budget, whereas VISTA FUZZ ’s scales only with the number of target APIs. V. D ISCUSSION 
+
+Supporting a New Library . Adding a library to V ISTA -FUZZ requires only a thin library-specific layer for document collection and input materialization; across the eleven libraries added beyond OpenCV, this layer requires a median of 112 non-comment lines of code, while the extraction prompt, 
+
+ParamSpec schema, relationship resolver, generation strate-gies, and test oracles remain unchanged. In contrast, FreeFuzz requires a usage corpus for each target and DocTer relies on library-specific document-parsing rules. The document-evolution experiment further shows that, once a library is supported, newly documented APIs can be tested without modifying the pipeline. 
+
+Choice of Oracles . The crash and NaN oracles need no library-specific modeling and exploit the extracted constraints: a crash or a non-finite output inconsistent with documented behavior on a constraint-satisfying input signals a potential inconsistency between the implementation and API docu-ments, and RQ1 shows the two oracles are complementary across library families. Their limitation is silent semantic errors—finite but incorrect results—which require semantic oracles such as cross-library differential testing [11], [23]; the 
+
+ParamSpec representation already enables feeding equivalent inputs to corresponding APIs across libraries, providing a foundation for this next step. 
+
+Choice of LLM . We replace the conference version’s GPT-4 with a locally served qwen2.5-coder:32b [21] under greedy decoding (temperature 0). We view this primarily as a reproducibility and deployability improvement: extraction becomes deterministic and independent of a proprietary ser-vice. The comparison in Section IV-D further shows that the TRANSACTIONS ON SOFTWARE ENGINEERING 11 
+
+smaller 7B variant reduces relationship-extraction recall and downstream VGR. 
+
+Threats to Validity . Internal validity: implementation bugs could distort results; we manually minimized and re-executed every reported issue, extraction is deterministic, hallucinations are caught by signature validation before generation (Sec-tion IV-C), and all extracted ParamSpec s are released for in-spection. Our oracles treat API documents as the specification, so errors in those documents surface as false positives, which we exclude during triage; the baseline comparison omits bug counts because the tools employ different oracle definitions. 
+
+External validity: findings are tied to twelve libraries, specific versions, and one extraction model; the served model’s 4,096-token context bounds the document text visible per API. 
+
+Limitations . V ISTA FUZZ executes three normalized rela-tionship patterns rather than all possible cross-parameter con-straints; in our manually labeled sample, 9.8% of documented relationships fall outside this representation. Its crash and NaN oracles also cannot detect finite but semantically incorrect outputs. Finally, the evaluated API set follows the applicability criteria in Section III, so the reported API reach characterizes the common evaluation universe used in this study rather than the complete native API universe of each baseline. VI. R ELATED WORK 
+
+Fuzzing [24] executes the target system with random or invalid inputs to uncover anomalies and has been widely applied to operating systems [25], network protocols [26], web applications [27], and APIs [15]. 
+
+Fuzzing Python Libraries . FreeFuzz [10] mines and mu-tates recorded API invocations, while DocTer [9] extracts DL-specific structure, dtype, shape, and valid-value constraints from API documents through learned rules. Other work ex-ercises libraries through generated neural networks [11]–[14], builds semantic oracles for numerical kernels [23], [28], [29], transfers inputs between relationally equivalent APIs [15], or extracts constraints from operator source code [30]. V ISTA -FUZZ therefore differs primarily in scope and representation rather than in the existence of dependency handling itself: it converts heterogeneous API documents and signatures into a common ParamSpec and applies the same normalized relation-ship resolver and generation pipeline across twelve libraries. 
+
+LLM-Based Test Generation . TitanFuzz [16], Fuz-zGPT [17], and Fuzz4All [18] generate and mutate complete test programs with LLMs, CHATAFL [31] applies LLMs to protocol fuzzing, LISP [32] to input-space partitioning, and further work to unit-test generation [33], [34] and soft-ware engineering broadly [35]. These approaches rely on the model’s prior exposure to idiomatic usage of the target library, so the constraints applied to each invocation are neither explicit nor checkable. VISTA FUZZ makes the constraints explicit—extracted from API documents rather than recalled from training data—and invokes a locally served open-soured LLM [21] once per API, so inference cost scales with the API surface rather than the testing budget. 
+
+Document-Guided Testing . Earlier document-guided techniques detect specification–implementation inconsistencies [36], [37], derive assertions and oracles [38], [39], or extract constraints through manually designed or learned rules [9], [40]. VISTA FUZZ normalizes recurring relationships into three explicit patterns, shape following, rank-bounded axis, and type following, within a common representation used across heterogeneous Python libraries. Across our twelve-library evaluation, 40.1% of tested APIs contain at least one such relationship, and disabling their resolution reduces VGR on these APIs from above 95% to 31.6%–52.8%. VII. C ONCLUSION 
+
+This paper introduced VISTA FUZZ , a document-guided fuzzing approach for Python libraries. V ISTA FUZZ uses a locally served open-sourced LLM to parse API documents into standardized parameter specifications, validates them against signatures, and generates test inputs that satisfy both individ-ual parameter constraints and inter-parameter dependencies. Applied to 7,718 APIs across twelve Python libraries, V ISTA -FUZZ detected 74 issues, of which 43 have been confirmed by developers as real bugs and 29 have already been fixed. Under the same budget, V ISTA FUZZ reaches more APIs and achieves higher coverage than the API-level baselines on PyTorch and TensorFlow. REFERENCES [1] A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan, T. Killeen, Z. Lin, N. Gimelshein, L. Antiga et al. , “PyTorch: An imperative style, high-performance deep learning library,” in Advances in Neural Information Processing Systems (NeurIPS) , 2019. [2] M. Abadi, P. Barham, J. Chen, Z. Chen, A. Davis, J. Dean, M. Devin, S. Ghemawat, G. Irving, M. Isard et al. , “TensorFlow: A system for large-scale machine learning,” in 12th USENIX Symposium on Operating Systems Design and Implementation (OSDI) , 2016, pp. 265–283. [3] C. R. Harris, K. J. Millman, S. J. van der Walt, R. Gommers, P. Virtanen, D. Cournapeau, E. Wieser, J. Taylor, S. Berg, N. J. Smith et al. , “Array programming with NumPy,” Nature , vol. 585, no. 7825, pp. 357–362, 2020. [4] P. Virtanen, R. Gommers, T. E. Oliphant, M. Haberland, T. Reddy, D. Cournapeau, E. Burovski, P. Peterson, W. Weckesser, J. Bright et al. ,“SciPy 1.0: Fundamental algorithms for scientific computing in Python,”                          
+
+> Nature Methods , vol. 17, pp. 261–272, 2020. [5] F. Pedregosa, G. Varoquaux, A. Gramfort, V. Michel, B. Thirion, O. Grisel, M. Blondel, P. Prettenhofer, R. Weiss, V. Dubourg et al. ,“Scikit-learn: Machine learning in Python,” Journal of Machine Learn-ing Research , vol. 12, pp. 2825–2830, 2011. [6] G. Bradski, “The opencv library.” Dr. Dobb’s Journal: Software Tools for the Professional Programmer , vol. 25, no. 11, pp. 120–123, 2000. [7] Y. Zhang, Y. Chen, S.-C. Cheung, Y. Xiong, and L. Zhang, “An empirical study on TensorFlow program bugs,” in Proceedings of the 27th ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) , 2018, pp. 129–140. [8] M. J. Islam, G. Nguyen, R. Pan, and H. Rajan, “A comprehensive study on deep learning bug characteristics,” in Proceedings of the 27th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE) ,2019. [9] D. Xie, Y. Li, M. Kim, H. V. Pham, L. Tan, X. Zhang, and M. W. God-frey, “Docter: documentation-guided fuzzing for testing deep learning api functions,” in Proceedings of the 31st ACM SIGSOFT International Symposium on Software Testing and Analysis , 2022, pp. 176–188. [10] A. Wei, Y. Deng, C. Yang, and L. Zhang, “Free lunch for testing: Fuzzing deep-learning libraries from open source,” in Proceedings of the 44th International Conference on Software Engineering , 2022, pp. 995–1007. [11] H. V. Pham, T. Lutellier, W. Qi, and L. Tan, “CRADLE: Cross-backend validation to detect and localize bugs in deep learning libraries,” in Pro-ceedings of the 41st International Conference on Software Engineering (ICSE) , 2019, pp. 1027–1038. TRANSACTIONS ON SOFTWARE ENGINEERING 12
+
+[12] Z. Wang, M. Yan, J. Chen, S. Liu, and D. Zhang, “Deep learning library testing via effective model generation,” in Proceedings of the 28th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE) ,2020, pp. 788–799. [13] J. Gu, X. Luo, Y. Zhou, and X. Wang, “Muffin: Testing deep learning libraries via neural architecture fuzzing,” in Proceedings of the 44th International Conference on Software Engineering , 2022, pp. 1418– 1430. [14] Q. Guo, X. Xie, Y. Li, X. Zhang, Y. Liu, X. Li, and C. Shen, “Audee: Automated testing for deep learning frameworks,” in Proceedings of the 35th IEEE/ACM International Conference on Automated Software Engineering (ASE) , 2020, pp. 486–498. [15] Y. Deng, C. Yang, A. Wei, and L. Zhang, “Fuzzing deep-learning libraries via automated relational api inference,” in Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering , 2022, pp. 44– 56. [16] Y. Deng, C. S. Xia, H. Peng, C. Yang, and L. Zhang, “Large language models are zero-shot fuzzers: Fuzzing deep-learning libraries via large language models,” in Proceedings of the 32nd ACM SIGSOFT interna-tional symposium on software testing and analysis , 2023, pp. 423–435. [17] Y. Deng, C. S. Xia, C. Yang, S. D. Zhang, S. Yang, and L. Zhang, “Large language models are edge-case generators: Crafting unusual programs for fuzzing deep learning libraries,” in Proceedings of the 46th IEEE/ACM International Conference on Software Engineering , 2024, pp. 1–13. [18] C. S. Xia, M. Paltenghi, J. Le Tian, M. Pradel, and L. Zhang, “Fuzz4all: Universal fuzzing with large language models,” in Proceedings of the IEEE/ACM 46th International Conference on Software Engineering ,2024, pp. 1–13. [19] “V ISTA FUZZ ,” https://github.com/beanduan22/Vistafuzz-/tree/main, 2025. [20] B. Duan, T. Mahmud, M. Che, Y. Yan, N. Dong, D. D. Kim, and G. Yang, “Harnessing llms for document-guided fuzzing of opencv li-brary,” in 2025 IEEE International Conference on Software Maintenance and Evolution (ICSME) . IEEE, 2025, pp. 73–84. [21] B. Hui, J. Yang, Z. Cui, J. Yang, D. Liu, L. Zhang, T. Liu, J. Zhang, B. Yu, K. Lu et al. , “Qwen2.5-Coder technical report,” 2024. [22] Ollama, “Ollama,” https://ollama.com, accessed: 2026-08-08. [23] J. Wang, T. Lutellier, S. Qian, H. V. Pham, and L. Tan, “EAGLE: Cre-ating equivalent graphs to test deep learning libraries,” in Proceedings of the 44th International Conference on Software Engineering (ICSE) ,2022, pp. 798–810. [24] B. P. Miller, L. Fredriksen, and B. So, “An empirical study of the reliability of unix utilities,” Communications of the ACM , vol. 33, no. 12, pp. 32–44, 1990. [25] L. Chen, Q. Cai, Z. Ma, Y. Wang, H. Hu, M. Shen, Y. Liu, S. Guo, H. Duan, K. Jiang et al. , “Sfuzz: Slice-based fuzzing for real-time op-erating systems,” in Proceedings of the 2022 ACM SIGSAC Conference on Computer and Communications Security , 2022, pp. 485–498. [26] V.-T. Pham, M. B¨ ohme, and A. Roychoudhury, “Aflnet: a greybox fuzzer for network protocols,” in 2020 IEEE 13th International Conference on Software Testing, Validation and Verification (ICST) . IEEE, 2020, pp. 460–465. [27] V. Atlidakis, P. Godefroid, and M. Polishchuk, “Restler: Stateful rest api fuzzing,” in 2019 IEEE/ACM 41st International Conference on Software Engineering (ICSE) . IEEE, 2019, pp. 748–758. [28] X. Zhang, N. Sun, C. Fang, J. Liu, J. Liu, D. Chai, J. Wang, and Z. Chen, “Predoo: Precision testing of deep learning operators,” in Proceedings of the 30th ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) , 2021, pp. 400–412. [29] C. Yang, Y. Deng, J. Yao, Y. Tu, H. Li, and L. Zhang, “Fuzzing automatic differentiation in deep-learning libraries,” in Proceedings of the 45th International Conference on Software Engineering (ICSE) , 2023, pp. 1174–1186. [30] J. Shi, Y. Xiao, Y. Li, Y. Li, D. Yu, C. Yu, H. Su, Y. Chen, and W. Huo, “ACETest: Automated constraint extraction for testing deep learning operators,” in Proceedings of the 32nd ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) , 2023, pp. 690– 702. [31] R. Meng, M. Mirchev, M. B¨ ohme, and A. Roychoudhury, “Large language model guided protocol fuzzing,” in Proceedings of the 31st Annual Network and Distributed System Security Symposium (NDSS) ,2024. [32] J. Li, Z. Dong, C. Wang, H. You, C. Zhang, Y. Liu, and X. Peng, “Llm based input space partitioning testing for library apis,” arXiv preprint arXiv:2501.05456 , 2024. [33] M. Sch¨ afer, S. Nadi, A. Eghbali, and F. Tip, “An empirical evaluation of using large language models for automated unit test generation,” IEEE Transactions on Software Engineering , vol. 50, no. 1, pp. 85–105, 2024. [34] C. Lemieux, J. P. Inala, S. K. Lahiri, and S. Sen, “CodaMosa: Escaping coverage plateaus in test generation with pre-trained large language mod-els,” in Proceedings of the 45th International Conference on Software Engineering (ICSE) , 2023, pp. 919–931. [35] X. Hou, Y. Zhao, Y. Liu, Z. Yang, K. Wang, L. Li, X. Luo, D. Lo, J. Grundy, and H. Wang, “Large language models for software engi-neering: A systematic literature review,” ACM Transactions on Software Engineering and Methodology , vol. 33, no. 8, 2024. [36] T. Lv, R. Li, Y. Yang, K. Chen, X. Liao, X. Wang, P. Hu, and L. Xing, “Rtfm! automatic assumption discovery and verification derivation from library document for api misuse detection,” in Proceedings of the 2020 ACM SIGSAC conference on computer and communications security ,2020, pp. 1837–1852. [37] Y. Zhou, C. Wang, X. Yan, T. Chen, S. Panichella, and H. Gall, “Automatic detection and repair recommendation of directive defects in java api documentation,” IEEE Transactions on Software Engineering ,vol. 46, no. 9, pp. 1004–1023, 2018. [38] S. Liu, J. Sun, Y. Liu, Y. Zhang, B. Wadhwa, J. S. Dong, and X. Wang, “Automatic early defects detection in use case documents,” in Proceedings of the 29th ACM/IEEE international conference on Automated software engineering , 2014, pp. 785–790. [39] M. Motwani and Y. Brun, “Automatically generating precise oracles from structured natural language specifications,” in 2019 IEEE/ACM 41st International Conference on Software Engineering (ICSE) . IEEE, 2019, pp. 188–199. [40] A. Blasi, A. Goffi, K. Kuznetsov, A. Gorla, M. D. Ernst, M. Pezz` e, and S. D. Castellanos, “Translating code comments to procedure spec-ifications,” in Proceedings of the 27th ACM SIGSOFT international symposium on software testing and analysis , 2018, pp. 242–253.
