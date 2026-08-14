@@ -1,0 +1,390 @@
+Title: Testing Deep Learning Library APIs via Cross-Framework Differential Fuzzing
+
+URL Source: https://arxiv.org/pdf/2608.11886v1
+
+Published Time: Thu, 13 Aug 2026 00:45:09 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+> TRANSACTIONS ON SOFTWARE ENGINEERING 1
+
+# Testing Deep Learning Library APIs via Cross-Framework Differential Fuzzing 
+
+Bin Duan, Ruican Dong, Naipeng Dong, Dan Dongseong Kim, Guowei Yang* School of Electrical Engineering and Computer Science, The University of Queensland, Brisbane, Australia b.duan@uq.edu.au, ruican.dong@uq.net.au, n.dong@uq.edu.au, dan.kim@uq.edu.au, guowei.yang@uq.edu.au 
+
+Abstract —Deep learning libraries underpin many safety- and reliability-critical applications, yet existing API-level testing techniques often rely on intra-library properties or CPU–GPU differential oracles and may miss defects that behave consistently across hardware backends. We present X AMT , a cross-framework differential fuzzing approach for deep learning library APIs. XAMT constructs and tests execution-validated groups of APIs intended to implement equivalent operations across seven li-braries. It uses explicit API aliases and parameter-role nor-malization to construct candidate correspondences and validates them through pairwise execution and a group-level behavioral check on canonical ordinary inputs. The resulting groups are explored using variance-guided differential fuzzing with ordinary, boundary, and non-finite inputs. Crash and inconsistency oracles flag executions exhibiting abnormal termination or inconsistent outputs for subsequent reproduction and analysis. Across the seven libraries, X AMT constructs 676 execution-validated groups containing 2,563 matched APIs. Among these, X AMT identifies 72 independently reproduced discrepancy cases, including 4 crash cases and 68 output inconsistencies. Among the 72 developer reports, 25 have been confirmed, including 23 that have been fixed. 
+
+Index Terms —Deep learning libraries, API matching, differ-ential testing, fuzzing 
+
+I. I NTRODUCTION 
+
+Deep learning has become integral to real-world systems in domains such as autonomous driving [1], [2], healthcare [3], [4], and finance [5], [6]. These applications depend heavily on deep learning libraries, whose APIs provide the build-ing blocks for model construction, training, and inference. Implementation defects in these APIs, including incorrect numerical results, inconsistent handling of non-finite values, and silent logic errors, can propagate to downstream models and compromise the reliability of deployed systems. Recent studies apply fuzzing to detect bugs in deep learning libraries by generating diverse inputs and using test oracles to identify abnormal behavior [7], [8]. Existing techniques can be broadly divided into model-level and API-level testing. Model-level fuzzing [9], [10], [11] generates or mutates complete neural networks and observes their behavior under different execution settings. API-level fuzzing [12], [13] directly ex-plores the input domains of individual library APIs. Both directions have revealed defects in widely used deep learning infrastructure. 
+
+> *Corresponding author.
+
+Despite these advances, many existing approaches rely on intra-library properties or differential oracles, particularly comparisons between CPU and GPU executions. Such ora-cles are effective when a defect manifests differently across hardware backends, but they provide no disagreement signal when an implementation produces the same divergent result on both CPU and GPU. Consequently, an API may behave consistently across backends while still returning an incorrect result. Cross-framework testing provides a complementary perspective by comparing independently implemented APIs intended to perform the same operation. To address this problem, we present XAMT , a cross-framework differential fuzzing approach for deep learning li-brary APIs. X AMT constructs candidate correspondences using explicit API aliases and parameter-role normalization, aligns library-specific interfaces through shared logical inputs, and retains supported correspondences after pairwise and group-level execution validation. It then applies variance-guided fuzzing over ordinary, boundary, and non-finite inputs. We evaluate X AMT on PyTorch, TensorFlow, Keras, JAX, MindSpore, PaddlePaddle, and Chainer. Across these seven libraries, XAMT constructs 676 execution-validated cross-library groups spanning 74 distinct library combinations and containing 2,563 matched APIs. The testing campaign identi-fies 72 independently reproduced discrepancy cases, including four Crash cases and 68 output inconsistencies. Among the 72 developer reports, 25 have been confirmed, including 23 that have already been fixed. Moreover, among the 50 CPU–GPU-applicable cases in the backend-replay subset, none produces an observable backend disagreement. These results show that the same triggering inputs provide no CPU–GPU disagreement signal under the evaluated configurations. This article is an extended version of our earlier paper presented at IEEE ISSRE [14]. The extension has two parts. Methodologically, X AMT removes the designated-reference-library requirement through API aliases and parameter-role normalization, adds pairwise and group-level execution val-idation of candidate correspondences, and broadens input generation to include boundary and non-finite values. Experi-mentally, we expand the evaluation from five to seven libraries and add analyses of matching quality, fixed-input CPU–GPU replay, method-level rediscovery by existing baselines, Ten-sorScope correspondence coverage, component contributions, and testing-budget sensitivity. arXiv:2608.11886v1 [cs.SE] 12 Aug 2026 TRANSACTIONS ON SOFTWARE ENGINEERING 2Execution  
+
+> Validation
+> APIs
+> Documentation
+> Candidate Group
+> Construction
+> Name
+> Normalisation
+> API Aliases
+> Parameter
+> Normalisation
+> Pairwise API
+> Execution
+> Crash
+> Inconsistency
+> Differential
+> Fuzzing
+> Group-level
+> Validation
+> Oracle
+> Fig. 1. Overview of X AMT .
+
+II. A PPROACH 
+
+Fig. 1 presents an overview of X AMT . First, X AMT collects callable APIs from the configured namespaces of the seven target libraries and normalizes their operation names and pa-rameter roles. APIs with the same normalized operation name are placed into candidate groups, while coarse namespace-derived categories are used only to exclude obvious semantic mismatches. Second, X AMT aligns their input parameters and validates each supported cross-library API pair through ac-tual execution on canonical-operation-specific ordinary inputs. Pairs that execute successfully and produce consistent outputs are connected to form candidate components, which are further validated at the group level. Third, X AMT generates consistent inputs and applies variance-guided differential fuzzing within a fixed time budget. Finally, Crash and Inconsistency oracles flag executions exhibiting abnormal termination or inconsistent outputs for subsequent reproduction and analysis. 
+
+A. Defining API Matching Rules 
+
+We introduce explicit API aliases and parameter-role nor-malization to accommodate library-specific naming and in-terface differences and to reduce ambiguous matches. These rules are constructed by comparing API names, signatures, and parameter descriptions in the official documentation of the seven target libraries and consolidating recurring library-specific variants. 
+
+1) API Name Normalization and Aliases: API names often reflect their core functionality, but different libraries may use substantially different names for the same operation. XAMT first converts API names from camel case to lowercase underscore-separated identifiers, normalizes special characters and dimension suffixes, and removes configured library and namespace prefixes. Version- and backend-specific suffixes, such as _v2 and _eager_fallback , are also removed when applicable. After syntactic normalization, X AMT applies a curated alias mapping that converts library-specific names into common operation names. We construct the mapping by comparing API names, callable signatures, parameter descriptions, and operation semantics in the official documentation of the seven target libraries. An alias is retained only when the corresponding APIs implement the same canonical operation within an identifiable shared semantic domain. Table I presents representative examples. For example, 
+
+torch.clamp and tensorflow.clip_by_value 
+
+are both normalized to clip , while torch.unsqueeze 
+
+and jax.numpy.expand_dims are normalized to                                                     
+
+> TABLE I REPRESENTATIVE API N AME ALIASES USED BY XAMT .
+> Normalized Name Library-Specific Names
+> concatenate cat ,concat clip clamp ,clip_by_value arccos acos sum reduce_sum matmul mm expand_dims unsqueeze transpose permute linear dense ,fully_connected batch_norm batch_normalization ,batchnorm silu swish sigmoid expit mse_loss mean_squared_error ,mse kl_divergence kullback_leibler_divergence ,kl_div inv matrix_inverse ,inverse
+> TABLE II REPRESENTATIVE PARAMETER ROLES USED BY XAMT .
+> Role Representative Parameter Names
+> data input ,x,values ,lhs ,mat1 axis dim ,axis ,axes shape shape ,size ,output_shape dtype dtype ,output_dtype keepdim keepdim ,keepdims order_direction descending ,ascending ,direction training training ,train ,is_training
+
+expand_dims . These mappings allow corresponding APIs to enter the same candidate group even when their original names have limited lexical similarity. The alias mapping is used to construct candidate correspon-dences and does not by itself establish semantic equivalence. For APIs with different supported domains, parameter encod-ings, state, or default behaviors, the corresponding invocation recipe restricts execution to a shared semantic domain and translates the logical inputs into library-specific calls. A can-didate correspondence is retained only after it passes execution validation. 
+
+2) Parameter Roles: Functionally equivalent APIs may expose the same logical inputs through different parameter names, positions, and calling conventions. X AMT therefore normalizes framework-specific parameter names into common semantic roles. The mapping contains 111 parameter-name aliases covering 24 roles. For example, dim , axis , and axes 
+
+are mapped to axis , while input , x, and values are mapped to a data-operand role. Parameters that affect the tested operation, including data operands, axes, shapes, data types, dimension-retention flags, stability options, execution modes, and ordering options, are retained as shared logi-cal inputs. Parameters with related but different encodings are translated by library-specific adapters. In contrast, 15 invocation- or execution-control parameters, such as name ,
+
+out , device , requires_grad , jit , and layout are not treated as shared logical inputs. When multiple parameters of an API share the same general role, X AMT first uses normalized-name correspon-dence and then parameter position to distinguish them. Un-recognized parameters are retained using their normalized names rather than being silently discarded. The resulting roles TRANSACTIONS ON SOFTWARE ENGINEERING 3
+
+are used to construct common logical inputs and translate them into library-specific invocations. For example, matrix-multiplication recipes restrict APIs such as mm to compatible two-dimensional inputs when required, while transpose and permutation APIs are invoked through operation-specific di-mension mappings. Stateful operations, including dense lay-ers and batch normalization, are compared only when their weights, statistics, and execution modes can be explicitly aligned; otherwise, the corresponding invocation is skipped. A semantic role identifies a family of logically related parameters rather than implying direct name substitution. Repeated data operands retain their identities through normalized parameter names and positions. Parameters with inverse encodings, such as ascending and descending , are translated by library-specific adapters rather than being assigned the same Boolean value. 
+
+B. Matching APIs 1) Constructing Candidate API Groups: XAMT automati-cally discovers public callable APIs through runtime reflection over the configured namespaces of the seven target libraries. For each API, it records the fully qualified name, callable signature, default values, normalized operation name, coarse operation category, and parameter roles. Private symbols, unavailable objects, and objects that cannot be invoked directly are excluded. After syntactic normalization and alias resolution, APIs are initially grouped according to their normalized operation names. A coarse operation category derived from namespace and name information is used only to reject obvious se-mantic mismatches. A static candidate group therefore con-tains APIs that share the same normalized operation name, have compatible coarse categories, and originate from at least two target libraries. For example, torch.clamp and 
+
+tensorflow.clip_by_value enter the same candidate group because both are normalized to clip .This initial grouping constructs broad candidates rather than declaring functional equivalence. Name normalization and coarse filtering identify APIs that may implement the same operation, while parameter alignment and execution validation determine whether they can be invoked under common logical inputs and retained in an execution-validated API group. 
+
+2) Aligning Input Parameters: For each candidate group, XAMT aligns API parameters using the normalized roles defined in Table II. Parameters assigned to the same role represent the same logical input even when their original names, positions, or encodings differ. When multiple param-eters share a role, exact normalized-name correspondence is preferred, and the original parameter order is used to resolve any remaining ambiguity. XAMT implements input adaptation in two layers. First, a shared input represented by NumPy arrays and Python-native values is converted into each library’s native representation using library-specific tensor constructors and data-type mappings. The implementation uses torch.tensor ,
+
+tf.constant , jnp.array , paddle.to_tensor ,
+
+ms.Tensor , and keras.ops.convert_to_tensor ;Chainer directly accepts NumPy arrays. Second, XAMT 
+
+constructs executable calls using deterministic invocation recipes indexed by canonical operation. Each recipe specifies the shared validation inputs, framework-specific parameter names and ordering, required additional arguments, and supported calling forms for that operation. These recipes handle differences such as axis versus dim , positional versus keyword arguments, and library-specific mandatory parameters. Qualified-API overrides further handle exceptional interfaces, including redirected APIs, legacy least-squares functions, CTC loss functions, and function-based control-flow operators. For example, the same logical inputs for matrix multiplication are bound to input and other in 
+
+torch.matmul , but to a and b in jax.numpy.matmul .Similarly, a shared reduction axis may be passed through 
+
+dim in PyTorch and axis in TensorFlow or JAX. If no supported common invocation can be constructed, the adapter raises a SkipCall condition with an explicit reason, and the corresponding API pair is classified as SKIP during execution validation. 
+
+3) Execution-Based Pair Validation: APIs with the same normalized operation name may still differ in semantics, parameter interpretation, or supported input domains. X AMT 
+
+therefore enumerates every cross-library API pair within each candidate group and validates each pair through actual execu-tion. The same logical input is used for every supported cross-library pair in the candidate group. Boundary and non-finite values are excluded from this stage because they are explored separately during fuzzing rather than treated as evidence of an incorrect correspondence. For the canonical input, X AMT exe-cutes both APIs and normalizes scalar, tensor, array, tuple, and list outputs. Output comparison proceeds over the normalized structure. Two outputs are non-equivalent if their structures or shapes differ. For aligned numerical outputs, X AMT first compares their element-wise NaN masks and then their infinity masks and infinity signs. If these masks agree, identically positioned non-finite elements are excluded and the remaining finite elements are compared using the absolute tolerance 
+
+τ = 10 −3. Outputs containing only identically positioned and signed non-finite values are treated as equivalent. The validation outcomes are mutually exclusive. A pair is marked as SKIP when no supported common invocation can be constructed. For a supported invocation, it is marked as REJECT if input conversion or API execution does not complete normally, or if both APIs execute successfully but produce non-equivalent outputs. A pair is marked as PASS only when both APIs execute successfully and produce equiv-alent outputs. Only PASS pairs are used to construct execution-validated API groups, while SKIP and REJECT pairs do not create group edges. Each API execution is isolated so that an abnormal worker termination does not interrupt the remaining validation process. 
+
+4) Constructing Executable API Groups: After pairwise validation, X AMT represents each API as a node and each PASS pair as an undirected edge. It applies union–find to the PASS edges and retains connected components that contain APIs from at least two target libraries. REJECT and SKIP pairs do not create edges. TRANSACTIONS ON SOFTWARE ENGINEERING 4
+
+Because pairwise PASS relationships are not necessarily transitive, a connected component may contain APIs that are linked through intermediate members but do not agree directly. X AMT therefore reruns all APIs in each component on the same canonical validation input used during pairwise validation. A component is retained as an execution-validated API group only when all members execute successfully and produce mutually consistent outputs; otherwise, the component is excluded from subsequent fuzzing. The retained components form the execution-validated API groups used by the subse-quent differential fuzzing stage. 
+
+C. Fuzzing 
+
+After aligning and validating the API groups, X AMT gener-ates common input seeds and applies variance-guided differen-tial fuzzing to explore behavioral differences among execution-validated APIs intended to implement the same operation. Each group is tested until its configured time budget is exhausted; the specific budget is presented in the experimental setup. 
+
+1) Input Seed Generation: XAMT generates input seeds using a unified parameter representation:  
+
+> •
+
+Tensor : Synthetic tensors are generated as multidimensional arrays with valid ranks and shapes and are converted into each library’s native tensor representation.  
+
+> •
+
+Value Scalar : Floating-point and integer values are sampled from ranges supported by the corresponding operation.  
+
+> •
+
+Index Scalar : Dimension and index values are constrained by the rank or size of the associated tensor.  
+
+> •
+
+Shape : Shape-related parameters are generated as integer lists or tuples compatible with their associated tensors.  
+
+> •
+
+Boolean Flag : Boolean parameters are assigned supported true or false values. All inputs are first represented as NumPy arrays and Python-native values and are then translated by the library-specific adapters. This common representation ensures that all APIs in a group receive the same numerical values and logically equivalent parameter settings. In addition to ordinary numerical values, X AMT includes boundary and non-finite values in the input-generation and mutation pools. Representative boundary values include signed zeros, small-magnitude values, extreme finite values, and values near operation-specific limits. NaN, positive infinity, and negative infinity are injected only when the corresponding input type supports non-finite values. Boundary and non-finite injections are performed at configurable intervals. 
+
+2) Variance-Guided Differential Fuzzing: Given an execution-validated group of APIs {A1, A 2, . . . , A n}
+
+intended to implement the same operation, X AMT supplies all APIs with the same logical input x. Output structures and non-finite values are first processed according to Section II-D. Only executions whose outputs have identical structures, shapes, and non-finite masks are assigned a search-guidance score. Let yi denote the finite elements returned by API 
+
+Ai, let ¯y denote their element-wise mean, and let m denote the number of finite output elements. X AMT computes the scale-normalized disagreement score as 
+
+S(x) = 
+
+> 1
+> n
+
+Pni=1 ∥yi − ¯y∥22
+
+∥¯y∥22 + mϵ , ¯y = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+yi, (1) where ϵ, a small stabilizing constant, is the machine epsilon of the normalized output type. The score is used only to guide input exploration and is not used as the final discrepancy oracle. Starting from a valid seed, X AMT mutates tensor elements, scalar values, indices, shapes, and Boolean parameters while preserving their types and structural constraints. Ordinary, boundary, and non-finite values are selected from the corre-sponding mutation pools when applicable. A mutated input is considered improved when it increases the guidance score by at least ∆score . When no improvement is observed for R consecutive mutations, X AMT generates a new valid seed and resumes exploration. Every execution is independently examined by the Crash and Inconsistency oracles. Executions with different output structures, shapes, or non-finite masks are processed directly by the Inconsistency oracle and are not assigned a guidance score. 
+
+D. Oracles 
+
+During differential execution, X AMT applies two oracles to flag individual executions that exhibit abnormal termination or inconsistent outputs. 
+
+1) Crash: The crash oracle detects unexpected crashes during API execution, including aborts, segmentation faults, assertion failures, and memory violations. If an API from one library crashes while at least one other API in the same group executes successfully under the same logical input, the test case is marked as a crash discrepancy. 
+
+2) Inconsistency: The inconsistency oracle performs pair-wise output comparison among all successfully executed APIs in a group. An input is flagged when any pair produces different normalized structures or shapes, different element-wise NaN masks, different infinity masks, or different infinity signs at aligned positions. When the NaN and infinity masks agree, identically positioned non-finite elements are excluded and the remaining finite elements are compared using the absolute tolerance τ . A finite-value mismatch that exceeds this tolerance is also reported as an output inconsistency. Thus, inconsistent NaN generation or propagation is treated as part of the unified Inconsistency oracle rather than as a separate category. The normalized disagreement score in Section II-C2 guides mutation selection but does not determine whether an execution is inconsistent. III. E VALUATION 
+
+A. Research Questions 
+
+We evaluate X AMT by answering the following five research questions: 
+
+RQ1: What cross-library API groups does X AMT construct through execution-based validation? 
+
+RQ2: How does the testing scope of X AMT compare with the preliminary evaluation? TRANSACTIONS ON SOFTWARE ENGINEERING 5
+
+RQ3: How effective is X AMT in identifying cross-library discrepancies? 
+
+RQ4: To what extent do the detected cases complement existing API-level differential-testing designs? 
+
+RQ5: How do the individual components of X AMT contribute to its overall effectiveness? For RQ1, we characterize the complete matching and execution-validation funnel over all seven target libraries. For RQ2, we characterize how the journal extension broadens the testing scope of X AMT beyond the preliminary evaluation in terms of supported libraries, matched APIs, API groups, and library combinations. For RQ3, we report validated discrep-ancy cases across the seven libraries, including their behav-ioral categories, affected APIs, and developer-report status. For RQ4, we assess complementarity through CPU–GPU replay, baseline rediscovery, and TensorScope correspondence coverage. For RQ5, we evaluate execution-based matching validation, extended input generation, variance-guided fuzzing, and the per-group testing budget. 
+
+B. Experimental Setup 
+
+Targeted Libraries. We evaluate seven numerical and deep learning libraries: PyTorch 2.12.0, TensorFlow 2.21.0, Keras 3.14.1 (evaluated using the tensorflow backend), JAX 0.10.1, MindSpore 2.9.0, PaddlePaddle 3.3.1, and Chainer 7.8.1. All matching and validation runs are performed on CPUs using fixed deterministic inputs. 
+
+Testing Budget. Unless otherwise stated, each execution-validated group is fuzzed for 60 seconds of wall-clock time, corresponding to an aggregate group-level fuzzing budget of approximately 12 hours for the 676 groups. 
+
+Environment. Experiments ran on Ubuntu 24.04.3 LTS with an AMD Ryzen Threadripper PRO 7985WX CPU, 502 GiB DDR5 memory, and 2 NVIDIA RTX 6000 Ada GPUs. 
+
+Parameter Settings. After explicit comparison of output structures and non-finite masks, aligned finite output elements are compared using an absolute tolerance of τ = 10 −3,consistent with the numerical criterion used in the prelim-inary evaluation. A mutation is considered improved when it increases the normalized disagreement score by at least 
+
+∆score = 0.001 , and the current search is restarted after 
+
+R = 20 consecutive non-improving mutations. 
+
+C. Metrics 
+
+Matched APIs and Groups. Following the reporting conven-tion of the preliminary study, we report the numbers of static candidate groups, evaluated cross-library pairs, final execution-validated groups, and matched APIs contained in the final groups. 
+
+Code Coverage. Code coverage has been widely adopted in software testing and recent deep learning library testing studies [10], [13], [12]. Following prior deep learning library fuzzing work, we use line coverage as the coverage metric. 
+
+Discrepancy Cases. Following previous works [8], [13], we report the number of distinct cases detected.                      
+
+> TABLE III MATCHING AND EXECUTION -V ALIDATION FUNNEL .
+> Stage Count
+> Static candidate groups 765 Cross-library pairs validated 20,202 PASS 11,591 SKIP 7,163 REJECT 1,448 Final execution-validated groups 676 Matched APIs 2,563
+> TABLE IV MATCHED API SACROSS THE SEVEN LIBRARIES .
+> PyTorch MindSpore Paddle JAX Keras TensorFlow Chainer
+> #APIs 480 441 431 379 331 293 208
+
+IV. R ESULT ANALYSIS 
+
+A. RQ1: What cross-library API groups does XAMT construct through execution-based validation? 1) Matching and Validation Funnel: We first examine how the matching pipeline constructs execution-validated cross-library API groups. As shown in Table III, name normal-ization, alias resolution, category filtering, and parameter-role alignment produce 765 static candidate groups. These groups represent potential correspondences rather than val-idated functional equivalence. X AMT then enumerates and processes 20,202 cross-library API pairs. Among them, 11,591 are classified as PASS, 7,163 as SKIP, and 1,448 as RE-JECT. Only PASS pairs are retained as edges for group construction. Union–find over the PASS edges, followed by the group-level consistency check, produces 676 final execution-validated groups containing 2,563 matched APIs. Following the reporting convention of the preliminary study, we report both the number of matched API groups and the total number of APIs contained in these groups. A group may contain APIs from multiple libraries and may include multiple equivalent API variants; therefore, the number of matched APIs is larger than the number of groups. 
+
+2) Matched APIs Across Libraries: Table IV reports the number of APIs from each library retained in the final execution-validated groups. PyTorch contributes 480 matched APIs, followed by MindSpore with 441, PaddlePaddle with 431, JAX with 379, Keras with 331, TensorFlow with 293, and Chainer with 208. These counts follow the same matched-API reporting convention as the preliminary evaluation. Because the matching process does not require a designated reference library, a final group may contain APIs from any combination of at least two target libraries. 
+
+3) Composition of Execution-Validated Groups: Figure 2 shows the 25 most frequent library combinations among the 74 combinations observed in the 676 execution-validated groups. The seven rows represent MindSpore, PaddlePaddle, PyTorch, JAX, TensorFlow, Keras, and Chainer. Each column represents one exact combination of these libraries: blue dots indicate the participating libraries, vertical lines connect the libraries belonging to the same combination, and the bar above reports TRANSACTIONS ON SOFTWARE ENGINEERING 6 
+
+> Fig. 2. Distribution of API groups across library combinations.
+
+the number of API groups with that combination. The final groups span 74 distinct combinations of the seven target libraries. Among the 676 groups, 232 contain APIs from two libraries, while 444 contain APIs from three or more libraries. Thus, 65.7% of the final groups include at least three library implementations. Multi-library groups provide additional im-plementations for differential comparison, whereas two-library groups retain operations available in only a limited subset of the target libraries. 
+
+4) Effect of Execution Validation: Pairwise validation sep-arates the 20,202 candidate pairs into three outcomes. PASS pairs provide behavioral evidence for group construction, while SKIP pairs indicate that no supported common in-vocation can be constructed. The 1,448 REJECT outcomes comprise 1,264 invocations that do not complete normally and 184 successful executions that produce non-equivalent outputs on the canonical validation input. We separately ex-amine the 184 output mismatches using the same finding-retention procedure applied to fuzzing candidates. None pro-vides sufficient evidence for retention because the differences arise from unsuitable candidate correspondences, incompatible supported domains, parameter or default semantics, or accept-able numerical variation. The PASS relationships are used to construct connected components, which are then examined by the group-level consistency check. This process produces the 676 final execution-validated groups used for subsequent fuzzing. The group-level check serves as a safeguard against non-transitive pairwise agreement. As with any input-based validation, these checks do not establish semantic equivalence over the complete input domain. We also manually audit 50 PASS, 50 REJECT, and 50 SKIP pairs. The audit finds that 100% of the PASS pairs are semantically comparable and that 96% of the REJECT pairs are correctly excluded. Among the audited SKIP pairs, 62% are caused by unsupported invocation recipes, 30% by the absence of a common input domain, and 8% by other interface or environment limitations. 
+
+Answer to RQ1. Across seven libraries, X AMT constructs 676 cross-library groups that pass the configured pairwise and group-level execution checks. The final groups contain 2,563 matched APIs and span 74 library combinations. Pairwise validation produces 11,591 PASS, 7,163 SKIP, and 1,448              
+
+> TABLE V EXPANSION OF THE API-L EVEL TESTING SCOPE OF XAMT .
+> Evaluation Libraries Matched APIs Groups
+> ISSRE 5839 238 Extended 72,563 676
+
+REJECT outcomes, and 444 groups contain APIs from at least three libraries. 
+
+B. RQ2: How does the testing scope of XAMT compare with the preliminary evaluation? 1) Expansion of the Testing Scope: We compare the API-level testing scope of the preliminary and extended evaluations of X AMT . As shown in Table V, the preliminary evaluation used PyTorch as the reference library and constructed 238 cross-library groups containing 839 matched APIs across five libraries. The journal extension removes the designated-reference-library requirement, expands the target set to seven libraries, and constructs 676 execution-validated groups con-taining 2,563 matched APIs. These groups span 74 distinct library combinations. These figures describe the expanded evaluation scope of the same approach rather than a comparison between two independent techniques. 
+
+2) Code Coverage: To preserve comparability with the preliminary evaluation, we report line coverage under the same aggregate testing budget of 12 hours. Table VI presents the re-sults for the five libraries shared by both evaluations, together with the MindSpore and PaddlePaddle results included only in the journal extension. For the five shared libraries, the extended evaluation reports consistently higher line coverage. PyTorch coverage increases from 19.97% to 25.18%, TensorFlow from 22.19% to 26.74%, Keras from 24.22% to 29.63%, JAX from 28.98% to 33.91%, and Chainer from 25.45% to 28.42%. The corresponding in-creases range from 2.97 to 5.41 percentage points. Across the five libraries, the average line coverage increases from 24.16% in the preliminary evaluation to 28.78% in the extended evaluation, an absolute improvement of 4.62 percentage points. The journal extension additionally reports 18.76% coverage for MindSpore and 21.53% for PaddlePaddle. The preliminary and extended evaluations retain the same variance-guided fuzzing strategy and use the same total testing budget of 12 hours. The reported coverage improvement should therefore not be interpreted as evidence of a newly introduced search algorithm. Because the two evaluations use different library versions and API universes, the comparison reflects the combined effects of the expanded matching scope, input domain, and evaluated API set rather than the isolated contribution of any single component. 
+
+Answer to RQ2. Under the same total testing budget of 12 hours, the journal extension broadens the evaluation of X AMT 
+
+from five to seven libraries, increases the number of matched APIs from 839 to 2,563 , and increases the number of cross-library groups from 238 to 676. The resulting groups span 74 library combinations and no longer depend on a designated TRANSACTIONS ON SOFTWARE ENGINEERING 7      
+
+> TABLE VI LINE COVERAGE UNDER THE SAME 12-H OUR TOTAL TESTING BUDGET .
+
+Library ISSRE Extended ∆
+
+PyTorch 19.97% 25.18% +5.21% TensorFlow 22.19% 26.74% +4.55% Keras 24.22% 29.63% +5.41% JAX 28.98% 33.91% +4.93% Chainer 25.45% 28.42% +2.97% MindSpore – 18.76% –PaddlePaddle – 21.53% –    
+
+> TABLE VII VALIDATED DISCREPANCY CASES BY ORACLE CATEGORY .
+
+Category Crash Inconsistency Total #Cases 4 68 72 
+
+reference library. For the five shared libraries, the average line coverage increases from 24.16% in the preliminary evaluation to 28.78% in the extended evaluation, corresponding to an absolute improvement of 4.62 percentage points. 
+
+C. RQ3: How effective is XAMT in identifying cross-library discrepancies? 1) Discrepancy Categories: We classify the independently reproduced discrepancy cases by their observed behavior: ab-normal process termination or output inconsistency. As shown in Table VII, four cases trigger abnormal process termination and 68 involve output inconsistencies, including differences in output structures, shapes, non-finite masks, infinity signs, or finite values. The four Crash cases were discovered during fuzzing and represent abnormal worker termination rather than handled API exceptions. The Inconsistency cases involve materially different outputs produced by APIs retained in the same execution-validated group. Each retained case is independently reproduced before in-clusion in the final results. We examine its triggering input, API semantics, and observed outputs using official API spec-ifications and, when applicable, numerical references such as NumPy or SciPy. When no independent numerical reference is available, we report the reproducible behavioral discrepancy without treating majority behavior alone as definitive ground truth. 
+
+2) Developer Reporting Status: We submitted 72 developer reports for the validated discrepancies. Table VIII summarizes their current status by library. Fixed reports are included in the Confirmed column because the corresponding issues have been accepted and addressed by the developers. The replication package provides the complete list of developer-report links 1.Overall, 25 reports have been confirmed, including 23 that have already been fixed. Another 41 reports remain pending, while six have other dispositions. Pending and other reports are not treated as maintainer-confirmed defects. In particular, all 27 MindSpore reports remain pending and are therefore    
+
+> 1https://github.com/beanduan22/SupXamt/tree/main TABLE VIII CURRENT DEVELOPER -R EPORTING STATUS OF THE VALIDATED
+> DISCREPANCIES .
+
+Library Reports Confirmed Fixed Pending Other 
+
+PyTorch 7 5 5 0 2TensorFlow 5 5 3 0 0Keras 7 7 7 0 0JAX 12 7 7 1 4PaddlePaddle 12 1 1 11 0Chainer 2 0 0 2 0MindSpore 27 0 0 27 0Total 72 25 23 41 6                                         
+
+> 1x=np.nextafter(
+> 2np.float32(1.0),
+> 3np.float32(0.0)
+> 4)
+> 5tensorflow_result =tf.math.erfinv(x)
+> 1output:
+> 2TensorFlow result: inf
+> 3Reference result: 3.8325071
+> Listing 1. Incorrect Boundary Result in TensorFlow
+> 1x=np.array(
+> 2[np.nan, np.inf, -np.inf],
+> 3dtype=np.float32
+> 4)
+> 5keras_result =keras.ops.isclose(x, x)
+> 1output:
+> 2Keras result: [False False False]
+> 3Reference result: [False True True]
+> Listing 2. Incorrect Infinity Comparison in Keras
+
+not counted as confirmed defects. Every retained case has nevertheless been independently reproduced and examined as described above. Output inconsistency is the dominant category, accounting for 68 of the 72 cases. These cases include structural, non-finite-mask, infinity-sign, and finite-value disagreements. The four Crash cases show that the testing process can also expose abnormal process termination. Developer responses currently provide external confirmation for 25 reports, although most recently submitted reports remain pending. 
+
+3) Representative Fixed Cases: Here, we present three representative discrepancies that were fixed after reporting. They illustrate different implementation problems, including incorrect boundary handling, inconsistent comparison seman-tics, and unintended propagation of non-finite values. The discrepancy in Listing 1 is triggered by the largest representable float32 value below 1. TensorFlow returns 
+
+inf , whereas the reference returns a finite result. This case reveals incorrect numerical handling near the boundary of the valid input domain. The issue was reported to TensorFlow and has been fixed. The discrepancy in Listing 2 shows that Keras incorrectly treats identical positive and negative infinities as unequal. Al-though NaN is expected to remain unequal to itself, matching infinity values should be considered equal. The issue concerns TRANSACTIONS ON SOFTWARE ENGINEERING 81 c = np.array([np.nan, np.inf, -0.0])                                  
+
+> 2r=np.array([np.nan, 2.0, 3.0])
+> 34jax_result =jax.scipy.linalg.toeplitz(c, r)
+> 1output:
+> 2JAX result:
+> 3[[nan nan nan] [nan nan nan] [nan nan nan]]
+> 4Reference result:
+> 5[[nan 2.0 3.0] [inf nan 2.0] [-0.0 inf nan]]
+> Listing 3. Incorrect NaN Propagation in JAX
+
+comparison semantics rather than numerical tolerance and has been fixed by the developers. The discrepancy in Listing 3 shows that JAX propagates a local NaN value across the entire Toeplitz matrix. In contrast, the reference preserves the expected matrix structure and confines non-finite values to positions determined by the input vectors. This incorrect propagation behavior was reported and subsequently fixed. These fixed cases illustrate three distinct forms of incorrect behavior: a finite boundary input producing infinity, incor-rect Boolean comparison semantics for infinity values, and excessive propagation of NaN across an output matrix. They demonstrate that the detected discrepancies are not limited to small numerical deviations, but also include clear violations of expected API behavior. 
+
+Answer to RQ3. XAMT identifies 72 validated discrepancy cases, including four Crash cases and 68 output inconsisten-cies. Among the 72 submitted reports, 25 have been confirmed, including 23 that have been fixed; 41 remain pending and six have other dispositions. 
+
+D. RQ4: To what extent do the detected cases complement existing API-level differential-testing designs? 
+
+We examine complementarity at three levels. First, fixed-input backend replay determines whether the triggering in-puts already provide a direct CPU–GPU disagreement signal. Second, method-level rediscovery evaluates whether FreeFuzz and DeepREL can expose the same underlying defects using their own input-generation strategies and native oracle sets. Third, a correspondence-scope audit determines whether Ten-sorScope can represent the cross-library relations witnessing the detected cases. These analyses characterize different forms of complementarity and do not establish that a defect is unreachable under every possible input or configuration. 
+
+1) Oracle-Level Comparison with CPU–GPU Differential Testing: We replay the fixed triggering inputs for the 60 cases included in the existing backend-replay dataset on the CPU and GPU implementations of the affected APIs whenever both backends support the input. These cases are a subset of the unified Inconsistency category. Output structures and non-finite values are processed using the same rules as the main Inconsistency oracle. All 60 replayed cases produce a cross-library disagreement. Among them, 50 support both CPU and GPU execution, but none of the fixed inputs produces an observable backend disagreement. The remaining 10 cases in-volve MindSpore APIs for which a compatible GPU execution                
+
+> TABLE IX DEFECT -L EVEL REDISCOVERY BY EXISTING BASELINES .
+> Baseline Applicable Rediscovered Not Rediscovered Inconclusive
+> FreeFuzz 15 212 1DeepREL 11 191
+
+is unavailable. This fixed-input replay shows that the evaluated inputs provide no signal to a CPU–GPU differential oracle; it does not establish that a complete backend-differential testing technique using its own input-generation strategy could never expose the same defects through other inputs. 
+
+2) Method-Level Rediscovery: We run FreeFuzz and Deep-REL on the affected APIs supported by their original work-flows, using their own input-generation strategies and native oracle sets. A case is considered rediscovered when a baseline-generated test exposes the same underlying defect, even through a different input or observable symptom. Two authors independently examine each candidate; unresolved root-cause attributions are classified as inconclusive. As shown in Table IX, FreeFuzz rediscovered 2 of the 15 applicable defects, while DeepREL rediscovered 1 of the 11 applicable defects. The remaining applicable defects were not rediscovered under the evaluated versions and testing budgets, except for one inconclusive attribution for each baseline. Cases outside their supported frameworks, APIs, or relational-oracle scopes are treated as not applicable rather than unsuccessful rediscovery. These results indicate that X AMT complements the evaluated baselines within their supported testing scopes. 
+
+3) Correspondence-Scope Comparison with TensorScope: 
+
+TensorScope derives directed counterpart relations from the registries and conversion handlers of eight model converters. A source API may correspond to either one destination API or an ordered composition of multiple destination APIs. Its matching scope is therefore bounded by the frameworks and conversion rules represented in the examined converter ecosystem. In contrast, X AMT does not require a converter path and constructs multi-library groups that are checked through pairwise and group-level execution before fuzzing. TensorScope covers TensorFlow, TensorFlow Lite, ONNX Runtime, MindSpore, PyTorch, and PaddlePaddle; JAX and Chainer are outside its framework matrix, and no explicit Keras API-side correspondence registry is included. We audit the 72 independently reproduced discrepancy cases against the converter registries and handlers identified by TensorScope. For each case, we identify the API pair or pairs that actually witness the disagreement and check whether the required relation is represented directly or through an interme-diate ONNX path. A case is fully represented when at least one witnessing correspondence, including its required opera-tion and parameter relation, is available; partially represented 
+
+when relevant operations appear but the complete witnessing correspondence is unavailable; and not represented when none of its witnessing correspondences can be constructed from the examined conversion rules. As shown in Table X, only 7 of the 72 cases (9.7%) are fully represented in TensorScope’s converter-derived corre-spondence scope. Another 22 cases (30.6%) are partially repre-TRANSACTIONS ON SOFTWARE ENGINEERING 9                                            
+
+> TABLE X TENSOR SCOPE REPRESENTATION OF THE 72 C ASES .
+> Representation Cases Percentage
+> Fully represented 79.7% Partially represented 22 30.6% Not represented 43 59.7% Total 72 100.0% TABLE XI COMPONENT ANALYSIS AND TOLERANCE SENSITIVITY .
+> (a) Execution Validation Configuration Groups Raw Raw/100 Groups
+> Full X AMT 676 109 16.1 w/o Execution Validation 765 194 25.4
+> (b) Input Generation Configuration Avg. Coverage Raw Reference Cases
+> Full X AMT 26.31% 109 72/72 w/o Extended Inputs 25.63% 78 50/72 Random Mutation 24.47% 73 47/72
+> (c) Oracle Tolerance Tolerance Inconsistency Cases Change
+> 10 −468 0
+> 10 −368 –
+> 10 −260 -8
+
+sented, while 43 cases (59.7%) involve witnessing correspon-dences that cannot be constructed from the examined converter registries and handlers. Overall, 65 cases (90.3%) are not fully represented. This substantial scope difference arises from API relations involving libraries outside TensorScope’s framework matrix, explicit Keras API-side interfaces, and operations or parameter mappings absent from the examined conversion rules. This result characterizes matching applicability rather than end-to-end detection effectiveness. A fully represented case may still require a triggering input that TensorScope does not generate, whereas a not-represented case cannot be tested through the same cross-framework relation without extending its converter-derived correspondence scope. 
+
+Answer to RQ4. The analysis shows complementarity at three levels. None of the fixed triggering inputs of the 50 CPU– GPU-applicable cases in the backend-replay subset produces a backend-disagreement signal. FreeFuzz and DeepREL redis-cover 2 of 15 and 1 of 11 applicable defects, respectively, un-der the evaluated configurations. In addition, only 7 of the 72 cases are fully represented in TensorScope’s converter-derived correspondence scope, while 22 are partially represented and 43 are not represented. 
+
+E. RQ5: How do the individual components of XAMT con-tribute to its overall effectiveness? 
+
+For the component analyses in RQ5, each tested API group receives the same wall-clock budget of 60 seconds. This per-group budget controls the testing opportunity assigned to each group across configurations. Because different configurations may contain different numbers of groups, their aggregate runtimes may differ. 
+
+1) Contribution of Execution-Based Matching Validation: 
+
+We examine whether execution-based validation reduces un-suitable API correspondences supplied to fuzzing. The full configuration applies pairwise execution validation and the group-level consistency check, producing 676 execution-validated groups. The ablated configuration skips both valida-tion stages and directly tests all 765 static candidate groups. Both configurations use the same extended input generation, variance-guided fuzzing, test oracles, and per-group budget of 60 seconds. As shown in Table XI, the full configuration produces 109 raw discrepancy candidates, corresponding to 16.1 candidates per 100 tested groups. Without execution validation, the number increases to 194, or 25.4 candidates per 100 groups. Execution validation therefore reduces the density of downstream candidates requiring reproduction and examination by filtering unsuitable correspondences before fuzzing. This analysis evaluates its candidate-filtering role rather than its effect on the final retained-case set. 
+
+2) Contribution of Extended Input Generation: We evaluate the contribution of boundary and non-finite inputs by retaining the same execution-validated groups, variance-guided search, mutation operators, test oracles, initial seeds, and 60-second per-group budget, while restricting input generation and muta-tion to ordinary finite values. We use the 72 discrepancy cases identified by the full configuration as a fixed reference set and report how many of their triggering conditions are reached under each ablated configuration. As shown in Table XI, removing extended inputs decreases the average line coverage from 26.31% to 25.63% and reaches 50 of the 72 reference cases. Among the 22 cases not reached, 20 require boundary or non-finite triggering values, while the remaining two are not reached within the testing budget. These results show that extended inputs primarily improve the exploration of boundary and non-finite behaviors. 
+
+3) Contribution of Variance-Guided Fuzzing: We compare variance-guided fuzzing with random mutation. The Ran-dom Mutation configuration uses the same execution-validated groups, initial seeds, complete input domain, mutation oper-ators, test oracles, and 60-second per-group budget. It differs only in that structurally valid mutations are explored without prioritization based on the normalized disagreement score. As shown in Table XI, random mutation achieves an average line coverage of 24.47% and reaches 47 of the 72 reference cases, compared with 26.31% and 72 cases for the full configuration. These results indicate that the disagreement-guided strategy improves both code exploration and the ability to reach the triggering conditions of the reference cases. 
+
+4) Sensitivity to the Oracle Tolerance: We replay the fixed triggering inputs of the 68 Inconsistency cases using the absolute tolerance τ ∈ { 10 −4, 10 −3, 10 −2}, where 10 −3 is the default value used in the main evaluation. This analysis changes only the finite-output comparison threshold and does not rerun the fuzzing process. Mask-level and infinity-sign discrepancies are independent of the finite-value tolerance. As shown in Table XI, all 68 cases remain classified as inconsistencies at 10 −4 and the default 10 −3, while 60 cases remain at 10 −2. Thus, 88.2% of the cases remain detectable under the most permissive evaluated tolerance, indicating that TRANSACTIONS ON SOFTWARE ENGINEERING 10    
+
+> 30 60 120 25 .75 26 26 .25 26 .5
+> Budget per Group (s) Line Coverage (%) Fig. 3. Sensitivity of total testing budget.
+
+most findings are not artifacts of a narrowly selected threshold. 
+
+5) Sensitivity to the Testing Budget: We compare three per-group testing budgets: 30, 60, and 120 seconds. Fig. 3 shows that the line coverage increases from 25.75% at 30 seconds to 26.31% at 60 seconds and 26.41% at 120 seconds. Increasing the budget from 30 to 60 seconds adds 0.56 percentage points, whereas increasing it from 60 to 120 seconds adds only 0.10 percentage points. We therefore use 60 seconds per group as the default budget. 
+
+Answer to RQ5. Execution validation reduces the density of raw discrepancy candidates from 25.4 to 16.1 per 100 tested groups. Under the same 60-second per-group budget, the full configuration achieves an average line coverage of 26.31%, compared with 25.63% without extended inputs and 24.47% under random mutation. Without extended inputs and under random mutation, 50 and 47 of the 72 reference cases are reached, respectively. The budget analysis shows that coverage largely stabilizes beyond 60 seconds per group. V. R ELATED WORK 
+
+A. Testing Deep Learning Libraries 
+
+The reliability of deep learning libraries has been studied through testing, program analysis, differential execution, and fuzzing [15], [16], [17], [18], [19], [20], [21]. Existing testing techniques target different abstraction levels, including com-plete deep learning models [22], compiler and backend im-plementations [23], computational graphs [24], and individual library APIs [25]. Our work focuses on API-level testing, but is also related to model-level and cross-framework differential testing. Model-level testing generates or mutates complete neural networks and observes their execution across libraries, back-ends, or configurations. CRADLE [26] detects inconsistencies by executing existing models through different deep learn-ing libraries. LEMON [11] and AUDEE [9] improve model diversity by mutating seed models and their inputs, while Muffin [10] generates models through a top-down construction process. NNSmith [27] combines symbolic constraint solving with gradient-guided search to synthesize executable models. These techniques exercise interactions among multiple op-erators and can expose model-level failures. However, a gen-erated model must maintain compatible tensor shapes, types, and operator dependencies, which may limit direct exploration of the input domains of individual APIs. In contrast, API-level testing can target a specific operation and systematically vary its arguments without embedding it in a complete model. 
+
+B. API-Level Fuzzing 
+
+API-level fuzzing directly generates inputs for individual library APIs. FreeFuzz [12] mines valid API invocations from open-source programs and mutates the observed inputs to expose unexpected behavior. DocTer [8] extracts input constraints from API documentation and generates constraint-aware tests, particularly for crash detection. DeepREL [25] identifies related APIs within a library and uses relational and automatic-differentiation properties as test oracles. Recent approaches further employ large language models to generate executable test programs. TitanFuzz [13] uses a lan-guage model to generate and mutate deep learning programs while preserving API dependencies and input constraints. FuzzGPT [28] reuses patterns from historical bug-triggering programs to generate tests that exercise uncommon behav-iors [29], [30]. These approaches improve input and program diversity, but generally test APIs using intra-library properties, exceptions, backend differences, or execution relations rather than systematically comparing implemented equivalents across multiple libraries. Many deep learning library testing techniques use intra-library differential oracles, including comparisons between CPU and GPU executions. Such comparisons are effective when a defect manifests differently across hardware backends, but provide no disagreement signal when an implementation produces the same divergent result on both devices. In RQ4, we replay the fixed X AMT triggering inputs under a CPU– GPU differential oracle. None of the 50 applicable output inconsistencies produces an observable backend disagreement, showing that these cross-library discrepancies are not exposed by CPU–GPU comparison under the evaluated configurations. 
+
+C. Cross-Framework Differential Testing 
+
+Cross-framework differential testing compares indepen-dently implemented operations that are expected to provide equivalent functionality. It complements intra-library testing by providing additional implementations as behavioral refer-ences. The central challenge is constructing comparable API groups and translating a shared logical input into compatible library-specific invocations. TensorScope [31] extracts directed counterpart relations and parameter mappings from model-converter registries and handlers. A source API may corre-spond to either one destination API or an ordered composition of multiple destination APIs. Its correspondence scope is therefore bounded by the frameworks and conversion rules represented in the examined converter ecosystem. In con-trast, X AMT does not require a converter path and retains multi-library correspondences after pairwise and group-level execution validation. RQ4 quantitatively examines the extent to which the witnessing relations of the X AMT cases are represented by TensorScope’s converter-derived scope. VI. T HREATS TO VALIDITY 
+
+Internal Validity. Errors in API aliases, parameter-role map-pings, invocation recipes, or library-specific adapters may in-correctly include or exclude API correspondences. We mitigate this threat by checking the curated mappings against official TRANSACTIONS ON SOFTWARE ENGINEERING 11 
+
+documentation, testing representative operation categories, and validating supported correspondences through execution on shared logical inputs. Nevertheless, execution validation is input-dependent: each supported pair is checked using one deterministic operation-specific ordinary input and is therefore not proven equivalent over the complete input domain. Fuzzing results may also be affected by randomness and library-level nondeterminism. In a post-hoc audit, we re-executed 100 sampled groups on a second ordinary validation input: 100 remained mutually consistent. We fix random seeds and use deterministic CPU execution whenever possible, but a finite testing budget cannot guarantee that every reachable discrepancy is exposed. The comparison in RQ2 uses the same aggregate 12-hour budget as the preliminary evaluation, whereas the component analyses in RQ5 use the same 60-second per-group budget. Finally, the cross-library oracles identify observable disagreements but do not independently determine which implementation is incorrect. 
+
+External Validity. Our evaluation covers seven libraries and may not generalize to other libraries, versions, namespaces, hardware backends, or programming languages. The evaluated API set is limited to public callable objects in the configured namespaces, and some APIs cannot be tested because no cross-library counterpart or supported common invocation can be constructed. The findings are also specific to the evaluated software versions and environment. In addition, Keras is evaluated using the TensorFlow backend, so the corresponding implementations are not fully independent. Extending the invocation recipes, validation inputs, target libraries, Keras backends, and hardware environments would improve gener-alizability. VII. C ONCLUSION 
+
+This paper presents X AMT , a cross-framework differential fuzzing approach for deep learning library APIs. X AMT con-structs candidate API correspondences through explicit API aliases and parameter-role normalization, retains supported correspondences after pairwise and group-level execution val-idation, and applies variance-guided fuzzing over ordinary, boundary, and non-finite inputs. Across seven libraries, X AMT 
+
+constructs 676 execution-validated groups containing 2,563 API members. The evaluation retains 72 distinct discrepancy cases, including four involving abnormal process termination and 68 involving output inconsistencies. Among the 72 sub-mitted reports, 25 have been confirmed, including 23 that have been fixed. The results demonstrate that cross-library comparison exposes API-level discrepancies that provide no CPU–GPU disagreement signal under the evaluated fixed inputs and configurations. REFERENCES [1] Q. Rao and J. Frtunikj, “Deep learning for self-driving cars: Chances and challenges,” in Proceedings of the 1st international workshop on software engineering for AI in autonomous systems , 2018, pp. 35–38. [2] D. Bogdoll, M. Nitsche, and J. M. Z¨ ollner, “Anomaly detection in autonomous driving: A survey,” in Proceedings of the IEEE/CVF confer-ence on computer vision and pattern recognition , 2022, pp. 4488–4499. [3] R. Miotto, F. Wang, S. Wang, X. Jiang, and J. T. Dudley, “Deep learning for healthcare: review, opportunities and challenges,” Briefings in bioinformatics , vol. 19, no. 6, pp. 1236–1246, 2018. [4] M. Arabahmadi, R. Farahbakhsh, and J. Rezazadeh, “Deep learning for smart healthcare—a survey on brain tumor detection from medical imaging,” Sensors , vol. 22, no. 5, p. 1960, 2022. [5] J. B. Heaton, N. G. Polson, and J. H. Witte, “Deep learning for finance: deep portfolios,” Applied Stochastic Models in Business and Industry ,vol. 33, no. 1, pp. 3–12, 2017. [6] Y. Venkateswarlu, K. Baskar, A. Wongchai, V. Gauri Shankar, C. Paolo Martel Carranza, J. L. A. Gonz´ ales, and A. Murali Dharan, “An efficient outlier detection with deep learning-based financial crisis prediction model in big data environment,” Computational Intelligence and Neu-roscience , vol. 2022, 2022. [7] J. Li, B. Zhao, and C. Zhang, “Fuzzing: a survey,” Cybersecurity , vol. 1, no. 1, pp. 1–13, 2018. [8] D. Xie, Y. Li, M. Kim, H. V. Pham, L. Tan, X. Zhang, and M. W. God-frey, “Docter: documentation-guided fuzzing for testing deep learning api functions,” in Proceedings of the 31st ACM SIGSOFT International Symposium on Software Testing and Analysis , 2022, pp. 176–188. [9] Q. Guo, X. Xie, Y. Li, X. Zhang, Y. Liu, X. Li, and C. Shen, “Audee: Automated testing for deep learning frameworks,” in Proceedings of the 35th IEEE/ACM International Conference on Automated Software Engineering , 2020, pp. 486–498. [10] J. Gu, X. Luo, Y. Zhou, and X. Wang, “Muffin: Testing deep learning libraries via neural architecture fuzzing,” in Proceedings of the 44th International Conference on Software Engineering , 2022, pp. 1418– 1430. [11] Z. Wang, M. Yan, J. Chen, S. Liu, and D. Zhang, “Deep learning library testing via effective model generation,” in Proceedings of the 28th ACM Joint Meeting on European Software Engineering Conference and Symposium on the Foundations of Software Engineering , 2020, pp. 788–799. [12] A. Wei, Y. Deng, C. Yang, and L. Zhang, “Free lunch for testing: Fuzzing deep-learning libraries from open source,” in Proceedings of the 44th International Conference on Software Engineering , 2022, pp. 995–1007. [13] Y. Deng, C. S. Xia, H. Peng, C. Yang, and L. Zhang, “Large language models are zero-shot fuzzers: Fuzzing deep-learning libraries via large language models,” in Proceedings of the 32nd ACM SIGSOFT interna-tional symposium on software testing and analysis , 2023, pp. 423–435. [14] B. Duan, R. Dong, N. Dong, D. D. Kim, and G. Yang, “Xamt: Cross-framework api matching for testing deep learning libraries,” in 2025 IEEE 36th International Symposium on Software Reliability Engineering (ISSRE) , 2025, pp. 191–202. [15] G. Yang, R. Qiu, S. Khurshid, C. S. P˘ as˘ areanu, and J. Wen, “A synergistic approach to improving symbolic execution using test ranges,” 
+
+Innovations in Systems and Software Engineering , vol. 15, pp. 325–342, 2019. [16] G. Yang, A. Filieri, M. Borges, D. Clun, and J. Wen, “Advances in symbolic execution,” Advances in Computers , vol. 113, pp. 225–287, 2019. [17] Q. Yang, M. Li, Q. Wang, G. Yang, J. Zhai, J. Li, L. Hou, and Y. Yang, “An algebraic approach for managing inconsistencies in software pro-cesses,” in International Conference on Software Process . Springer, 2007, pp. 121–133. [18] Q. Yi and G. Yang, “Feedback-driven incremental symbolic execution,” in 2022 IEEE 33rd International Symposium on Software Reliability Engineering (ISSRE) . IEEE, 2022, pp. 505–516. [19] T. Mahmud, M. Che, and G. Yang, “Acid: an api compatibility issue detector for android apps,” in Proceedings of the ACM/IEEE 44th Inter-national Conference on Software Engineering: Companion Proceedings ,2022, pp. 1–5. [20] Q. Yi, J. Wen, and G. Yang, “Summary-guided incremental symbolic execution,” in Proceedings of the ACM/IEEE 42nd International Con-ference on Software Engineering: Companion Proceedings , 2020, pp. 310–311. [21] M. Wu, L. Jiang, J. Xiang, Y. Zhang, G. Yang, H. Ma, S. Nie, S. Wu, H. Cui, and L. Zhang, “Evaluating and improving neural program-smoothing-based fuzzing,” in Proceedings of the 44th International Conference on Software Engineering , 2022, pp. 847–858. [22] N. Christou, D. Jin, V. Atlidakis, B. Ray, and V. P. Kemerlis, “ {IvySyn }:Automated vulnerability discovery in deep learning frameworks,” in 
+
+32nd USENIX Security Symposium (USENIX Security 23) , 2023, pp. 2383–2400. [23] D. Xiao, Z. Liu, Y. Yuan, Q. Pang, and S. Wang, “Metamorphic testing of deep learning compilers,” Proceedings of the ACM on Measurement and Analysis of Computing Systems , vol. 6, no. 1, pp. 1–28, 2022. TRANSACTIONS ON SOFTWARE ENGINEERING 12 
+
+[24] J. Wang, T. Lutellier, S. Qian, H. V. Pham, and L. Tan, “Eagle: creating equivalent graphs to test deep learning libraries,” in Proceedings of the 44th International Conference on Software Engineering , 2022, pp. 798– 810. [25] Y. Deng, C. Yang, A. Wei, and L. Zhang, “Fuzzing deep-learning libraries via automated relational api inference,” in Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering , 2022, pp. 44– 56. [26] H. V. Pham, T. Lutellier, W. Qi, and L. Tan, “Cradle: cross-backend validation to detect and localize bugs in deep learning libraries,” in 
+
+2019 IEEE/ACM 41st International Conference on Software Engineering (ICSE) . IEEE, 2019, pp. 1027–1038. [27] J. Liu, J. Lin, F. Ruffy, C. Tan, J. Li, A. Panda, and L. Zhang, “Nnsmith: Generating diverse and valid test cases for deep learning compilers,” in 
+
+Proceedings of the 28th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 ,2023, pp. 530–543. [28] Y. Deng, C. S. Xia, C. Yang, S. D. Zhang, S. Yang, and L. Zhang, “Large language models are edge-case fuzzers: Testing deep learning libraries via fuzzgpt,” arXiv preprint arXiv:2304.02014 , 2023. [29] J. Chen, G. Wang, D. Hao, Y. Xiong, H. Zhang, and L. Zhang, “History-guided configuration diversification for compiler test-program genera-tion,” in 2019 34th IEEE/ACM International Conference on Automated Software Engineering (ASE) . IEEE, 2019, pp. 305–316. [30] C. Holler, K. Herzig, and A. Zeller, “Fuzzing with code fragments,” in 21st USENIX Security Symposium (USENIX Security 12) , 2012, pp. 445–458. [31] Z. Deng, G. Meng, K. Chen, T. Liu, L. Xiang, and C. Chen, “Differential testing of cross deep learning framework {APIs }: Revealing inconsisten-cies and vulnerabilities,” in 32nd USENIX Security Symposium (USENIX Security 23) , 2023, pp. 7393–7410.

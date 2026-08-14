@@ -6,50 +6,62 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-13
-- 运行时间：2026-08-13 21:13:32 UTC
+- 最新运行日期：2026-08-14
+- 运行时间：2026-08-14 21:12:39 UTC
 - 运行状态：成功
-- 本次总论文数：9
-- 精读区：1
-- 速读区：8
+- 本次总论文数：13
+- 精读区：3
+- 速读区：10
 
 ### 今日简报（AI）
-- 今日共生成 9 篇推荐（精读 1 篇，速读 8 篇）
-- 精读：《CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing》（10.0/10）
-- 速读：《SpecPath: Testing Coding Agents Across Contract-Equivalent Specification Histories》（7.5/10）, 《ZhuLong: Execution-Grounded LLM Agent for EDA Scripting with Offline API Self-Exploration》（7.0/10）, 《Entropy-based Code Adversarial Translation for Real-world Repository Migration》（7.0/10）
+- 今日共生成 13 篇推荐（精读 3 篇，速读 10 篇）
+- 精读：《Refine After Generation: Toward Correct and Concise Patches in LLM-based Program Repair》（9.0/10）, 《Janus: An Algorithm-Evaluator Co-Evolution Framework for LLM-Driven Discovery under Expensive Evaluation Budgets》（8.0/10）
+- 速读：《Entropy-based Code Adversarial Translation for Real-world Repository Migration》（7.5/10）, 《Specification-first convergence with an AI coding agent: a case study of dismantling a core architectural invariant across 189 files in a 717k-line codebase with no test oracle and no human code review》（7.0/10）, 《Can Formal Specifications Be Synthesized from Tests Alone?》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202608/13/README](/202608/13/README)
+- 详情：[/202608/14/README](/202608/14/README)
 
 ### 精读区论文标签
-1. [CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing](/202608/13/2608.10613v1-causalrepair-bridging-the-causality-gap-in-large-language-model-based-automated-program-repair-via-dual-slicing)  
-   标签：评分：10.0/10、query:apr-oracle
-   evidence：基于大模型的自动程序修复框架，使用双重切片获取因果上下文
+1. [Refine After Generation: Toward Correct and Concise Patches in LLM-based Program Repair](/202608/14/2608.13292v1-refine-after-generation-toward-correct-and-concise-patches-in-llm-based-program-repair)  
+   标签：评分：9.0/10、query:apr-oracle
+   evidence：关注大语言模型自动程序修复中除通过测试外的补丁正确性与质量
+2. [Janus: An Algorithm-Evaluator Co-Evolution Framework for LLM-Driven Discovery under Expensive Evaluation Budgets](/202608/14/2608.08189v1-janus-an-algorithm-evaluator-co-evolution-framework-for-llm-driven-discovery-under-expensive-evaluation-budgets)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：共同演化目标程序和可执行代理评估器
+3. [Requirements-Augmented Generation for Trustworthy Acceptance Testing of LLM-Based Software](/202608/14/2608.12970v1-requirements-augmented-generation-for-trustworthy-acceptance-testing-of-llm-based-software)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：针对大模型软件的自动化验收测试与测试预言
 
 ### 速读区论文标签
-1. [SpecPath: Testing Coding Agents Across Contract-Equivalent Specification Histories](/202608/13/2608.09799v1-specpath-testing-coding-agents-across-contract-equivalent-specification-histories)  
+1. [Entropy-based Code Adversarial Translation for Real-world Repository Migration](/202608/14/2608.09273v2-entropy-based-code-adversarial-translation-for-real-world-repository-migration)  
    标签：评分：7.5/10、query:apr-oracle
-   evidence：在契约等价的规范历史中测试编码代理
-2. [ZhuLong: Execution-Grounded LLM Agent for EDA Scripting with Offline API Self-Exploration](/202608/13/2608.07925v1-zhulong-execution-grounded-llm-agent-for-eda-scripting-with-offline-api-self-exploration)  
+   evidence：用于自动程序修复和迁移的多智能体框架
+2. [Specification-first convergence with an AI coding agent: a case study of dismantling a core architectural invariant across 189 files in a 717k-line codebase with no test oracle and no human code review](/202608/14/2608.12440v1-specification-first-convergence-with-an-ai-coding-agent-a-case-study-of-dismantling-a-core-architectural-invariant-across-189-files-in-a-717k-line-codebase-with-no-test-oracle-and-no-human-code-review)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：具有基于断言执行的执行落地LLM代理，用于脚本修复
-3. [Entropy-based Code Adversarial Translation for Real-world Repository Migration](/202608/13/2608.09273v2-entropy-based-code-adversarial-translation-for-real-world-repository-migration)  
+   evidence：在没有预先存在的预言验证行为的情况下进行AI编程代理重构
+3. [Can Formal Specifications Be Synthesized from Tests Alone?](/202608/14/2608.13240v1-can-formal-specifications-be-synthesized-from-tests-alone)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：自动程序修复及衡量迁移质量的判别器
-4. [GraphAlignCoder: Aligning Program and Proof Graphs for Code Generation](/202608/13/2608.11394v1-graphaligncoder-aligning-program-and-proof-graphs-for-code-generation)  
+   evidence：从测试和执行轨迹中合成形式化规范作为测试预言
+4. [Does Fixing Break Security? An Empirical Study of Security Degradation in Iterative LLM-Driven Infrastructure-as-Code Repair](/202608/14/2608.13404v1-does-fixing-break-security-an-empirical-study-of-security-degradation-in-iterative-llm-driven-infrastructure-as-code-repair)  
    标签：评分：7.0/10、query:apr-oracle
-   evidence：对齐程序和证明图，将显式正确性结构转移到代码生成中
-5. [Diagnosis Before Recovery: Turning Agent Failures into Selective Self-Correction](/202608/13/2608.11772v1-diagnosis-before-recovery-turning-agent-failures-into-selective-self-correction)  
-   标签：评分：7.0/10、query:apr-oracle
-   evidence：针对编码任务中代理失败的选择性自我纠正
-6. [EvoMem: Memory-Augmented Evolution for Code Optimization](/202608/13/2608.10795v1-evomem-memory-augmented-evolution-for-code-optimization)  
+   evidence：评估迭代式LLM驱动代码修复中的安全性退化
+5. [Directed Neuro-Symbolic Stochastic Execution for Verification of Distributed Parallel AI Programs](/202608/14/2608.07947v1-directed-neuro-symbolic-stochastic-execution-for-verification-of-distributed-parallel-ai-programs)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：基于大语言模型的进化程序搜索与变异知识重用
-7. [Harnessing LLMs for Document-Guided Fuzzing of Python Libraries](/202608/13/2608.11744v1-harnessing-llms-for-document-guided-fuzzing-of-python-libraries)  
+   evidence：在AI程序验证中使用线性时序逻辑指定正确性
+6. [Memoir: Learning, Verifying, and Evolving False-Positive Memories for Static Application Security Testing Tools](/202608/14/2608.09181v1-memoir-learning-verifying-and-evolving-false-positive-memories-for-static-application-security-testing-tools)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：提取参数规范用于模糊测试预言
-8. [Claim-Level Reliability Assessment for Efficient Test-Time Reasoning](/202608/13/2608.11994v1-claim-level-reliability-assessment-for-efficient-test-time-reasoning)  
+   evidence：识别并验证安全测试中的误报警报
+7. [From Runnable to Verifiable: An Independent Reproducibility Study of LLM/Agent-Driven Vulnerability Validation Artifacts](/202608/14/2608.09567v1-from-runnable-to-verifiable-an-independent-reproducibility-study-of-llmagent-driven-vulnerability-validation-artifacts)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：针对解法正确性的目标验证与语义证伪
+   evidence：漏洞验证工件与补丁反事实判定
+8. [Testing Deep Learning Library APIs via Cross-Framework Differential Fuzzing](/202608/14/2608.11886v1-testing-deep-learning-library-apis-via-cross-framework-differential-fuzzing)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：用于测试的跨框架差异预言
+9. [$\varepsilon$-MemEvo: Adaptive Cross-Task Memory Transfer for LLM Program Evolution](/202608/14/2608.12522v1-varepsilon-memevo-adaptive-cross-task-memory-transfer-for-llm-program-evolution)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：程序演化中带有自适应注入的跨任务知识迁移
+10. [InSPECtor: Improving SLEIGH Processor Specification Veracity via Proxy](/202608/14/2608.13042v1-inspector-improving-sleigh-processor-specification-veracity-via-proxy)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：针对规范的自动化代理预言验证策略
 
 
 <div class="dpr-home-promo-card">

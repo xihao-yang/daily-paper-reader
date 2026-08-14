@@ -1,0 +1,496 @@
+Title: Refine After Generation: Toward Correct and Concise Patches in LLM-based Program Repair
+
+URL Source: https://arxiv.org/pdf/2608.13292v1
+
+Published Time: Fri, 14 Aug 2026 01:04:30 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# Refine After Generation: Toward Correct and Concise Patches in LLM-based Program Repair 
+
+Wenqiang Luo ∗, Jacky Keung ∗, Xiaoyu Shi †, Yicheng Sun ∗, Boyang Yang ‡, Zhou Yang §, and Haoye Tian †∗Department of Computer Science, City University of Hong Kong, Hong Kong, China wenqialuo4-c@my.cityu.edu.hk, Jacky.Keung@cityu.edu.hk, yicsun2-c@my.cityu.edu.hk 
+
+†Department of Computer Science, Aalto University, Espoo, Finland xiaoyu.shi@aalto.fi, haoye.tian@aalto.fi 
+
+‡Jisuan Institute of Technology, Beijing, China, buaabarty@gmail.com 
+
+§Department of Computing Science, University of Alberta, Edmonton, Canada, zy25@ualberta.ca 
+
+Abstract —Large language models (LLMs) have advanced automatic program repair (APR) to the point where agentic systems routinely resolve real-world, repository-level issues. Yet the generated patch, the artifact that validators execute, ranking systems compare, and developers ultimately inspect, has received little scrutiny beyond whether it passes tests. In this paper, we identify patch verbosity as a major yet overlooked concern in LLM-based APR. Characterizing 28 state-of-the-art approaches on SWE-bench Verified, we find that even successful patches are consistently larger and more complex than developer patches, with the median approach producing 121.78% more total changes, 80.91% more net changes, and 43.99% higher cyclomatic complexity. We further show that this verbosity is rooted in capability-oriented design choices such as iterative refinement and broad context, and can hardly be reduced by surface-level controls such as output format or minimality prompts. Motivated by these findings, we formu-late post-generation patch refinement and propose RECAP, a lightweight, plug-and-play adapter that attaches to existing repair frameworks after generation. RECAP’s refiner is trained via supervised fine-tuning and direct preference optimization with distilled reasoning traces, on a dataset of patch pairs we construct from multiple sources. Across four host systems, prompting, commit-untangling, and minimality-aware baselines reduce patch size only by sacrificing 49 to 217 resolved instances. In contrast, RECAP achieves a substantially better size-correctness tradeoff, cutting average total changes from +242.14% to +4.24% and net changes from +348.24% to -39.75% relative to developer patches while preserving or improving resolution by up to 42 instances. Our results indicate that minimality cannot be simply reduced to syntactic compression, and that decoupling minimization from generation offers a practical path to more reviewable repairs. 
+
+I. I NTRODUCTION 
+
+Large language models (LLMs) have transformed automatic program repair (APR), shifting the field from rigid tem-plates to generative strategies based on prompting, fine-tuning, retrieval-augmentation, and agent-based pipelines [1]–[3]. This shift is critical for repository-level bug fixing, where local file context is insufficient but naive whole-repository inclusion exceeds model limits [4]. Modern coding agents address this with multi-step workflows of planning, tool use, and execution feedback [5], evaluated by benchmarks like SWE-bench [6]. As these pipelines grow mature, the generated patch becomes the central artifact that downstream validators execute, ranking systems compare, and developers inspect. However, a patch that resolves an issue is not necessarily one developers can trust. LLM-based APR may produce patches that are textually large, broad in scope, unnecessarily complex, or mixed with indirect and redundant changes. Such verbosity matters because developers prefer smaller repairs [7] that are more likely to be accepted [8], and industrial evidence shows human fixes are usually compact [9]. Reviewers reject large patches not for size itself but for the higher risk of unnecessary changes [10] that raise review confusion, effort, and rejection [11]. Verbose repairs are further linked to fault-proneness [12], regressions and poor localization [13], and wasted token budget and latency [14]. This growing risk from large patches motivates patch minimization. Yet this drive for minimality must be balanced against correctness. Passing tests makes a patch plausible, but weak oracles and under-constrained suites can still admit overfitting [15], so patch minimization cannot be treated as purely syn-tactic compression. A useful refinement method must reduce unnecessary changes without degrading the correctness needed to resolve the issue. Existing APR research largely targets producing, validating, and selecting candidate patches [1]–[3], [5], paying less attention to a complementary post-generation question: once an APR system produces a plausible patch, is that patch already good enough for developers to inspect, maintain, and integrate, or can it be further refined while preserving its correctness? 
+
+Prior works motivate this question but do not answer it. Commit untangling [16], [17] isolates development intents, yet the extracted commit may remain internally complex. Delta debugging [18], [19] minimizes changes under preserved properties but demands repeated validation runs that become prohibitively expensive for large-scale APR. Minimality-aware methods like AdaPatcher [20] and QiMeng-PRepair [21] embed minimality into generation by training small mod-els, which trail the frontier LLMs that dominate the SWE-bench leaderboard [22] at repository-level repair and remain restricted to function-level code. Meanwhile, state-of-the-art frameworks rely on massive LLMs and complex multi-agent workflows whose retraining imposes severe computational burden. 
+
+This work. We target post-generation refinement of LLM-arXiv:2608.13292v1 [cs.SE] 13 Aug 2026 generated candidate patches for repository-level issue fixes, integrating with existing systems after their patch-generation stage. Specifically, we propose RECAP (RE fine for Correct 
+
+And concise Patches), a lightweight post-generation adapter for plug-and-play patch refinement. Refinement starts from an existing patch rather than synthesizing one from scratch, which lowers the capability barrier enough for a compact specialized model to be viable compared to direct repair. Given relevant context and a candidate patch, RECAP attempts to return a more concise refined patch through three components, where the collector curates the context and candidate patch provided by the host framework, the filter decides whether a candidate should be refined under the active deployment policy, and the refiner generates the refined patch. Training the refiner requires data mapping verbose patches to concise targets. We construct a 5,540-instance patch-refinement dataset from three complementary sources includ-ing function-level repair pairs, tangled commits paired with their atomic fixes, and synthetic SWE-bench instances created by inflating concise developer patches. We train with super-vised fine-tuning (SFT) and direct preference optimization (DPO) [23], strengthened by reasoning traces that expose the verbose-to-concise transformation [23]–[27]. We evaluate on SWE-bench Verified along three research questions. First, we characterize patch verbosity across 28 leaderboard approaches, such as SWE-agent [28], OpenHands [29], Agentless [30], and analyze design factors associated with larger patches. Second, we apply RECAP to patches from different frameworks and compare against prompting, commit-untangling, and minimality-aware baselines. Third, we ablate the training phases to evaluate their contribution. Our results show that patch verbosity is widespread, where across 28 approaches the median successful patch has +121.78% more total changes, +80.91% more net changes, and +43.99% higher cyclomatic complexity than the developer patch, tied to design choices such as iterative refinement and broad context rather than surface-level controls like output format or minimality prompts. RECAP achieves a substantially better size-correctness tradeoff than baselines, which lose 49 to 217 resolved instances while shrinking patches. Across four host systems, RECAP cuts average total changes from +242.14% to +4.24% and net changes from +348.24% to -39.75% relative to developer patches, while preserving or improving resolution by up to +42 instances. Our ablation shows that SFT supplies the core refinement ability while DPO is essential for preserving correctness lost by aggressive SFT-only simplification. This paper makes the following contributions:  
+
+> •
+
+We empirically characterize patch verbosity in state-of-the-art SWE-bench APR systems, showing that many resolved patches remain larger, broader, or more complex than corresponding developer patches.  
+
+> •
+
+We formulate post-generation patch refinement for APR and propose an adapter that can be integrated after the patch-generation stage of existing APR frameworks.  
+
+> •
+
+We construct a multi-source patch-refinement dataset with verbose-to-concise pairs, reasoning traces, and preference pairs for training a specialized refiner.  
+
+> •
+
+We perform a comprehensive evaluation of RECAP on SWE-bench Verified to reveal the effectiveness of post-generation patch refinement. II. R ELATED WORK 
+
+LLM-based Program Repair. Recent APR is increas-ingly driven by LLM-based systems evaluated on repository-level benchmarks such as SWE-BENCH [6]. Some improve the repair process through fault localization, context re-trieval, and patch generation, search- and retrieval-oriented ap-proaches (e.g., A UTO CODE ROVER [31], SWE-S EARCH [32], LINGMA AGENT [33]) improve repository exploration, while pipeline-based methods (e.g., SWE-F IXER [34]) decompose repair into stages such as file retrieval and code editing. A second direction enhances agent capabilities through rein-forcement learning or experience reuse (e.g., D EEP SWE [35], SWE-E XP [36]) and transferable procedural knowledge (e.g., LINGXI [37]), whereas A GENTLESS [30] shows that simplified non-agentic workflows remain competitive. Other work studies scaling (e.g., S KYWORK -SWE [38]), efficiency (e.g., P ATCH -PILOT [39]), and infrastructure (e.g., O PEN HANDS [29]). Most systems emphasize process and system efficiency, with limited attention to enforcing simplicity in patch generation. 
+
+Patch Simplicity and Its Importance. Empirical studies consistently show that smaller, simpler patches are preferable. Larger patches are more error-prone [12] and less likely to be accepted during code review [8], and developers favor concise changes that avoid unnecessary modifications while preserving correct behavior [7]. Complex patches also increase cogni-tive overhead, as long or tangled changes frequently lead to confusion, lower review quality, and delayed integration [11]. Rejection is often driven not by size alone but by irrelevant or mixed changes within a patch [10], and in automated repair, overly complex patches further raise the risk of regressions and unintended side effects [13]. Most real-world fixes are also relatively small, reinforcing the importance of minimal edits [9]. Despite this, LLM-based APR systems often generate unnecessarily complex patches due to imperfect localization and a tendency to produce self-contained solutions rather than minimal edits [14]. Patch simplicity therefore remains critical for correctness, reviewability, and maintainability, since large or complex patches can degrade both software quality and developer productivity. 
+
+Towards Simpler and Minimal Patches. Prior work sim-plifies code changes in several ways. Commit untangling techniques (e.g., FLEXEME [40], UTANGO [16], ATOM - 
+
+> IZER
+
+[17]) decompose mixed commits into coherent units, while delta debugging and program reduction methods (e.g., PERSES [41], C2D2 [42]) isolate failure-inducing changes by iteratively removing irrelevant code while preserving behavior. More recently, minimality has been built into APR, where QIMENG -PR EPAIR [21] uses edit-aware rewards to encour-age concise patches and AdaPatcher [20] applies preference learning to bias repair toward smaller edits. However, these approaches remain loosely integrated with modern LLM-based repair systems, leaving the gap between powerful repair generation and controlled patch simplicity an open challenge. III. D ATA CONSTRUCTION 
+
+A. Function-Level Code Pairs 
+
+Our first source is the ACPR preference dataset [20], built around the code consistency rate (CCR), the proportion of code lines preserved after modification. Each of its 1,227 samples provides two correct solutions whose CCRs differ by at least 0.1, one preserving more original code and one performing a larger rewrite. We take the lower-CCR solution as the non-minimal repair and the higher-CCR solution as the refinement target. The input is the problem description, buggy code, and lower-CCR patch, and the target is the higher-CCR patch, teaching refinement at the function level. 
+
+B. Tangled CCS Commits 
+
+Our second source captures repository-level patches where a bug fix is committed together with unrelated maintenance changes. We use the tangled commit dataset of Koh et al. [43], built from the manually annotated Conventional Commits Specification (CCS) dataset of Zeng et al. [44], which contains 350 atomic commits each labeled with a single intent such as fix , refactor , or build , mixed into 1,400 multi-label tangled commits. Selecting tangled commits with at least two CCS labels including fix yields 533 instances, treating the tangled commit as the non-minimal patch and the corresponding atomic fix commit as the target. Since the dataset provides commit messages rather than issue reports, the atomic fix message serves as the relevant context. 
+
+C. Synthetic SWE-bench Data 
+
+To improve real-world generalizability, we synthesize data from the SWE-bench training split [6] with no overlap with the test split, following prior repository-level repair training such as SWE-Llama [6] and Nemotron-CORTEXA [45]. We inflate concise gold (developer) patches into larger input patches. 
+
+Candidate pre-processing. From roughly 19K training in-stances, we remove empty-patch, malformed, and over-length cases exceeding a 32K-token budget measured after filling the issue description, repository context, and patch into our prompt template, leaving 11,821 valid instances. 
+
+Concise-target selection. Since not every gold patch is already concise, we use LLM-as-a-Judge [46] to identify patches that are minimal and free of the inflation patterns in Table I, yielding 4,109 concise-target instances. 
+
+Sampling and training-regime split. To control cost, we stratified-sample 50% of the judged-concise instances while preserving the repository and patch-size distribution (total code changes, as defined in Section IV), giving 2,054 instances, split into SFT and DPO sets at a 4:1 ratio (1,643 SFT, 411 DPO). The disjoint split reduces SFT memorization during preference tuning, and the larger SFT share follows evidence that SFT remains a primary driver before preference optimization [24]. TABLE I: Patch-inflation rules.              
+
+> Category Inflation patterns Overly complex solutions Replace simple conditionals with elaborate logic; Use convoluted, verbose patterns when simpler ones exist; Over-refactor (e.g., adopt a new framework) when a small fix suffices. Unnecessary or irrelevant changes Touch unrelated code or extra files; Add needless helpers or wrappers; Perform multi-site refactors where a local change at the call site would suffice. Code overwrite Rewrite whole functions or large sections; Duplicate behavior already handled upstream or data already available. Overfitting fixes Handle edge cases explicitly instead of generally; Add case-by-case checks; Fix downstream in callers (e.g., try/except ) rather than the root cause upstream. Documen-tation &comments Add docstrings or comments explaining the fix; Add comments explaining unmodified surrounding code. Reinventing /bypassing abstractions Reimplement built-in parameters, helpers, or framework mechanisms; Manually transform data covered by existing utilities; Bypass base classes or default utilities with hardcoded logic. Formatting /cosmetic noise Add whitespace noise (blank lines, indentation); Make cosmetic-only edits such as renaming or reordering imports; Add redundant else /pass blocks.
+
+As-is examples. To prevent the model from blindly refining already-concise patches, 20% of the SFT set are “as-is” examples whose input and target are identical gold patches, yielding 328 as-is and 1,315 standard SFT instances. 
+
+Constructing verbose input patches. For each standard SFT instance, we create large input patches via inflation and rejection sampling. (1) In inflation, a high-performance closed-source LLM rewrites the gold patch into a larger one while preserving the fix, guided by prior observations of how patches become unnecessarily large or indirect, including overly complex fixes [47], [48], unnecessary or irrelevant edits [49], code overwriting [48], overfitting fixes [7], [50], reinventing or bypassing abstractions [48], and formatting or cosmetic noise [51], summarized in Table I. (2) In rejection sampling, we use the issue description and code context from SWE-BENCH ORACLE [6] to ask the LLM to write extensive patches from scratch, sampling 10 candidates per instance and keeping the largest. With as-is examples, this yields 2,958 SFT instances. 
+
+Preference-pair construction. For the 411 DPO seeds, we build larger input patches with the same procedures, then sample 10 refined patches from the SFT model per input. Patches larger than the gold ones become rejected patches and the gold patches become chosen patches. Since each seed contributes one inflated and one rejection-sampled input, this produces 822 DPO preference instances. 
+
+D. Reasoning Trace Collection 
+
+Beyond input–output pairs, we collect reasoning traces via chain-of-thought (CoT) distillation [25], where a high-performance closed-source LLM explains each refinement, transferring complex reasoning from stronger to smaller mod-els [26], [52]. We emphasize structured stepwise traces, which aid student-model learning and improve rationality [26], [53]. Traces cover all three transformations, namely lower-CCR to TABLE II: Overview of the patch refinement dataset.                 
+
+> Source Granu-larity Input patch Target patch Relevant context Train #Inst. ACPR Function Lower-CCR solution Higher-CCR solution Problem description SFT 1,227 CCS commits Commit Tangled fix commit Atomic fix commit Fix message SFT 533 Synthetic Repo Inflated / sampled patch Gold patch Issue description / repo context SFT 2,958 Repo Inflated / sampled patch Gold patch (chosen) SFT sampled (reject) DPO 822 Total 5,540
+
+higher-CCR solutions, tangled to atomic fix commits, and inflated to concise patches, with the teacher explaining how each concise target derives from the verbose patch [27], [54]. 
+
+E. Final Dataset 
+
+The final dataset contains 5,540 instances, namely 1,227 function-level pairs, 533 tangled-commit pairs, and 3,780 SWE-bench synthetic instances (Table II). We use SEARCH/REPLACE (S/R) blocks for patches rather than Git diffs, avoiding the invalid or hallucinated line numbers of diff headers while improving application efficiency [30]. We recover the final Git diff deterministically from the applied blocks, so SWE-bench [6] evaluates line numbers from the diff algorithm rather than LLM-generated ones. IV. A PPROACH 
+
+APR is commonly a pipeline that locates suspicious code, generates candidate patches, and validates them against an or-acle [1]–[3]. Recent LLM-based systems instantiate it as fine-tuned models, prompt-based pipelines, multi-step workflows, or autonomous agents [3], the generated patch remains the unit passed to validation, ranking, or submission. This common interface motivates a refinement adapter that wraps existing frameworks. As shown in Figure 1, rather than replacing patch generation, we insert a lightweight plug-in refinement step between candidate generation and downstream stages. 
+
+A. Task Formulation 
+
+Let B denote the problem context, C the code context, and p a candidate patch from the repair framework, where applying p to program P yields P ⊕ p. Given x = ( B, C, p ),patch refinement produces a refined patch p′ preferable to 
+
+p under the intended bug-fixing specification. The primary objective is concision, where among patches satisfying the intended behavior, p′ expresses the fix with a smaller, simpler change than p. Correctness acts as a constraint, so p′ preserves a correct p and may repair an incorrect p when the context supports a better fix. Formally, the correctness condition is: 
+
+P ⊕ p′ |= S, (1) where S is the intended bug-fixing specification. This con-dition is conceptual since S is rarely available in real APR settings, and a test suite T provides an executable oracle for plausibility rather than a proof of correctness. Refinement is thus separated from generation, where the adapter starts from an existing candidate, improves its concision and logic, and must not make a correct or plausible candidate worse. 
+
+B. Overview of RECAP 
+
+As detailed in Figure 1, RECAP has three components, namely a collector, a filter, and a refiner. The collector 
+
+standardizes the interface between a framework and RECAP. Since frameworks expose artifacts in heterogeneous formats, it obtains context through a framework-adaptive procedure rather than a fixed parser. From one reference localization artifact, e.g., a bug-localization file for workflow systems such as Agentless [30] or a trajectory for agentic systems such as SWE-agent [28], an LLM generates a reusable Python extraction script applied to all instances of that framework. The candidate patch p is located via configuration, and the optional test resource T is gathered by a script run against the patched code, targeting SWE-bench suites but extensible to other oracles. The collector emits a unified context file pairing each instance with (B, C, p, T ), giving the refiner a stable input format without assuming a single architecture or a hand-written parser per framework. The filter decides whether a candidate is sent to the refiner according to the deployment mode (Section IV-D), forwarding all candidates when refinement risk is acceptable or, in con-servative modes, keeping the candidate unchanged or invoking an LLM-as-a-Judge to estimate whether refinement is safe. The refiner is a small open-source LLM trained for patch refinement. Given x = ( B, C, p ), it generates ˆp = Rθ (x) in the same S/R representation as the input, and RECAP returns either ˆp or the original p according to the active mode. 
+
+C. Training the Refiner 
+
+We train the refiner in two phases, where SFT teaches the input-output structure of patch refinement and DPO shifts its preference toward concise patches. Both use the dataset constructed in Section III, randomly partitioned into training and evaluation splits at a 90% / 10% ratio. 
+
+SFT phase. Let Dsft = {(xi, y i)}Ni=1 be the supervised dataset, where xi = ( Bi, C i, p i) and yi is the reasoning trace ending with the final S/R patch. We fine-tune the refiner policy on Dsft with a token-level cross-entropy loss over each target sequence yi.
+
+Curriculum scheduling. The three sources form a natural difficulty progression by granularity, namely function-level pairs / tangled commits / synthetic repository-level instances (easy / medium / hard ). We exploit this ordering with curricu-lum learning to stabilize SFT [55], with phase composition governed by a smoothing factor λ [56]. Training spans six epochs, starting with a warm-up on easy data only ( 100 /0/0). In each later epoch, λ of the samples come from the hard source while the remaining 1 − λ rehearse easy and medium sources to prevent catastrophic forgetting. Raising λ across the five epochs ( 0, 0.3, 0.6, 0.9, 1.0) yields hard ratios of Candidate APR Framework 
+
+Locate 
+
+Suspicious Code 
+
+Generate 
+
+Candidate Patches Rank/ Validate 
+
+Patches Submit/ 
+
+Return Patch 
+
+Patch 
+
+Refinement Adapter 
+
+Adapter Architecture 
+
+ Collector 
+
+> Problem Context (B)
+> (e.g., issue description, commit
+> message, stack trace, …)
+> Code Context (C)
+> (e.g., related files, functions,
+> retrieved snippets, …)
+> Candidate Patch (p)
+> (Optional) Tests / Oracle (T) Collected Instance
+> x=(B, C, p, [T])
+
+ Filter  
+
+> Unconditional Judge-Guided
+> Decides whether to forward the candidate patch
+> Oracle-Guided [T]
+> Deployment Modes
+
+ Refiner ( )
+
+> Input Output
+> x=(B, C, p)
+> Refined patch
+
+Adapter Output         
+
+> Refined Patch Original Patch p
+> (Bypass/Fallback)
+> Unconditional Refinement Judge-Guided Refinement Oracle-Guided Refinement
+> Candidate
+> x=(B,C,p)
+> Refiner Refined Judge
+> Refined Original
+> p
+> Candidate
+> x=(B,C,p)
+> Candidate
+> x=(B,C,p)
+> Refiner Refiner Run on Tests/Oracle [T]
+> Refined Original
+> p
+> Refinable Not Refinable Fail Pass
+> Localization Artifact (reference)
+> (e.g., localization
+> file, agent trajectory)
+> Generate Extraction Script
+> Apply to Instances
+
+Fig. 1: Overview of RECAP. 
+
+0/30 /60 /90 /100% , so the model consolidates simpler refine-ments before specializing on repository-level patches. 
+
+DPO phase. We apply DPO [23] to contrast concise targets with less-preferred model-sampled patches. We use DPO over online RL such as PPO [57] and GRPO [58], since optimizing a static preference dataset needs no separate reward model or on-policy rollouts, keeping preference tuning cheap and consistent with our plug-and-play design. Let Ddpo = {(xi, y +
+
+i , y −
+
+i )}Mi=1 be the preference dataset, where y+
+
+i is the concise gold patch and y−
+
+i is sampled from the SFT model (Section III-C). Taking the SFT model as the reference policy, we optimize the DPO objective so the refiner assigns higher relative likelihood to y+
+
+i than to y−
+
+i , and the resulting policy serves as RECAP’s refiner. 
+
+D. Deployment Modes 
+
+APR frameworks differ in the validation support available at refinement time, from running tests before accepting a patch to delayed validation, manual review, or benchmark infrastructure. To match these settings, RECAP supports three modes (bottom of Figure 1). 
+
+Unconditional refinement (UR). The default mode, where the filter forwards every candidate patch to the refiner: 
+
+AUR (x) = Rθ (x). (2) It maximizes concision opportunities and suits hosts that independently validate or rank all candidates downstream, at the risk that an imperfect refinement may alter a candidate that would otherwise be accepted. 
+
+Judge-guided refinement (JGR). When tests are unavail-able or too costly after refinement, the filter invokes an LLM-as-Judge J to decide refinability via a three-step policy. (1) An apparently incorrect patch is refinable since the refiner may repair it, (2) a correct but already minimal patch is unchanged, and (3) a correct but verbose patch is refined only when the judge deems it low-risk to correctness. It then applies: 
+
+AJGR (x) = 
+
+(
+
+Rθ (x), if J(x) = REFINABLE ,p, otherwise. (3) This trades some refinement opportunity for a conservative fallback, avoiding changes to patches that are already minimal or whose verbosity may be required for correctness. 
+
+Oracle-guided refinement (OGR). When an executable oracle T is available, RECAP refines every candidate, applies it, and runs the tests, returning the refined patch only when the patched program passes and otherwise falling back to the original: 
+
+AOGR (x, T ) = 
+
+(
+
+ˆp, if P ⊕ ˆp |= T, p, otherwise, where ˆp = Rθ (x).
+
+(4) This is the strongest safeguard, though bounded by test-suite strength, since a patch passing T is only plausible with respect to that oracle. V. E VALUATION 
+
+A. Research Questions 
+
+RQ-1: To what extent do SOTA APR approaches pro-duce verbose patches, and what factors contribute to verbosity? RQ-1 motivates patch refinement by quantifying verbosity in current APR approaches and analyzing associated design factors. It has two sub-questions. 
+
+RQ-1.1 : What is the status quo of patches generated by SOTA APR approaches? This question measures whether cur-rent high-performing systems tend to produce patches larger and more verbose than developer patches. RQ-1.2 : What causes different patch-size outcomes? This question examines whether observable design choices are associated with different patch-size patterns. 
+
+RQ-2: How effective is RECAP in refining patch size while maintaining correctness? RQ-2 evaluates whether RECAP can reduce patch size, scope, and complexity on patches produced by SOTA approaches while preserving the correctness of resolved SWE-bench instances. 
+
+RQ-3: How do different training components contribute to patch refinement? RQ-3 ablates the SFT and DPO phases of Section IV-C to show how each affects concision and correctness preservation. 
+
+B. Experimental Setup 1) Model: We use GPT-5.2 [59] for concise-target judging, patch inflation, and rejection sampling, since noisy synthetic labels would degrade the refinement supervision, and Gemini-3-Flash [60] for reasoning-trace collection, as its traces are more consistently organized as stepwise procedures. Our main refiner is QWen-3.5-27B [61], a recent small model, since the refiner must stay compact while handling long-context repository-level input. For RQ-2, we use Claude-4.5-Sonnet 
+
+[62] as the pure-prompting baseline to test whether a small specialized refiner can outperform a stronger general-purpose model, and we also instantiate RECAP with Gemma-4-E4B-it 
+
+[63] and Mistral-3-14B-Reasoning [64] for generalizability. All selected models have at least a 64K-token context window to support repository-level SWE-bench instances. 
+
+2) Benchmark: We evaluate on SWE-bench Verified [6], the human-filtered subset of SWE-bench. Its instances are complex real-world repository-level GitHub issues requiring broad code context and multi-file reasoning, and it is a practi-cal evaluation standard for LLM-based APR agents, enabling direct comparison with recent SOTA systems. 
+
+3) Metrics: We measure patch size from three comple-mentary perspectives, namely textual size, edit scope, and code complexity. For textual size, we follow prior LOC-based measurements of code change and review effort [65]–[68], ex-cluding context lines since these depend on diff configuration (Git defaults to three [69]). 
+
+Total Changes . The total number of the added LOC and the deleted LOC (added + deleted). 
+
+Net Changes . The difference between added and deleted LOC (added - deleted). 
+
+Edited Files . Count of files modified by a patch, capturing edit scope as verbose patches may touch unrelated files. We also measure how a patch changes the complexity of the modified source files. 
+
+Halstead Time [81]. An estimated implementation time derived from Halstead effort, computed from the counts of distinct and total operators and operands , a more interpretable member of the Halstead family than effort alone. 
+
+Cyclomatic Complexity (CC) [82]. The number of linearly independent paths in the control-flow graph, capturing whether a patch introduces additional branching structure. Since Halstead and CC are computed on complete source files, for each patch we compute the metrics on the original files, apply the patch, recompute on the modified files, and treat the difference as the introduced complexity change. Absolute sizes can mislead, since harder instances may need larger patches. Following the relative-comparison principle in prior repair evaluation [83], we compute the per-instance ratio between each generated patch and its gold patch, average across instances, and subtract 100% to obtain the ∆ values, where positive values indicate larger or more complex changes than gold and negative the opposite. 
+
+C. RQ-1 (Patch Verbosity in SOTA APR) 
+
+[Experimental Design for RQ-1]: From the SWE-bench Verified leaderboard [22] (November 2025), we collect open-and closed-source submissions throughout the list, keeping the latest version per approach except SWE-agent [28] where we retain all LLM variants to reveal how the underlying model affects patch size, yielding 28 approaches. For RQ-1.1, we average ∆ values over each approach’s resolved instances to measure successful-patch size relative to gold. Since some patches also modify tests harness, or reproduction scripts that inflate LOC for non-fixing purposes, we manually check each patch and report resolved instances containing auxiliary test or reproduction edits (column # w/ aux edits ). For RQ-1.2, we inspect papers, technical reports, and repos-itories to classify each approach along five dimensions: (1) patch format (structured formats such as S/R, XML, or JSON versus Git diff), (2) minimality instruction (explicit, implicit, or absent size-constraining instructions), (3) context scope 
+
+(fixed window, structured such as AST-level, full repository, or dynamic selection), (4) iterative refinement (whether a can-didate is revised iteratively), and (5) resolution performance 
+
+(top- versus bottom-ranked by resolved instances). Focusing on Total and Net Changes, we run instance-wise tests per group, using the Mann-Whitney-Wilcoxon (MWW) test [84], [85] for binary dimensions and the Kruskal-Wallis H test [86] for multi-group ones, with pairwise MWW tests under Holm– Bonferroni correction [87] when significant and Cliff’s Delta [88] for effect magnitude. 
+
+[Experimental Results for RQ-1.1]: Verbosity is systemic, not an outlier effect. Table III shows successful patches are consistently larger than gold. All 28 approaches exceed gold with the median producing +121.78% more total changes, +80.91% more net changes, and +13.06% more edited files. Since every approach rather than a few outliers shows inflation, verbosity is a systemic property of current APR systems, not only with particular frameworks or models. Even successful repairs broaden the change footprint a reviewer must inspect. 
+
+Textual size and operator-level complexity can move in opposite directions. While LOC inflation is uniformly positive, the Halstead Time difference is widely dispersed, from −14812% (Zai) to +901% (EntroPO), with a near-zero median of +5 .71% that reflects cancellation rather than a small increase. Two factors explain the divergence from the LOC TABLE III: Comparison between agent-generated patches and corresponding gold patches on SWE-bench Verified.                                                                                                                                                                                                                                              
+
+> Approach LLM # Re-solved
+> ∆Total Changes %
+> ∆Net Changes %
+> ∆Edited Files %
+> ∆Halstead Time Diff%
+> ∆CC Diff% # w/ aux edits Approach LLM # Re-solved
+> ∆Total Changes %
+> ∆Net Changes %
+> ∆Edited Files %
+> ∆Halstead Time Diff%
+> ∆CC Diff % # w/ aux edits
+> Trae [70] Multiple 376 +97.85 +58.64 +3.33 +275.97 +18.04 0 Swe-Rizzo [71] Claude 3.7 Sonnet 283 +30.38 -6.31 -0.80 +62.4 -0.83 1Lingxi [37] Claude 4 Sonnet 373 +81.59 +59.53 +2.89 +72.17 +43.15 0 CodeSweep [72] Kimi K2 Instruct 267 +226.73 +178.71 +14.45 -102.73 +73.28 8JoyCode [73] Multiple 373 +114.37 +59.39 +11.66 +192.05 +50.81 40 Agentless [30] Claude 3.5 Sonnet 254 +17.62 -16.25 -2.61 +15.92 -22.57 0Refact [74] Claude 4 Sonnet 372 +654.31 +572.15 +63.33 +533.95 +164.14 200 Composio [75] Multiple 243 +88.94 +20.84 +2.47 -5.5 -63.11 5OpenHands [29] GPT 5 359 +126.6 +114.01 +10.24 +170.33 +57.18 6 Navie [76] GPT 4o 236 +110.57 +55.4 -1.69 -116.15 +32.04 1Moatless [32] Claude 4 Sonnet 354 +133.44 +136.76 +8.04 +67.4 +71.2 4 Skywork [38] Skywork-SWE-32B 235 +227.43 +67.43 +41.70 -4.51 +98.32 42 Augment [77] Claude 4 Sonnet 352 +192.19 +100.47 +14.92 +152.17 +57.1 38 AutoCodeRover [31] Claude 3.5 Sonnet 231 +20.75 -10.47 -0.72 -112.18 -4.17 0Zai [78] GLM 4.6 341 +15143.45 +15220.49 +505.06 -14812.27 +2829.4 320 Gru [79] -226 +33.83 +0.31 +7.23 +34.05 -4.81 1Cortexa [45] GPT o3 341 +118.22 +104.37 -0.88 -29.17 +25.87 1 SWE-Exp [36] DeepSeek V3 210 +64.70 +9.83 +0.73 -1936.89 +14.47 1SWE-agent [28] Claude 4 Sonnet 333 +690.91 +1158.45 +37.83 +216.61 +116.67 43 SWE-agent [28] SWE-agent-LM-32B 201 +4461.9 +5207.17 +297.51 -313.78 +493.42 201 PatchPilot [39] GPT o4 mini 323 +125.33 +94.38 +17.78 -23.16 +10.68 2 SWE-agent [28] Claude 3.5 Sonnet 168 +1009.05 +242.23 +134.52 -87.23 +136.32 136 SWE-agent [28] Claude 3.7 Sonnet 312 +275.87 +216.76 +19.10 +266.76 +83.62 10 SWE-Fixer [34] QWen 2.5 164 +69.14 +17.69 +34.45 +23.77 -26.09 0EntroPO [80] QWenCoder 30B 302 +4503.46 +5195.13 +191.11 +901.14 +638.32 239 Lingma [33] SWE-GPT-72B 144 +61.41 +8.12 +5.23 -800.61 +4.3 8DeepSWE [35] DeepSWE 294 +69.95 +21.07 +18.62 -333.14 +25.49 57 SWE-agent [28] GPT 4o 116 +465.59 +759.37 +90.52 -396.82 +44.83 33 --------- MEDIAN -288.50 +121.78 +80.91 +13.06 +5.71 +43.99 7
+
+TABLE IV: Significance test results for patch format, iterative refinement, and resolution. 
+
+Patch Format Structured Git-Diff p, |δ|
+
+S vs. G 
+
+∆Avg Total Changes % +130.29 +227.31 0.141, 0.02 
+
+∆Avg Net Changes % +91.93 +243.39 0.042 , 0.03 
+
+Iterative Refinement w/ w/o p, |δ|
+
+w/ vs. w/o 
+
+∆Avg Total Changes % +406.46 +95.60 <0.001 , 0.21 
+
+∆Avg Net Changes % +496.64 +47.09 <0.001 , 0.17 
+
+Resolution Top-12 Bottom-12 p, |δ|
+
+T vs. B 
+
+∆Avg Total Changes % +223.39 +118.09 <0.001 , 0.17 
+
+∆Avg Net Changes % +224.67 +90.39 <0.001 , 0.19 
+
+trend. First, Total Changes count both additions and deletions, so a textually large patch can leave the final file’s operator and operand volumes unchanged or even simpler. Second, part of the LOC inflation comes from auxiliary edits to tests and reproduction scripts rather than production logic. These edits are common but uneven, ranging from 0 to 320 resolved instances per approach (median 7) and clustering in the most verbose systems. The four approaches exceeding +1000% 
+
+total changes are exactly the four most aux-heavy ones, namely Zai ( +15143% , 320), EntroPO ( +4503% , 239), SWE-agent with SWE-agent-LM-32B ( +4462% , 201), and SWE-agent with Claude 3.5 Sonnet ( +1009% , 136). For these systems raw patch size overstates the production change a reviewer must reason about, confirming textual size alone is unreliable to interpret the patch complexity. 
+
+Larger patches are also structurally heavier, not merely longer. The median Cyclomatic Complexity difference is 
+
++43 .99% , almost eight times the Halstead Time median, showing verbosity is not driven solely by bulk additions, deletions, or auxiliary edits, since patches also add branching structure to production code, a distinct review and maintenance concern. Current LLM-based APR agents thus produce suc-cessful patches that are simultaneously larger, broader in file scope, and structurally more complex than gold, motivating a downstream refinement step that targets both edit volume and structural complexity rather than LOC alone. 
+
+[RQ-1.1] Finding: Patch verbosity is widespread and multi-dimensional. All 28 evaluated SWE-bench ap-proaches exceed the gold patch in total changes (me-dian +121.78%), net changes (+80.91%), edited files (+13.06%), and cyclomatic complexity (+43.99%), indi-cating that verbosity is prevalent across current systems. Textual size and structural complexity can move in opposite directions, demonstrating that patch verbosity cannot be captured by single one size metric. 
+
+[Experimental Results for RQ-1.2]: Surface-level con-trols are weak. Tables IV and V relate patch size to five design choices. Output format shows limited association. Structured formats have lower average total changes than Git-diff (+130.29% vs. +227.31%) but not significantly so, while net changes are significant (+91.93% vs. +243.39%) with a negligible effect ( |δ| = 0 .03 ). Minimality instructions are more striking, since explicitly instructing minimality (+208.83% total, +168.05% net) yields patches as large as no instruc-tion (+191.39%, +194.09%), while implicit guidance gives the smallest patches (+49.65%, +9.56%), suggesting that the underlying repair mechanism dictates patch size far more than the prompt wording. Both dimensions indicate that formatting or instructing toward minimality, without changing how the repair is produced, barely affects verbosity. TABLE V: Significance test results for minimality instruction, and context scope. 
+
+Pair ∆Avg Total Changes % 
+
+∆Avg Net Code Size Change % Minimality Instruction 
+
+Explicit (E) +208.83 +168.05 Implicit (I) +49.65 +9.56 None (N) +191.39 +194.09 KW Test p <0.001 <0.001 
+
+Pairwise 
+
+p, |δ|
+
+N vs. E <0.001 , 0.15 <0.001 , 0.14 N vs. I <0.001 , 0.13 <0.001 , 0.15 E vs. I <0.001 , 0.28 <0.001 , 0.29 
+
+Context Scope 
+
+Fixed Window (FW) +300.34 +398.57 Structured (S) +72.93 +43.12 Full Repo (FR) +221.23 +139.70 Dynamic (D) +105.99 +62.22 KW Test p <0.001 0.005 
+
+Pairwise 
+
+p, |δ|
+
+FW vs. S <0.001 , 0.12 0.02 , 0.06 FW vs. FR 0.23, 0.03 0.71, 0.01 FW vs. D 0.23, 0.03 0.52, 0.03 S vs. FR <0.001 , 0.14 0.01 , 0.07 S vs. D <0.001 , 0.09 0.52, 0.04 FR vs. D 0.01 , 0.06 0.52, 0.04 
+
+Capability-oriented design enlarges patches. The strongest, most consistent trend is that higher-capability design also means larger patches. Iterative refinement produces far larger patches than its absence (+406.46% vs. +95.60% total, +496.64% vs. +47.09% net), and top-ranked systems exceed bottom-ranked ones (+223.39% vs. +118.09% total, +224.67% vs. +90.39% net), all four contrasts significant. The mecha-nisms that raise resolution also inflate the patch, a tension prompting cannot resolve, which is why we position refine-ment downstream to reduce verbosity after a capable agent finds a plausible repair without weakening the generator. 
+
+Context should be organized, not just enlarged. More context is not better for concision. Structured context gives the smallest patches (+72.93% total, +43.12% net) and fixed-window the largest (+300.34%, +398.57%), with full-repository and dynamic in between. Structured context is significantly smaller than full-repository for both metrics and than dynamic for total changes, suggesting that more exposed code broadens edits while context curated around repair-relevant structure keeps changes localized. 
+
+[RQ-1.2] Finding: Verbosity is closely tied to repair ca-pability rather than surface-level design choices. Neither structured output formats nor explicit minimality prompts lead to meaningfully smaller patches. In contrast, iterative refinement (+406.46% vs. +95.60% total, p < 0.001 ) and higher resolution (+223.39% vs. +118.09%, p < 0.001 )are consistently associated with larger patches, revealing a capability–concision tradeoff that motivates a downstream refinement more robust than constraining the generator. D. RQ-2 (Patch Refinement Effectiveness) 
+
+[Experimental Design for RQ-2]: We compare the RECAP against four baselines. The first is prompting Claude-4.5-Sonnet with the same input as RECAP (issue context, code context, and verbose candidate patch), a strong prompting-only alternative to a specialized refiner. The second is Atomizer [17], a SOTA collaborative multi-agent commit-untangling technique, which we apply by treating a verbose patch as a tangled commit and separating the atomic fix. The third is Adapatcher [20], a two-stage APR framework that seeks small fixes through adaptive repair. The fourth is PRepair [21], an edit-aware repair method using reward optimization for precise repair. As minimality-aware generators rather than refiners, Adapatcher and PRepair receive the same context ( B and C)without the candidate patch p and generate a concise patch directly, testing whether post-generation refinement matches precise-generation training. We evaluate all three modes from Section IV-D, namely UR, JGR, and OGR. 
+
+[Experimental Results for RQ-2]: A small specialized re-finer dominates the size–correctness tradeoff. Direct prompt-ing with the substantially stronger Claude-4.5-Sonnet aggres-sively reduces size yet sacrifices 29 to 44 resolved instances per host, and the minimality-oriented baselines lose 49 to 217. RECAP is the only method that reduces patch size while preserving or improving resolution in almost every setting. 
+
+Existing minimality methods do not transfer to repository-level refinement. The baseline failures are systematic. At-omizer separates intents but never guarantees the extracted “atomic” fix is self-contained, so it frequently drops code needed to resolve the issue, explaining its catastrophic −217 
+
+on SWE-agent. Adapatcher and PRepair, trained for function-level repair, see their locality assumptions break down on repository-level patches and degrade correctness across all four hosts. This validates our design, since repository-level refine-ment is a distinct task that cannot be served by repurposing untangling or function-level minimization tools. 
+
+Deployment modes form a controllable, partly counter-intuitive safety tradeoff. UR and JGR maximize concision, cutting average total changes from +242 .14% to +4 .24% and 
+
++9 .76% and net changes from +348 .24% to −39 .75% and 
+
+−34 .84% . OGR is intentionally less aggressive at +18 .55% 
+
+total and −7.39% net because it falls back whenever the refined patch fails the oracle, which guarantees it cannot drop an already-resolved instance yet still improves all four systems by +23 to +42 .
+
+Refinement helps most for verbose agents but still benefits already-compact patches. The gains scale with host verbosity. For SWE-agent, with extremely large patches (+690.91% total, +1158.45% net), RECAP-UR collapses these to +24.69% total and -33.17% net while adding 24 resolved instances, and RECAP-JGR reaches +31.52% and -26.56% with +22. For Moatless and Openhands, net changes drop from +136 .76% 
+
+and +114 .01% to −37 .38% and −38 .06% . Even Agentless, whose patches are already near-gold, is pushed below the gold baseline in total and net changes, supporting refinement as a general-purpose downstream step. 
+
+Concision is multi-dimensional, and textual reduction does not imply complexity reduction. RECAP-UR reduces edited-file scope and Cyclomatic Complexity below the host on all four cases, but Halstead Time is mixed, falling for Agentless and Moatless while remaining positive for SWE-agent and Openhands. This mirrors RQ-1.1, where fewer lines and files do not guarantee a proportional drop in operator–operand complexity, so refinement must be judged on multiple axes and a host-by-host complexity check should accompany any reported LOC reduction. 
+
+[RQ-2] Finding: RECAP achieves a substantially better size–correctness tradeoff. While untangling and function-level minimization do not transfer to repository-level re-finement, RECAP resolves up to 42 additional instances and reduces average patch size from +242.14% to +4.24% in total changes while preserving or improving correctness, demonstrating superior size–correctness tradeoff through task-specialized refinement. E. RQ-3 (Ablation Study) 
+
+[Experimental Design for RQ-3]: Since the full adapter uses both SFT and DPO, we compare two variants, one removing DPO to use the SFT-only model, which tests whether supervised pairs alone teach concise repair, and another remov-ing both phases to prompt the base instruction model with the same refinement input. We estimate how much behavior comes TABLE VI: Performance comparison between different baselines and RECAP on SWE-bench Verified.                                                                                                                                                                                
+
+> Approach Resolved ∆Total Chg %
+> ∆Net Chg %
+> ∆Files Aff %
+> ∆Halstead Time Diff %
+> ∆CC Diff % Agentless 254/500 +17.62 -16.25 -2.61 +15.92 -22.57 Prompting 215/500(-39) +1.02 -36.41 -2.42 +4.93 -23.53 Atomizer 94/500(-160) +8.73 +4.54 -1.56 -20.57 -16.32 Adapatcher 204/500(-50) +17.48 -20.49 -2.66 +18.24 -21.20 PRepair 205/500(-49) +18.81 -12.85 -2.77 +22.90 -20.13 RECAP-UR 258/500(+4) -9.94 -50.40 -2.86 -16.50 -23.79 RECAP-JGR 265/500(+11) -7.61 -50.09 -2.76 -6.67 -24.09
+> RECAP-OGR 280 /500(+26) -7.64 -47.71 -2.90 -12.11 -22.40 SWE-agent 333/500 +690.91 +1158.45 +37.83 +216.61 +116.67 Prompting 303/500(-30) +41.70 +9.55 -0.30 -27.89 +0.32 Atomizer 116/500(-217) +933.35 +1064.78 +23.4 +377.00 +202.04 Adapatcher 271/500(-62) +221.00 +266.03 +15.31 +93.55 +132.00 PRepair 255/500(-78) +461.96 +275.33 +5.48 -1.00 -178.9
+> RECAP-UR 357/500(+24) +24.69 -33.17 -1.93 +30.89 -12.48 RECAP-JGR 355/500(+22) +31.52 -26.56 +0.88 +24.16 -9.77 RECAP-OGR 375 /500(+42) +52.39 +50.64 +3.40 +65.30 +18.80 Approach Resolved ∆Total Chg %
+> ∆Net Chg %
+> ∆Files Aff %
+> ∆Halstead Time Diff %
+> ∆CC Diff % Moatless 354/500 +133.44 +136.76 +8.04 +67.40 +71.20 Prompting 310/500(-44) +22.34 +28.72 +1.22 -64.26 +6.85 Atomizer 152/500(-202) +123.48 +183.29 +20.64 +43.87 +107.32 Adapatcher 265/500(-89) +85.20 +61.90 -1.65 +55.15 +37.74 PRepair 252/500(-102) +67.29 +60.47 +5.40 +7.25 +31.94 RECAP-UR 350/500(-4) +5.09 -37.38 -1.99 -18.73 -14.49
+> RECAP-JGR 348/500(-6) +10.32 -29.88 -1.57 -28.92 -6.91 RECAP-OGR 378 /500(+24) +14.10 -32.76 -0.90 -2.42 -5.58 Openhands 359/500 +126.60 +114.01 +10.24 +170.33 +57.18 Prompting 330/500(-29) +7.74 -15.08 -1.97 -21.10 -9.31 Atomizer 164/500(-195) +109.43 +74.71 +8.18 +335.79 +79.87 Adapatcher 276/500(-83) +99.73 +38.93 +3.32 +39.47 +51.10 PRepair 264/500(-95) +74.11 +25.02 +0.25 +41.41 +14.70 RECAP-UR 363/500(+4) -2.89 -38.06 -2.07 +22.67 -12.99
+> RECAP-JGR 365/500(+6) +4.79 -32.84 -1.92 +38.18 -2.04 RECAP-OGR 382 /500(+23) +15.36 +0.26 0-20.18 -0.62
+
+TABLE VII: Performance comparison between RECAP with and without different components.                                                                                            
+
+> Approach Resolved ∆Total Chg %
+> ∆Net Chg %
+> ∆Files Aff %
+> ∆Halstead Time Diff %
+> ∆CC Diff % Agentless 254/500 +17.62 -16.25 -2.61 +15.92 -22.57 w/o SFT&DPO 260/500(+6) +2.27 -28.43 -2.74 +0.49 -22.48 w/o DPO 255/500(+1) -3.21 -35.83 -2.67 -21.26 -25.68
+> w/ SFT&DPO 258 /500(+4) -9.94 -50.40 -2.86 -16.50 -23.79 SWE-agent 333/500 +690.91 +1158.45 +37.83 +216.61 +116.67 w/o SFT&DPO 291/500(-42) +62.43 +60.15 -0.66 -59.99 +28.80 w/o DPO 273/500(-60) +11.26 -16.90 -2.05 -118.13 +9.10 w/ SFT&DPO 357 /500(+24) +24.69 -33.17 -1.93 +30.89 -12.48
+> Moatless 354/500 +133.44 +136.76 +8.04 +67.40 +71.20 w/o SFT&DPO 304/500(-50) +25.56 +18.97 -1.55 -10.37 +6.60 w/o DPO 280/500(-74) +8.32 +6.72 -2.70 -35.30 -9.60 w/ SFT&DPO 350 /500(-4) +5.09 -37.38 -1.99 -18.73 -14.49
+> Openhands 359/500 +126.60 +114.01 +10.24 +170.33 +57.18 w/o SFT&DPO 317/500(-42) +58.81 -1.79 -1.05 +114.91 -22.95 w/o DPO 295/500(-64) +44.46 -3.15 -1.38 -31.69 -24.90
+> w/ SFT&DPO 363 /500(+4) -2.89 -38.06 -2.07 +22.67 -12.99
+
+from the pretrained model and prompt format alone. We run each under the RQ-2 setting with the same metrics, deploying UR by default. 
+
+[Experimental Results for RQ-3]: Prompting alone re-fines patches but cannot be trusted with correctness. Ta-ble VII shows the variant without SFT and DPO already shrinks patches relative to every host, confirming a general in-struction model can perform shallow cleanup from the prompt alone. This cleanup is unreliable, dropping 42 instances on SWE-agent, 50 on Moatless, and 42 on Openhands. 
+
+SFT learns concision so well that it over-applies it, falling below even the untrained baseline. Adding SFT sharpens con-cision across the board, lowering average total changes from +37.27% to +15.21%, average net changes from +12.23% to -12.29%, and average Halstead Time from +11.26% to -51.60% relative to the untrained variant, with the strongest Halstead reduction on all four hosts. Yet supervised imitation reveals its blind spot, since the SFT-only model resolves only 276 instances on average, below both the full model (332) and the untrained variant (293). 
+
+DPO supplies the missing restraint, and its payoff scales with verbosity. DPO closes the gap by contrasting concise gold patches with the model’s over-aggressive samples, injecting the negative signal SFT lacks. The full model recovers average resolution from 276 to 332, concentrated where SFT over-cuts most, with +84 over SFT-only on SWE-agent, +70 on Moatless, and +68 on Openhands. This recovery does not cost concision, since the full model still attains the lowest average total changes (+4.24%), net changes (-39.75%), and edited-file scope (-2.21%) among all variants. 
+
+Optimizing a single minimality metric is a trap. SFT-only produces the best Halstead Time on every host and would look superior judged on that metric alone, yet it is the weakest model once correctness is considered. The full model instead achieves better average Cyclomatic Complexity (-15.94% vs. -12.77%) with far higher resolution. The lesson mirrors RQ-1, since the most aggressive simplifier is not the best patch, and the right target is a concise patch that still resolves the issue rather than the smallest syntactic or operator-level change. 
+
+[RQ-3] Finding: SFT teaches concision but over-applies it; DPO supplies the missing restraint that makes the refiner deployable. The SFT-only model achieves the strongest size reduction (avg. total changes +15.21%) but resolves fewer instances than even the untrained baseline (275.8 vs. 293.0), because it learns how to compress but not when compression breaks the fix. Adding DPO recovers resolution to 332 (+84, +70, and +68 on the three most verbose hosts) without sacrificing concision, turning an aggressive simplifier into a usable adapter. 
+
+VI. D ISCUSSION 
+
+Model Generalizability. A practical adapter should not be tied to one LLM backbone, we therefore re-instantiate it with two additional open-source models of different architectures and scales, Gemma-4-4B and Mistral-3-14B-Reasoning, eval-uated under UR mode against the four RQ-2 hosts. Table VIII shows all three backbones reduce patch size on nearly every metric, indicating that the RQ-2 gains stem from the refine-ment task and training pipeline rather than a single backbone. Even Gemma-4-4B is viable on all four hosts, enabled by modern long-context capacity that lets a 4B model ingest repository-level inputs exceeding the 32K-token windows of earlier small models. 
+
+Refinement Gains and Losses. Table IX decomposes the RQ-2 resolution delta into its four transitions. Most impor-tantly, refinement is not purely subtractive, since across all TABLE VIII: Performance comparison between different LLMs on SWE-bench Verified. 
+
+Approach Resolved ∆Total Chg % 
+
+∆Net Chg % 
+
+∆Files Aff % 
+
+∆Halstead Time Diff % 
+
+∆CC Diff % Agentless 254/500 +17.62 -16.25 -2.61 +15.92 -22.57 Gemma 4 4B 273 /500(+19) -11.37 -40.95 -2.61 -15.83 -21.78 Mistral 3 14B 255/500(+1) +0.72 -19.58 -2.58 -1.23 -26.25 
+
+Qwen 3.5 27B 258/500(+4) -9.94 -50.40 -2.86 -16.50 -23.79 SWE-agent 333/500 +690.91 +1158.45 +37.83 +216.61 +116.67 Gemma 4 4B 328/500(-5) +165.79 +138.61 5.94 47.71 47.15 Mistral 3 14B 337/500(+4) +56.90 +59.88 3.05 -15.37 28.15 Qwen 3.5 27B 357 /500(+24) +24.69 -33.17 -1.93 +30.89 -12.48 
+
+Moatless 354/500 +133.44 +136.76 +8.04 +67.40 +71.20 Gemma 4 4B 330/500(-24) +5.11 -20.71 -1.35 -52.28 1.71 Mistral 3 14B 346/500(-8) +34.03 +14.46 -1.00 -54.53 -8.26 Qwen 3.5 27B 350 /500(-4) +5.09 -37.38 -1.99 -18.73 -14.49 
+
+Openhands 359/500 +126.60 +114.01 +10.24 +170.33 +57.18 Gemma 4 4B 352/500(-7) 22.84 -21.26 -2.33 +30.76 +7.26 Mistral 3 14B 360/500(+1) 44.21 0.95 -0.82 +7.14 +16.05 Qwen 3.5 27B 363 /500(+4) -2.89 -38.06 -2.07 +22.67 -12.99 
+
+TABLE IX: Correctness transitions induced by refinement. C/I denote correct/incorrect before →after refinement. Net =
+
+Recovered − Broken matches the resolution delta in RQ-2. 
+
+Host Mode C→C C→I I→C I→I Net Agentless UR 227 27 31 209 +4 JGR 235 19 30 210 +11 OGR 254 0 26 214 +26 SWE-agent UR 314 19 43 124 +24 JGR 318 15 37 130 +22 OGR 333 0 42 125 +42 Moatless UR 326 28 24 119 -4 JGR 330 24 18 125 -6 OGR 354 0 24 119 +24 Openhands UR 340 19 23 116 +4 JGR 343 16 22 117 +6 OGR 359 0 23 116 +23 
+
+hosts and modes the refiner consistently recovers previously failing instances (I →C ranges from 18 to 43), meaning refining a verbose patch can rewrite edits that actively prevented it from passing the test suite. Recovery is strongest on SWE-agent (42–43 instances), whose extreme verbosity (+690.91% total changes) makes extraneous edits most likely to interfere with correctness, demonstrating that verbosity is a correctness risk, not merely a review burden. @@ -243,7 +243,9 @@ def _eval_subs(self, old, new):       
+
+> cond = self.condition.subs(old, new) base = self.base_set.subs(old, new)
+> if cond is S.true:
+> -return ConditionSet(new, Contains(new, base), base) +return base
+> +elif cond is S.false:
+> +return S.EmptySet return self.func(self.sym, cond, base) def dummy_eq(self, other, symbol=None): sympy/sets/conditionset.py ( Refined )sympy/sets/conditionset.py ( Original )@@ -242,8 +242,6 @@ class ConditionSet(Set): return self.func(sym, cond, base)
+> cond = self.condition.subs(old, new)
+> base = self.base_set.subs(old, new) -if cond is S.true:
+> -return ConditionSet(new, Contains(new, base), base)
+> return self.func(self.sym, cond, base) def dummy_eq(self, other, symbol=None):
+
+Fig. 2: An example of patch refinement by only removal. 
+
+Fine-grained Refinement Beyond Edit Removal. A natural concern is that the refiner merely deletes lines, which would explain LOC reduction but not the cyclomatic-complexity drops in RQ-2. Figures 2 and 3 show RECAP refining at two distinct levels. In the removal case (Fig. 2), the candi-date introduced an extra if cond is S.true scaffolding branch that the refiner recognized as redundant and dropped, keeping only the essential edit. The fine-grained case (Fig. 3) is harder, where the candidate handled four SSL parameters with four near-identical if blocks and the refiner preserved exact behavior while collapsing them into a single loop. @@ -30,6 +30,22 @@                 
+
+> subprocess_env = os.environ.copy() if passwd: subprocess_env['PGPASSWORD'] = str(passwd) +# Handle SSL connection parameters +sslmode = conn_params.get('sslmode')
+> +if sslmode:
+> +subprocess_env['PGSSLMODE'] = str(sslmode) ++sslcert = conn_params.get('sslcert') +if sslcert: +subprocess_env['PGSSLCERT'] = str(sslcert)
+> +
+> +sslkey = conn_params.get('sslkey') +if sslkey: +subprocess_env['PGSSLKEY'] = str(sslkey) ++sslrootcert = conn_params.get('sslrootcert')
+> +if sslrootcert:
+> +subprocess_env['PGSSLROOTCERT'] = str(sslrootcert) try: # Allow SIGINT to pass to psql to abort queries. signal.signal(signal.SIGINT, signal.SIG_IGN) django/db/backends/postgresql/client.py ( Refined )django/db/backends/postgresql/client.py ( Original )@@ -30,6 +30,9 @@ class DatabaseClient(BaseDatabaseClient): subprocess_env = os.environ.copy() if passwd: subprocess_env['PGPASSWORD'] = str(passwd)
+> +for key in ('sslmode', 'sslcert', 'sslkey', 'sslrootcert'):
+> +if conn_params.get(key): +subprocess_env['PG' + key.upper()] = str(conn_params[key]) try: # Allow SIGINT to pass to psql to abort queries. signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+Fig. 3: An example of fine-grained patch refinement. VII. T HREATS TO VALIDITY 
+
+Internal validity. RQ-1 relies on public leaderboard arti-facts and system descriptions, so undocumented settings may affect our classification of design choices. We fix the collection date, use the latest submission per approach, classify from available papers, reports, and repositories, and treat the design-factor analysis as association rather than causation . The pipeline’s LLM-based judging, inflation, rejection sampling, and trace collection may introduce noisy supervision, but mitigated by combining multiple data sources and evaluating on real APR patches rather than synthetic inputs alone. 
+
+Construct validity. SWE-bench tests serve as the exe-cutable oracle, so passing them shows plausibility under the benchmark rather than full semantic correctness. We scope correctness claims to the evaluated resolution outcome and an-chor OGR to the test suite, accepting a refined patch only when it preserves the host’s passing outcome. Our patch-size and complexity metrics are proxies for review effort, so we report three complementary perspectives spanning textual size, edit scope, and code complexity, all grounded in prior repair and review studies, and compare each patch against its developer patch on the same instance rather than absolute sizes. Since developer patches are not guaranteed to be globally minimal, we use them only as relative reference points. 
+
+External validity. Our evaluation on SWE-bench may not transfer to other benchmarks, languages, proprietary repos-itories, or settings without tests. Several factors limit this risk. SWE-bench Verified spans real repository-level issues across many projects, and we evaluate across four host systems covering workflow-based and agent-based designs and three LLMs of different architectures and scales, so the gains are not tied to a single host or backbone. The collector’s framework-adaptive extraction also lowers the cost of porting the adapter elsewhere. We scope conclusions to repository-level APR settings similar to SWE-bench, where candidate patches and validation outcomes are observable, and leave broader languages and settings to future work. VIII. C ONCLUSION 
+
+This paper studied patch verbosity as a major concern in LLM-based APR. Characterizing 28 SOTA approaches on SWE-bench Verified, we found even successful patches are consistently larger, broader, and structurally more complex, with verbosity tied to capability-oriented design choices rather than surface controls. We therefore formulated post-generation patch refinement and proposed RECAP, a lightweight, plug-and-play adapter that attaches to existing frameworks after generation, trained on a multi-source dataset with SFT and DPO. Across four host systems, it achieved a better size-correctness tradeoff than prompting, commit-untangling, and minimality-aware baselines, reducing edit volume, scope, and complexity toward or below gold levels while preserving or improving resolution. REFERENCES [1] A. F. Pereira and R. F. Mello, “A systematic literature review on large language models applications in computer programming teaching evaluation process,” IEEE Access , 2025. [2] Y. Yang, C. Li, Z. Han, R. Li, K. Xu, Q. Li, W. Zhong, Z. Shen, Z. Fei, J. Ge et al. , “Patch generation in apr: A survey from the perspectives of utilizing llms and using apr-specific information,” ACM Transactions on Software Engineering and Methodology , 2025. [3] B. Yang, Z. Cai, F. Liu, B. Le, L. Zhang, T. F. Bissyand´ e, Y. Liu, and H. Tian, “A survey of llm-based automated program repair: Taxonomies, design paradigms, and applications,” arXiv preprint arXiv:2506.23749 ,2025. [4] Y. Chen, J. Wu, X. Ling, C. Li, Z. Rui, T. Luo, and Y. Wu, “When large language models confront repository-level automatic program repair: How well they done?” in Proceedings of the 2024 IEEE/ACM 46th inter-national conference on software engineering: companion proceedings ,2024, pp. 459–471. [5] Z. Jiang, D. Lo, and Z. Liu, “Agentic software issue resolution with large language models: A survey,” arXiv preprint arXiv:2512.22256 , 2025. [6] C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. Narasimhan, “Swe-bench: Can language models resolve real-world github issues?” in International Conference on Learning Representa-tions , vol. 2024, 2024, pp. 54 107–54 157. [7] C. Le Goues, M. Pradel, and A. Roychoudhury, “Automated program repair,” Communications of the ACM , vol. 62, no. 12, pp. 56–65, 2019. [8] P. Weißgerber, D. Neu, and S. Diehl, “Small patches get in!” in 
+
+Proceedings of the 2008 international working conference on Mining software repositories , 2008, pp. 67–76. [9] P. Rondon, R. Wei, J. Cambronero, J. Cito, A. Sun, S. Sanyam, M. Tufano, and S. Chandra, “Evaluating agent-based program repair at google,” in 2025 IEEE/ACM 47th International Conference on Software Engineering: Software Engineering in Practice (ICSE-SEIP) . IEEE, 2025, pp. 365–376. [10] Y. Tao, D. Han, and S. Kim, “Writing acceptable patches: An empirical study of open source project patches,” in 2014 IEEE International Conference on Software Maintenance and Evolution . IEEE, 2014, pp. 271–280. [11] F. Ebert, F. Castor, N. Novielli, and A. Serebrenik, “An exploratory study on confusion in code reviews,” Empirical Software Engineering ,vol. 26, no. 1, p. 12, 2021. [12] R. Purushothaman and D. E. Perry, “Toward understanding the rhetoric of small source code changes,” IEEE Transactions on Software Engi-neering , vol. 31, no. 6, pp. 511–526, 2005. [13] S. Mechtaev, J. Yi, and A. Roychoudhury, “Directfix: Looking for simple program repairs,” in 2015 IEEE/ACM 37th IEEE International Conference on Software Engineering , vol. 1. IEEE, 2015, pp. 448–458. [14] J. Li, H. Zhu, H. Liu, X. Shi, H. Zong, Y. Dong, K. Zhang, S. Jiang, Z. Jin, and G. Li, “Aligning llms to fully utilize the cross-file context in repository-level code completion,” in 2025 40th IEEE/ACM Interna-tional Conference on Automated Software Engineering (ASE) . IEEE, 2025, pp. 1477–1489. [15] H. Tian, K. Liu, A. K. Kabor´ e, A. Koyuncu, L. Li, J. Klein, and T. F. Bissyand´ e, “Evaluating representation learning of code changes for predicting patch correctness in program repair,” in Proceedings of the 35th IEEE/ACM international conference on automated software engineering , 2020, pp. 981–992. [16] Y. Li, S. Wang, and T. N. Nguyen, “Utango: untangling commits with context-aware, graph-based, code change clustering learning model,” in 
+
+Proceedings of the 30th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering ,2022, pp. 221–232. [17] K. Zhu, Z. Tian, S. Wang, M. Leng, and X. Mao, “Atomizer: An llm-based collaborative multi-agent framework for intent-driven commit untangling,” arXiv preprint arXiv:2601.01233 , 2026. [18] M. Zhang, Z. Xu, Y. Tian, X. Cheng, and C. Sun, “Toward a better understanding of probabilistic delta debugging,” in 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . IEEE, 2025, pp. 2024–2035. [19] X. Zhou, Z. Xu, M. Zhang, Y. Tian, and C. Sun, “Wdd: Weighted delta debugging,” in 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . IEEE, 2025, pp. 1592–1603. [20] Z. Dai, B. Chen, Z. Zhao, X. Tang, S. Wu, C. Yao, Z. Gao, and J. Chen, “Less is more: Adaptive program repair with bug localization and preference learning,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 39, no. 1, 2025, pp. 128–136. [21] C. Ke, R. Zhang, J. Guo, Y. Wen, L. Ding, S. Wang, X. Zhu, X. Peng, D. Huang, Z. Du et al. , “Qimeng-prepair: Precise code repair via edit-aware reward optimization,” arXiv preprint arXiv:2604.05963 , 2026. [22] SWE-bench, “Swe-bench leaderboards,” https://www.swebench.com/, 2025. [23] R. Rafailov, A. Sharma, E. Mitchell, C. D. Manning, S. Ermon, and C. Finn, “Direct preference optimization: Your language model is secretly a reward model,” Advances in neural information processing systems , vol. 36, pp. 53 728–53 741, 2023. [24] Y. Feng and C. Yang, “An empirical study of sft-dpo interac-tion and parameterization in small language models,” arXiv preprint arXiv:2603.20100 , 2026. [25] J. Wei, X. Wang, D. Schuurmans, M. Bosma, F. Xia, E. Chi, Q. V. Le, D. Zhou et al. , “Chain-of-thought prompting elicits reasoning in large language models,” Advances in neural information processing systems ,vol. 35, pp. 24 824–24 837, 2022. [26] X. Zhuang, Z. Zhu, Z. Wang, X. Cheng, and Y. Zou, “Unicott: A unified framework for structural chain-of-thought distillation,” in The Thirteenth International Conference on Learning Representations , 2025. [27] P. Yu, J. Lanchantin, T. Wang, W. Yuan, O. Golovneva, I. Kulikov, S. Sukhbaatar, J. Weston, and J. Xu, “Cot-self-instruct: Building high-quality synthetic prompts for reasoning and non-reasoning tasks,” arXiv preprint arXiv:2507.23751 , 2025. [28] J. Yang, C. E. Jimenez, A. Wettig, K. Lieret, S. Yao, K. Narasimhan, and O. Press, “Swe-agent: Agent-computer interfaces enable automated soft-ware engineering,” Advances in Neural Information Processing Systems ,vol. 37, pp. 50 528–50 652, 2024. [29] X. Wang, S. Rosenberg, J. Michelini, C. Smith, H. Tran, E. Nyst, R. Malhotra, X. Zhou, V. Chen, R. Brennan et al. , “The openhands software agent sdk: A composable and extensible foundation for pro-duction agents,” arXiv preprint arXiv:2511.03690 , 2025. [30] C. S. Xia, Y. Deng, S. Dunn, and L. Zhang, “Agentless: De-mystifying llm-based software engineering agents,” arXiv preprint arXiv:2407.01489 , 2024. [31] Y. Zhang, H. Ruan, Z. Fan, and A. Roychoudhury, “Autocoderover: Autonomous program improvement,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis ,2024, pp. 1592–1604. [32] A. Antoniades, A. ¨ Orwall, K. Zhang, Y. Xie, A. Goyal, and W. Wang, “Swe-search: Enhancing software agents with monte carlo tree search and iterative refinement,” in International Conference on Learning Representations , vol. 2025, 2025, pp. 64 485–64 515. [33] Y. Ma, Q. Yang, R. Cao, B. Li, F. Huang, and Y. Li, “Alibaba lingmaagent: Improving automated issue resolution via comprehensive repository exploration,” in Proceedings of the 33rd ACM International Conference on the Foundations of Software Engineering , 2025, pp. 238– 249. [34] C. Xie, B. Li, C. Gao, H. Du, W. Lam, D. Zou, and K. Chen, “Swe-fixer: Training open-source llms for effective and efficient github issue resolution, 2025,” URL https://arxiv. org/abs/2501.05040 , vol. 1, no. 2, p. 3. [35] M. Luo, N. Jain, J. Singh, S. Tan, A. Patel, Q. Wu, A. Ariyak, C. Cai, T. Venkat, S. Zhu, B. Athiwaratkun, M. Roongta, C. Zhang, L. E. Li, R. A. Popa, K. Sen, and I. Stoica, “Deepswe: Training a state-of-the-art coding agent from scratch by scaling rl,” 2025, notion Blog. [36] S. Chen, S. Lin, Y. Shi, H. Lian, X. Gu, L. Yun, D. Chen, L. Cao, J. Liu, N. Xia et al. , “Swe-exp: Experience-driven software issue resolution,” 
+
+arXiv preprint arXiv:2507.23361 , 2025. [37] X. Yang, J. Zhou, M. Pacheco, W. Zhu, P. He, S. Wang, K. Liu, and R. Pan, “Lingxi: Repository-level issue resolution framework enhanced by procedural knowledge guided scaling,” arXiv preprint arXiv:2510.11838 , 2025. [38] L. Zeng, Y. Li, Y. Xiao, C. Li, C. Y. Liu, R. Yan, T. Wei, J. He, X. Song, Y. Liu et al. , “Skywork-swe: Unveiling data scaling laws for software engineering in llms,” arXiv preprint arXiv:2506.19290 , 2025. [39] H. Li, Y. Tang, S. Wang, and W. Guo, “Patchpilot: A cost-efficient software engineering agent with early attempts on formal verification,” 
+
+arXiv preprint arXiv:2502.02747 , 2025. [40] P.-P. Pˆ art ,achi, S. K. Dash, M. Allamanis, and E. T. Barr, “Flexeme: Untangling commits using lexical flows,” in Proceedings of the 28th ACM Joint European Software Engineering Conference and Symposium on the Foundations of Software Engineering (ESEC/FSE ’20) . ACM, 2020, pp. 63–74. [Online]. Available: https://doi.org/10.1145/3368089. 3409693 [41] C. Sun, Y. Li, Q. Zhang, T. Gu, and Z. Su, “Perses: Syntax-guided program reduction,” in Proceedings of the 40th International Conference on Software Engineering . Association for Computing Machinery, 2018, p. 361–371. [42] X. Song, Y. Wu, S. Liu, B. C. 0001, Y. L. 0001, and X. P. 0001, “C2d2: Extracting critical changes for real-world bugs with dependency-sensitive delta debugging,” in Proceedings of the 33rd ACM SIGSOFT International Symposium on Software Testing and Analysis, ISSTA 2024, Vienna, Austria, September 16-20, 2024 , M. Christakis and M. Pradel, Eds. ACM, 2024, pp. 300–312. [Online]. Available: https://doi.org/10.1145/3650212.3652129 [43] B. Koh, N. Walkinshaw, and D. Shin, “Detecting multiple semantic concerns in tangled code commits,” arXiv preprint arXiv:2601.21298 ,2026. [44] Q. Zeng, Y. Zhang, Z. Qiu, and H. Liu, “A first look at conventional commits classification,” in 2025 IEEE/ACM 47th International Confer-ence on Software Engineering (ICSE) . IEEE, 2025, pp. 2277–2289. [45] A. Sohrabizadeh, J. Song, M. Liu, R. Roy, C. Lee, J. Raiman, and B. Catanzaro, “Nemotron-cortexa: Enhancing llm agents for software engineering tasks via improved localization and solution diversity,” in 
+
+Forty-second International Conference on Machine Learning , 2025. [46] H. Li, Q. Dong, J. Chen, H. Su, Y. Zhou, Q. Ai, Z. Ye, and Y. Liu, “Llms-as-judges: a comprehensive survey on llm-based evaluation methods,” 
+
+arXiv preprint arXiv:2412.05579 , 2024. [47] F. Li, J. Jiang, J. Sun, and H. Zhang, “Hybrid automated program repair by combining large language models and program analysis,” ACM Transactions on Software Engineering and Methodology , vol. 34, no. 7, pp. 1–28, 2025. [48] S. Liu, F. Liu, L. Li, X. Tan, Y. Zhu, X. Lian, and L. Zhang, “An empirical study on failures in automated issue solving,” arXiv preprint arXiv:2509.13941 , 2025. [49] E. A. AlOmar, L. Xu, S. Martinez, A. Peruma, M. W. Mkaouer, C. D. Newman, and A. Ouni, “Chatgpt for code refactoring: Analyzing topics, interaction, and effective prompts,” in 2025 IEEE International Conference on Collaborative Advances in Software and COmputiNg (CASCON) . IEEE, 2025, pp. 389–398. [50] J. Xu, Y. Fu, S. H. Tan, and P. He, “Aligning the objective of llm-based program repair,” in 2025 IEEE/ACM 47th International Conference on Software Engineering (ICSE) . IEEE, 2025, pp. 2548–2560. [51] V. Campos, R. Shariffdeen, A. Ulges, and Y. Noller, “Empirical eval-uation of generalizable automated program repair with large language models,” arXiv preprint arXiv:2506.03283 , 2025. [52] M. Zawalski, W. Chen, K. Pertsch, O. Mees, C. Finn, and S. Levine, “Robotic control via embodied chain-of-thought reasoning,” arXiv preprint arXiv:2407.08693 , 2024. [53] D. Li, S. Cao, T. Griggs, S. Liu, X. Mo, E. Tang, S. Hegde, K. Hakhamaneshi, S. G. Patil, M. Zaharia et al. , “Llms can easily learn to reason from demonstrations structure, not content, is what matters!” 
+
+arXiv preprint arXiv:2502.07374 , 2025. [54] H. Xu, Y. Yan, Y. Shen, W. Zhang, G. Hou, S. Jiang, K. Song, W. Lu, J. Xiao, and Y. Zhuang, “Mind the gap: Bridging thought leap for improved chain-of-thought tuning,” Advances in Neural Information Processing Systems , vol. 38, pp. 143 665–143 694, 2026. [55] C. Yang, T. Zhang, J. Jiang, X. Zhou, H. Tian, M. Du, J. Shi, J. Chen, Y. Li, E. L. Ouh et al. , “Semantics-aligned, curriculum-driven, and reasoning-enhanced vulnerability repair framework,” arXiv preprint arXiv:2510.01002 , 2025. [56] S. Yin, Z. Tian, J. Chen, and S. Guo, “Improving llm code generation via requirement-aware curriculum reinforcement learning,” arXiv preprint arXiv:2605.00433 , 2026. [57] J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov, “Prox-imal policy optimization algorithms,” arXiv preprint arXiv:1707.06347 ,2017. [58] Z. Shao, P. Wang, Q. Zhu, R. Xu, J. Song, X. Bi, H. Zhang, M. Zhang, Y. Li, Y. Wu et al. , “Deepseekmath: Pushing the limits of mathematical reasoning in open language models,” arXiv preprint arXiv:2402.03300 ,2024. [59] OpenAI, “Introducing gpt-5.2 — openai,” https://openai.com/index/ introducing-gpt-5-2/, 2025. [60] Google, “Introducing our most intelligent model yet. with state-of-the-art reasoning to help you learn, build, and plan anything.” https://deepmind. google/models/gemini/, 2025. [61] Qwen Team, “Qwen3.5: Towards native multimodal agents,” February 2026. [Online]. Available: https://qwen.ai/blog?id=qwen3.5 [62] Anthropic, “Introducing claude sonnet 4.5,” https://www.anthropic.com/ news/claude-sonnet-4-5, 2025. [63] G. Deepmind, “Our most intelligent open models, built from gemini 3 research and technology to maximize intelligence-per-parameter,” https: //deepmind.google/models/gemma/gemma-4/, 2026. [64] M. AI, “Introducing mistral 3 — mistral ai,” https://mistral.ai/news/ mistral-3, 2025. [65] T. Zhang, M. Song, J. Pinedo, and M. Kim, “Interactive code review for systematic changes,” in 2015 IEEE/ACM 37th IEEE International Conference on Software Engineering , vol. 1. IEEE, 2015, pp. 111– 122. [66] R. S. Shariffdeen, S. H. Tan, M. Gao, and A. Roychoudhury, “Automated patch transplantation,” ACM Transactions on Software Engineering and Methodology (TOSEM) , vol. 30, no. 1, pp. 1–36, 2020. [67] P. Thongtanunam, S. McIntosh, A. E. Hassan, and H. Iida, “Review participation in modern code review: An empirical study of the android, qt, and openstack projects,” Empirical Software Engineering , vol. 22, no. 2, pp. 768–817, 2017. [68] O. Baysal, O. Kononenko, R. Holmes, and M. W. Godfrey, “Investigating technical and non-technical factors influencing modern code review,” 
+
+Empirical Software Engineering , vol. 21, no. 3, pp. 932–959, 2016. [69] Git, “Git - git-diff documentation,” https://git-scm.com/docs/git-diff, 2026. [70] P. Gao, Z. Tian, X. Meng, X. Wang, R. Hu, Y. Xiao, Y. Liu, Z. Zhang, J. Chen, C. Gao et al. , “Trae agent: An llm-based agent for software engineering with test-time scaling,” arXiv preprint arXiv:2507.23370 ,2025. [71] SWE-Rizzo, “Swe-rizzo - software engineering on bittensor - a team rizzo subnet,” https://github.com/brokespace/code, 2025. [72] CodeSweep, “Codesweep - autopilot for enterprise software mainte-nance,” https://codesweep.ai/, 2025. [73] JD, “Joycode swe-bench agent pipeline,” https://github.com/ jd-opensource/joycode-agent/, 2025. [74] S. M. C. Ai, “Refact,” https://github.com/smallcloudai/refact, 2025. [75] Composio, “Composio sdk,” https://github.com/ComposioHQ/composio, 2024. [76] AppMap, “Appmap navie,” https://appmap.io/product/appmap-navie. html, 2024. [77] AugmentCode, “Augment swe-bench verified agent,” https://github.com/ augmentcode/augment-swebench-agent, 2025. [78] Z.ai, “Z.ai: Free ai chatbot,” https://chat.z.ai/, 2025. [79] Gru, “Gru ai - your agi assistant,” https://gru.ai/, 2024. [80] J. Yu, Z. Cheng, X. Wu, and X. Xing, “Building coding agents via entropy-enhanced multi-turn preference optimization,” arXiv preprint arXiv:2509.12434 , 2025. [81] M. H. Halstead, Elements of Software Science (Operating and program-ming systems series) . Elsevier Science Inc., 1977. [82] C. Ebert, J. Cain, G. Antoniol, S. Counsell, and P. Laplante, “Cyclomatic complexity,” IEEE software , vol. 33, no. 6, pp. 27–29, 2016. [83] S. Gulwani, I. Radiˇ cek, and F. Zuleger, “Automated clustering and pro-gram repair for introductory programming assignments,” ACM SIGPLAN Notices , vol. 53, no. 4, pp. 465–480, 2018. [84] H. B. Mann and D. R. Whitney, “On a test of whether one of two random variables is stochastically larger than the other,” The annals of mathematical statistics , pp. 50–60, 1947. [85] F. Wilcoxon, “Individual comparisons by ranking methods,” in Break-throughs in statistics: Methodology and distribution . Springer, 1992, pp. 196–202. [86] E. Ostertagova, O. Ostertag, and J. Kov´ aˇ c, “Methodology and application of the kruskal-wallis test,” Applied mechanics and materials , vol. 611, pp. 115–120, 2014. [87] S. Holm, “A simple sequentially rejective multiple test procedure,” 
+
+Scandinavian journal of statistics , pp. 65–70, 1979. [88] N. Cliff, “Dominance statistics: Ordinal analyses to answer ordinal questions.” Psychological bulletin , vol. 114, no. 3, p. 494, 1993.
