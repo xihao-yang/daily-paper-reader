@@ -6,41 +6,29 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-15
-- 运行时间：2026-08-15 19:22:11 UTC
+- 最新运行日期：2026-08-16
+- 运行时间：2026-08-16 19:24:31 UTC
 - 运行状态：成功
-- 本次总论文数：6
+- 本次总论文数：2
 - 精读区：0
-- 速读区：6
+- 速读区：2
 
 ### 今日简报（AI）
-- 今日共生成 6 篇推荐（精读 0 篇，速读 6 篇）
-- 速读：《OpenCodeReview: Determinism over Non-Determinism for Cost-Effective Agent-Based Code Review》（6.5/10）, 《OpenCodeReview: Determinism over Non-Determinism for Cost-Effective Agent-Based Code Review》（6.5/10）, 《From Faulty Memories to Corrected Actions: Dependency-Guided Rollback Repair for Memory-Augmented Agents》（6.5/10）
+- 今日共生成 2 篇推荐（精读 0 篇，速读 2 篇）
+- 速读：《VICBench: A Multi-Language Benchmark for Code Vulnerability Detection》（6.0/10）, 《LLM-Assisted Dynamic Threat Analysis for Attacker-Reachable Software Weaknesses in Autonomous Vehicles》（6.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202608/15/README](/202608/15/README)
+- 详情：[/202608/16/README](/202608/16/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [OpenCodeReview: Determinism over Non-Determinism for Cost-Effective Agent-Based Code Review](/202608/15/2608.09290v1-opencodereview-determinism-over-non-determinism-for-cost-effective-agent-based-code-review)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：基于代理的代码审查和问题发现的确定性工程
-2. [OpenCodeReview: Determinism over Non-Determinism for Cost-Effective Agent-Based Code Review](/202608/15/2608.09290v2-opencodereview-determinism-over-non-determinism-for-cost-effective-agent-based-code-review)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：基于智能体的代码审查和补丁评估，采用确定性工程
-3. [From Faulty Memories to Corrected Actions: Dependency-Guided Rollback Repair for Memory-Augmented Agents](/202608/15/2608.10502v1-from-faulty-memories-to-corrected-actions-dependency-guided-rollback-repair-for-memory-augmented-agents)  
-   标签：评分：6.5/10、query:apr-oracle
-   evidence：代理的故障后存储恢复与修复
-4. [Pseudo2CodeQA: A Benchmark for LLM-Based Structured Algorithmic Reasoning in Code Generation](/202608/15/2608.09068v1-pseudo2codeqa-a-benchmark-for-llm-based-structured-algorithmic-reasoning-in-code-generation)  
+1. [VICBench: A Multi-Language Benchmark for Code Vulnerability Detection](/202608/16/2608.12246v1-vicbench-a-multi-language-benchmark-for-code-vulnerability-detection)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：包含可执行测试套件的基准测试，用于评估代码生成质量
-5. ["Will This Data Break My Task?" - Interactive Synthesis of Task-Aware Data Unit Tests](/202608/15/2608.09376v1-will-this-data-break-my-task---interactive-synthesis-of-task-aware-data-unit-tests)  
+   evidence：漏洞检测和真实修复的基准测试
+2. [LLM-Assisted Dynamic Threat Analysis for Attacker-Reachable Software Weaknesses in Autonomous Vehicles](/202608/16/2608.13450v1-llm-assisted-dynamic-threat-analysis-for-attacker-reachable-software-weaknesses-in-autonomous-vehicles)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：合成任务感知的单元测试用于验证
-6. [QuoteBench: How Matched Scores Can Hide Command-Path Failures](/202608/15/2608.13547v1-quotebench-how-matched-scores-can-hide-command-path-failures)  
-   标签：评分：6.0/10、query:apr-oracle
-   evidence：命令路径故障和执行分数的验证
+   evidence：大模型辅助的软件缺陷动态分析与测试构件构建
 
 
 <div class="dpr-home-promo-card">
