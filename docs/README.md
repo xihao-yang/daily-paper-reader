@@ -6,29 +6,56 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-16
-- 运行时间：2026-08-16 19:24:31 UTC
+- 最新运行日期：2026-08-17
+- 运行时间：2026-08-17 20:46:06 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：0
-- 速读区：2
+- 本次总论文数：11
+- 精读区：3
+- 速读区：8
 
 ### 今日简报（AI）
-- 今日共生成 2 篇推荐（精读 0 篇，速读 2 篇）
-- 速读：《VICBench: A Multi-Language Benchmark for Code Vulnerability Detection》（6.0/10）, 《LLM-Assisted Dynamic Threat Analysis for Attacker-Reachable Software Weaknesses in Autonomous Vehicles》（6.0/10）
+- 今日共生成 11 篇推荐（精读 3 篇，速读 8 篇）
+- 精读：《Rethinking Automated Program Repair: The Impact of Bug Complexity, Fault Localization, and LLM Cost-efficiency》（10.0/10）, 《Does Fixing Break Security? An Empirical Study of Security Degradation in Iterative LLM-Driven Infrastructure-as-Code Repair》（8.5/10）
+- 速读：《Vero: Can AI Agents Build Formally Verified Software Repositories?》（7.0/10）, 《Engineering Reliable Coding Agents: Evaluating and Operating the System Around the Model》（7.0/10）, 《Validating LLM-Modernized Scientific Software Through Differential Fault Injection》（7.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202608/16/README](/202608/16/README)
+- 详情：[/202608/17/README](/202608/17/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [Rethinking Automated Program Repair: The Impact of Bug Complexity, Fault Localization, and LLM Cost-efficiency](/202608/17/2608.14065v1-rethinking-automated-program-repair-the-impact-of-bug-complexity-fault-localization-and-llm-cost-efficiency)  
+   标签：评分：10.0/10、query:apr-oracle
+   evidence：基于LLM的自动程序修复及其修复有效性的实证分析
+2. [Does Fixing Break Security? An Empirical Study of Security Degradation in Iterative LLM-Driven Infrastructure-as-Code Repair](/202608/17/2608.13404v2-does-fixing-break-security-an-empirical-study-of-security-degradation-in-iterative-llm-driven-infrastructure-as-code-repair)  
+   标签：评分：8.5/10、query:apr-oracle
+   evidence：迭代式大模型驱动修复中的安全性退化
+3. [LoopVSR: A Loop Engineering Framework for Automated Repair of Visual Speech Recognition Inference Pipelines](/202608/17/2608.13610v1-loopvsr-a-loop-engineering-framework-for-automated-repair-of-visual-speech-recognition-inference-pipelines)  
+   标签：评分：8.0/10、query:apr-oracle
+   evidence：具有补丁审计和回滚功能的自动修复框架
 
 ### 速读区论文标签
-1. [VICBench: A Multi-Language Benchmark for Code Vulnerability Detection](/202608/16/2608.12246v1-vicbench-a-multi-language-benchmark-for-code-vulnerability-detection)  
+1. [Vero: Can AI Agents Build Formally Verified Software Repositories?](/202608/17/2608.13522v1-vero-can-ai-agents-build-formally-verified-software-repositories)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：验证代码生成和规格的机器检查证明以确保正确性
+2. [Engineering Reliable Coding Agents: Evaluating and Operating the System Around the Model](/202608/17/2608.13867v1-engineering-reliable-coding-agents-evaluating-and-operating-the-system-around-the-model)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：超越模型能力的编码代理可靠性评估与运行框架
+3. [Validating LLM-Modernized Scientific Software Through Differential Fault Injection](/202608/17/2608.14527v1-validating-llm-modernized-scientific-software-through-differential-fault-injection)  
+   标签：评分：7.0/10、query:apr-oracle
+   evidence：用于验证大模型现代化代码的差异故障注入
+4. [SafeQL: Search-based Refinement for Safe and Efficient LLM-based Text-to-SQL](/202608/17/2608.09260v1-safeql-search-based-refinement-for-safe-and-efficient-llm-based-text-to-sql)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：漏洞检测和真实修复的基准测试
-2. [LLM-Assisted Dynamic Threat Analysis for Attacker-Reachable Software Weaknesses in Autonomous Vehicles](/202608/16/2608.13450v1-llm-assisted-dynamic-threat-analysis-for-attacker-reachable-software-weaknesses-in-autonomous-vehicles)  
+   evidence：利用数据库管理系统作为引导的基于搜索的LLM代码生成改进
+5. [Fine-Tuning Qwen3-27B for C-to-Rust Code Translation: A Three-Stage Curriculum of Pretraining, Debugging-Aware SFT, and Task-Specific SFT](/202608/17/2608.13681v1-fine-tuning-qwen3-27b-for-c-to-rust-code-translation-a-three-stage-curriculum-of-pretraining-debugging-aware-sft-and-task-specific-sft)  
    标签：评分：6.0/10、query:apr-oracle
-   evidence：大模型辅助的软件缺陷动态分析与测试构件构建
+   evidence：针对代码翻译和修复的调试感知微调
+6. [Regime-Conditional Verification: Correctness Estimation for Adapting and Monitoring Safety Classifiers](/202608/17/2608.14089v1-regime-conditional-verification-correctness-estimation-for-adapting-and-monitoring-safety-classifiers)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：分类器预测的正确性估计和选择性纠正
+7. [AppLooper: An Agentic Application Engineering Loop for Accountable Release with Virtual-User Feedback](/202608/17/2608.14093v1-applooper-an-agentic-application-engineering-loop-for-accountable-release-with-virtual-user-feedback)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：包含实现、评估和修复及用户反馈的迭代循环
+8. [Breaking Models to Test the Judge: A Mutation Testing Approach for Semantic Evaluators of Domain Class Diagrams](/202608/17/2608.14315v1-breaking-models-to-test-the-judge-a-mutation-testing-approach-for-semantic-evaluators-of-domain-class-diagrams)  
+   标签：评分：6.0/10、query:apr-oracle
+   evidence：针对语义评估器和判定器的变异测试
 
 
 <div class="dpr-home-promo-card">

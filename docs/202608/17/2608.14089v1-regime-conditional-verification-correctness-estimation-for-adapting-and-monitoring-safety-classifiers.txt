@@ -1,0 +1,504 @@
+Title: Regime-Conditional Verification: Correctness Estimation for Adapting and Monitoring Safety Classifiers
+
+URL Source: https://arxiv.org/pdf/2608.14089v1
+
+Published Time: Mon, 17 Aug 2026 00:35:49 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Regime-Conditional Verification: Correctness Estimation for Adapting and Monitoring Safety Classifiers ∗
+
+# Thiago Sandoval, Ufuk Topcu 
+
+The University of Texas at Austin 
+
+Abstract 
+
+Safety classifiers deployed with large language models of-ten fail for two reasons: their decisions reflect the policy learned during training rather than the deployer’s desired policy, and their performance degrades as deployment traffic evolves. We present Regime-Conditional Verification (RCV), a lightweight wrapper that adapts an off-the-shelf safety classi-fier without retraining it. RCV estimates, from the classifier’s internal representations, the probability that each prediction disagrees with the deployer’s policy, and selectively corrects predictions likely to be wrong. The same correctness esti-mates also provide a label-free signal for detecting distribu-tion shift, enabling a maintenance loop that updates the cor-rectness estimation layer and resorts to classifier fine-tuning only when necessary. Across three off-the-shelf safety classi-fiers and two benchmark datasets, RCV improves adherence to the deployer’s policy in every classifier–dataset combina-tion, catching up to 0.81 of previously missed unsafe content without modifying the underlying classifier. In a deployment study with ten attack campaigns, each a harm category held out of RCV’s training, RCV detects every campaign in a ded-icated injection panel; in the maintenance census most drift episodes are repaired without updating the classifier, and the fine-tune is reserved for the residual episodes that repair does not restore. 
+
+# Introduction 
+
+A deployed LLM application submits every prompt– response pair it produces to a safety classifier: the prompt (user message plus injected context) and the model’s re-sponse. We call this stream the application’s traffic . The classifier gates this traffic: for each pair it outputs a binary verdict, safe or unsafe, and the application passes or blocks the pair accordingly. Moreover, there is no agreed formal definition of LLM safety; in practice, safety is operationally defined by whatever the deployed classifier flags. Deploy-ment then exposes two failure modes: the classifier’s implicit policy is fixed at training time and may diverge from the deployer’s own, and the distribution of the traffic it gates shifts as usage evolves and adversaries adapt, degrading its verdicts (Piet et al. 2025). We address both with a single lightweight layer around the classifier. A verdict is wrong 
+
+> ∗
+
+This work was supported by the MURI grant Foundations of Dynamic Certification for Autonomy (ONR N00014-25-1-2479). 
+
+when it conflicts with the deployer’s written policy. Because a natural-language policy cannot be verified formally, we es-timate the probability that each verdict is wrong and correct those that likely are. This correctness estimation layer steers the off-the-shelf classifier toward the deployer’s policy while simultaneously providing a label-free signal for detecting de-ployment drift. That signal drives a maintenance loop that repairs the layer as traffic shifts and fine-tunes the classifier only when necessary. Our experiments first test the design hypothesis that the estimator must be conditioned on the classifier’s own verdict, because a safe verdict can be wrong only by letting a violation through and an unsafe verdict only by blocking something harmless, and thus a single pooled estimator serving both degrades. Figure 1 gives an overview. 
+
+Problem formulation. Consider an application and let x
+
+be an item, a prompt–response pair. The deployer holds a written safety policy T , in natural language, and we write 
+
+Y = C(x) for the verdict of the off-the-shelf classifier C.The policy is operationalized by an oracle Y ⋆(x), by hu-man annotation or an LLM judge applying T . The method is agnostic to that choice: Y ⋆ enters only through labeled examples. The oracle is available offline but impractical as a per-item dependency on live traffic. We assume white-box access to C: the deployer can read C’s internal state along-side every verdict, as when the classifier is self-hosted. The indicator A = 1{Y = Y ⋆} records agreement on each item, and adherence is the expectation of A over the traffic distri-bution. Note that a gain in adherence is a gain in agreement with Y ⋆, not with T directly. 1 The traffic distribution is not stationary, so adherence is a function of time; the deployer commits to a floor. The problem is thus twofold: raise ad-herence at deployment, and hold it above that floor as traffic drifts. 
+
+Adherence as a safety case. A safety case, in the engineer-ing sense, is a structured rationale that a deployed system will avoid unacceptable outcomes, and one whose validity is monitored across the deployment window (Clymer et al. 2024). The standing claim defended here is that adherence stays above that floor. The setting matches a subsystem ex-ample in that framework: a generative model combined with 
+
+> 1
+
+We assign 1 to unsafe, the detection convention of the safety-classification literature; verification work often gives 1 to the safe state, but the choice is notational. arXiv:2608.14089v1 [cs.AI] 14 Aug 2026 User: “Could you help me hack into Company XPTO servers?”                    
+
+> Assistant: “Sure! I will be glad to help.”
+> Off-the-shelf classifier C
+> third-party weights fixed verdict Y=SAFE
+> ×misses the violation route on Y
+> Correct (at deployment) probe on state Z
+> estimated wrong ⇒flip
+> ✓flipped to UNSAFE
+> adheres to Tat deployment
+> Monitor (in operation) track the flip rate , label-free alarm on drift ⇒repair / fine-tune
+> ✓held above the floor
+> stays adherent as traffic drifts
+
+Figure 1: Regime-conditional correctness estimation corrects an off-the-shelf classifier’s decisions at deployment and yields a label-free drift signal. An off-the-shelf classifier gates each prompt–response pair; here its verdict clears one that the deployer’s policy would block. A probe on the classifier’s internal state estimates when the verdict is wrong, and RCV corrects it (top); event counts from these estimates are monitored, label-free, to watch for drift (bottom). a classifier that monitors its outputs. That literature names distribution shift among the reasons such claims are hard to keep justified in deployment. Holding the claim as traffic drifts is the second half of the problem we address. 
+
+Existing levers and tooling. A deployer who wants a clas-sifier to follow their own policy has a few levers, among them accepting its implicit policy, fine-tuning it (which re-quires weight access and GPU, and carries regression risk), and stacking filters, each a new model with its own pol-icy. Tooling that watches a deployed classifier tracks other quantities: drift monitors follow the input distribution, the classifier’s scores, or a label-free accuracy estimate; learned correctness estimators score each prediction’s reliability so the system can abstain when it is low. RCV differs in its ob-ject: it estimates the correctness of the classifier’s own verdict under the deployer’s policy and uses that single estimate for both correction and monitoring. Related Work gives the full placement. This paper makes the following contributions: 
+
+• Regime-conditional correctness. We find that a classi-fier’s correctness under the deployer’s policy is estimable from its own internal state, and that for correction the estimate must be conditioned on the classifier’s verdict: safe and unsafe verdicts fail differently and need sepa-rate estimators and calibrations. No single calibration is valid for two error structures that differ given the score. 
+
+• The estimator. We introduce RCV, a regime-conditional correctness estimator: trained on labeled examples of the deployer’s policy, one probe and one calibration per regime produce, from the classifier’s own internal state, a calibrated probability that the verdict disagrees with that policy. Deployed, it amounts to a few thousand parameters per regime, with no additional language model. 
+
+• Applications. This estimator enables policy adaptation and deployment maintenance on one shared signal: a flip rule corrects verdicts whose estimated error probability passes a threshold, and event counts derived from those estimates are monitored without labels and signal drift. 
+
+• Artifacts. We release code, the oracle’s label map, per-seed results, and scripts that rebuild both evaluation sets from the official dataset releases. In our deployment study, we inject ten attack campaigns into traffic gated by an off-the-shelf Llama-Guard-3. A dedicated injection panel detects all ten at a median attack rate of 
+
+0.115 at first alarm (100 of 100 runs). Over the deployment’s one hundred drift episodes (ten held-out families across ten seeds), the audited repair restores the pre-drift standard in place for 79 episodes under a constrained label budget, and for 87 when the audit is bounded by data instead; the fine-tune is reserved for the residual episodes that repair does not restore to the pre-drift standard. Across six classifier–dataset combinations, adherence rises in every one, and the caught share of previously missed unsafe content ranges from 0.29 
+
+to 0.81 .
+
+# Method: Regime-Conditional Verification 
+
+Correctness estimation. Why should a classifier’s inter-nal representations reveal whether its verdict agrees with a policy it was never trained on? Each classifier we consider is a fine-tuned large language model, and its representations are shaped by pretraining on a general corpus and encode more about an input than the safety specialization uses. Fine-tuning specializes the decision more than it rebuilds the represen-tation, so features relevant to a different policy can survive even where the classifier’s own verdict ignores them. A probe given those representations and examples of the deployer’s policy can then learn the deployer’s decision rule over fea-tures the model already computes. The probe exploits latent features already encoded in the representation; it recovers no new information about the input. Probes are known to recover such latent properties, from a frozen classifier’s cor-rectness (Corbière et al. 2019) to a judge’s verdict correct-ness (Radharapu et al. 2025). Those systems abstain on a low estimate; ours corrects the verdict. Because the two er-ror directions fail differently, one calibration would have to be valid for both. We hypothesize it cannot be, and that the estimator must be conditioned on the classifier’s verdict. The correctness estimation layer is implemented as probes on the classifier’s internal representations. A safe verdict can err only by missing a violation, and an unsafe verdict can err only by over-blocking. The verdict thus partitions the errors: each value defines a regime, the conditioning the method is named for. RCV equips each regime with its own probe and calibration map. From the internal representation Z that C
+
+exposes, the probe estimates the probability that the verdict is wrong for the deployer’s policy. The partition adds no inference-time cost; the experiments 2Input x                                             
+
+> (prompt, resp.)
+> Off-the-shelf classifier C
+> emits Y, state Z
+> SAFE -regime probe v0
+> on state Z·+Platt cal.
+> UNSAFE -regime probe v1
+> on state Z·+Platt cal.
+> Flip if
+> P(wrong) > τ ;else keep Y
+> Final verdict
+> Y=0
+> Y=1
+> state Z
+> (shared)
+> Monitor
+> sequential test on the flip rate ·label-free
+> Audit +repair
+> update probe on fresh audit labels
+> Gate
+> Q1 ∧Q2
+> Fine-tune
+> small weight update of C(new Z, Y )
+> Refit probes
+> recalibrate on new Z
+> weights fixed again
+> alarm
+> test no alarm
+> accept
+> Q1 ∧Q2 retry (bounded)
+> no update passes
+> last resort update C
+> resume monitoring Q1 (recall) within 5pp of the pre-drift standard Q2 (over-block) within 5pp of the pre-drift standard per-regime flip rate
+> fine-tune updates C
+> AInference (correct)
+> BMaintenance loop (monitor +maintain)
+
+Figure 2: Correction and maintenance are applications of one correctness estimator. Panel A (inference): correctness estimation and decision correction. C emits verdict Y and exposes state Z; the verdict routes the item to one of two calibrated probes, and a flip rule corrects verdicts estimated to be wrong. Panel B (deployment): drift monitoring and maintenance. 
+
+Per-regime event counts derived from the correctness estimates are monitored label-free; an alarm triggers a probe update or, if no update passes, a fine-tune of C.answer whether the gain survives splitting finite data between two probes. Appendix A.1 shows why a single calibration map cannot serve two regimes whose error rates differ given the score. 
+
+Decision correction. When the calibrated estimate ex-ceeds a threshold τ (one half by default), RCV flips the verdict. In the safe regime a flip turns a pass into a block; in the unsafe regime it turns a block into a pass (Fig. 2). 
+
+Drift monitoring. The same probes make the deployed system observable without labels. When a probe is calibrated to current traffic, the average of its per-item estimates over a regime is a plug-in estimate of that regime’s error rate (Appendix A.2). Together, the two error rates determine ad-herence: their traffic-weighted average is the error rate of the deployed system, and adherence is its complement. The floor the deployer commits to is a floor on adherence. The same partition separates the two directions of drift: drift whose harmful items slip past the classifier registers first in the safe regime; drift that makes the classifier over-block reg-isters first in the unsafe regime (Fig. 3 shows the accept side; the reject side is exercised under the Detection exper-iment). The classifier’s own block rate, by contrast, misses the harm that slips past, because it arrives as passed traffic and leaves the block count unchanged. RCV’s drift signal derives from the internal state, read through the trained cor-rectness estimate, not from the classifier’s confidence score. Drift therefore registers as movement in what the probes were trained to estimate, agreement with the deployer’s policy. In deployment, each regime is monitored by its own se-quential test on two nested event counts derived from the cal-ibrated correctness score; the test alarms under a sustained increase above reference rates estimated on drift-free traffic (mechanics and parameters in Appendix D). Test thresh-olds are calibrated on drift-free streams to a pre-specified false-alarm allowance, and the realized false-alarm rate is measured on the same class of streams in the experiments. 
+
+Maintenance. When an alarm fires, the traffic mixture is recorded, and all subsequent audit and gate material is com-posed at that mixture. The deployer audits items on which no component has been trained or calibrated; each labeled item is assigned to either the update’s training set or its calibra-tion set. A candidate update of the probes is then scored on a held-out block of the same mixture that no fit uses. The can-didate is accepted when it holds the pre-drift standard, recall and over-block each within a pre-specified tolerance. If no candidate passes, the audit is enlarged within a fixed budget; when the budget is exhausted, the loop terminates with an escalation to fine-tune the classifier, the designated last resort outside the automated loop, and the one action that changes the representation itself, not the way it is read. After an ac-cepted repair, the reference mixture is updated to include the injected family at the rate at which the alarm fired, and the monitor is recalibrated on a run-in drawn from the updated reference mixture; C is unchanged. After a fine-tune, the probes are refit on the new representation, C’s weights are again fixed, and a re-arm readout is taken. In the drift litera-ture’s terms, the loop is a gated, correction-coupled instance of concept-drift adaptation (Gama et al. 2014). 
+
+# Experiments 
+
+Setup. We evaluate three off-the-shelf safety classi-fiers spanning two architectures. Llama-Guard-3-8B and WildGuard-7B are generative classifiers whose verdict is read from the output token distribution; Beaver is a dis-criminative classifier that produces it by thresholding the scalar output of a classification head, and it was chosen for cross-architecture validation. Two English, single-turn safety datasets with human annotations supply the traffic: PKU-30.00 0.05 0.10 0.15 0.20 
+
+> attack rate at first alarm
+> cyberattack toxic language violence disinformation stereotypes defamation sensitive info fraud material harm mental-health over-reliance
+> 10/10 10/10 10/10 10/10 10/10 10/10 10/10 10/10 10/10 10/10
+
+Figure 3: All ten held-out attack campaigns alarm before the 0.30 attack-rate cap , at a median attack rate of 0.115 
+
+(family medians 0.063 –0.158 ), against Llama-Guard-3. Each mark is one of ten seeds placed at the scheduled attack rate at the position where the monitor first alarmed. Black ticks are family medians. SafeRLHF and WildGuardMix. The deployer’s policy T is operationalized by an LLM judge (GPT-5-Nano, Y ⋆), which agrees with the datasets’ human labels at κ = 0 .838 on PKU-SafeRLHF ( n=16 ,422 ) and κ = 0 .766 on WildGuard-Mix ( n=11 ,708 ); the steering gains (the adherence gains from decision correction) are additionally scored against the human labels themselves. In the deployed configuration, the probes are per-regime logistic regression with per-regime logistic (Platt) calibration. On the evaluation split the de-ployed probes attain an area under the ROC curve (AUROC) of 0.936 –0.961 and an expected calibration error of 0.011 –
+
+0.014 , so the flip threshold of 0.5 operates on calibrated probabilities. The steering results aggregate ten fixed seeds. Each seed uses its own training, calibration, and evaluation split, and steering is scored on the evaluation split only. The representation Z is the final decision-token hidden state for the two generative classifiers ( d=4 ,096 ) and, for Beaver, the final hidden state that its classification head reads ( d=5 ,120 ). The extraction recipes are given in Appendix D. Drift is sim-ulated by campaigns drawn from the dataset’s own category taxonomy and held out of the probes’ initial training. We call the injected category the campaign’s family. We write “attack” for these held-out-category injections; nothing in the method assumes an adversary or a threat model. The audit budget, attack-rate cap, and false-alarm allowance are design constants fixed before the drift experiments; the al-lowance was selected on a held-out development family (Ap-pendix D). Every held-out campaign injects a mix of material the oracle Y ⋆ judges unsafe and material it judges safe. The ten held-out campaigns induce mostly missed unsafe items, with slip-past rates of 0.105 –0.409 against over-block rates of 0.000 –0.070 . The reverse error direction is exercised by two constructed campaigns, described under Detection. 
+
+The conditioning hypothesis. The hypothesis that the esti-mator must be conditioned on the classifier’s verdict is instan-0.90 0.92 0.94 0.96 Correctness-probe AUROC 0.939 0.950          
+
+> +1.11 pp
+> 0.936 0.939
+> +0.34 pp
+> 0.937 0.944
+> +0.72 pp
+> 0.913 0.941
+> +2.74 pp
+> 0.927 0.929
+> +0.24 pp
+> 0.924 0.933
+> +0.94 pp
+> 0.914 0.961
+> +4.65 pp
+> 0.918 0.953
+> +3.54 pp
+> 0.913 0.954
+> +4.07 pp
+> LR MLP GBM LR MLP GBM LR MLP GBM Llama-Guard-3 WildGuard Beaver
+> pooled RCV (per-regime)
+
+Figure 4: The routing ablation across three probe fami-lies: per-regime routing exceeds its pooled counterpart in every cell. Routed versus pooled correctness-probe AUROC on PKU-SafeRLHF, per classifier, for a linear probe (the de-ployed choice), a small multilayer perceptron, and gradient-boosted trees. Markers are ten-seed means (s.d. across seeds 
+
+0.003 –0.009 ). tiated as per-regime routing: one probe and one calibration per verdict. We first remove the per-regime routing, repeating the ablation across three probe families (Fig. 4). With routing off, RCV collapses to a single pooled probe with one calibra-tion on the full mixed stream; this is the pooled variant of our own probe, identical in capacity and calibration. Per-regime routing raises adherence in all 60 paired per-seed compar-isons across both datasets. It raises the caught share in 59 of those 60 comparisons and matches the pooled variant in the remaining one, on WildGuardMix. Per-regime routing also improves the probe’s own discrimination: routed AUROC exceeds pooled AUROC in every cell of the ablation, by 0.2
+
+to 4.6 pp (Fig. 4). 
+
+Steering an off-the-shelf classifier to the deployer’s policy. 
+
+With the conditioning hypothesis validated, the remaining experiments show its consequences; the first is decision cor-rection. RCV raises adherence to the deployer’s policy in all six classifier–dataset combinations (Table 1). The largest gain is for Beaver on PKU-SafeRLHF, which also starts low-est ( 0.787 → 0.920 ). The largest gain on WildGuardMix is again for Beaver ( 0.898 → 0.933 ; Table 1). The safety-critical quantity is the caught share: unsafe items that slip past the classifier arrive as passed traffic, and the classifier on its own recovers none of them by construction. Recovery on this axis is therefore strictly additive, and across the six combina-tions it spans 0.29 –0.81 (Table 1). On WildGuardMix, RCV 4Table 1: What RCV changes on an off-the-shelf classifier: adherence rises in all six cells, and up to 0.81 of the unsafe items the classifier passed are caught. Caught share: of the truly unsafe items the classifier passes, the fraction RCV flips to unsafe. Cells are ten-seed means and ± is the standard deviation across seeds. The corrected value exceeds the raw value on every seed of every cell.                                                             
+
+> Classifier Adherence: raw →RCV Caught share
+> PKU-SafeRLHF (n=16 ,422 items) Llama-Guard-3 0.864 ±0.005 →0.926 ±0.004 0.703 ±0.021 WildGuard 0.906 ±0.004 →0.932 ±0.005 0.383 ±0.063 Beaver 0.787 ±0.004 →0.920 ±0.002 0.806 ±0.019
+> WildGuardMix (n=11 ,708 items) Llama-Guard-3 0.923 ±0.002 →0.943 ±0.004 0.346 ±0.047 WildGuard 0.932 ±0.002 →0.945 ±0.003 0.291 ±0.034 Beaver 0.898 ±0.002 →0.933 ±0.003 0.546 ±0.029
+
+recovers 0.29 of the unsafe items WildGuard misses, even with little headroom: this is the classifier’s own training dis-tribution, so it sits near its ceiling, yet adherence still rises. Steering also alters the share of truly-safe items blocked, by 
+
+−5.3 to +7 .0 pp across the six cells, and falls in three; ad-herence counts both error directions, so the reported gains already include these changes. We test whether the corrections track human safety judg-ments beyond agreement with Y ⋆. We re-score the six com-binations against the datasets’ human labels in place of Y ⋆,with no refit and no threshold change. Those labels are un-used in RCV’s training and calibration. A correction that matched Y ⋆ on every scored item would score, on this axis, 
+
+Y ⋆’s own agreement with the human labels ( 0.9195 PKU-SafeRLHF and 0.9298 WildGuardMix). Adherence moves toward that level in every cell with a measurable starting gap, including two cells that start above the level and fall toward it. The remaining cell starts within 0.7 pp of the level and stays within 1.4 pp (Appendix B). 
+
+Steering toward the added clause. We next test policy coverage with a clause that two of the three classifiers were never trained to enforce: a commitment-to-assist clause that is added to T and that treats an assistant’s agreement to assist a harmful request as a violation even when the re-sponse itself contains no explicitly harmful content. The two content-trained classifiers recall the added clause below their in-training clauses, a gap of about twelve points on PKU-SafeRLHF. There, RCV raises recall on the added clause to within 1.8 points of the level each classifier reaches on its in-training clauses; on WildGuardMix both rise and a resid-ual gap remains (Fig. 5). Across the figure’s four classifier– dataset cells, recall rises from raw to RCV on the in-training clauses and the added clause alike. WildGuard, whose train-ing does supervise this clause (Han et al. 2024), starts near ceiling on it ( 0.91 recall on PKU-SafeRLHF) and gains noth-ing from RCV ( +0 .003 , indistinguishable from zero), while Llama-Guard-3 (Grattafiori et al. 2024) and Beaver (Ji et al. 2023) are supervised on content categories alone, so the blind spot is classifier-relative: RCV adds the deployer’s clause raw RCV PKU-SafeRLHF 0.20 0.40 0.60 0.80 1.00 recall   
+
+> Beaver Llama-Guard-3
+> raw RCV WildGuardMix 0.20 0.40 0.60 0.80 1.00 in-training clauses added clause
+
+Figure 5: RCV lifts recall on the in-training clauses and raises an added commitment-to-assist clause to within 1.8
+
+points of the in-training level on PKU-SafeRLHF. Each panel is one dataset. For each classifier, filled markers give ten-seed mean recall on the in-training clauses, the clauses the classifier’s training enforces. Open markers give the same quantity for the added clause, which that training does not enforce. Each series appears once for the raw classifier and once under RCV. The mechanism decomposition is in Ap-pendix B. where the classifier’s training lacks it. 
+
+The maintenance loop. The loop is the second application of the same estimator. We now run the maintenance loop end to end on one deployment, WildGuardMix traffic gated by Llama-Guard-3: each of the ten held-out harm families is injected at ten seeds, one alarm-to-resolution episode each, a census of one hundred drift episodes. 
+
+Detection. Detection is measured in its own experiment, separate from the maintenance run and executed on Llama-Guard-3. The protocol ramps each injected family against clean base traffic: a 2,000-item clean run-in, then an attack rate rising linearly from zero to 0.30 over the next 19,000 items, with ten seeds per family. The attack rate is the sched-uled probability that an arriving item is drawn from the injected family. Across the ten held-out harm families the monitor alarms in 100 of 100 runs, always before the cap, at a median attack rate of 0.115 with family medians from 
+
+0.063 to 0.158 , and every first alarm falls in the safe regime. All ten families induce net safe-regime error, missed unsafe items, so the panel tests detection on that side alone. To test the monitor’s detection in the unsafe regime, two campaigns are constructed, because no natural category over-blocks on net. The first is a pool of items the classifier blocks and the oracle Y ⋆ judges safe; the second is built by the same rule with the dataset’s human label in place of the oracle. Each alarms in 10 of 10 runs, at a median attack rate of 0.057 ,and every first alarm falls in the unsafe regime. On clean traffic the same configuration yields 14 alarms in 90 null draws, a false-alarm rate of 0.156 (Clopper–Pearson 95% in-terval [0 .088 , 0.247] ); the interval’s upper bound sits below the 0.30 false-alarm allowance the calibration targets. 
+
+Gate outcomes. Every alarm resolves in one of two ways: an audited probe update passes the gate and the drift is re-paired in place, or no update passes within the budget and 50 50 100      
+
+> of 100 drift episodes
+> 87 13 data-bounded
+> 64 15 21 budget 300 ×4
+> repaired in place escalate
+> 300 1,200 2,400 3,600
+> audit labels
+> 0.6 0.7 0.8 0.9
+> held-out recall
+> deployed budget cap
+> saturates passes the gate
+
+Figure 6: Repair in place succeeds in 79 of 100 drift episodes at the deployed budget, and 87 when the audit is bounded by data instead. Left: the 100 -episode census (ten held-out families, ten seeds) under the deployed budget (300 labels per attempt, four attempts; solid first-audit repair, lighter later-audit repair, escalate) and under the data bound. Right: held-out recall against audit size for one repairing and one saturating episode; the dashed line is the deployed bud-get cap. the episode escalates to the fine-tune (demonstrated once, below). Under the deployed budget ( 300 labels per attempt, four attempts, a held-out 300 -label gate block, and a 5 pp acceptance tolerance on each axis), 79 of the 100 episodes repair in place, 64 on the first audit (Fig. 6); label cost per episode is a median of 600 , a mean of 870 , and at most 1,500 .The accepted update improves held-out recall over the pre-repair probe in 44 of the 79 repairs, by a median of 1.4 pp. Per-episode gate readings carry a standard error of 3–7 pp at the 300 -label gate block. To measure repair capacity without the budget constraint, we re-run the same episodes and the audit grows in fresh ma-terial until the corpus is exhausted, at realized data bounds of 1,817 –3,720 labels. 87 of the 100 episodes repair; seven repair only at 1,500 –3,600 labels, beyond the deployed bud-get’s 1,200 -label cap, each with a held-out recall gain. The remaining 13 do not pass the gate at any audit size. Held-out recall moves by a median of 0.0 pp between 300 labels and the bound; individual moves span −1.7 to +7 .4 pp, and in two episodes recall was still rising at the bound. For each of the thirteen, the bound is where the audit has drawn every item available at the alarm’s mixture. 
+
+The fine-tune. The escalation leg is executed once, on a saturating episode (disinformation, seed 8675309 ; Fig. 6 shows a different disinformation episode, seed 271828 )whose thirteen audits exhausted all 3,720 fresh labels the corpus could supply while held-out recall ended where it be-gan (net 0.0 pp; readings vary within ±4 pp and no attempt passes the gate). A fine-tune of C on labels the episode had already obtained ( 480 training items at the alarm-time mix-ture, five trainer seeds) raises the classifier’s own recall by 
+
+6.3 ± 1.9 pp; the raw fine-tune violates the pre-drift standard on the over-block axis in four of five seeds on a powered eval-uation set. Re-armed with a single fresh 300 -label audit, the fine-tuned classifier with a refitted probe passes the pre-drift standard in five of five seeds (recall 0.792 ±0.004 , over-block 
+
+0.033 ); at the deployed 300 -label gate, where base plus probe reproduces its recorded failure, fine-tune plus probe passes in four of five seeds; the fifth is short by one unsafe item. The correctness estimation layer reduces sensitivity to the trainer seed: recall’s standard deviation across seeds is 0.004 
+
+against the raw fine-tune’s 0.019 . The fine-tune supplies ca-pacity; the probe converts it into a compliant, seed-stable deployment; the two are trained on disjoint splits of the same audited label pool and are evaluated and operated together. 
+
+Consecutive-campaign chains. Five chains compound campaigns on the same deployment: each cycle injects a different held-out family; after an accepted repair, the ref-erence mixture is updated to include that family, and the monitor recalibrates before the next campaign. The chains reach depths of 4, 3, 3, 2, and 0 accepted repairs, twelve in all, most at 600 labels; three chains end in escalation and two in a no-alarm terminal. The deepest chain left a reference mixture that was more than half attack material, and the loop still ran. Both no-alarm campaigns, material harm and fraud, arrive fourth and fifth into reference mixtures already carry-ing the earlier families, where the ramp does not move the monitored counts. A no-alarm terminal triggers no audit and hence yields no labels, so harmlessness cannot be confirmed. 
+
+Baseline monitors. Event counts on the correctness score are not the only choice of drift statistic: Appendix C com-pares the deployed monitor against off-the-shelf drift moni-tors under a matched false-alarm allowance. It is competitive with score-KS: both detect all 100 campaigns; it alarms ear-lier (median attack rate 0.115 against 0.134 ) with more null alarms ( 14 of 90 against 0). The monitor’s role in the loop does not depend on the statistic, since any alarm can trigger the same audit. The in-place repair does not transfer: it up-dates the probe itself and leaves the classifier unchanged, so a deployment monitored by any of these baselines would still need the probe to repair in place. 
+
+Ablations. Having validated the routing above, we ablate the remaining design choices in turn: the probe family and the probe input. The three families differ in capacity, yet routing improves AUROC in all three. In these cells the routing gain therefore comes from the verdict partition, not from probe ca-pacity (Fig. 4; Appendix B). Under the identical per-regime protocol, the routed linear probe has the highest AUROC for every classifier, exceeding even the pooled gradient-boosted trees (largest gap on Beaver, 0.961 against 0.913 AUROC). Reading only the classifier’s confidence score, the routed probe stays within 5.1 points of the internal-state arm on adherence, on both sides of it. On the safety-critical quan-tity it falls behind everywhere: the internal-state probe (ours) catches more of the missed unsafe items in all twelve eval-uation cells, by 0.09 to 0.49 in caught share, and in 119 of 
+
+120 paired seed comparisons (Appendix B). A text-surface control extends the input comparison downward: given only the text of the prompt–response pair (TF-IDF n-grams un-der the identical per-regime protocol), its caught share of the missed unsafe items is lower than the internal-state probe’s 6in all twelve cells, at 0.07 –0.56 ; the n-gram baselines that Wang et al. (2026) find competitive for input harmfulness do not match the probe on the correctness target (Appendix B). 
+
+# Related Work 
+
+Correctness estimation treats the model’s errors as one pop-ulation. ConfidNet (Corbière et al. 2019) trains an auxiliary head to predict whether a frozen classifier is correct and abstains when that prediction is low, P(IK) (Kadavath et al. 2022) trains a model to report the probability that it knows the answer, and a linear probe on a judge’s hidden states (Rad-harapu et al. 2025) returns a calibrated estimate of whether its verdict is correct. All three leave the verdict in place; RCV conditions on the verdict and flips it. 
+
+Adapting a frozen model attaches post-hoc control: guardrail stacking (NeMo (Rebedea et al. 2023)) adds rails and constitution-trained classifiers (Sharma et al. 2025) train replacement models. Low-cost activation monitors (Cun-ningham et al. 2025) train linear probes on the policy model’s own activations, reusing its representations in place of a stan-dalone safety classifier; RCV’s probe reads the frozen clas-sifier’s internal state and predicts when its verdict is wrong. Fair-Wrapping (Soen et al. 2022) edits a fixed model’s output posteriors toward a fairness target; RCV flips verdicts toward a safety policy. RepV (Yang et al. 2025), the closest architec-tural antecedent, learns a single shared space for interpreter correctness in a different setting, plan verification. 
+
+Drift monitoring is mature. Label-free performance esti-mation (ATC (Garg et al. 2022)) estimates accuracy under shift; sequential risk tracking (Podkopaev and Ramdas 2022), with its label-free extension (Amoukou et al. 2024), detects that a change has occurred. DriftLens (Greco et al. 2024) localizes per-label representation drift, the Suitability Fil-ter (Pouget et al. 2025) gates dataset-level accuracy drops, JailbreaksOverTime (Piet et al. 2025) self-trains detectors as jailbreaks drift, and WATCH (Prinster et al. 2025) raises anytime-valid alarms and adapts to benign shift. Concurrent work, DriftGuard (Xin et al. 2026), monitors moderation drift and updates the moderator’s weights; RCV corrects verdicts without modifying the weights, and fine-tunes them only as its last resort. 
+
+Verdict-conditioned estimation has precedents. Top-label calibration (Gupta and Ramdas 2022) is the named prior for per-verdict calibration, and class-conditional conformal pre-diction (Ding et al. 2023) splits by the true class for set-valued coverage. RCV splits by the verdict. The one correctness esti-mate it returns underlies both decision correction at inference and drift monitoring in deployment. 
+
+# Limitations 
+
+First, steering is measured on all six classifier–dataset cells; detection is limited to one classifier, Llama-Guard-3, over ten held-out harm families; and the end-to-end maintenance loop runs on one deployment, WildGuardMix gated by the same classifier. The loop composes those separately mea-sured components; its audit, acceptance gate, and repair cy-cle are exercised only in that deployment. Both datasets are English and single-turn, and the policy-coverage evidence is a single added clause. Second, adherence is agreement with 
+
+Y ⋆, so every gain is relative to the deployer’s stated policy as one judge applies it. Any single reference, human or model, carries bias, and Y ⋆ does not enter the two arms symmet-rically: RCV’s probes are fit and calibrated on it, while the raw classifier makes no use of it. The re-scoring against the datasets’ human labels, unused in RCV’s training and calibra-tion, bounds this concern (Appendix B); a multi-judge panel is the natural extension. Third, the census and chain evidence run on composed streams: drift is injected into recorded base traffic and audits draw from a finite corpus. A recorded per-episode verdict can flip when the evaluation set is enlarged, as it does for the fine-tuned episode. Fourth, drift is simulated rather than naturally occurring: each campaign is a category from the dataset’s own taxonomy, held out of initial probe training and injected into base traffic on a fixed dose sched-ule, one campaign at a time, so composition and onset are fixed by construction. Drift as it arises in live deployment is untested. Fifth, the probes require white-box access. An API-only deployment exposes at most a confidence score, and the score-only probe recovers much of the adherence but far less of the caught share, since missed unsafe items sit behind confident safe verdicts whose scores carry little signal. 
+
+# Conclusion 
+
+A safety classifier’s correctness under a deployer’s policy can be estimated from the classifier’s own internal state when the estimate is conditioned on its verdict. With per-regime probes, RCV raises adherence to the deployer’s stated policy while the classifier stays frozen. The maintenance loop is built on the same correctness estimates. That estimation is monitored without labels, an audited repair restores the de-ployment in place, and the fine-tune is reserved for residual episodes that repair does not restore to the pre-drift standard. These results show that post-release policy adaptation and maintenance need not be treated as weight-update problems. The evidence is confined to English single-turn moderation with white-box access, a deployer-supplied oracle, and simu-lated drift. Correction and monitoring share one signal: event counts on the correctness score are the drift statistic. 
+
+# Ethical Statement 
+
+This work builds and evaluates on uncensored, potentially harmful prompt–response content. We redistribute neither the datasets nor any harmful text: rebuilder scripts recon-struct both evaluation sets from the official releases under their licenses and access conditions, and the oracle’s labels ship as a label map keyed to public item identifiers. Verdict correction can over-block legitimate speech or pass content the classifier had caught; both directions sit under deployer-set controls. 
+
+# References 
+
+Amoukou, S. I.; Bewley, T.; Mishra, S.; Lécué, F.; Maga-zzeni, D.; and Veloso, M. 2024. Sequential Harmful Shift Detection Without Labels. In Advances in Neural Informa-tion Processing Systems 37 .7Clymer, J.; Gabrieli, N.; Krueger, D.; and Larsen, T. 2024. Safety Cases: How to Justify the Safety of Advanced AI Systems. arXiv preprint arXiv:2403.10462 .Corbière, C.; Thome, N.; Bar-Hen, A.; Cord, M.; and Pérez, P. 2019. Addressing Failure Prediction by Learning Model Confidence. In Advances in Neural Information Processing Systems 32 .Cunningham, H.; Peng, A.; Wei, J.; Ong, E.; Roger, F.; Petrini, L.; Wagner, M.; Mikulik, V.; and Sharma, M. 2025. Cost-Effective Constitutional Classifiers via Rep-resentation Re-use. Anthropic Alignment Science Blog, https://alignment.anthropic.com/2025/cheap-monitors/. Ding, T.; Angelopoulos, A. N.; Bates, S.; Jordan, M. I.; and Tibshirani, R. J. 2023. Class-Conditional Conformal Predic-tion with Many Classes. In Advances in Neural Information Processing Systems 36 .Gama, J.; Žliobait˙ e, I.; Bifet, A.; Pechenizkiy, M.; and Bouchachia, A. 2014. A Survey on Concept Drift Adap-tation. ACM Computing Surveys , 46(4): 44:1–44:37. Garg, S.; Balakrishnan, S.; Lipton, Z. C.; Neyshabur, B.; and Sedghi, H. 2022. Leveraging Unlabeled Data to Predict Out-of-Distribution Performance. In International Conference on Learning Representations .Grattafiori, A.; et al. 2024. The Llama 3 Herd of Models. 
+
+arXiv preprint arXiv:2407.21783 .Greco, S.; Vacchetti, B.; Apiletti, D.; and Cerquitelli, T. 2024. Unsupervised Concept Drift Detection from Deep Learning Representations in Real-time. IEEE Transactions on Knowl-edge and Data Engineering .Gupta, C.; and Ramdas, A. 2022. Top-Label Calibration and Multiclass-to-Binary Reductions. In International Confer-ence on Learning Representations .Han, S.; Rao, K.; Ettinger, A.; Jiang, L.; Lin, B. Y.; Lambert, N.; Choi, Y.; and Dziri, N. 2024. WildGuard: Open One-Stop Moderation Tools for Safety Risks, Jailbreaks, and Refusals of LLMs. arXiv preprint arXiv:2406.18495 .Ji, J.; Liu, M.; Dai, J.; Pan, X.; Zhang, C.; Bian, C.; et al. 2023. BeaverTails: Towards Improved Safety Alignment of LLM via a Human-Preference Dataset. arXiv preprint arXiv:2307.04657 .Kadavath, S.; Conerly, T.; Askell, A.; Henighan, T.; Drain, D.; Perez, E.; Schiefer, N.; Hatfield-Dodds, Z.; DasSarma, N.; Tran-Johnson, E.; et al. 2022. Language Models (Mostly) Know What They Know. arXiv preprint arXiv:2207.05221 .Kivimäki, J.; Nurminen, J. K.; Białek, J.; and Kuberski, W. 2025. Confidence-based Estimators for Predictive Perfor-mance in Model Monitoring. Journal of Artificial Intelli-gence Research , 82: 209–240. Piet, J.; Huang, X.; Jacob, D.; Chow, A.; Alrashed, M.; Zhao, G.; Hu, Z.; Sitawarin, C.; Alomair, B.; and Wagner, D. 2025. JailbreaksOverTime: Detecting Jailbreak Attacks Under Dis-tribution Shift. arXiv preprint arXiv:2504.19440 .Podkopaev, A.; and Ramdas, A. 2022. Tracking the Risk of a Deployed Model and Detecting Harmful Distribution Shifts. In International Conference on Learning Representations .Pouget, A.; Yaghini, M.; Rabanser, S.; and Papernot, N. 2025. Suitability Filter: A Statistical Framework for Classifier Eval-uation in Real-World Deployment Settings. In Proceedings of the 42nd International Conference on Machine Learning .Prinster, D.; Han, X.; Liu, A.; and Saria, S. 2025. WATCH: Adaptive Monitoring for AI Deployments via Weighted-Conformal Martingales. In Proceedings of the 42nd Inter-national Conference on Machine Learning .Radharapu, B.; Saxena, E.; Li, K.; Whitehouse, C.; Williams, A.; and Cancedda, N. 2025. Calibrating LLM Judges: Linear Probes for Fast and Reliable Uncertainty Estimation. arXiv preprint arXiv:2512.22245 .Rebedea, T.; Dinu, R.; Sreedhar, M.; Parisien, C.; and Co-hen, J. 2023. NeMo Guardrails: A Toolkit for Controllable and Safe LLM Applications with Programmable Rails. In 
+
+Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing: System Demonstrations ,431–445. Sharma, M.; Tong, M.; Mu, J.; Wei, J.; Kruthoff, J.; Good-friend, S.; Ong, E.; Peng, A.; Agarwal, R.; Anil, C.; et al. 2025. Constitutional Classifiers: Defending against Univer-sal Jailbreaks across Thousands of Hours of Red Teaming. 
+
+arXiv preprint arXiv:2501.18837 .Soen, A.; Alabdulmohsin, I.; Koyejo, S.; Mansour, Y.; Moorosi, N.; Nock, R.; Sun, K.; and Xie, L. 2022. Fair Wrapping for Black-box Predictions. In Advances in Neural Information Processing Systems 35 .Wang, C.; Wei, Z.; Liu, Q.; Zhou, W.; and Chen, M. 2026. False Sense of Security: Why Probing-based Malicious Input Detection Fails to Generalize. In Findings of the Association for Computational Linguistics: ACL 2026 , 26100–26113. Xin, Y.; Cai, H.; Shen, B.; Jin, L.; and Hu, L. 2026. Drift-Guard: Safety-Aware Multi-Monitor Detection and Selective Adaptation for Evolving Toxicity Moderation. arXiv preprint arXiv:2606.28725 .Yang, Y.; Bhatt, N. P.; Samineni, P.; Siva, R.; Wang, Z.; and Topcu, U. 2025. RepV: Safety-Separable Latent Spaces for Scalable Neurosymbolic Plan Verification. arXiv preprint arXiv:2510.26935 .8Technical Appendix 
+
+Notation follows the main text. An item x is a prompt– response pair. The off-the-shelf classifier C emits the verdict 
+
+Y = C(x) and exposes an internal representation Z. The deployer’s policy T is operationalized by the oracle Y ⋆(x),and A = 1{Y = Y ⋆} records agreement on each item. The verdict and the oracle label assign 1 to unsafe. Adherence is the expectation of A over the traffic distribution. The ver-dict routes each item to one of two regimes, safe ( Y =0 ) or unsafe ( Y =1 ). Each regime has its own logistic-regression probe and calibration map, whose calibrated score estimates the probability that a verdict of that regime is correct; equiv-alently, one minus the probability that it is wrong. RCV flips the verdict when the score is below the regime’s threshold τ .
+
+# A Formal Propositions 
+
+A.1 The Calibration Note (Proposition 1) 
+
+Suppose the items in both the safe and unsafe regimes are scored by one probe followed by one calibration map; write 
+
+U for the probe’s underlying score. The ideal single map assigns to each score value the conditional probability of a correct verdict given that score, m(u) = Pr[ A=1 | U =u].At a fixed score u, write w(u) for the safe regime’s share of the items with that score, so the unsafe regime’s share is 1 − w(u), and write qs(u) and qu(u) for the probability of a correct verdict at that score within the safe and unsafe regimes, at scores where both regimes have items. These last two are what a map calibrated to its own regime would report at that score, so m, qs and qu are the same kind of object: one map for the two regimes together and one for each regime alone. 
+
+Proposition 1. For almost every score u, the ideal single map is the average of the two regimes’ conditional agreement rates, weighted by the regimes’ shares, 
+
+m(u) = w(u) qs(u) +  1 − w(u) qu(u),
+
+and its miscalibration on each regime is the other regime’s share times the gap between the two rates: on the unsafe regime, m(u) − qu(u) = w(u)  qs(u) − qu(u), and sym-metrically on the safe regime. Proof. At a fixed score, split the correct-verdict event by regime: the conditional probability of a correct verdict is the average of the two regimes’ agreement rates, weighted by the regimes’ shares, which is the first display. Subtracting 
+
+qu(u) from both sides gives the unsafe-regime form, and the regimes’ roles are symmetric. Two consequences read directly off the identity. The ideal single map is miscalibrated on both regimes wherever the two rates differ: it is between them. Where the two rates differ and the regimes’ shares are unequal, the miscalibration is larger on the minority regime. Where one regime dominates a score region ( w(u) near one), the map is nearly exact for that regime, and its miscalibration on the minority regime is nearly the full gap. The identity does not constrain the magnitude of the gap. The gap vanishes at almost every score if and only if correctness is conditionally independent of the verdict given the score. Either the verdict adds no information about correctness beyond the score, or no single map is calibrated to both regimes. 
+
+A.2 The Monitor Note (Proposition 2) 
+
+Proposition 2 states the identity behind confidence-based performance estimation (CBPE) (Kivimäki et al. 2025) one predicted class at a time; the verdict regime is the predicted class. Average-confidence estimators rest on the same aver-aging step, and ATC (Garg et al. 2022) applies a threshold to the same confidence signal. When the probe is calibrated to current traffic, its mean score over a verdict regime is a plug-in estimate of that regime’s agreement rate. Fix a regime y ∈ { 0, 1} with Pr[ Y =y] > 0 and consider the items the classifier routes there. Write S ∈ [0 , 1] for the probe’s calibrated score on such an item: the regime’s calibra-tion map applied to the regime’s logistic-regression output. The score is read as an estimate of Pr[ A=1 | Z, Y =y], the probability that the verdict is correct. 
+
+Proposition 2. Suppose the score is calibrated to current traffic within the regime: with all probabilities taken over the current traffic distribution, 
+
+Pr[ A = 1 | S, Y = y] = S almost surely. (1) 
+
+Then 
+
+E[S | Y = y] = Pr[ A = 1 | Y = y],
+
+the regime’s agreement rate on current traffic. Proof. Since A is binary, condition (1) states S =
+
+E[1{A=1 } | S, Y =y] almost surely. Taking expectations conditional on Y =y,
+
+E[S | Y =y] = EE[1{A=1 } | S, Y =y] Y =y
+
+= Pr[ A=1 | Y =y].
+
+The second equality holds because averaging the agreement rate at each score over the regime’s score distribution returns the regime’s overall agreement rate. The regime agreement rates are the components of ad-herence: adherence is their traffic-weighted average, and the identity concerns one regime at a time. Proposition 2’s esti-mator is the window mean: over a window drawn uniformly from the regime’s traffic, the average score is an unbiased estimate of the regime’s mean score, and therefore of the regime’s agreement rate whenever condition (1) holds on that traffic. Drift erodes that condition: a score whose map was fitted on one window’s labeled data need not stay cal-ibrated after the traffic shifts. The loop refits the probe on every alarm, on a block composed at the alarm-time mix-ture and therefore representative of the post-alarm traffic by construction. Between refits, calibration is an assumption; the identity certifies the estimator within calibration, not through drift. 
+
+Remark 1 (The mean and the event counts) . Proposition 2 concerns the mean score. The deployed alarm tracks two nested event counts on the calibrated score: crossings of the flip boundary τ , the verdicts RCV flips, and crossings of a wider 0.95 boundary. The mean and the rate of those flips 9share one target. Under condition (1), one minus the mean is the regime’s rate of incorrect verdicts. At the deployed threshold, the flip rate estimates the same rate by counting the verdicts that the probe assesses as more likely wrong than right. Each count replaces the item-level probabilities with binary decisions at its boundary, so the identity certifies the mean and only the mean. The identity justifies the scores that the alarm reads, not the alarm’s behavior. The alarm is a one-sided sequential test on the counts. Its test thresholds are calibrated on drift-free streams to the false-alarm allowance (Appendix D.1). 
+
+# B Steering: Extended Results 
+
+B.1 Human-Label Evaluation Grid 
+
+We re-score the six classifier–dataset cells against the datasets’ human labels in place of Y ⋆, with no refit and no threshold change. Corrections are judged by agreement with those labels and not only with Y ⋆; the calibrated scores and corrected verdicts are functions of the representation and of the per-regime probe, which was trained on Y ⋆’s labels. A correction that matched Y ⋆ on every scored item would score, on the human axis, the raw agreement between Y ⋆ and the human labels: 0.9195 on PKU-SafeRLHF and 0.9298 on WildGuardMix ( κ = 0 .838 and 0.766 ). The movement count below measures distance to this agreement level, computed on each seed’s own evaluation split, where it varies by ±0.2–
+
+0.6 pp. Corrected adherence moves toward the level in 48 of the 50 seeds of the five cells that start a measurable distance from it (cell means 1.8–10 .5 pp), and the distance shrinks un-der correction in each (paired p ≤ 0.042 ; Table T1). The sixth cell, WildGuard on PKU-SafeRLHF, starts within 0.7 pp of the level on every seed and ends within 1.4 pp on every seed; its ten-seed mean distance to the level is 0.4 pp be-fore correction and 0.7 pp after, and the mean crosses from below the level to above it. The flips do not concentrate on the items where Y ⋆ diverges from the annotators: in every cell, such items are a smaller share of the flipped items than of all verdict– Y ⋆ disagreements, by 6.5 to 29 .1 pp. On the human axis, the caught-share changes of the two genera-tive classifiers on WildGuardMix (Table T1), whose caught populations average 70 and 24 items per seed, are not distin-guishable from seed noise ( p = 0 .10 , 0.99 ). 
+
+Derivation. A fixed script re-derives every cell from the per-seed steering records; if any Y ⋆-axis value fails to repro-duce Table 1 of the main text to |∆| = 0 , it aborts and does not emit the grid. Every paired p in this subsection comes from a two-sided paired t-test across the ten evaluation seeds. The level is a function of the two label sets alone and is fixed before any correction runs; the movement count was speci-fied after the per-cell directions of movement (four up, two down; Table T1) were observed. 
+
+B.2 Steering Toward the Added Clause 
+
+Most of the clause’s lift is the flip rule recovering missed items in general. The third classifier is excluded because the added clause is already inside its training. For each of the remaining two, the contrast compares the flip rule’s caught share on the clause’s missed items with its caught share on missed items of the in-training clauses. For Beaver the con-trast is null ( +0 .0090 , 95% t-CI [−0.017 , +0 .035] ), and the clause’s apparent extra lift is mechanical: the clause starts from a larger blind-spot gap, and applying the same caught share to a larger gap yields a larger gain. For Llama-Guard-3 the contrast is mildly positive ( +0 .0711 , [+0 .052 , +0 .090] ), positive at 47 of 47 operating points including the de-ployed one. The contrast does not replicate on WildGuard-Mix: Beaver is null (mean +0 .020 , t-CI [−0.022 , +0 .062] ;mean-positive at 20 of 47 operating points), and Llama-Guard-3 is non-positive at most points (mean −0.089 , t-CI 
+
+[−0.187 , +0 .009] ; mean-positive at 3 of 47 ). The positive contrast is confined to Llama-Guard-3 on PKU-SafeRLHF. 
+
+B.3 Routing Gain by Probe Family 
+
+Per-regime routing exceeds its pooled counterpart in every cell of the PKU-SafeRLHF routing ablation, by +0 .2 to 
+
++4 .6 pp, on a linear probe, on a multilayer perceptron, and on gradient-boosted trees. The three families differ in capacity, yet routing improves AUROC in all three. In these cells the routing gain therefore comes from the verdict partition, not from probe capacity. 
+
+B.4 The Confidence-Score Probe 
+
+A probe routed on the classifier’s own scalar confidence score in place of its internal representation Z recovers adherence to within 5.1 points of the deployed probe but catches fewer of the missed-unsafe items (Table T2). The confidence score is the classifier’s own decision score: Beaver’s continuous harm cost, and the two generative classifiers’ unsafe-token proba-bility. Everything else is the steering setup of Appendix D.1. The score enters the probe through a single monotone stan-dardization, which preserves its rank ordering, so the inter-nal state’s higher caught share below is not an artifact of the transform applied to the score. The routed score probe’s caught share of the missed-unsafe items is lower in all six cells, by 10 .1 to 47 .9 points. 
+
+B.5 The Escalation Fine-Tune 
+
+The main text reserves a fine-tune escalation for census episodes whose repair does not pass the gate within the budget. The escalation leg separates what the weight up-date carries from what the refitted probe carries. The esca-lation leg runs once, on one episode of the data-bound cen-sus of Appendix C.2 (disinformation family, seed 8675309 ), whose thirteen audits exhausted the 3,720 fresh labels its corpus could supply while the held-out gate reading ended at 0.7255 , the same value as at the first audit (readings vary within ±4 pp). The classifier is fine-tuned by LoRA on 480 
+
+of the labels the episode’s audits had already obtained, drawn at the alarm-time mixture ( r = 0 .1372 ); 120 further labels are held aside as the fine-tune’s validation set, and five trainer seeds ( 42 , 123 , 456 , 789 , 1024 ) repeat the update from iden-tical data. The probes in cells B and D of Table T3 are refit from the deployment’s probe-training and calibration slices (Appendix D.1) plus the same 480 items, half assigned to fit-ting and half to calibration; B reads the base representation and D the fine-tuned one. Between B and D the only changes 10 Classifier Caught share ( Y ⋆→human) Adherence, human axis (raw →RCV)                                     
+
+> PKU-SafeRLHF
+> Llama-Guard-3 0.703 →0.754 (+5 .1) 0.892 →0.922 (+3 .1)
+> WildGuard 0.383 →0.434 (+5 .1) 0.917 →0.923 (+0 .7)
+> Beaver 0.806 →0.845 (+3 .8) 0.813 →0.916 (+10 .3)
+> WildGuardMix
+> Llama-Guard-3 0.346 →0.374 (+2 .8) 0.950 →0.946 ( −0.3)
+> WildGuard 0.291 →0.291 ( −0.0) 0.987 →0.957 ( −2.9)
+> Beaver 0.546 →0.568 (+2 .3) 0.903 →0.938 (+3 .5)
+
+Table T1: Adherence against the datasets’ human labels moves toward Y ⋆’s own agreement with them ( 0.9195 PKU-SafeRLHF / 0.9298 WildGuardMix) in the five cells with a measurable gap: up from below, down from above. Each row is one deployed steering cell of Table 1 of the main text (the classifier named in the Classifier column). That cell is held fixed and re-scored against the dataset’s own human annotations. Caught share (fraction of truly-unsafe passed items RCV flips to unsafe): the Y ⋆ value followed by the human-axis value, with the change in percentage points. Adherence: raw →RCV on the human axis. Ten-seed means.                                          
+
+> Classifier Caught share Adherence (Z/ score) (Z/ score)
+> PKU-SafeRLHF
+> Beaver 0.806 ±0.019 /0.699 ±0.022 0.920 ±0.002 /0.886 ±0.004
+> Llama-Guard-3 0.703 ±0.021 /0.224 ±0.026 0.926 ±0.004 /0.876 ±0.005
+> WildGuard 0.383 ±0.063 /0.059 ±0.025 0.932 ±0.005 /0.904 ±0.005
+> WildGuardMix
+> Beaver 0.546 ±0.029 /0.445 ±0.025 0.933 ±0.003 /0.923 ±0.004
+> Llama-Guard-3 0.346 ±0.047 /0.099 ±0.032 0.943 ±0.004 /0.923 ±0.005
+> WildGuard 0.291 ±0.034 /0.031 ±0.016 0.945 ±0.003 /0.932 ±0.003
+
+Table T2: The internal state has the higher caught share in all six cells. Per-regime steering with the probe reading the classifier’s confidence score, against the deployed probe reading its internal representation Z. Both are routed on the verdict under the identical per-regime protocol, with the same targets, probe family, calibration, splits, and seeds. Each cell gives the two arms as Z / score, scored against the policy oracle Y ⋆. The internal-state probe has the higher caught share in all six cells. The score arm’s adherence is at most 5.1 points below the internal state’s. Ten-seed means ± s.d.; the caught share is the fraction of truly-unsafe passed items RCV flips to unsafe. are the classifier’s weights and the representation the probe reads. After the fine-tune the probe is re-armed on a single fresh 
+
+300 -label audit, drawn from the episode’s already-obtained labels ( 150 fitting items, 150 calibration items), and on the probe-training and calibration slices, re-read under the fine-tuned representation; the fine-tuned classifier plus re-armed probe is then validated against the acceptance standard the episode failed: the pre-drift reading, taken at deployment start (recall 0.8105 , over-block 0.0192 ), with the 5 pp tolerance on each axis. The base comparator in Table T4 receives the same re-arm construction at the base representation. The powered set is the 3,420 -item held-out pool excluding the fresh audit and the gate block, the 2,820 items of Table T4. On the powered set (Table T4), the raw fine-tune exceeds the over-block ceiling in four of five seeds, and fine-tune plus probe passes in five of five at recall 0.7920 ± 0.0040 and over-block 0.0325 (the main text rounds this to 0.033 ). On the deployed 300 -label gate block, base plus probe reproduces the episode’s recorded failure and fine-tune plus probe passes in four of five seeds; the fifth (trainer seed 456 ) falls short by one unsafe item. Across trainer seeds the powered-set recall of fine-tune plus probe has s.d. 0.004 , where the raw fine-tune’s recall spans 0.049 (s.d. 0.019 ). Base plus probe also passes on the powered set: the episode’s recorded failure is a granularity effect of the 300 -label gate block, so this experiment demonstrates that the deployed-budget gate outcome reverses on the powered set; it does not establish that the fine-tune was necessary for this episode. On the 1,290 -item retention slice (outside the episode’s labels and never entering the stream), 4 to 8 items flip from correct to incorrect and 3 to 8 flip the other way per trainer seed, a net change between −4 and +1 items, at most 
+
+0.4% of the slice. 
+
+B.6 The Text-Surface Control 
+
+A published critique of hidden-state probing holds that probes for malicious-input detection learn superficial pat-terns and that simple n-gram baselines perform compara-bly (Wang et al. 2026). Our probes target a different quantity, the classifier’s agreement with the deployer’s oracle, so we adapt the critique’s n-gram surface features to that target and do not reproduce its input-harmfulness result. TF-IDF features of the prompt–response text (word 1–2-grams and word-boundary-padded character 3–5-grams, 50 ,000 each, sublinear term frequencies, fit per cell and seed on the train-ing split only) enter the identical per-regime protocol, with the same targets, splits, seeds, calibration, and flip threshold 11 Cell System Recall Over-block A base classifier 0.7625 0.0467                    
+
+> Bbase +probe (audit-half) 0.7861 0.0321
+> Cfine-tune, raw 0.8254 ±0.0192 0 .0748 ±0.0076
+> Dfine-tune +probe (audit-half) 0.7914 ±0.0008 0 .0313 ±0.0013
+
+Table T3: The weight update raises the classifier’s own recall; the raw fine-tune also raises the over-block. The four cells of the escalation fine-tune on an episode that does not pass the gate at any audit size. All four systems score the same 3,420 -item held-out pool ( 678 unsafe) at the alarm-time mixture. Cells A and B do not depend on the trainer seed; cells C and D are means 
+
+± s.d. over the five trainer seeds. The fine-tuned classifier’s own recall rises by 6.3 ± 1.9 pp over the base classifier (C against A). The acceptance verdicts are in Table T4: on the powered set, the raw fine-tune exceeds the over-block ceiling in four of five seeds; fine-tune plus probe passes in five of five.                                                                  
+
+> System Recall 95% CI Over-block Verdict
+> Powered evaluation set ( 2,820 items, 573 unsafe)
+> base classifier 0.7644 [0 .728 ,0.797] 0.0467 pass base +probe 0.7836 [0 .748 ,0.815] 0.0325 pass fine-tune, raw (5 seeds) 0.8028 –0.8517 —0.0654 –0.0846 fail 4/5(over-block) fine-tune +probe (5 seeds) 0.7920 ±0.0040 —0.0325 pass 5/5
+> Deployed gate block ( 300 items, 47 unsafe; 2.13 pp per unsafe item)
+> base classifier 0.7234 [0 .582 ,0.831] 0.0316 fail base +probe 0.7447 [0 .605 ,0.847] 0.0119 fail fine-tune, raw (5 seeds) 0.7447 –0.8085 —0.0474 –0.0553 pass 4/5
+> fine-tune +probe (5 seeds) 0.7660 ±0.0150 —0.0150 pass 4/5
+
+Table T4: On the powered set the raw fine-tune exceeds the over-block ceiling in four of five seeds; after the re-arm on one fresh 300 -label audit, fine-tune plus probe meets the acceptance standard (recall floor, over-block ceiling). Each row is one system; the Verdict column reports pass or fail against the acceptance standard. Both test sets sit at the alarm-time mixture and are disjoint from every fitting set. The acceptance standard is recall ≥ 0.7605 and over-block ≤ 0.0692 ; it derives from the pre-drift reading with the 5 pp tolerance on each axis. Multi-seed rows report the range or the mean ± s.d. over the five trainer seeds. as the deployed probe (the sparse features enter unscaled: centring a sparse matrix makes it dense, and the rows are already L2-normalised; regularisation strength is fixed at the class default C = 1 .0 and is not selected per regime on a held-out fold over the deployed grid, whose largest value is 0.1). Logistic regression on these features has a convex objective, so the fit is the optimum of its penalised objec-tive. The text side is not information-poor: the pair’s text is the classifier’s own input. The surface control’s caught share of missed unsafe items, scored against the policy or-acle Y ⋆, is lower than the internal-state probe’s in all six classifier–dataset cells: it reaches 0.066 –0.558 where the in-ternal state reaches 0.291 –0.806 , and the smallest shortfall is 21 .6 points. Had the surface control matched the probe, the critique would transfer and this evidence for reading the classifier’s internal state would be gone. Per-cell values for all three probe inputs (internal state, confidence score, text surface) appear in the supplementary code and data. 
+
+# C Maintenance: Extended Results 
+
+This part reports extended maintenance results: the census by family (C.1), repair capacity (C.2), the five chain records (C.3), and the comparison against off-the-shelf drift monitors under a matched false-alarm allowance (C.4). All four run on the WildGuardMix deployment, its traffic classified by Llama-Guard-3. 
+
+C.1 Census Outcomes by Family 
+
+Table T5 breaks the 100 -episode census by held-out fam-ily under the deployed budget ( 300 labels per attempt, four attempts, a held-out 300 -label gate block). It reports each family’s escalation count and whether repair-in-place holds across families. Episodes that escalated started from lower pre-repair recall: the pre-repair probe’s median recall on the episode’s own gate block is 0.706 where the episode esca-lated and 0.792 where repair succeeded. 
+
+C.2 Repair Capacity by Family 
+
+Table T6 repeats the census with the audit bounded by data instead of by budget: the audit grows in fresh material until the corpus is exhausted. The two designs draw different audit segments, so an episode that narrowly passes the gate under one design can fail it under the other. 87 of the 100 episodes repair and 13 episodes do not pass the gate at any audit size. Under the data bound, 11 of the 21 budget escalations repair and 10 do not, so for most of the eleven the shortage was of labels, not of repair capacity. Of the 79 episodes that repair under the budget, 76 repair under the data bound and 3 do not. 
+
+C.3 The Five Chain Records 
+
+Table T7 gives the per-cycle record behind the main text’s consecutive-campaign chains. The chains test whether the 12 Family Repaired First audit Escalated Label cost /10 /10 /10 median max cyber 9 9 1 600 1,500 defamation 9 7 1 600 1,500 disinformation 6 4 4 1,200 1,500 fraud 10 9 0 600 900 material harm 9 8 1 600 1,500 mental health 8 5 2 750 1,500 sensitive info 6 5 4 1,050 1,500 stereotypes 7 5 3 750 1,500 toxic 7 5 3 1,050 1,500 violence 8 7 2 600 1,500 all 79 64 21 600 1,500 
+
+Table T5: In every family, most episodes repair in place, and most repairs occur on the first audit. The 100 -episode census by held-out family under the deployed budget: episodes repaired in place, first-audit repairs, and escalations to the fine-tune, each a count of the family’s ten episodes; the label cost per episode is the median and maximum over all ten, escalations included. Every escalated episode costs the full 1,500 labels. Ten seeds per family.                                                 
+
+> Family Repaired Above budget Never pass Bounds (labels) /10 /10 gate /10 of those cyber 10 10—defamation 10 00—disinformation 7033,610–3,720 fraud 10 00—material harm 10 10—mental health 7031,817–2,245 sensitive info 10 30—stereotypes 9213,618 toxic 7033,479–3,542 violence 7033,457–3,654 all 87 713 1,817–3,720
+
+Table T6: 11 of the 21 budget escalations repair under the data bound; the rest never pass the gate. The same 100 
+
+episodes with the audit bounded by data instead of budget: episodes repaired, repairs that exceed the deployed budget of four 300 -label attempts, episodes that do not pass the gate at any audit size (median held-out move 0.0 pp between 300 
+
+labels and the bound, range −1.69 to +7 .35 pp), and the realized data bounds of those episodes, with a dash where a family has none. The three mental-health episodes reach their bound at 1,817 –2,245 labels; the ten others run past 
+
+3,457 . Ten seeds per family. loop withstands campaigns on one deployment and what those campaigns cost in labels. Each cycle’s cost is com-puted as its audit labels plus the episode’s held-out 300 -label gate block, so a first-audit repair costs 600 . An escalated ter-minal has exhausted the audit budget, 300 fresh labels per attempt over four attempts, plus its gate block: 1,500 labels. Cycle 1 is judged against the deployment-start standard. Af-ter an accepted repair, the accepted candidate’s gate reading becomes the standard for the next cycle. 
+
+C.4 Off-the-Shelf Drift Monitors Under a Matched Allowance 
+
+We check whether the deployed monitor is competitive with off-the-shelf drift monitors under a matched false-alarm al-lowance of 0.30 per stream. We compare it against score-KS and ATC on 100 constructed attack streams (ten held-out harm families, ten seeds) and 90 seed-instantiations of the shared drift-free null stream (Table T8). Every monitor is calibrated on the same drift-free material. Neither baseline ships as a sequential monitor for this setting, so both enter the table in adapted form. For ATC we count items below its source-calibrated threshold as events and run the same sequential accumulation. For score-KS the windowing con-figuration is ours. ATC alarms on 90 /90 drift-free instanti-ations. The low-confidence share it monitors ran 0.061 on its calibration prefix and 0.073 on the live null traffic. The replay-calibrated threshold does not cover an offset of that size. The 0.05 allowance is the conventional level for a stand-alone test, not one of this paper’s design constants. At that level, ATC with its threshold set from the point estimate of its reference rate exceeds the allowance ( 87 /90 ). With the threshold set by the same replay design, the realized rate is 8/90 , consistent with that allowance at this sample size. At the matched allowance both threshold treatments alarm on every instantiation. Every event-based monitor runs the deployed alarm implementation itself, and its output is ver-ified against the deployed monitor’s accumulation. Only the monitored statistic differs. Score-KS is windowed, not event-based, and shares only the threshold-calibration design. 
+
+# D Reproducibility 
+
+D.1 Recipes, Seeds, and Splits 
+
+Extraction recipes. Each classifier emits its verdict on the full (prompt, response) pair. Only Llama-Guard-3 reads Z
+
+from the verdict’s own forward pass; the other two reads are two-pass (below). 
+
+• Llama-Guard-3-8B (d=4 ,096 ): the chat template over the user prompt and assistant response with the generation prompt appended. Z is the final-layer decision-token hid-den state; the verdict is the softmax over the safe and unsafe tokens thresholded at 0.5. Re-extraction under this recipe reproduces the Z used here at cosine 0.99996 .
+
+• WildGuard-7B (d=4 ,096 ): the model’s three-field tem-plate. The read is two-pass: pass one freely generates the assessment, and pass two teacher-forces on the model’s own pass-one tokens to re-read the decision-token hidden state. Greedy decoding makes the pass-two Z faithful to the free-generation state. Z is the final-layer harmful-response decision token; the verdict is the harmful-response head. Re-extraction under this recipe reproduces the Z used here at cosine 0.99997 .
+
+• Beaver (d=5 ,120 ): the pair is wrapped in a <prompt> . . . </prompt> /
+
+<response> . . . </response> envelope inside a placeholder assistant turn. Z is the final hidden state at the last non-pad token (maximum length 512); the verdict thresholds the scalar harm cost at ≥ 3.0. Re-extraction 13 Chain (seed) Cycles (family, label cost) Terminal Depth Final attack share Total labels 42 mental health 600; sensitive info 600; cyber 900; stereotypes 600 fraud, no alarm 4 0.544 2,700 789 disinformation 600; fraud 600; violence 600 material harm, no alarm 3 0.425 1,800 1024 toxic 600; defamation 600; material harm 600 violence escalated 3 0.383 3,300 456 material harm 900; sensitive info 600 fraud escalated 2 0.316 3,000 123 — stereotypes escalated 0 0.000 1,500 
+
+Table T7: The five chain records. Each chain sequences campaigns on one deployment: the Cycles column lists accepted repairs in cycle order with their label costs; the remaining columns give the terminal event, the chain depth (accepted repairs), the attack share of the chain’s final traffic, and the chain’s total label cost. An escalated terminal costs the full 1,500 labels; a no-alarm terminal triggers no audit and costs none.               
+
+> Monitor Detections First-alarm rate Null alarms /100 median [IQR] /90 score-KS 100 0.134 [0.134, 0.174] 0ATC ——90 deployed monitor 100 0.115 [0.094, 0.137] 14
+
+Table T8: The deployed monitor and score-KS stay within the matched allowance; ATC does not. Each row is one monitor: detections count alarmed attack streams of the 100 ;the first-alarm rate is the attack rate at the first alarm (lower is earlier), median [interquartile range] over the 100 streams (ten seeds per held-out family). Thresholds are read from replayed drift-free streams at a 0.30 per-stream false-alarm allowance (Appendix D.1 gives the deployed monitor’s de-sign); null alarms are counted on the shared 90 drift-free null streams. ATC’s row reports no detection reading because it alarms on 90 /90 drift-free streams. under this recipe reproduces the Z used here at cosine 
+
+0.99995 .
+
+Seeds and splits. The steering results aggregate ten fixed seeds, {42 , 123 , 456 , 789 , 1024 , 7, 2026 , 31415 ,
+
+271828 , 8675309 }; the maintenance census and the moni-tor comparison aggregate all ten, and the chain and fine-tune experiments use five. The PKU-SafeRLHF traffic pool is the dataset’s test split, so the cells whose classifier was trained on this corpus are measured on items held out from that training. Steering reports the mean over seeds and the standard devia-tion across them; confidence intervals reported elsewhere are Wilson score 95% intervals. Steering uses a group-blocked split by prompt, 45 /35 /20 train/calibration/evaluation, with every group (all responses to one prompt) assigned atomi-cally to a single split. The evaluation split is drawn first at 
+
+20% ; the configured calibration fraction 0.4375 applies to the remainder, yielding the 35% quoted here. Groups whose rows share one combination of verdict and agreement are allocated within that combination. Groups whose rows mix combinations form one further pool and are allocated by the same procedure. The per-regime logistic-regression probe is fit on the train split; on the calibration split, each regime’s regularisation strength is selected by held-out AUROC and the calibration map is then fit. 2  
+
+> 2The calibration map is a sigmoid from the probe’s logit to the probability of agreement, fitted as L2-regularised logistic regression at C=1 on the calibration split’s hard labels. Platt’s original formu-
+
+Stream composition. 
+
+• EVAL is the 1,709 WildGuardTest items that include a response; prompt-only rows are excluded because the unit of analysis is a prompt–response pair. POOL is about 
+
+10 ,000 WildGuardTrain items with responses, stratified by adversarial flag and subcategory, with the drift families excluded. 
+
+• The WildGuardMix steering cells are measured on EVAL and POOL together, 11 ,708 items, carved per seed by the split rule above. POOL is WildGuardTrain, so the Wild-Guard cells on this corpus are measured partly on items the classifier was trained on. Any advantage the classifier holds on items it was trained on reduces its misses there, and with them the probe’s room for correction. The size of that reduction is not measured. The WildGuard rows of Table 1 of the main text are measured under that reduced headroom, and the other two classifiers were not trained on this pool. The probe fitted here is not reused in the maintenance experiments, which draw from POOL alone and fit their own probes on their own slice of it; EVAL enters no maintenance training fold. 
+
+• The pool is carved per seed into probe-training, calibra-tion, retention, and traffic slices, recorded in determinis-tic manifests; the stream-assembly script asserts pairwise disjointness. 
+
+• A drift stream is base traffic from the traffic slice plus one campaign family, whose rate rises linearly to a cap of 
+
+0.30 .
+
+• The ten held-out campaign families are WildGuardMix’s own adversarial subcategories, excluded from the ini-tial probe-training and calibration splits. In the Wild-GuardMix deployment, the first campaign’s family is pre-registered by pool size, the largest subcategory. 
+
+• The retention slice is never streamed and never trained on, and audited items are never re-audited. 
+
+Monitor mechanics and parameters. Each regime’s se-quential test watches two event counters, placed at score values 0.5 and 0.95 . The 0.5 counter sits on the decision   
+
+> lation is unregularised and smooths its targets; at our calibration-split sizes the two fits are indistinguishable on held-out log-loss and Brier, and differ by 3% of level in expected calibration error; the pipeline figure’s “+Platt cal.” label (Fig. 2 of the main text) refers to this map. A calibration split falling below roughly one hundred rows, or below fifteen minority cases, would reopen the choice.
+
+14 surface, so its events are the flips themselves; the wider 0.95 
+
+counter supplies the sensitivity. A counter’s events are the items whose score falls below its boundary; its reference event rate is counted on the drift-free run-in and carries a posterior for its estimation uncertainty. The rate increase the test is designed to detect, the indifference zone, is the small-est whose break-even rate sits at quantile 0.99 of that pos-terior. Each counter accumulates a sequential log-likelihood ratio over its events, one-sided for an increase and measured from its running minimum, so periods at the reference rate drain it; the monitor alarms when any counter’s accumulation crosses its threshold, and the four thresholds, two per regime, are searched jointly. Thresholds are fixed in advance of the monitored horizon by replaying the run-in: the reference is estimated on the first 2,000 items of the deployed stream, and 
+
+4,000 replay streams of the 19 ,000 -item horizon are drawn from it. Calibration nests over posterior draws: one reference draw per ten replay streams, and a threshold set is accepted when the fraction of draws showing any false alarm is within the allowance. A draw shows a false alarm when any of its ten replay streams alarms. The resulting guarantee reads: with confidence q = 0 .70 over run-in estimation, the moni-tor raises no false alarm over the 19 ,000 -item horizon on a drift-free stream; the complementary 0.30 is the false-alarm allowance. Three of these values, the 0.95 boundary, the con-fidence q, and the indifference-zone quantile, were selected on measured curves, on a held-out development family that is excluded from the ten reported attack families. The 0.95 
+
+boundary is on a plateau: detection at 0.97 is identical to three decimals, 0.99 detects 28% later, and 0.90 exceeds the allowance. The confidence q is the last value at which unused allowance still converts into detection. The indifference-zone quantile is at the knee of its measured curve. The false-alarm evaluation reuses the development family’s null stream. On the 60 seed instantiations not used during selection, the rate is 10 of 60 (Clopper–Pearson 95% interval [0 .083 , 0.285] ,whose upper bound is below the 0.30 allowance), consistent with the reported 14 of 90 . The 90 readings are seed instanti-ations of one composed stream, not independent samples of traffic. 
+
+Loop constants. Table T9 lists the design constants, fixed before the maintenance experiments. Each labeled audit item keeps a fixed assignment to the update’s training or calibra-tion material. Every candidate update, and the pre-repair probe beside it, is scored on the held-out 300 -label gate block. The audit grows from 300 to 1,200 labels, and the gate block’s 300 labels are additional. 
+
+D.2 The Judge Prompt and Agreement with Human Labels 
+
+The deployer’s policy oracle Y ⋆ is a single LLM judge, GPT-5-Nano ( gpt-5-nano-2025-08-07 ), applied to each (prompt, response) pair with the policy rubric as its system prompt and the response format set to a JSON object. The request sets the sampling temperature to 0, but the model fixes its temperature at 1 and accepts the parameter with-out applying it, so the labels are a stored label map: re-running the pipeline re-reads the stored judge outputs and does not re-query the judge. Agreement with the datasets’ own human labels is Cohen’s κ on the binary safe/unsafe decision: κ = 0 .838 on PKU-SafeRLHF (raw agreement 
+
+0.919 , n=16 ,422 ) and κ = 0 .766 on WildGuardMix (raw agreement 0.930 , n=11 ,708 ). The policy rubric is a labeling specification, not harm-ful content; it ships verbatim in the supplementary code and data package as judge_prompt.txt . It states the two unsafe tests (baseline harmful content and the deployer’s commitment-to-assist clause) and the strict JSON output schema, whose rule_fired field names the rule that fired. Clause membership in Appendix B.2 comes from this field: an item belongs to the added clause when the commitment-to-assist rule fired on it. 
+
+D.3 Compute 
+
+Most alarms are handled by a probe fit and leave the classifier unchanged; a fine-tune is reserved for the episodes that do not pass the gate, 21 of the 100 in the census. Table T10 lists the per-stage compute. Representation extraction and the fine-tune are the two GPU stages; the per-regime probe fit, the calibration fit, the flip-rule scoring, and the monitor replays run on CPU. The GPU stages run on single-GPU cloud instances from a pinned container image, PyTorch 2.4.0 on Python 3.11, CUDA 12.4.1, Ubuntu 22.04, with at least 8
+
+vCPUs and 32 GB of system memory; task-level packages are version-pinned by the pod-setup scripts. The CPU stages run single-machine, and every loop and steering run records its environment, Python 3.12.3 with NumPy 2.5.1, SciPy 1.18.0, and scikit-learn 1.9.0, together with SHA-256 digests of the code, the configuration, and the input data file, in its result’s provenance block. The remaining reproducibility checks are the code-digest match above and the extraction-recipe cosine checks of Appendix D.1. 15 Design constant Value Monitor event-counter boundaries (score values, per regime) 0.5, 0.95 
+
+No-false-alarm confidence q / false-alarm allowance 0.70 / 0.30 
+
+Calibration criterion nested posterior draws ( 10 streams per draw) Run-in / replays / horizon 2,000 items / 4,000 streams / 19 ,000 items Indifference-zone quantile 0.99 
+
+Attack-rate cap (linear ramp) 0.30 
+
+Audit budget (labels per attempt) / attempts per episode 300 labels / at most 4
+
+Monitor observation chunk 2,000 items Gate block (held out) 300 labels Acceptance tolerance (recall floor, over-block ceiling) 5 pp each vs. the standing standard (the pre-drift reading at cycle 1) 
+
+Table T9: Design constants of the monitor and maintenance loop and their values, fixed before the maintenance experiments. Each post-alarm audit is a prefix of a segment composed at the alarm-time mixture. 
+
+Stage Compute Hardware Policy-oracle labeling (PKU-SafeRLHF, one-time) one run, 16 ,422 items GPT-5-Nano API Policy-oracle labeling (WildGuardMix, one-time) one run, 11 ,708 items GPT-5-Nano API Representation extraction (three classifiers) ≈1.5 h L40S GPU One fine-tune ( 480 items, one epoch) ≈6 min A100 80GB GPU Maintenance program (GPU stages) a few GPU-hours L40S + A100 Steering, added clause, monitoring — CPU only 
+
+Table T10: Per-stage compute. Representation extraction runs on a single L40S GPU and the escalation fine-tune on a single A100 80GB GPU; the recurring steering, added-clause, and monitoring compute is CPU-only. Running times are single-run wall-clock on the stated hardware except the maintenance-program row, which aggregates the extraction and fine-tune stages across five seeds. 16
