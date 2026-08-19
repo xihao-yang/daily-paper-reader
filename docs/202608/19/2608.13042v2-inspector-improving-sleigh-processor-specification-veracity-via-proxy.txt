@@ -1,0 +1,861 @@
+Title: InSPECtor: Improving SLEIGH Processor Specification Veracity via Proxy
+
+URL Source: https://arxiv.org/pdf/2608.13042v2
+
+Published Time: Tue, 18 Aug 2026 01:29:35 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+# InSPECtor: Improving SLEIGH Processor Specification Veracity via Proxy 
+
+# Michael Chesser 1, Paul Quirk 2, Douglas Cooke 1, Guy Farrelly 1, Surya Nepal 3, and Damith C. Ranasinghe 11Adelaide University 
+
+2Defence Science and Technology Group 
+
+3CSIRO 
+
+# Abstract 
+
+Processor specifications underpin critical security and program-analysis tools such as disassemblers, decompilers, and emulators, yet, their correctness is rarely examined. Er-rors in specifications distort program behavior, obscure vulner-abilities, and enable analysis-evasion techniques. Validating processor specifications is a non-trivial task. Our study is a significant undertaking to enable the systematic validation of open-source SLEIGH language specifications, predominantly used by Ghidra . We design and implement a testing frame-work based on an automated oracle validation strategy by 
+
+proxy . Our approach leverages the structure encoded in a specification itself to enumerate decodable instruction forms and generate targeted initial states. Then differentially test the successful decoding and emulation of those instructions by comparing emulators exercising the processor specification against hardware references. Applying InSPECtor across diverse, open-source specifications— x86-64 , AArch64 , ARM/Thumb , RISC-V ,
+
+MSP430 —embedding differences in specification styles, author preferences, and instruction set architecture designs, we uncovered over 38,920 discrepancies that led to 125 unique bugs with proposed fixes, identifying decoding and semantic defects as well as cross-vendor inconsistencies. We distill our findings into 8 concrete recommendations to drive future improvements. Our work underscores the importance of specification correctness and provides a practical tool to substantially improve the fidelity of SLEIGH processor specifications, strengthening the reliability of downstream security and analysis tools. 
+
+# 1 Introduction 
+
+SLEIGH is a domain-specific language (DSL) for describ-ing processor specifications that decode and translate instruc-tions into the architecture-agnostic intermediate representa-tion (IR), Pcode [37]. There are over 35 processor fami-lies expressed in SLEIGH specifications, covering a diverse range of processors from PIC microcontrollers to modern 
+
+x86-64 and AArch64 CPUs. Significantly, SLEIGH speci-fications underpin Ghidra [36], the dominant open source multi-architecture toolchain for reverse engineering and bi-nary analysis, and multi-architecture emulators such as Alli-gator from Airbus [10], Icicle [8], MetaEmu [7] and Styx [22]. In Ghidra’s disassembler and decompiler, SLEIGH specifica-tions directly determine how binary code is decoded, lifted, and interpreted by analysts and automated scripts. As a re-sult, SLEIGH specifications sit on the critical path of security workflows such as vulnerability discovery, malware analysis, fuzzing, firmware auditing, and program understanding. This widespread reliance amplifies the consequences of specification errors: flaws in SLEIGH can propagate across multiple tools, users, and workflows. Yet, despite this cen-tral role, the reliability of SLEIGH specifications remains an underexplored problem. In practice, SLEIGH specifications are large, painstakingly constructed artifacts that encode both instruction formats and their semantics. Developing faithful processor specifications is a non-trivial task. For instance, the ARM manual is 12,000 pages where complexities such as the operand-dependent be-havior of instruction prevents a simple approach based on examining mnemonics. Additionally, the 2025 edition of the Intel Software Developer’s Manual [1] exceeds 5,000 pages. The specifications must capture subtle architectural behav-iors across diverse and often poorly documented instruction set architectures. Further, to address the demand for rich, fast, and safe computation, modern architectures are con-stantly evolving, with new instructions and features added each year 1, translating to an increase in instructions and com-plex instruction-bit encodings in ISAs. The painstaking con-struction and update of specifications to integrate architectural changes while maintaining backward compatibility makes the 
+
+> 1For instance, microprocessor advancements, such as Single Instruction, Multiple Data (SIMD), Arm Neon, Advanced Matrix Extensions (AMX), Advanced Vector Extensions (AVX) or cryptography extensions are often incorporated to cater to artificial intelligence, high-performance computing and security-focused workloads.
+
+1arXiv:2608.13042v2 [cs.CR] 17 Aug 2026 specifications intrinsically susceptible to bugs. Even small mistakes—such as missing side effects or incorrect semantic ordering—can propagate silently through static and dynamic analysis tools. These errors may lead to misleading decom-pilation output and unsound program analyses, ultimately undermining the conclusions drawn by security practitioners; often exploited by malware to detect virtual environments [6] and hide from analysis [29, 33, 34]. Importantly, the critical dependency on SLEIGH specifi-cations has not been met by a commensurate, open source assurance of its correctness. Therefore, we are motivated to improve the correctness of SLEIGH processor specifications. By enhancing the veracity of SLEIGH processor specifi-cations, we expect to drive improvements across all their applications. 
+
+The Study. In this first study, we focus our efforts on improv-ing the veracity of the SLEIGH processor specifications with the hope of generalizing our learning outcomes to broader specification assurance research. Importantly, these specifi-cations need to be updated and reassessed for correctness as ISAs evolve and new instructions are added. Our efforts will facilitate testing implementations thoroughly, and automating this process in the future. Previously, studies have examined improving the correct-ness of CPU emulators [23–25,38], hypervisors [3], processor hardware [17, 32, 35], disassembly veracity (textual represen-tation accuracy) [18,28], while a few have tested the semantic correctness of binary lifters [9, 19] but specification-level cor-rectness has received less attention. Although the work in [26] considered usability of Pcode for formal analysis and the au-thors in [4] made significant strides to validate the veracity of Sail specification language described semantic models for significant parts of ARMv8-A , RISC-V , and CHERI-MIPS , the correctness of the extensive multi-architecture support within the SLEIGH specifications has not been examined. In seeking to design an approach to uncover specification bugs, we observe that a processor specification itself encodes enough structure to drive systematic validation. So, we in-troduce InSPECtor , a framework that automatically traverses  
+
+> SLEIGH
+
+specifications to enumerate decodable instructions, derive targeted execution states from semantic definitions, and perform differential testing against hardware reference systems. This enables high-coverage, specification-driven testing without redundant instruction exploration. 
+
+Our Contributions. In summary: • We propose symbolically traversing SLEIGH specification decoding rules, a new, systematic methodology that aims to exhaustively generate instruction encodings, extracting edge cases for testing and deriving initial input states that trigger these edge cases. • We design, implement, and evaluate the methodology in the prototype InSPECtor system for testing specifications, including, GenSYS —a test case generation tool that inte-grates these techniques and JuxtaPlayer —a robust differ-ential testing environment capable of executing test cases on both emulators and hardware-assisted virtual machines. • We analyze the discovered bugs, identify their root causes, propose fixes, and distill 8 recommendations for improving the SLEIGH DSL and preventing future issues. Importantly, we use InSPECtor to test x86-64 , AArch64 ,
+
+> ARM/Thumb
+
+, RISC-V , and MSP430 SLEIGH specifications. Our work uncovered over 38,920 discrepancies. Manually triaging, categorizing, and prioritizing the discrepancies, we identified the root causes of the discrepancies leading to the discovery of 125 unique bugs with proposed fixes sub-mitted to Ghidra maintainers. We open-source InSPECtor 
+
+on GitHub: https://github.com/Sleigh-InSPECtor. 
+
+# 2 Instruction Encodings and SLEIGH Specifi-cations Primer 
+
+Before describing our specification-driven testing approach, we briefly review ISA-level instruction encodings and the structure of SLEIGH specifications. Throughout this discus-sion, we use examples from a simplified ISA with a vari-able length instruction set, similar to x86-64 , defined by the  
+
+> SLEIGH
+
+specification in Figure 1 2.Instructions are represented as sequences of bytes, referred to as instruction encodings . Although each concrete instruc-tion has a unique binary representation, instruction encodings within an ISA typically share a common structure. Bits are grouped together to form fields that have specific meanings, such as the registers, immediate values, and addressing modes. For example, in the simplified ISA, addi r2,r3,0x1234 is encoded as follows: i16=0x1234 op=1 rn=3 rd=3 0 0 0 1 0 0 1 0 0 0 1 1 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0 1 1 0 1 0  
+
+> SLEIGH
+
+specifications exploit this structure by expressing decoding as a hierarchy of declarative rules. These rules, called constructors , are organized into groups called tables. The SLEIGH specification in Figure 1 is annotated with the key components of each constructor: • Pattern section : defines the mapping from an instruction encoding to the other components of the specification via Boolean expressions that reference the instruction encod-ing and the current decoder context —a SLEIGH -specific mechanism to encode or transfer information between con-structors which we will discuss later. 
+
+> 2For simplicity, we omit the parts of the specification that define the register and memory configuration of the ISA, as well as the mapping from field names to bit ranges in the instruction encoding.
+
+21 Op: "nop" is op =1 & i16 =0 { export 0; } 2 Op: "syscall" is op =0 & i16 =1 { export 1; } 34 Imm0: is i16 =0 {} 5 ImmX: i64 is i16 [ i64 = (i16 << 48 ) >> 48 ; ] { export i64; } 67 Mem: [rn] is rn & i16 =0 { export *rn; } 8 Mem: [rn + ImmX] is rn & ImmX { export *(rn + ImmX); } 910 :^instruction is prefix =0xf8 ; instruction [ ctx.mem =1 ; ] {} 11 12 :run Op is op =0 & Op { HwOp(Op); } 13 14 :nop is op =1 & rd = rn & Imm0 { } 15 :mov rd,rn is op =1 & rd & rn & Imm0 { rd = rn; } 16 :addi rd,rn,ImmX is op =1 & rd & rn & ImmX { rd = rn + ImmX; } 17 18 :ld rd,Mem is ctx.mem =1 & op =1 & rd & Mem { rd = *Mem; }                   
+
+> Root constructors  Subtable Constructors
+> Legend: Semantics section Decode actions Pattern section Display section Subtable group name Check if 0xf8 matches then move to next byte (prefix constructor) Derive the value of i64 based on the i16 field Recursively find a matching constructor from the Op subtable Checks if the instruction bits are 000 in the op field and =1 in the i16 field Instruction semantics in terms of simpler ops Return a reference to a location to be used by the parent
+
+Figure 1: An example of a SLEIGH specification for a simple ISA with a variable length instruction set, such as x86-64 .• Decode actions : optional expressions, after the pattern sec-tion between ‘[ ]’, that specify how to update the decoder context when the constructor is evaluated. • Display section : defines the textual representation of the instruction used for disassembly. • Semantic section : defines the meaning of the instruction in terms of the simpler ISA-independent operations (Pcode). Subtable constructors that share a group name (e.g., Op , Mem )form a table and are responsible for decoding a particular aspect of the instruction, such as operand decoding, and are used at different points during the decoding process. Con-structors that do not specify a table name (i.e. those that start with ‘ :’), are implicitly associated with the root table, and are the starting point for the decoding process. All other tables are used for decoding only when they appear in the pattern section of one of the root-level constructors (such as Op on Line 12). Employing a SLEIGH specification for decoding begins with two inputs: a sequence of bytes (the instruction encoding) and a set of context bits. Context bits are a SLEIGH -specific mechanism used for two purposes: i) to encode information relevant to decoding that is not directly present in the instruc-tion encoding, such as the current processor mode (e.g., ARM 
+
+vs. Thumb ); and ii) to transfer information between construc-tors. For example, context bits are often used to alter operand decoding in the presence of prefix bytes. Given this initial state, the decoder attempts to find a con-structor whose pattern section matches the current state. Con-structors are considered from most to least specific, where specificity is determined by the number of constrained bits in the pattern section 3. If no constructor matches, the encod-ing is treated as undecodable or invalid. When a match is found, the decoder applies the corresponding decode actions to update its state. It then recursively evaluates any subta-bles referenced in the pattern section using the updated state. Constructors in each subtable are matched and evaluated in the same way until the instruction is fully decoded. Once decoding is complete, the instruction semantics can be deter-mined by evaluating the semantic section of the constructors matched during decoding, potentially substituting subtable references with the values exported by the corresponding constructors. 
+
+Example. Consider the addi r2,r3,0x1234 instruction from before. After extracting the fields from the instruction encoding, the decoder sees: rd=2 , rn=3 , op=1 , i16=0x1234 ,and attempts to find a constructor in the root table matching these values. The nop , mov and addi constructors all match the current opcode ( op=1 ). However, nop is rejected because 
+
+rd ̸=rn and mov is rejected because i16 ̸=04 causing the addi 
+
+constructor to match. The decoder then evaluates any decode actions (none for the addi constructor) and recurses into any referenced subta-bles. The addi constructor has a single referenced subtable (ImmX ) which has one constructor (Line 5). This constructor has no additional constraints (the i16 field is unconstrained),     
+
+> 3Tie-breaking depends on the declaration order, and non-overlapping constructors can be matched out-of-order.
+> 4This requires evaluating the Imm0 constructor and backtracking which is described in more depth in Section 3.1.1.
+
+3GenSYS SLEIGH Specs             
+
+> Generated instructions Diffs Initial states
+> Constructor Traversal
+> α=λξ λ?Ω≠λλ>σSMT Solver
+> α=λξ λ?Ω≠λλ>σ
+
+State Generation 
+
+## JuxtaPlayer x86-64 AArch64 RISC-V 
+
+# ∞
+
+State Setup Differential Analysis Single-step execution   
+
+> Reg: RAX=100,RBX=10 67 48 8b 00
+> Mem: 0x1000=00000000
+> Instr: State:
+
+Test Corpus Instruction Generation 
+
+> Deferred constraints
+
+Figure 2: A high-level overview of InSPECtor ; the specification-driven test case generation ( GenSYS detailed in Section 3.1 & 3.2) and differential testing ( JuxtaPlayer detailed in Section 3.3) process to identify bugs or defects in the specification encodings. so it matches immediately, and the decode action computes 
+
+i64=0x1234 . At this point, all operands have been decoded 5,and the target disassembly is obtained by substituting these decoded values into the display section of the matched con-structor, yielding addi r2,r3,0x1234 . Similarly, the in-struction semantics are obtained by substituting the decoded operands into the semantic section, resulting in the instruction semantics being: r2=r3+0x1234 . For a complete SLEIGH 
+
+DSL description, readers are directed to the resource in [37]. For instruction generation, we are interested in traversing all possible decode paths which requires considering the pat-tern and decode sections of the constructors we discussed in this section. 
+
+# 3 Methodology 
+
+Figure 2 presents an overview of our approach, GenSYS sys-tematically generates decodable instructions as test cases, effectively aiming to cover all instructions recognized by a  
+
+> SLEIGH
+
+specification; JuxtaPlayer applies a differential test-ing strategy, comparing the behavior of executing an instruc-tion in a SLEIGH -based emulator with a hardware reference. The key idea is to employ the SLEIGH -based emulator as a proxy for assessing the correctness of a target specification. Ideally we would systematically generate and test every unique instruction recognized by a SLEIGH specification. However, testing every possible combination of operand and immediate values is both computationally wasteful and unnec-essary, since most operand variations do not affect an instruc-tion’s core behavior. Instead, we generate all instructions with unique semantics by traversing a specification’s constructors as we detail in Section 3.1, and combine them with a repre-sentative subset of operand values: simple defaults, random selections, and values that force operand aliasing within the instruction semantics. In the following, we elaborate on the in-struction generation and state generation methods in GenSYS 
+
+followed by the testing method encapsulated in JuxtaPlayer .  
+
+> 5Mapping register fields ( rn and rd ) to specific registers is handled by attachments, which is described in Section 3.1.1.
+
+# 3.1 Instruction Generation 
+
+For SLEIGH specifications, generating all instructions with unique semantics is equivalent to generating one instruction for each possible decode path in the specification. We can do this by determining which constraints on the instruction encoding must hold for a given constructor to be selected dur-ing decoding, and then solving those constraints to produce a concrete instruction encoding. Conceptually, this process can be viewed as a constraint satisfaction problem (CSP). In practice, however, efficiently collecting and solving all relevant constraints requires a com-plex traversal of the decode tree. In particular, the traversal must handle several kinds of constraints, account for implicit constraints introduced by overlapping constructors, manage decode actions that modify decoder state during traversal, and avoid unbounded recursion. The core of the traversal process is outlined in Algorithm 1. Starting from the root-level table, G ET INSTRUCTIONS in-vokes the C ONSTRUCTOR TRAVERSAL algorithm, which se-lects a constructor c for the current subtable t (forking the current state S if there were multiple valid choices), translates all constraints required to match that constructor to symbolic expressions (T RANSLATE ), updating S, before recursively repeating the process for any subtables. The state returned by C ONSTRUCTOR TRAVERSAL contains the complete set of constraints associated with the decode path, which are solved using an SMT solver to produce concrete instruction encoding 
+
+X. G ET INSTRUCTIONS then restores the state to a previous fork and selects a different constructor, repeating this process until every possible path has been explored. The algorithm’s state S consists of three components: i) an instruction bit vector I = b1b2 · · · bn; ii) a context bit vector 
+
+C = b1b2 · · · bm; and iii) a collection of deferred constraints. For the bit vectors, each bit is either a fixed value (0 or 1) or symbolic (?). The size of the context bit vector ( m) is a constant defined by the specification. For variable-length ISAs, the size of the instruction bit vector ( n) is not known 4until traversal is complete, instead we define an upper bound 6
+
+and ignore any unreferenced bits after all constructors have been selected.                                                                                                                                            
+
+> Algorithm 1 Instruction Generation
+> 1: function GET INSTRUCTIONS 2: O← {} ▷The list of generated instructions (Output).
+> 3: F← {} ▷The set of fork points for unselected paths.
+> 4: S←initial state ,t←root subtable
+> 5: while S̸=∅do
+> 6: S,f←CONSTRUCTOR TRAVERSAL (S,t)
+> 7: F←F∪f▷Add new fork points found during subtable traversal.
+> 8: X←SOLVE (S)▷Get instruction bytes satisfying all constraints.
+> 9: if Xis SAT then
+> 10: O.push( X)
+> 11: (S,t)←F.pop ()
+> 12: return O
+> 13: 14: t: subtable to add constraints from
+> 15: S: the current decoder state
+> 16: function CONSTRUCTOR TRAVERSAL (S,t)
+> 17: F← {}
+> 18: if Sat traversal limit then
+> 19: return (UNSAT ,F)
+> 20: c←CURRENT CONSTRUCTOR (S,t)
+> 21: if Shas unselected constructors then
+> 22: F.push(N EXT CONSTRUCTOR (S,t))
+> 23: S.simple ←S.simple ∧TRANSLATE (c.simple)
+> 24: if S.simple is UNSAT then
+> 25: return (UNSAT ,F)▷Terminate traversal early if simple constraints are UNSAT.
+> 26: S.deferred ←S.deferred ∧TRANSLATE (c.cplx )∧
+> TRANSLATE (c.attach )
+> 27: for oiin FIND OVERLAPS (S,c)do
+> 28: S.deferred ←S.deferred ∧ ¬ TRANSLATE (oi)
+> 29: S←APPLY DECODE ACTIONS (S,c)
+> 30: for tiin SUBTABLES (c)do ▷Recursively traverse subtables and merge constraints.
+> 31: S,f←CONSTRUCTOR TRAVERSAL (S,ti)
+> 32: F←F∪f
+> 33: if Sis UNSAT then
+> 34: return (UNSAT ,F)
+> 35: return (S,F)
+
+Every bit in the instruction bit vector is initialized as sym-bolic ( Ii = ? for i ∈ 1, 2, · · · n), while the context bit vector is initialized to a fixed value determined by the current processor configuration (for our simple ISA specification in Figure 1, it is initialized to 0). Deferred constraints are additional constraints on the in-struction bit vector that cannot be resolved to a fixed value (e.g., inequalities). These constraints are solved simultane-ously after the traversal process has completed and all con-straints are known. By maintaining known instruction bits separately from deferred constraints, the algorithm can ef-ficiently test satisfiability during traversal and prune large portions of the search space. For example, if a constructor in a subtable requires a particular bit to be 1, but that bit is already known to be 0 from an earlier constraint, then the corresponding subtree can be discarded immediately, signif- 
+
+> 6Considering the largest possible instruction across all tested ISAs is 120 bits (15-byte x86-64 instructions), max (n) = 120.
+
+icantly improving efficiency. Next, we detail the complex component of the method employed in the instruction genera-tion algorithm design. 
+
+3.1.1 Translating Constructor Constraints 
+
+The following section describes the method for translating the pattern section of each constructor into a combination of fixed bit patterns and deferred constraints encapsulating the TRANSLATE function in Algorithm 1. 
+
+Simple constraints. Most constraints involve equality checks between a constant and a range of instruction or context bits. These constraints can be translated directly into fixed values for the corresponding bits in the instruction or context bit vector. If a new constraint is unsatisfiable given the previously fixed values, traversal stops and the algorithm continues with a different set of constructor choices. Otherwise, the newly constrained bits are updated and traversal continues. 
+
+Example. Using the specification Figure 1, consider the 
+
+:run constructor (Line 12) and the Op subtable (Lines 1–2): 12 :run Op is op =0 & Op { HwOp(Op); } 1 Op: "nop" is op =1 & i16 =0 { export 0; } 2 Op: "syscall" is op =0 & i16 =1 { export 1; } ... 
+
+When the :run constructor is selected, the algorithm up-dates the instruction bit vector so that the op field bits are fixed to 0. It then attempts to select a constructor from the Op 
+
+subtable by checking each constructor’s constraints against the current state. The Op:"nop" constructor requires the op 
+
+field is equal to 1, which conflicts with the current value of 0, so it is immediately discarded. The Op:"syscall" con-structor is compatible, so it is selected and traversal continues after adding a i16=1 constraint. All simple constraints can be reduced to a bitwise mask-and-compare operation. For example, when generating an instruction corresponding to run syscall , the final symbolic expression passed to the SMT solver is (I & 0xfffffe00 =
+
+0x00010000 ), where I denotes the instruction bit vector. 
+
+Complex constraints. Beyond simple equality constraints, 
+
+SLEIGH also allows constructors to use more complex con-straints to match instructions. This includes both inequalities and constraints involving non-constant expressions. Unlike simple constraints, there is often no single value that can be assigned to the constrained bits to satisfy the constraint out-right. One possible strategy would be to choose any value satisfying the constraint and continue traversal; however, such a choice may conflict with constraints introduced by later sub-tables, preventing valid instructions from being generated. Another option would be to exhaustively explore all possible values, but this would require traversing an excessive number of paths and would generate many redundant instructions. In-stead, we elect to check that such constraints are potentially 
+
+5satisfiable (i.e., they do not already conflict with the existing simple constraints) and then add them to a list of deferred constraints, which are solved once traversal is complete. Once constructors for all subtables have been selected, the full set of constraints for the current instruction is known. To obtain a final instruction encoding, a symbolic expression is constructed from the instruction bit vector together with the deferred constraints. This expression is then passed to an SMT solver (Z3), which attempts to find a concrete assignment to all bits satisfying the combined constraints. If the solver succeeds, it returns a concrete instruction encoding; otherwise, it reports that the constraints are unsatisfiable. 
+
+Example. As an example, consider the :nop constructor from Line 14 of our example specification in Figure 1: 14 :nop is op =1 & rd = rn & Imm0 { } 
+
+For an instruction to match this constructor, the rd and 
+
+rn fields must be equal. This constraint cannot be translated directly into fixed values for the instruction bit vector, since there are many possible values for rd and rn that satisfy it. Rather than choosing an assignment prematurely, we add the constraint rd=rn to the list of deferred constraints. At the end of traversal, the final expression passed to the SMT solver is: 
+
+(I & 0xfffffe00 = 0x00000200 ) ∧ (I.rd = I.rn )
+
+To optimize the process further, we check whether deferred constraints remain potentially satisfiable given the currently known bits. Suppose there is a deferred constraint i16 > 0 .The algorithm then checks whether at least one bit in the range corresponding to i16 is either unknown or equal to 1. If a different constructor requires that i16=0 , we can immediately reject it due to the i16 > 0 constraint, which avoids wasting time traversing impossible constructor combinations. 
+
+Constraints imposed in attachments. Fields referenced by a constructor may be linked to attachments that control the interpretation of the underlying bits. While most attachments allow all field values, some SLEIGH specifications use attach-ments to mark certain operand values as invalid. To handle this during instruction generation, invalid values are excluded by introducing appropriate deferred constraints. 
+
+Example. A possible set of attachments for our example specification in Figure 1 is as follows: attach variables [rd rn] [ _ r1 r2 r3 r4 r5 r6 r7] 
+
+Whenever rd or rn appears unconstrained in the specifica-tion (e.g., in the :mov and :addi constructors), its value is interpreted according to the attachment mapping. For exam-ple, rd=1 maps to r1 ; rd=2 maps to r2 , and so forth. In this example, an attachment index of 0 has no associated register, indicated by the ‘ _’ operator. To account for this, we treat such cases as implicit complex constraints: rd ̸=0 and rn ̸=0.For instruction generation, these constraints are handled in the same way as other complex constraints discussed previously. 
+
+Implied constraints from overlapping constructors. The behavior of an instruction is primarily determined by its ‘op-code’ field, 7 which specifies the operation performed on the instruction’s operands. In general, two instructions with the same opcode have the same semantics regardless of their operand values. However, some instructions can be repre-sented as a specific sub-encoding of a more general instruc-tion. For example, copying a value between registers (e.g., 
+
+mov r0,r1 ) is semantically equivalent to adding zero to a source and storing the result in a destination register (e.g., 
+
+addi r0,r1,0 ). These instructions are often referred to as 
+
+pseudo-instructions , and are present in many ISAs. Although SLEIGH specifications could ignore pseudo-instructions and always decode them as their generic coun-terparts, modeling them explicitly benefits both human and machine analysis. A more specific textual representation im-proves disassembly for human analysts, and defining special-ized semantics can simplify both static and dynamic analysis. In addition to pseudo-instructions, some ISAs include in-structions with more complex operand encodings that require special handling during decoding. For example, in both x86-64 and MSP430 , instruction encodings include ‘addressing mode’ bits that alter the interpretation of operand fields. To model such encodings, SLEIGH provides a mechanism known as constructor specialization, which allows multiple constructors within the same subtable to match the same instruction encoding. Recall (Section 2), the SLEIGH de-coder prioritizes matching constructors from most to least constrained. Consequently, for an instruction to match a less constrained constructor, it must also avoid matching any over-lapping constructors that would be considered first. To model this behavior, we treat the target constructor as if it carried an additional implied constraint requiring all preceding overlap-ping constructors to not match. 
+
+Example. Consider Lines 14–16 of Figure 1: 14 : nop is op =1 & rd = rn & Imm0 { } 15 : mov rd,rn is op =1 & rd & rn & Imm0 { rd = rn; } 16 : addi rd,rn,ImmX is op =1 & rd & rn & ImmX { rd = rn + ImmX; } 
+
+To generate a mov instruction, we must avoid matching the :nop constructor. Since the only difference between the two constructors is the constraint rd =rn , we add its nega-tion, rd ̸=rn , to the list of deferred constraints for the :mov 
+
+constructor. In rare cases, there are no unique constraints that can be added to distinguish between two overlapping constructors. For example, consider the :addi constructor in the example specification. This constructor overlaps with both :nop and 
+
+:mov . Similarly, we can avoid matching :nop by adding 
+
+> 7To keep instruction encodings compact, the full opcode may be split over multiple fields depending on the ISA.
+
+6the constraint rd ̸=rn . However, at the constructor level, the constraints for :mov and :addi are identical. The only difference between the two constructors is the final subtable (i.e., Imm0 and ImmX ). Since subtables are eval-uated only after a constructor has been selected, it may seem impossible for :addi to match. However, SLEIGH supports 
+
+backtracking ; if no constructor matches in a later subtable, the decoder may return to an earlier point in the process and try a different constructor. Therefore, to ensure that :addi is selected, we must force the SLEIGH decoder to backtrack from the :mov constructor. To achieve this, the generation algorithm inspects all con-structors in the Imm0 subtable and adds additional constraints that ensure that no constructor matches. In this example, the 
+
+Imm0 constructor requires i16 =0, so we add the constraint 
+
+i16 ̸=0. If the subtable contained multiple constructors, we would instead need a combined constraint ensuring that all of them fail to match. The final set of constraints the algorithm solves for the :addi constructor is: (I & 0x0000fe00 = 0x00000200) (I.rd ≠ I.rn ∨ I.i16 ≠ 0) (I.i16 ≠ 0) 
+
+> Avoid : nop
+> Match : addi
+> Avoid : mov
+
+∧∧
+
+Notice that when we add constraints to resolve the over-lap with the :nop constructor, the overlap can be resolved by negating the simple constraints or by backtracking, maxi-mizing the flexibility the solver has to generate an encoding, allowing addi r0,r0,1 to be a valid solution. 
+
+Self-referencing constructors and decode actions. SLEIGH 
+
+allows constructors to be self-referencing , meaning that a con-structor may reference the same subtable to which it belongs. This functionality is used for two main purposes: i) phased decoding and ii) optional prefix parsing . In both cases, the self-referencing constructor must be able to influence subse-quent steps of the decoding process. To support this, construc-tors may specify decode actions in square brackets after the pattern section. Each decode action evaluates an arithmetic expression, possibly over context and/or instruction bits, and writes the result to a context field. 
+
+Phased decoding. For phased decoding, context fields are used to split the decoding process into multiple phases, where previous phases manipulate other context bits which are used as constraints in later phases. During instruction generation, this mechanism is straight-forward to handle; at any point in the traversal, the phase has a fixed value, so only constructors for the current phase need to be considered. Phased decoding is not used in our exam-ple specification, instead we provide the following example (inspired by the AArch64 specification) to explain. 
+
+Example. Consider the case where the immediate field is split across the instruction encoding: :^instruction is phase =0 & immhi & immlo & instruction [ phase =1 ; imm =(immhi <<8 | immlo); ] {} :mov rd,rn is phase =1 & op =0xf & rd & rn & imm =0                
+
+> { rd =rn; } :addi rd,rn,imm is phase =1 &op =0xf &rd &rn &imm { rd =rn +imm; }
+
+Assuming the phase context field is initialized to 0, only the first constructor matches the current context. The instruc-tion generation algorithm therefore selects it and updates the context according to the decode actions. When the algorithm subsequently resolves the instruction 8 subtable, it uses the updated context, where phase =1. Since the phase value is now 1, only the second and third constructors match, allow-ing them to act as if they were separate subtables. The :mov 
+
+constructor demonstrates the usefulness of phased decoding, where it is able to define a constraint on the entire immediate value instead of separate constraints on each subfield. 
+
+Prefix parsing. Constructors used for prefix parsing are more involved to translate. Since prefix constructors also consume part of the instruction bit vector, the algorithm must track the offset within the instruction encoding, and adjust any subsequent constraints. Additionally, since prefix bytes can be optional and repeated (e.g., x86-64 ), unlike phased parsing, prefix constructors cannot be easily separated from regular opcode decoding, which can lead to implied constraints from overlap resolution. Further, to avoid generating arbitrarily long encodings from repeated prefixes, we must incorporate a traversal limit during the traversal process. 9
+
+Example. Consider the :ld constructor: 10 :^instruction is prefix =0xf8 ; instruction [ctx.mem =1 ] {} 18 :ld rd,Mem is ctx.mem =1 & op =1 & rd & Mem { rd = *Mem } 
+
+For the :ld constructor to match, instead of one of the arithmetic instructions with the same opcode, the context field ctx.mem must be set to 1. This occurs only if the prefix 
+
+constructor (Line 10) is matched first; that constructor adds the constraint that the instruction must begin with the prefix byte ( 0xf8 ) and updates the context field ctx.mem to 1. Con-sequently, when the instruction generation algorithm tries to generate an encoding for the :ld constructor, it emits the fol-lowing constraint: 10 I & 0x0000fe00ff ̸ = 0x00000400f8 .
+
+Dynamic context. If the result of a decode action depends on unconstrained parts of the instruction encoding, the cor-responding parts of the context bit vector become partially symbolic. Because the only source of symbolic values is the instruction bit vector, each value can be expressed as a func-tion of instruction bits and constants. Any later constraint on   
+
+> 8Recall that the instruction identifier is a special identifier that matches the root subtable—constructors prefixed with just ‘:’.
+> 9Given that physical hardware will always have an upper limit on instruc-tion length, this should never prevent us from generating a valid instruction.
+> 10 Constraints simplified; in practice, additional constraints are required for overlap resolution and attachments.
+
+7those context bits can therefore be translated into a constraint on the instruction bit vector. These translated constraints are added to the deferred-constraint set and solved after traversal. 
+
+Example. Consider the following extension to our example specification: Rd2: ctx.rd2 is ctx.rd2 < 7 & ctx.rd2 { ... } Mem2: is rn & ImmX { ... } :ld2 rd,Rd2,Mem is op =2 & rd & Rd2 & Mem & Mem2 [ctx.rd2 = rd +1 ; ] { ... } 
+
+The instruction generation algorithm must track that 
+
+ctx.rd1 is equivalent to rd+1 , and ensure that a subsequent constraint on ctx.rd1 is mapped to a corresponding con-straint on rd . For example, the ctx.rd1 < 7 constraint in the Rd2 subtable becomes rd+1 < 7 .
+
+3.1.2 Avoiding Excess Constructor Combinations 
+
+SLEIGH specifications use attachments to map the numer-ical value of a field to a specific register. However, more complex relationships between fields which cannot be easily expressed with attachments are sometimes required. In such cases, specifications resort to mapping field values through separate constructors, which exponentially increases the num-ber of constructor combinations. For example, ARM allows any combination of the registers r0 to r15 to appear in the reg-ister lists used by the load/store-multiple instructions LDMIA 
+
+and STMIA . The corresponding decoding specification (Fig-ure 3) requires traversing approximately 2 16 paths to cover all operand combinations. To avoid generating an instruction for every combination, the algorithm tracks which constructors have already been covered and prunes them during subtable traversal when this type of explosion is detected ( traversal limit on Line 18). 1 rlist_15: rlist_14,r15 is b15 =1 & rlist_14 {...} 2 rlist_15: rlist_14 is b15 =0 & rlist_14 {} 3 rlist_14: rlist_13,r14 is b14 =1 & rlist_13 {...} 4 rlist_14: rlist_13 is b14 =0 & rlist_13 {} 5 # ... Repeated for rlist_13 to rlist_01          
+
+> 6rlist_00: is b00 =0 {} 7rlist_00: r0 is b00 =1 {...} 8rlist: {rlist_00} is rlist_00 {...}
+
+Figure 3: Register list operand decoding in the ARM SLEIGH 
+
+specification (e.g., for LDMDA r0, {r1,r2 ...} ): Each reg-ister in the list can be either present or absent and there are 16 registers ( r0 to r15 ) leading to 2 16 combinations. 
+
+3.1.3 Solving Instruction Encodings 
+
+After returning from C ONSTRUCTOR TRAVERSAL , all con-structors have been selected. However, when we attempt to solve the constraints to find a concrete instruction encoding (Line 8), there can still be several bits in the encoding that remain unconstrained, or only partially constrained (e.g., imm > 0 ). These ‘free’ bits correspond either to generic operands or to unused bits that do not affect the instruction. As a result, each instruction typically has a range of valid encodings. Ex-haustively generating and testing every combination of these free bits would reintroduce the same exponential explosion we are trying to avoid. Instead, the algorithm generates a smaller representative set of solutions that covers the most 
+
+interesting cases. To do this, S OLVE attempts to identify possible edge cases in the instruction encoding. It uses Z3’s support for mini-mizing and maximizing values [5] to generate test cases at the minimum and maximum encodings permitted by the con-straints, which helps expose potential off-by-one errors in partial constraints. For example, for the :nop constructor (Line 14 of our example specification), given the complex constraint rd=rn , Z3 generates encodings corresponding to 
+
+rd=rn=0 and rd=rn=7 .Next, analysis of the instruction’s semantics identifies any registers that could alias with operands derived from the un-constrained bits. Additional constraints are then added to the instruction bit vector to force operands to match the aliasing register, generating targeted cases for each potential alias. 
+
+# 3.2 State Generation 
+
+The behavior of an executed instruction depends on the state of the processor. Therefore, to comprehensively test a specifi-cation, we need to explore not only changes to the instruction bytes but also to the initial input state. The state is made up of several components, including the values of ISA-level registers, memory, and processor-specific internal state (e.g., model-specific registers, caches, and micro-architectural re-sources). For specification testing, we assume the internal state is fixed and is reset between instruction executions. How-ever, both ISA-level registers and memory are allowed to vary.                                                             
+
+> Algorithm 2 State Generation (from Pcode edge cases)
+> 1: function GEN INPUT STATES (P)▷P: List of Pcode oper-ations for an instruction.
+> 2: G← {} ▷Output G: Set of edge case triggering input states.
+> 3: S←initial symbolic state
+> 4: for piin Pdo
+> 5: (a,b)←S.get( pi.inputs) ▷Get the current sym-bolic value of the inputs.
+> 6: o←SYMBOLISE (a,pi.op, b)▷Symbolically ex-ecute p i.
+> 7: for ein EDGE CASES (pi.op) do
+> 8: s←SOLVE (A SSERT ((a,b,o)triggers e)) ▷Find a concrete input s triggering e.
+> 9: if sis SAT then
+> 10: G←G∪s
+> 11: S.set( pi.output, o)▷Update the symbolic state with the output of p i.
+> 12: return G
+
+8Group Example Pcode Operations Edge cases 
+
+Addition/Subtraction INT ADD , I NT SUB Overflow/underflow, result negative, result zero. Multiplication/Division INT MULT , I NT DIV , I NT SDIV Operands negative/zero. Zero/Sign Extension INT ZEXT , I NT SEXT Input all ones or all zeros, output non-negative and negative. Boolean BOOL XOR , B OOL OR, . . . Result true/false. Bitwise INT XOR , I NT OR, . . . Result zero/non-zero. Shifts INT LEFT , I NT RIGHT , . . . Oversized shift operand, overflowing result, sign-bit set. Comparisons INT EQUAL , I NT LESS , . . . Operands equal or ±1. Overflow conditions INT CARRY , I NT BORROW , . . . Result true/false. Floating point FLOAT ADD , F LOAD SUB , . . . Operands with interesting floating point values (e.g. NaN). Branches CBRANCH Condition is true and path constraints for future operations. Table 1: Edge cases used for generating initial interesting input states from Pcode operations. Although many specification bugs are discoverable with an arbitrary initial state, certain bugs may manifest only when an instruction is executed under extremely specific initial conditions. To allow us to test these cases, Algorithm 2 is used to generate interesting input states by identifying potential edge cases from the semantics section of the specification. We exploit the fact that SLEIGH breaks instructions into simpler operations (Pcode) to express each edge case as an assertion in terms of the inputs and/or output of a specific operation. By systematically defining edge cases for each Pcode operation and generating initial states that trigger each edge case, it is possible to find discrepancies even when the semantics are only subtly incorrect. 
+
+Example. Consider an ADD instruction that also needs to update various arithmetic flags, for example on x86-64 the Pcode for ADD r0,r0,r1 is as follows: 
+
+> OF = r0 IntCarry r1 r2 = r0 IntAdd r1 ZF = r2 IntEqual 0 NF = r2 IntSignedLessThan 0
+
+The ADD instruction is broken into four Pcode operations. Consider the second operation, r2 = r0 IntAdd r1 , where 
+
+r0 and r1 are inputs to the instruction and are replaced with symbolic variables ar0 and br1 (Line 5 of Algorithm 2), the EDGE CASES method returns the following three assertions 11 :
+
+ar0 + br1 overflows , ar0 + br1 = 0, ar0 + br1 s< 0 Values for ar0 and br1 are obtained by symbolically solving the assertions using an SMT solver (e.g., for the third assertion 
+
+ar0 = 0, br1 = −1). After saving valid edge-case triggering inputs, the algorithm updates the symbolic state (Line 11) such that, r0 = ar0 + br1. This means, when generating edge cases for the later Pcode operation ZF = r2 IntEqual 0 ,we actually generate edge cases for ar0 + br1 = 0. All assertions are solved independently; the state genera-tion process does not attempt to find initial input states that   
+
+> 11 s< represents a signed less-than operation.
+
+simultaneously solve multiple assertions. This avoids an ex-ponential explosion of assertion combinations, many of which would be unsatisfiable. In practice, complex input states are still generated from later Pcode operations because any pre-ceding Pcode operations that modify inputs to the operation are incorporated in symbolic expressions. In some cases, previous operations can restrict the possible values of the operands; this makes the edge cases unsatisfiable and causes no corresponding input state to be generated. For many ISAs, instructions may update status register bits (flags) when specific conditions occur while executing the instruction. In SLEIGH specifications, these conditions are checked using individual Pcode operations, which will have edge-case-triggering inputs generated for them. This can re-sult in the state generation process producing duplicate input states, since the conditions checked by the instruction are often the same as the edge cases defined for state generation. 
+
+Example. In the example code above, the same initial input state that satisfies (r0 + r1 s< 0 ) (edge case for addition), also satisfies (r2 = −1) (edge case for comparisons) since r2 =
+
+r0+r1. However, this redundancy is useful because it ensures that missing or incorrectly implemented semantics are still tested. In cases where exact duplicates are generated, they are automatically removed before the test cases are executed. 
+
+Pcode Edge Cases. When defining edge cases for Pcode oper-ations, there is a trade-off between defining too many, which results in excessive testing, and too few, which risks missing important behaviors. A summary of the edge cases used for state generation is provided in Table 1, and we motivate them below: • Addition and subtraction. For I NT ADD and I NT SUB ,edge cases that test integer overflows/underflows and out-put values that are negative or zero are potentially interest-ing. Inputs corresponding to these edge cases are likely to set or clear various CPU flags, testing that the flags are properly updated by the SLEIGH specification, and that the correct set of overflow checks are used. • Multiplication and division. Since there are both signed and unsigned variants of multiplication and division, edge 9cases are defined to identify when the incorrect variant is used. It is also useful to include edge cases for division by zero, as the behavior varies across ISAs. • Zero and sign extension. For these operations, bugs are most likely to result from using the incorrect type of ex-tension. To identify these bugs, edge cases that ensure negative inputs of various bit-widths are used. For exam-ple, an input for a 16-bit extension would be 0xFFFF .• Boolean operations. Given that there are only four input combinations for boolean operations, it is possible to test all outputs by constraining the inputs to each of the four combinations. • Bitwise operations. In SLEIGH , bitwise operations are used for three purposes: implementing ISA-level bitwise operations, extracting and inserting bits, and as an alter-native to boolean operations. Misuse of these operations can be detected by forcing the inputs to be extreme values (e.g., all bits set to 0 or 1). • Shifting operations. Overflows are also possible in shift operations, and the behavior of oversized shifts varies be-tween ISAs. Edge cases are defined to constrain the shift operand to a value that exceeds the total number of bits in the type. Additional edge cases are defined to test whether the correct type of shift (arithmetic versus logical) is used, by constraining the inputs to be negative or positive values. • Comparisons. For comparisons, it is desirable to detect cases of off-by-one errors and where the wrong compari-son operator is used. To achieve this, constraints are used to enforce that operands are equal or differ by ±1. • Overflow conditions. SLEIGH explicitly calculates vari-ous overflow conditions by using specific operations for each one. Edge cases are defined corresponding to each overflow-checking operation. • Floating-point operations. For floating-point operations, the operands are constrained to extreme and special values (such as extremely small or large values, NaN, or ±Inf). Floating-point operations are challenging to evaluate sym-bolically, which prevents us from solving subsequent edge cases that use the result of a floating-point operation. How-ever, within a single instruction, integer and floating-point operations are typically not performed on the same inputs. • Branches. Branches are handled by forking the symbolic state at each branch operation and adding an assertion for the branch condition. For most branch operations, when the condition is true, the operation jumps to a different instruction. However, SLEIGH also allows branches to Pcode operations within the same instruction (internal Pcode branches) 12 . For the outgoing edge of external branches, edge case generation stops when the branch is taken, since instructions are individually tested. Internal   
+
+> 12 For example, the x86-64 specification employs internal branches to iterate over individual bits in the implementation of bit-scan instructions (BSF and BSR
+
+loops (where the branch jumps backwards within the in-struction) are handled by unrolling the loop a fixed number of times (e.g., 10) and generating edge cases for each un-rolled iteration. • Memory accesses. When a value is loaded from memory, it may be used as an input to subsequent operations. To gen-erate edge case-triggering operands for these operations, memory is included as part of the initial input state. When-ever a load occurs, the state generator introduces a new symbolic input variable representing the value returned from the load and records the expression for the address from which the value is loaded. Since not all addresses are valid for every architecture, additional constraints are used to restrict the addresses to valid ranges and, for some architectures, to ensure that the address is properly aligned for the access size. Constraints are also added to ensure memory accesses are consistent, so that multiple loads from the same address return the same value. For stores, the same constraints are applied to the address (to prevent invalid access exceptions from occurring), but the written value is ignored. It is technically possible for the value written by a store to be later loaded; however, there are no instructions in any of the tested ISAs where this occurs, so it can be ignored for the purpose of state generation. 
+
+# 3.3 Differential Testing Environment 
+
+We use a differential testing strategy to discover bugs in  
+
+> SLEIGH
+
+specifications using the generated test cases. The strategy is implemented in JuxtaPlayer , which executes the test cases on two different systems: i) an emulator derived from the SLEIGH specification under test; and ii) hardware-based reference systems. 
+
+3.3.1 System Configuration 
+
+> SLEIGH
+
+-based Emulator. JuxtaPlayer uses Icicle [8], a 
+
+> SLEIGH
+
+-based emulator, to execute Pcode operations from the SLEIGH specification. Icicle supports the execution of individual instructions (single-stepping) within all of the test architectures and provides APIs for directly reading and writ-ing the system state required for differential testing. Icicle 
+
+also supports tracking exceptions that occur during execution. 
+
+Hardware-Based Reference (KVM). Since our goal is to ensure that SLEIGH specifications accurately reflect the be-havior of real hardware, we use real hardware as the reference system for differential testing. Where possible, hardware-assisted virtual machines (VMs) are used to support this goal. These VMs create isolated virtual execution environments that can be used to efficiently execute instructions on the un-derlying hardware. By carefully configuring the VM state, it is possible to construct an environment analogous to that of 10 Generation Time (s) Generated Tests Missing Constructors Architecture Traversal Solving State Gen Instructions States                                                       
+
+> Constructor Coverage N/A Redun. Incom. Bugs
+> x86-64 491.99 1019.56 425.45 71,852 712,668 97% 77 504
+> AArch64 0.24 90.09 573.02 25,031 123,031 97% 104 41 40
+> ARM/Thumb 1387.26 691.99 59.11 30,709 207,999 96% 50 79 23
+> RISC-V 0.07 39.69 6.76 9,725 38,481 99% 4610
+> MSP430 0.09 46.10 557.15 7,436 124,712 90% 179 00
+
+Table 2: Summary of the generation process execution for each architecture. For missing constructors, N/A : Not applicable (only used different SLEIGH config), Redun. : Redundant constructors, Incom. : Unreferenced constructors due to incomplete specifications, Bugs: root-caused bugs in the specification. the emulator. Hardware virtualization differs between ISAs and even between different vendors of the same ISA. 13 Fortunately, the Linux kernel provides a hardware virtualization driver, KVM (Kernel-based Virtual Machine), which exposes a consistent interface for manipulating hardware VMs. KVM supports all the essential features for differential testing, allowing us to read and write register values, allocate memory, and single-step the processor. However, some additional configuration is required to en-sure that the VM environment matches the assumptions made by the SLEIGH specification. This configuration is performed by JuxtaPlayer using KVM APIs, below we describe the x86-64 specific configuration steps; the ARM/Thumb and AArch64 
+
+configurations requires similar steps.  
+
+> x86-64
+
+processors support multiple execution modes (e.g., real mode, protected mode, and long mode), each of which can change the semantics of a particular instruction encoding. The x86-64 SLEIGH specification expects to be configured to decode instructions in a specific mode. Therefore, hardware VMs must be configured to run in the correct mode (i.e., long mode for x86-64 ). To do this, the relevant bits in control regis-ters, such as EFER (Extended Feature Enable Register), are set to enable ISA extensions related to long mode execution, and the global descriptor table (GDT) is set up to ensure that the memory region containing the instruction bytes is interpreted as 64-bit code. To ensure all instructions are available, JuxtaPlayer enables additional extensions, such as SSE and AVX, by setting bits in the appropriate control registers and configuring the VM’s 
+
+CPUID . To handle memory accesses, JuxtaPlayer also con-figures the page table, a hierarchical data structure used for hardware address translation, to map the instruction page and any additional memory from the test case’s initial input state. The final challenge is to support single-stepping in the VM execution environment. On both the Intel and AMD CPUs, single-stepping is implemented by setting the trap flag (TF), which causes a debug exception after each instruction return-ing control to the hypervisor, which in turn returns control to 
+
+> 13 Intel CPUs implement a set of virtualization extensions called VT-x, while AMD CPUs implement a different set of extensions called AMD-V (or SVM—Secure Virtual Machine).
+> JuxtaPlayer
+
+. KVM automatically handles this process, mak-ing it straightforward to single-step instructions in most cases. However, this debug exception can be suppressed by higher priority exceptions (e.g., memory violations) that occur during instruction execution. If such an exception occurs, control is not returned to the hypervisor; instead, the processor executes the corresponding exception handler. If no handler is present, a ‘triple fault’ occurs, resetting the VM and losing the state needed for differential analysis. To prevent this, JuxtaPlayer 
+
+defines exception handlers that immediately exit back to the hypervisor. The VM is configured to use these handlers by setting the appropriate entries in the interrupt descriptor table (IDT), updating the task state segment (TSS), and mapping memory for the exception stack. When exceptions occur, we recover the exception reason using a combination of the RIP (instruction pointer) and CR3 (faulting address) registers. 
+
+Hardware-Based Reference (Debugger). For MSP430 and 
+
+> RISC-V
+
+, we did not have access to hardware that supported hardware virtualization extensions, making it impossible to use KVM-based VMs for differential testing. In these cases, alternative approaches were required to execute instructions on real hardware while still allowing the system state to be manipulated and observed. These approaches are generally less efficient and robust than hardware virtualization, but the ISAs in question are typically simpler, making them sufficient for differential testing. As the reference system for MSP430 , we use an MSP430FR5969 microcontroller, which contains an EEM (Energy-Efficient Microcontroller Emulator) module that can single-step instructions and read and write the system state. The microcontroller has disjoint memory regions for code, RAM, MMIO peripherals, and other functions. Gaps between these regions either trap on access or return a constant value when read. To keep the test environment consistent, breakpoints were used to detect memory accesses outside the generic memory ranges, as no form of memory protection was available. How-ever, only two breakpoints could be enabled simultaneously, and the breakpoint mechanism did not report information about the access that triggered it. Consequently, NOP instruc-tions had to be inserted after the instruction under test for 11 each potential trapping address, and each test case had to be executed repeatedly as part of a greater-than/less-than scan. The lack of memory protection also meant that an instruc-tion could write an unknown value to any MMIO register. Therefore, the microcontroller had to be fully reset between test cases to ensure a clean state. For RISC-V , we use the BeagleV®-Ahead, which contains a quad-core Xuantie C910 processor implementing RV64GC, including the 0.7.1 draft version of the vector extension. Al-though the board can run Linux, it lacks support for KVM. Instead, ptrace was used to seize control of a newly created process and provide an isolated execution environment. The required memory regions were mapped into the pro-cess, and the initial regions were unmapped. Because ptrace 
+
+does not support single-stepping, test cases were first ex-ecuted with memory filled with c.ebreak instructions to detect jumps. Instructions that did not jump were then re-executed with memory populated with the values specified by the test case. Since RISC-V jump instructions do not load from memory, executions using the initial memory contents could be used as the final results for such instructions. Us-ing ptrace instead of KVM limits testing to unprivileged instructions. 
+
+3.3.2 Initial Input State 
+
+Before an instruction is executed, the environment is config-ured to match the initial state defined by the test case. This includes a region of memory containing the instruction bytes with the execute permission set. Registers and other memory regions are then initialized according to the values produced by the state generation algorithm. The instruction pointer (i.e., RIP) is positioned at the instruction address, and the system is set up to execute a single step. The execution may succeed or raise an exception. In either event, the final system state is recorded, including modified memory values, registers, and any exception information, for later comparison. Notably, for performance, instead of mapping the entire address space,  
+
+> JuxtaPlayer
+
+lazily maps the memory whenever a memory exceptions occur and replays the instruction. 
+
+# 4 Evaluation 
+
+We focus our evaluation on five important SLEIGH specifica-tions ( x86-64 , AArch64 , ARM/Thumb , RISC-V , and MSP430 )to assess coverage, discrepancy patterns, and bug prevalence across diverse ISA designs. This section summarizes the results for all ISAs. All instructions were generated using the SLEIGH specifica-tion from Ghidra 10.3. 14 GenSYS is executed on a Threadrip-per Pro 5995WX with 64 GB RAM 15 . Through the evaluation, 
+
+> 14 Commit: 104d9592485c2fb6c7ab5177c71d8d70140a3d03
+> 15 The traversal process is single threaded, while state-generation was run in parallel using 8 threads.
+
+we seek to answer the following questions: • How generalizable is InSPECtor in traversing the ISA vari-ants of SLEIGH specifications, given the diverse specifi-cation styles used by different authors and contributors? (Section 4.1) • How effective is InSPECtor at finding bugs in SLEIGH 
+
+specifications? (Section 4.2) • What is the nature and impact of the bugs found by In-SPECtor ? (Section 4.2 and Section 4.4) • How effective are the techniques employed by InSPECtor ?(Section 4.3) 
+
+# 4.1 Test Case Generation 
+
+A means to objectively assess the test coverage of a given specification is necessary for assurance and evaluation of the testing method to understand its effectiveness. Analogous to considering code-coverage metrics as a proxy for a bug-based metric in software testing [16, 21] or fuzzing [12], we consider measuring constructor coverage as a proxy for the testing coverage of a given specification. Given that the funda-mental unit of syntax in SLEIGH is a constructor, constructor coverage is a meaningful evaluation metric. We compute constructor coverage as: Constructor Coverage = Constructors Used in Generation Total Constructors in a Spec. Further, to demonstrate the efficiency of the generation pro-cess, we also report the test Generation Time .
+
+Generation Results. GenSYS was used to generate instruc-tions and states for x86-64 , AArch64 , ARM/Thumb , RISC-V 
+
+and MSP430 . The results are summarized in Table 2. These results represent unique constructor combinations, i.e., in-structions, including variants, and input states covering the edge cases defined in Section 3.2. Although the instruction generation process employed by  
+
+> GenSYS
+
+exhaustively explores the SLEIGH specification, a total of 460 constructors remained without any generated test cases. We manually investigated each missing constructor and categorized them in Table 2, in summary: • Not Applicable. Many of the missed constructors corre-spond to processor modes or ISA extensions that are not enabled in our configuration (e.g., x86-64 real/protected-mode semantics and AArch64 pointer-authentication sup-port). Because these features are unavailable at runtime, the associated constructors can never be matched and can be ignored. • Redundant. A large proportion of the missing construc-tors correspond to cases where they completely overlap with a set of more specific constructors. While these re-dundant constructors are benign and have no impact on 12 Architecture Execs/s Raw Groups Unimplemented Alignment Exception Flags Float PC State  
+
+> x86-64
+
+176,404 349,897 18,827 9159 653 2467 3627 605 257 2059  
+
+> AArch64
+
+3,723 52,833 7,342 5127 21 1451 5 426 0 312  
+
+> ARM/Thumb
+
+3,572 78,251 9,785 4652 12 4182 32 376 10 521  
+
+> RISC-V
+
+1,012 15,682 937 322 0 373 8 222 1 11  
+
+> MSP430
+
+0.164 93,043 2,028 145 0 468 163 0 68 1184 Table 3: Discrepancies found by running JuxtaPlayer on the testcases generated by GenSYS . Raw: total number of discrepancies (including variations to input state). Groups: unique constructor combinations for which at least one discrepancies was found. Each of these groups was then assigned a category based on observing: the set of differences (exception state and memory/register values) and the operations in the SLEIGH semantics for the constructor combination. the specification’s correctness, they can be removed to simplify the specification and improve maintainability. • Incomplete. Some parts of the specification are incom-plete, and the missing constructors correspond to cases where a subtable constructor is fully implemented, but the parent constructor is missing. • Specification Issues (Bugs). A small set of the missing constructors represent issues in the SLEIGH specification. 
+
+# 4.2 Differential Testing Analysis 
+
+Across all architectures, JuxtaPlayer discovered 589,713 dis-crepancies between the output states of the SLEIGH -based emulator and the hardware reference system corresponding to 38,920 unique constructor combinations after grouping. How-ever, many of these stem from hardware/processor-specific instructions (see Appendix C), or from instructions that are not fully implemented in the specification 16 . Analyzing the discrepancies enabled us to identify 125 unique bugs. In the following sections, we describe the discovered discrepan-cies, the analysis process and the specification bugs. We also present an analysis of root causes and sources of errors we uncovered along with bug examples. 
+
+4.2.1 Discrepancy Analysis and Specification Bugs 
+
+In general, discrepancies correspond to either bugs or SLEIGH 
+
+specification limitations. In Table 3, discrepancies are first grouped by unique constructor combinations and then as-signed to categories we describe here, using an ordered set of heuristics. This categorization serves two purposes. First ,it separates discrepancies that are unlikely to correspond to actionable SLEIGH bugs—for example, those involving un-modeled hardware state or undefined behavior—from dis-crepancies that more directly indicate errors in decoding or instruction semantics. Second , it provides a consistent link be-tween the observed form of a discrepancy and the mechanism used to detect it, which makes the results easier to interpret.  
+
+> 16 SLEIGH allows custom Pcode operations as placeholders for instructions during decompilation. Since no Pcode is associated with these operations, they cannot be emulated and analyzed using differential testing.
+
+• Unimplemented: Discrepancies corresponding to either: unimplemented behavior—caused by placeholder seman-tic operations in the SLEIGH specification; or unsupported behavior—use of architectural state not represented in our model, such as model-specific registers (MSRs) or other hardware state not defined at the ISA level. These are detected by the presence of placeholder operations (e.g., 
+
+unimpl blocks or custom pcodeop definitions), or the use of unmodeled registers in the SLEIGH semantics. Unim-plemented behaviors often arise for recently added ISA features, or instructions with difficult semantics to directly express in Pcode. Unsupported behavior typically corre-sponds to hardware-specific operations that may depend on implementation-specific hardware details rather than ISA-defined semantics. • Exception: Discrepancies in the type or metadata (e.g., faulting address) of an exception raised by the SLEIGH 
+
+semantics relative to the hardware reference. It also cap-tures cases caused by ISA feature mismatches (e.g., in-structions from some ISA extensions not present on the hardware reference, but included in the SLEIGH speci-fication). Exception mismatches are also frequently re-lated to unpredictable/undefined behavior. For example, on ARM/Thumb some instructions can be encoded with the program counter (PC) as a destination register, which is listed as unpredictable behavior in the architecture. The  
+
+> SLEIGH
+
+specification treats this as ignoring the operation in many cases, while the hardware reference raises an ex-ception. Unfortunately, the variability of exception sources makes it difficult to automatically separate out true issues in this category from unpredictable/undefined behavior. • Alignment: Discrepancies related to alignment issues. They are separated out as a special case of exception dis-crepancies since these are generally unfixable without adding additional semantics to SLEIGH —see Section 5.1. • Flags: Discrepancies in architectural flags, such as condition-codes or status bits. These are detected when the only observed state difference is in the flag register set. We isolate this class because flag behavior for some archi-tectures is frequently related to undefined or unpredictable cases, and therefore benefits from a separate analysis. 13 Architecture Decoding Semantics Ordering Incorrect Semantics Aliasing Total                               
+
+> x86-64 16 012 432
+> AArch64 0122 023
+> ARM/Thumb 0015 217
+> RISC-V 2112 318
+> MSP430 2626 135
+> Total 16 987 9125
+
+Table 4: Summary of bug types by architecture. • Float: Discrepancies in registers or memory that arise along an execution path containing floating-point Pcode operations. These are detected by tracking whether the cor-responding SLEIGH semantics use floating-point operators. This category is separated from general state discrepancies because some differences may reflect limitations of the Pcode floating-point model rather than errors that can be fixed by modifying the SLEIGH specification. • PC: Discrepancies in the final program counter, includ-ing incorrect branch targets or advancement to the next instruction—e.g., from decoding the wrong instruction length on x86-64 and MSP430 . These are detected when execution ends at a program counter different to the oracle. Such cases are strong indicators of decoding errors and therefore often correspond directly to SLEIGH specifica-tion bugs. • State: Any remaining discrepancy in registers or memory not captured by the preceding categories. This is the resid-ual class used when the final architectural state differs but no more specific heuristic applies. In practice, these cases are often the most interesting, as they may indicate incor-rect semantics, missing side effects, or incorrect handling of particular operand forms. Notably, the categories above serve as a prioritization mech-anism for analysis as much as a descriptive taxonomy since discrepancies in classes are difficult to directly associate with a specific error in the SLEIGH specification. While each dis-crepancy corresponds to a possible bug, each bug usually results in many different discrepancies. To analyze the discrepancies within a group, we manually aggregate discrepancies based on mnemonic, semantics, and overlapping constructors, then selected a representative exam-ple to study. Time to triage a unique bug was approximately 4 hours on average; the time varies significantly depending on root-cause complexity. This was followed by a consider-able time to craft, test and document suitable fixes for Ghidra maintainers. This process enabled us to identify 125 unique bugs (where a bug corresponds to a unique root-cause fixed in an ISA). Consequently, the bug count is not the number of buggy in-structions, which would be an inflated number. Tables for the unique bugs based on our analysis of discrepancies for 
+
+> x86-64
+
+, AArch64 , ARM/Thumb , RISC-V and MSP430 ISAs are contained in Appendix E. To characterize the types of  
+
+> SLEIGH
+
+issues encountered across the specifications in the bugs discovered, we categorize the bugs and summarize the results in Table 4. We elaborate on the classes of bugs in I-1 – I-15 in more detail, with bug examples, and provide additional bug case studies in Appendix 4.4. 
+
+4.2.2 Decoding Issues 
+
+In general, decoding issues occur when incorrect constructor constraints prevent the correct instruction implementation from being selected. We detail these in the following. 
+
+I-1 Redundant and out-of-order prefixes. Instruction pre-fixes are one of the most complex aspects of x86-64 instruc-tion encoding and causes discrepancies between hardware vendors (see Section C), security-critical CPU bugs [27], and severe performance issues [13]. Similarly, the x86-64 SLEIGH 
+
+specification contains many prefix-related decoding issues.  
+
+> x86-64
+
+instructions allow redundant and duplicate prefixes; however, the SLEIGH implementation assumes that at most one of each prefix is present. For example, when multiple operand-size ( 66 ) or address-size ( 67 ) override prefixes ap-pear, the specification computes the final address/operand size incorrectly, leading to discrepancies. Additionally, the 64-bit extension to the ISA introduces a new class of prefixes (the REX prefix) with different decoding rules compared to legacy prefixes. According to the ISA reference, there must be at most one REX prefix present, and it must follow all legacy prefixes. However, both the Intel and AMD CPUs tested are more lenient during decoding; any REX prefixes that precede legacy prefixes are ignored, and they allow multiple REX prefixes, only using the final one. The SLEIGH specification does not replicate this behavior; instead, it rejects all instructions where there are multiple or out-of-order REX prefixes. While compilers avoid emitting unnecessary prefixes, thus reducing the impact of this issue on real-world code, such prefixes occasionally appear in handcrafted assembly for low-level performance optimizations. For example, OpenSSL uses redundant prefixes to align code to micro-architecturally friendly boundaries [2]. 
+
+I-2 Context handling issues. Historically, the x86-64 SLEIGH specification used a single context field for both indicating whether long mode (64-bit) instructions were de-codable and for tracking the current address size. This design assumed that long mode could be inferred from the address size, because it has a different default setting compared to other processor modes. However, including an address-size override prefix ( 67 ) changes the current address size, caus-ing the specification to mistakenly assume that the processor is not in long mode. Although the specification was later refined to introduce a dedicated context bit for long mode, many long mode instructions still reference the operand-size bit, resulting in discrepancies. 
+
+I-3 Overlapping constructors. Some constructors are un-14 reachable because every instruction encoding that matches them is instead matched by a different constructor (with differ-ent semantics). Further analysis revealed that many overlap-ping constructors are under-constrained . This bug causes the wrong instruction semantics and disassembly to be used for the instructions associated with an unreachable constructor. 
+
+I-4 Over constrained constructors. Several constructors have additional constraints that are not present in the underly-ing ISA. For example on x86-64 , two constructors require a specific bit in the decoder context to be matched. However, this bit is only set in 32-bit protected mode, even though the associated instructions are also valid in 64-bit long mode. This issue likely stems from a mismatch in the way context bits are used in the SLEIGH specification. On real hardware, the protected mode bit is set in long mode, but the SLEIGH 
+
+specification only sets an equivalent bit when configured for 32-bit mode. The impact of this bug is that the corresponding instructions are incorrectly treated as invalid in long mode. 
+
+I-5 Constructor ordering. For x86-64 specifically there were also several issues related to constructor ordering. Two unreachable constructors, corresponding to 64-bit variants of instructions, share the same encoding as their 32-bit coun-terparts, except for a mandatory REX.W prefix. However, the 32-bit variant allows the prefix to be present and is always matched first, preventing any encoding from matching the 64-bit variant. This bug likely originates from unclear ordering rules. Since the 64-bit variant is not strictly more constrained than the 32-bit variant, the decoder defaults to the declara-tion order. This issue causes the wrong register sizes (32-bit instead of 64-bit) to be used for the instruction, resulting in incorrect disassembly and semantics. 
+
+4.2.3 Semantics Ordering Issues 
+
+I-6 Semantic ordering issues arise when correct outcomes are dependent on a specific order of operations which are not followed. This was common in the MSP430 ISA which makes heavy use of addressing modes to augment its basic instructions. These modes include direct and offset indexing, and address auto incrementing among others. All of which are available to the MOV instruction leading to cases such as MOV.W @R7+, 0x0(R7) . The MSP430 was found to execute this instruction by resolving and incrementing the source register, before resolving the destination, performing the instruction’s operations with the pre-incremented value, and writing back the result. This causes loading the destination 0x0(R7) to be impacted by the increment of the source @R7+ . This differed from the SLEIGH implementation which always performed the increment as the last operation of the instruction. This also occurred in pseudo-instructions such as POP.W SP (MOV.W @SP+, SP ) even though they had separate Pcode semantics. Semantic ordering issues were also found outside of ad-dressing modes in AArch64 . The NGCS instruction’s output was written to the destination register, and then the flags were calculated off that register’s value. However when using the zero register as the destination register no write is performed, and the flags are always incorrectly calculated from the fixed value of zero. 
+
+4.2.4 Incorrect Semantics Issues 
+
+Incorrect or missing semantics bugs appear when an imple-mentation uses the incorrect operations, or does not imple-ment all behaviors of an instruction. This was the largest category of bugs, and also contained the most subtle and unique mistakes. For example, in AArch64 the BCAX instruc-tion was implemented with an or operation instead of an xor ,and STLRB stored a word sized value instead of a byte. In ad-dition to these subtle issues, there were several wider classes of issues. 
+
+I-7 Missing floating point semantics. RISC-V floating point extensions encode smaller precision floats as NaN-boxed in-side larger registers by setting all the unused upper bits to 1’s. But, the SLEIGH specification does not use this encoding for single precision floats when writing to the registers, nor does it propagate un-NaN-boxed values as NaN’s, causing all initial floating point test cases to fail. The extra logic that fixing this issue added to the start and end of all floating point instructions was not able to be filtered out by Ghidra ’s decompiler, causing the decompilation to become bloated. 
+
+I-8 Default values and behaviors. RISC-V defines specific result values for arithmetic exceptions. On division by zero, the division instruction should return 2 width − 1, and the re-mainder should be the dividend. There was no zero check before the division, resulting in this behavior being dependent on the execution environment default. 
+
+I-9 Incorrect register lists. To implement instructions op-erating on groups of registers in SLEIGH , recursive subtables are used where the different constructors conditionally in-clude the Pcode semantics for that register. This occurs in 
+
+> MSP430
+
+, AArch64 , and ARM/Thumb , with MSP430 having an issue where it did not correctly handle register wrapping, and  
+
+> ARM/Thumb
+
+having an issue where the registers were pushed in the wrong order. However, this style of implementation inherently requires duplicated sets of constructors based on the number of registers, requiring the same fix to be applied to each constructor in the set. 
+
+4.2.5 Aliasing Issues 
+
+I-10 The SLEIGH specification implements instructions us-ing multiple Pcode operations. Consequently, when source and destination operands refer to the same register or memory location (i.e., they alias), special care is required to preserve the atomicity of input values. This issue was frequently han-dled incorrectly in SIMD instructions ( x86-64 , ARM/Thumb ), where the part of the destination register is often modified before the source register had been completely read. 15 For RISC-V this occurs in the Control and Status Register extension in the FSCSR /FSFLAGS /FSFRM instructions. These instructions swap a value into the float CSRs by moving the source register to the CSR and the value in the CSR to the destination register. The Pcode implementation of this instruction attempted to do this without using a temporary, causing the value in the source register to be overwritten. This lack of a temporary when using aliased registers also occurs in the compressed instruction extension with the C.JALR ra 
+
+instructions. This instruction should jump to the address held in the ra register and replace its value with the address of the following instruction, but was found to instead execute the instruction at the following address. Both RISC-V and AArch64 exhibit bugs involving the ar-chitectural zero register, which should always return 0 and discard writes. The RISC-V SLEIGH specification tries to enforce this via a subtable that exports a temporary variable instead of the zero register itself. However, several instruction definitions directly reference the zero register, circumventing this mechanism and allowing non-zero values to be written when the register is used as a destination. Additionally for RISC-V , the destination register for some instructions is intended to be 32 bits instead of the full register width. To handle this, a constructor rdW is used, which creates a temporary of the right size, sets its value to that of the destination register, and exports the temporary. When an instruction attempts to write to this aliased register, it would change the temporary but not the destination register. This prevented the FCVT instructions from outputting any result. 
+
+4.2.6 Unresolvable Issues 
+
+The problems we discussed previously can be addressed through careful editing of processor specifications. How-ever, there are numerous issues requiring more fundamental design changes to simultaneously support accuracy of both decompilation and emulation use cases; we discuss these next. 
+
+I-11 Unimplemented operations. The SIMD and vector instructions across x86-64 and AArch64 are partially imple-mented in Pcode and partially with added custom Pcode ops, with the semantic section of RISC-V ’s vector extension com-pletely unimplemented. A full Pcode implementation of these is possible, but would bloat the generated disassembly and output Pcode for static analysis tools. 
+
+I-12 Floating point issues. Floating point instructions contributed to a large number of discrepancies, as many architecture-specific aspects of the IEEE 754 standard are not exposed through the SLEIGH specification layer. SLEIGH 
+
+does not enforce a rounding mode and instead uses the en-vironment’s default, while modern architectures ( x86-64 ,
+
+> AArch64
+
+, RISC-V ) provide a means to change the default rounding mode, as well as override the rounding mode for individual instructions. Architectures with hardware support for floating point numbers generally include the common en-                              
+
+> Category Unimpl. Exec. Flags Float PC State
+> Decoding 511 0009Semantic Ordering 001017Incorrect Semantics 1184666 Aliasing 0000010
+
+Table 5: Summary of the the root-cause bugs triaged and fixed and their association to observed discrepancies types. codings of FP32 and FP64 which are supported in SLEIGH .However, x86-64 and AArch64 also support the FP16 and BF16 encoding which SLEIGH does not have. SLEIGH also chooses to propagate NaN payloads, while the IEEE 754 stan-dard leaves this to the implementers’ discretion. This differs from RISC-V and conditionally AArch64 which always return the canonical NaN. Properly fixing these discrepancies would require better floating point support from SLEIGH .
+
+I-13 Unpredictable behavior. A set of discrepancies for 
+
+> x86-64
+
+, AArch64 , and ARM/Thumb came from defined un-predictable outputs in related ISA specifications. But, these currently cannot be fixed as there is no single correct behavior. 
+
+I-14 Memory alignment exceptions. Many SIMD and atomic operations have stricter alignment requirements than standard load/store instructions. When an operand is provided at an insufficiently aligned address, an exception should be generated. However, there is no mechanism to annotate these requirements in a SLEIGH specification, meaning the emula-tor is unaware that an exception should occur. While extra Pcode could be used, this case is better handled by adding explicit alignment to memory accesses. 
+
+I-15 Missing instruction semantics. The x86-64 specifica-tion does not implement the auxiliary carry flag ( AF ) in any 
+
+instruction, resulting in discrepancies in almost all arithmetic instructions. This is a known limitation of the specification (treated as a single bug) and likely remains unfixed because the auxiliary carry flag is rarely used in modern programs. Importantly, based on our in-depth analysis of the issues uncovered, we detail possible solutions in recommended modifications to the SLEIGH DSL in Section 5.1. 
+
+4.2.7 Discrepancy-Bug Associations 
+
+Although the relationship between discrepancies and bugs is not a simple one-to-one mapping, Table 5 discusses how 
+
+triaged and fixed bugs in Table 4 relate to relevant observed discrepancies to distinguish those that relate to the bugs. No-tably, a single bug may manifest in different types of discrep-ancies while a single discrepancy may be the result of multiple types of bugs. We observe up to three separate bugs triggered by a single discrepancy. Multiple discrepancies from the same bug are common, especially when incorrect semantics are en-countered. Hence these numbers represent a lower bound. In addition, recall that Alignment related discrepancies are separated since these are generally unfixable without adding 16 additional semantics to SLEIGH as we discuss in Section 5.1. To generate results, we used the related discrepancies leading to the identification of the bug during triaging to conduct the analysis. The associations in Table 5 demonstrate that systematic discrepancy detection serves as a strong indica-tor for underlying correctness problems. The distribution of bugs in Table 5 suggests State related issues should be prioritized in analysis. Although discrepancy classes are diffi-cult to attribute directly to bugs, State and Exception related discrepancies are strong indicators of errors in the SLEIGH 
+
+specification. 
+
+# 4.3 Effectiveness of Techniques 
+
+In this section we investigate the effectiveness of the designed technique to traverse a given specification to generate encoded instructions and discover specification bugs. 
+
+Instruction Generation. To quantify the contribution of in-dividual components in GenSYS , we perform an ablation study over its constructor traversal and constraint-solving techniques. We focus on three key aspects to evaluate: i) 
+
+Simple constraints only (ignoring all deferred constraints); ii) Explicit constraints only (solve deferred constraints, but excludes implied constraints from overlapping constructors); and iii) No backtracking (solve all constraints, but assume backtracking from subtables is impossible) versus GenSYS 
+
+(solve all constraints with backtracking allowed). We report two metrics to understand impact: i) ∆ Accu-racy —the decrease in generation accuracy relative to Gen-SYS , where accuracy is the percentage of generated instruc-tions whose decode path matches the target constructors; and ii) Missed —the number of constructors for which no valid in-struction encoding was found, despite a valid encoding being found by GenSYS .Table 6 shows that simple constraint solving alone, Sim-ple Only , significantly reduces accuracy, particularly when applied to the MSP430 and RISC-V SLEIGH specifications. Without translating simple constraints, many generated in-structions match different constructors to those intended, re-sulting in missed constructors. Although, Explicit constraints only , shows a reduced accuracy drop, especially for MSP430 ,accuracy drops remain above 12% for each ISA. Then, with                                             
+
+> Arch. Simple Only Explicit Only No Backtracking
+> ∆Acc (↓)Missed ∆Acc (↓)Missed ∆Acc (↓)Missed
+> x86-64 16.7% 995 12.3% 65 0% 0
+> AArch64 13.2% 98 13.7% 79 0% 11
+> ARM/Thumb 30.4% 302 15.9% 80 0% 75
+> RISC-V 57.7% 38 54.7% 38 0% 0
+> MSP430 69.6% 388 41.9% 58 0% 0
+
+Table 6: Summary of instruction generation accuracy (based on constructors used for decoding compared to generation), and missed constructors compared to GenSys, when solving techniques are removed. Naive Approach 
+
+> GenSYS
+
+Figure 4: Constructors hit in the x86-64 SLEIGH specifica-tion and bugs found with the naive approach for testing with 
+
+> JuxtaPlayer
+
+. Notably, GenSYS generation and the execution of the resulting test cases takes <40 minutes for x86-64 .
+
+No Backtracking only, all of the generated instructions’ de-code path matches the target constructors, as with GenSYS ,but leads to Missed constructors. Overall, disabling the con-straint translation components significantly degrades test gen-eration effectiveness across all evaluated ISAs, causing large regions of the specification to remain uncovered. 
+
+Comparison to naive approach. To further evaluate the over-all effectiveness of the instructions and states generated by 
+
+> GenSYS
+
+, we can compare it to a naive approach devoid of our key techniques. Instead of modeling the SLEIGH decod-ing process, we simply select a constructor at random, set any bits that have fixed constraints for that constructor, and fill any remaining bits with random values. For each gener-ated instruction, we randomize the input state to derive the instruction used by JuxtaPlayer for testing. We compare the random approach to GenSYS on x86-64 
+
+across two metrics: i) Constructors Hit —the number of con-structors for which at least one generated instruction correctly decodes to that constructor; and ii) Bugs —the number of bugs triggered from the 32 root-cause bugs discovered for x86-64 .Notably, fully validating bug metrics would require a signif-icant amount of manual analysis, as indeed performed in our primary analysis with InSPECtor , for the randomly generated instructions. Therefore, we automatically determine whether a bug was triggered. We manually annotated each bug with the conditions required for detecting it—a canary based on the constructors containing the bug. We provide canaries for each bug in our open-source GitHub repository. The results of the naive approach are shown in Figure 4. After generating and testing 1 .1×10 7 testcases taking 8 hours, the naive approach failed to: i) generate any instruction that matches 1249 constructors (38% miss); and ii) find 15 bugs (47% miss). To better illustrate the failures of the naive ap-proach, we consider two of the missed bugs below: 
+
+CVTSS2SI/CVTSD2SI . These instructions are used to convert scalar floating-point values into integers. However, the SLEIGH specification contains a bug where the float-to-integer cast operation ( trunc ) is missing in the constructors 17 that handle cases where the destination operand size matches the floating-point source operand size. These instructions have a complex encoding that requires a specific prefix byte and a multi-byte opcode, consequently they were never gener-ated by the random approach. GenSYS generates constraints that force the appropriate prefix byte when generating this instruction and is able to find this bug. 
+
+PACKUSWB . This instruction converts 16-bit signed words (ranging from −215 to 2 15 − 1) in the source operand into 8-bit unsigned bytes (from 0 to 2 8 − 1) for the destination operand. Values outside the destination range are saturated (i.e., negative values become 0 and values greater than 255 become 255). However, the SLEIGH specification contains an off-by-one error in a comparison operation, causing an input of 255 to be converted to zero. Since this bug occurs only for one specific input value, random testing is highly unlikely to expose it. In contrast, GenSYS derives edge-case inputs from the SLEIGH semantics and generates targeted states around boundary conditions, allowing it to detect the bug. 
+
+# 4.4 Bug Case Studies 
+
+Incorrect MSP430X Constants. MSP430 instructions use the following word to hold 16-bit constants for indexing, absolute addressing, and immediate values. MSP430X extends these constants to 20 bits, with the upper 4 bits sourced from the preceding extension word. In the SLEIGH specification for  
+
+> MSP430X
+
+the upper 4 bits were missing from all uses of the 20 bit constants. Preventing these instructions from repre-senting any negative number, or positive numbers larger than 216 , including memory addresses. The effects of this can be observed in Ghidra’s disassembly when moving the .data 
+
+section outside of the first 64KB of memory (Figure 5).  
+
+> RISC-V
+
+CSRRW/CSRRWI. The CSRRW instruction atomi-cally swaps a value into a Control and Status Register (CSR). In the case where the zero register x0 is used as the destina-tion register, no read should be performed, preventing any CSR read side-effects. Currently, the SLEIGH specification checks if the source register is x0 rather than the destination register. This prevents handling the case where the value of the CSR is read and then cleared, as using CSRRW rd, csr, x0 will cause the CSR to be cleared without returning any value, leading to missing data in decompilation and emulation. This appears in OpenSBI [30] where the CSRRWI instruction is used to read the MTOPEI status register and clear it. The CSR instructions where also the only instruction that could write non-zero values to x0 . During normal emulation and analysis this has little impact as the constant 0 is returned on SLEIGH reads to x0 . However, the GDB tool queries the emulator for register values, including the now non-zero zero register. This then causes single stepping branches which compare to x0 to fail. As instead of properly single stepping, GDB places a breakpoint at the incorrectly-computed next instruction address, and continues execution. MOVX.W  &DAT_0000004a , R12   
+
+> MOVX.W &GlobalVar ,R12
+> Current Ghidra Disassembly
+> Disassembly With Fix
+> 00 4a 42 1c 18 c0
+> Address
+> Instruction Extension Word
+
+Figure 5: An example of the MSP430 bug where the upper 4 bits of 20 bit constants are ignored. This shows Ghidra failing to resolve the symbol as it uses the wrong address. 
+
+AArch64 STRLB/STRLH. These instructions store abyte/half-word to memory. However, the SLEIGH specifi-cation did not set the size of the operation, causing the entire 32-bit register value to be written to memory. This results in bytes adjacent in memory to the target being corrupted, impacting emulation accuracy. 
+
+AArch64 LD2R/LD3R/LD4R. These instructions load mul-tiple values from memory, and store repeating copies of each value into different SIMD registers. However, the SLEIGH 
+
+specification only wrote to the last register given. This results in only one value being loaded from memory and stored in a register. Disassembly or emulation based on values intended to be loaded into earlier registers would yield incorrect results. 
+
+AArch64 RMIF. This instruction sets the CPU flags based on an input value and a bit-mask. However, the SLEIGH 
+
+specification did not correctly filter based on the bit-mask. All masked bits would be set to the value of the NG flag. This can impact both disassembly and emulation, as many flags influencing branches could be overwritten, causing some branches to no longer be reachable. 
+
+# 5 Discussion 
+
+In addition to the limitations of this work and potential for future work, potential changes to the design of the SLEIGH 
+
+specification language are discussed below. These suggested changes allow for improved maintainability, versatility, fi-delity, and understandability of SLEIGH specifications. 
+
+# 5.1 Recommendations for Improving SLEIGH 
+
+The SLEIGH language is demonstrably effective for speci-fying instruction semantics, as evidenced by the more than 35 ISAs represented in SLEIGH within Ghidra . However, our study reveals that SLEIGH lacks features and constructs needed to express complex instruction behaviors suited to its applications in security workflows. Based on the issues un-covered through differential test-result analysis in Section 4.2, we propose extensions to the SLEIGH language that could reduce bugs in specifications. We divide these extensions into two groups: i) general recommendations , based on the issues uncovered in Section 4.2.2-4.2.5, that aim to better support the key use cases for SLEIGH while reducing bugs during 18 specification development and maintenance; and ii) recom-mendations to address the unresolvable issues identified in Section 4.2.6. 
+
+5.1.1 General Recommendations 
+
+The modifications described here aim to improve the expres-siveness and usability of SLEIGH , reducing bugs during spec-ification development and maintenance. 
+
+#1: Add support for decompiler hints 
+
+Decompiler hints can enable high-fidelity SLEIGH specifi-cations to support accurate emulation while producing clear decompilation output. As the fidelity of SLEIGH semantics increases, the readabil-ity and overall quality of the resulting decompiled code can sometimes decline. These regressions typically arise from rare edge cases that compilers guarantee cannot occur but that the decompiler cannot reliably rule out. Examples in-clude handling offsets to 20-bit addresses on MSP430 and differences in the bit-level representation of NaN values. Intro-ducing decompiler hints—such as annotations indicating that certain conditions are likely—would preserve high-fidelity Pcode for emulation while enabling the decompiler to make simplifying assumptions that improve its output. Such hints would help specifications remain both accurate for emulation and useful for decompilation. 
+
+#2: Introduce templated constructors and arrays 
+
+Provide higher-level language constructs that reduce code duplication and copy-and-paste errors while improving specification readability and maintainability. Duplicated specification logic often causes the same issue to recur across constructors. This duplication is partly necessi-tated by the limited expressiveness of SLEIGH , particularly its inability to represent loops and array-like constructs. When an instruction requires a repeated action, such as assigning values to a list of registers (as in Listing 3), authors must write each assignment manually. This limitation not only contributes to bugs but also makes specifications harder to read and maintain. Consequently, complex instructions are sometimes left unimplemented. Extending SLEIGH with ar-rays and templated constructors could address this problem. Possible syntax for this extension is shown in Appendix F: a template for the reglist constructor uses the variable i to index arrays containing both the constructor constraints and the target registers. 
+
+#3: Introduce improved accessor functions 
+
+The current use of the export statement to return references from subtables is error-prone. Dedicated accessor functions would provide a clearer mechanism for exporting values and managing dependencies. To pass information between subtables, SLEIGH allows a semantics section to return a reference to a value, variable, or memory location through an export statement, which must be the final statement in the section. Subtleties in the behavior of export make it error-prone and contribute to non-obvious aliasing problems. A key subtlety is that an export statement is not evalu-ated alongside the rest of its semantics section. Instead, it is evaluated when referenced by the semantics section of the parent constructor. Consequently, copying a register value to a temporary and exporting that temporary behaves differ-ently from exporting the register directly. In the aliasing bugs discovered in the x86-64 specification, the main constructor modifies a register without accounting for the effect on ref-erences exported by subtables. Dedicated accessor functions could prevent such bugs by, for example, requiring the use of temporaries. Alternatively, the compiler could warn when an exported reference may overlap a register modified by the parent constructor. 
+
+#4: Support inline helper functions 
+
+Inline helper functions would encapsulate complex logic for reuse and allow tools to select the desired representation and fidelity of instruction semantics.  
+
+> SLEIGH
+
+currently relies on black-box functions—e.g., 
+
+define pcodeop <name> —for instructions that are too com-plex to model in Pcode or whose semantics are not fully im-plemented. Although these black-box functions are generally intended to be replaced eventually with Pcode semantics, the reverse sometimes occurs. For example, the Pcode seman-tics for the x86-64 instruction FXSAVE were replaced with the black-box _fxsave operation, matching the compiler intrin-sic used in C to generate the instruction. This representation simplifies decompilation but cannot be used for emulation. Inline helper functions could permit dynamic selection of the desired representation and fidelity of instruction semantics. An emulator, could maximize fidelity by handling every edge case, while the decompiler could represent the same semantics concisely as a function call. 
+
+5.1.2 Recommendations to Address Unresolvable Issues 
+
+We identified problems, described in issues I-11 – I-14 , that are infeasible or impractical to resolve within the current  
+
+> SLEIGH
+
+language. To address these limitations, we propose the following extensions to the SLEIGH DSL: 19 #5: Support SIMD extensions I-11 
+
+Expressing SIMD semantics in Pcode is cumbersome be-cause many repeated operations are performed on different parts of the input operands. Introduce vectorized Pcode operations or structured iteration constructs to represent SIMD instruction semantics more concisely. Modern ISAs increasingly include instructions that operate on lanes of data, such as SIMD and vector instructions, yet expressing their semantics in SLEIGH remains cumbersome and error-prone. Consequently, we observe poor decompi-lation quality and a history of bugs in the subset of these instructions that have been defined. As more programs adopt these instructions, strong support in SLEIGH specifications becomes increasingly necessary. The extensive use of custom Pcode operations and the partial SIMD implementations we found suggest that the Pcode instruction set should include a new group of SIMD operations. Inline helper functions could improve decompilation by allowing the decompiler to hide internal details. However, they may not benefit advanced decompilation techniques such as de-vectorization—i.e., translating a sequence of vector instructions back into a loop over scalar elements. New vec-torized Pcode operations would make SIMD constructs eas-ier to express, although every analysis that consumes Pcode would need to account for them. Alternatively, SLEIGH could provide structured iteration constructs that are automatically unrolled for analyses requiring unstructured Pcode while re-maining visible to the decompiler. 
+
+#6: More precise floating-point semantics I-12 
+
+Introduce language constructs for describing floating-point formats, operations, rounding modes, and related semantics more precisely. The limited set of floating-point operations in SLEIGH is insufficient to capture the complete behavior of floating-point instructions in modern ISAs. For example, Pcode provides no operations for unsigned conversions between integer and floating-point values and no method for encoding different formats, such as bfloat16 and half-precision floating point, or rounding modes. New Pcode operations for floating-point formats, con-versions, and rounding modes would enable more precise  
+
+> SLEIGH
+
+specifications. However, every analysis that con-sumes Pcode would need to account for these operations, potentially requiring changes to all existing Pcode-based anal-yses and tools. Alternatively, some semantics could be en-coded as hints, similar to existing branch hints. Tools such as decompilers could then selectively ignore the additional detail and treat an operation as a more generic case. 
+
+#7: Represent unpredictable and undefined values ex-plicitly I-13 
+
+Add mechanisms to model and isolate undefined or archi-tecturally unpredictable ISA behavior more precisely. A considerable number of discrepancies across all archi-tectures arise from outputs designated as undefined or unpre-dictable by the ISA reference. Such outputs can also differ across hardware implementations of the same ISA. One rem-edy is to add a Pcode operation that marks a register as con-taining an unpredictable value. This operation would allow the resulting discrepancies to be isolated more precisely, help analysis tools identify portability problems caused by com-piler bugs or manually written code, and assist in analyzing malware that exploits implementation differences to identify its execution environment. 
+
+#8: Specify memory alignment requirements I-14 
+
+Allow alignment constraints to be expressed explicitly when performing memory operations. Currently, SLEIGH supports only a global alignment con-straint for all memory operations within an ISA. This lim-itation can cause discrepancies in the exception state after emulating instructions with stricter alignment requirements. Possible solutions could include: adding alignment informa-tion to the Pcode L OAD /S TORE operations or introducing naturally aligned memory operations. Operation-level align-ment would improve emulation accuracy and benefit static analyses by supporting the detection of potentially unaligned accesses, improving type inference, and allowing constant-propagation algorithms to make assumptions about registers that hold aligned pointers. 
+
+# 5.2 Other Processor Specifications  
+
+> InSPECtor
+
+is designed to address the challenges posed by the SLEIGH DSL in its extensive and diverse set of proces-sor specifications but its core ideas—symbolically traversing a specification’s decoding rules, extracting edge cases and state generation—can extend to other specification languages such as Sail or VADL. At a high level, languages such as VADL [15] and Sail [31] share structural similarities with 
+
+> SLEIGH
+
+: they describe instruction encodings alongside exe-cutable or interpretable semantics. VADL, as implemented in OpenVADL [15], provides a concise and formal repre-sentation of processor architectures, with explicit modeling of instruction formats and behavior. Similarly, Sail [31] of-fers a rich, formally grounded language for ISA semantics, often used in verification settings for architectures such as ARM. These commonalities suggest that our approach could generalize along two main dimensions. First, specification traversal—i.e., systematically enumerating decoding paths, instruction variants, or semantic rules—can be adapted to 20 any language that exposes structured instruction definitions. Second, symbolic solving can be applied as long as the speci-fication can be translated into a constraint representation. In principle, both VADL and Sail provide sufficient structure and formalism to support these operations. However, adopting our approach requires solving chal-lenges pertinent to the specification language, and traversal in each specification language is fundamentally different be-cause each language exposes a different normalized represen-tation and structure. In particular, more formally grounded specification languages such as Sail support richer decoding constructors (e.g., complex control flow), which can signifi-cantly increase solver complexity or introduce path explosion during specification traversal, requiring more aggressive prun-ing or summarization. Then, translating semantics into effi-cient encodings for a symbolic solver could be non-trivial, if the abstractions do not map directly to bit-precise constraints. Hence, the primary effort lies not in redesigning the symbolic methodology itself, but in translating language-specific rep-resentations into a model suitable for constraint solving and automated exploration. 
+
+# 5.3 False Positives 
+
+In general, discrepancies correspond to either bugs or lim-itations in the SLEIGH specification, thus defining a false positive is hard. Each discrepancy identified represents a pos-sible bug, but cannot be easily deduplicated without manual effort, so we report discrepancies, as done in related works in CPU emulator testing [23–25]. Then, we discuss bugs in the context of root causes fixed, not the number of buggy instructions, a more inflated number. The large number of discrepancies found for many of the identified bugs is a major contributor to the observed differ-ence between the bug and discrepancy counts. In addition to discrepancies mapped to root-causes, other contributors include ISA-defined unpredictable behaviors, unimplemented semantics, or issues which cannot be fixed without extending 
+
+> SLEIGH
+
+, discussed in Section 4.2.6. Due to limitations of the SLEIGH language, these issues do not represent an error in the specification, and consequently could be considered false positives; however, our recommendations for improving 
+
+> SLEIGH
+
+, discussed in Section 5.1, would allow addressing the sources of these discrepancies while helping to improve specification veracity. 
+
+# 5.4 Limitations & Future Work 
+
+Despite our extensive efforts, our work is not without limita-tions. Although we sought to test the correctness of a spec-ification, our approach will not determine the completeness of a specification, since instructions missing from a SLEIGH 
+
+specification are not generated, and therefore not tested. How-ever, these instructions exhibit a well-defined failure mode: whenever an unknown instruction encoding is encountered, an invalid instruction exception will be generated in, for instance, 
+
+> SLEIGH
+
+-based emulators. This behavior typically makes any missed instructions easy to detect in real-world targets. But, in disassemblers, missing instructions in specifications can impact control-flow recovery where invalid instructions are used as heuristics for identifying unreachable or invalid code regions. In these cases, missing instructions may cause the analysis to misattribute control-flow errors, making it harder to localize the root cause. Future work should consider not only correctness but also achieving completeness as an at-tribute of specification testing. Some ISAs include instructions that alter the execution of subsequent code. For example, to allow for a more compact instruction encoding, ARM/Thumb includes an If-Then-Else (ITE ) instruction in THUMB mode that changes up to four consecutive instructions into variants that are conditionally executed based on the value of the status register. Since the approach presented here generates and tests a single instruc-tion at a time, it does not test these cases. Therefore, future work can consider advancing the generation process to iden-tify and generate the necessary instruction sequences to test these variants in the specification. 
+
+# 6 Related Work 
+
+We acknowledge the significant efforts devoted in past studies to test CPU emulators. EmuFuzzer [25] tested x86-64 CPU emulators using a hardware reference to detect structures within the instruction by observing when mutating a particu-lar byte causes an exception. KEmuFuzz [24] extends Emu-Fuzzer by adding support for fuzzing virtual machines and hypervisors through carefully crafted templates that include snippets of both user- and system-level instructions, but re-tained the same instruction generation method as EmuFuzzer. The approach is suited for testing x86-64 emulators running in protected mode (32-bit instructions), requires filtering branch instructions due to execution environment limitations, and only identifies imprecise byte-level structure in instructions. In contrast, PokeEMU [23] generates test instructions by symbolically executing the emulator’s binary instruction de-coding logic. This is similar to the constructor traversal pro-cess adopted in GenSYS , but applied to the emulator binary. Fast PokeEMU [38] builds on PokeEMU by reducing test case execution overhead by merging multiple instructions into a single test case. In contrast to InSPECtor , PokeEMU does not generate edge case-triggering input states, as the value of input operands is not used in the decoding logic. Fur-ther, InSPECtor ’s objective to guarantee complete constructor coverage implies that the method devised can find bugs in unreachable constructors. Other testing strategies are found in studies examining binary lifters. MeanDiff [20] compares binary lifters by trans-lating each intermediate representation (IR) into a common 21 IR. Once translated, an SMT solver is employed to check for symbolic equivalence. However, due to the complexity of the translation process, certain complex instructions are omitted from analysis. In contrast, JuxtaPlayer , akin to CPU-emulator testing methods, uses a hardware oracle as a reference and determines equivalence by testing selected initial input states, avoiding the need to check the symbolic equivalence of seman-tically complex instructions, such as floating-point operations. Notably, a prior study analyzed the limitation of Pcode’s for-mal semantics [26]. This led to several recommendations to improve the Pcode definitions, documentation and resolve bugs in Ghidra. This complements the recommendations re-sulting from our extensive work across five ISAs to improve  
+
+> SLEIGH
+
+and the processor specifications in Section 5.1. Alongside these studies, we also acknowledge studies de-veloping techniques to uncover flaws in hardware-assisted virtual machines [3, 14] or methods to uncover discrepancies in the textual representation of instructions generated by dis-assemblers [28]. Other approaches aim to detect unexpected changes in the processor state of individual hardware CPUs arising from undocumented instructions [11], manufacturing defects [32], or hardware implementation issues [32]. In general, similar to our study, these works across sev-eral domains also aim to identify discrepancies. Notably, discrepancies, even one known to differ between hardware implementations, can be exploited by malware for emulator or VM detection, as demonstrated in previous studies [29,33,34]. 
+
+# 7 Conclusion 
+
+This paper introduced a methodology for generating instruc-tions and initial input states that fully explore all machine code sequences decodable by SLEIGH processor specifica-tions. This led to the development of InSPECtor with GenSYS 
+
+and JuxtaPlayer . GenSYS is an instruction and state generator used to produce over 1,200,000 test cases across 5 different ISAs, covering all instructions and addressing modes, as well as edge cases. The test cases were used to evaluate the cor-rectness of specifications using a differential testing strategy, realized in JuxtaPlayer . The process revealed systematic is-sues in 5 SLEIGH specifications and highlighted areas where improvements to the SLEIGH specification language could reduce future defects. Improving the veracity of SLEIGH 
+
+specifications enhances the reliability and confidence in down-stream tools that depend on their correctness. Importantly, our testing strategy and tools support automated correctness evaluation of SLEIGH specifications into the future. 
+
+# Acknowledgements 
+
+The work was supported by the Next Generation Technology Fund (NGTF)—administered by Commonwealth Scientific and Industrial Research Organisation (CSIRO) and Defence Science and Technology Group (DSTG) in Australia, The Ad-vanced Strategic Capabilities Accelerator (ASCA) program and DSTG, Australia. The authors would like to thank and ac-knowledge Om Mandavia for the preliminary investigations. 
+
+# A Ethical Considerations 
+
+Our work presents a method and tool design for testing and evaluating processor specifications focusing on the open source SLEIGH specifications. Our goal is to improve the truthfulness of the tools used by the security community, such as Ghidra and CPU emulators, that rely on the truthfulness of the SLEIGH specifications, and thereby helping to improve the security of software systems and the safety and security of end-users of those systems. Through our analysis with InSPECtor , we identified a sub-stantial number of defects in existing SLEIGH specifications. While documenting these issues is essential for improving the correctness and reliability of disassembly and analysis frameworks, public discussion of such defects carries some dual-use risks. In particular, an adversarial actor could po-tentially misuse specification inconsistencies to craft binaries that evade static or dynamic analysis, mislead emulators, or otherwise undermine defensive tooling. To mitigate these risks, we followed established responsible-disclosure practices. All defects discovered dur-ing this work were communicated directly to the Ghidra 
+
+project maintainers, together with the corresponding fixes that we validated internally. Our intention is to strengthen the ecosystem of analysis tools rather than expose previously unknown issues without remediation. We emphasize that any future defects uncovered through the use of this tool should likewise be discussed and disclosed responsibly to the main-tainers of the Ghidra project following the guidelines therein. Despite these concerns, we believe the benefits of improv-ing specification quality, strengthening capabilities and cor-rectness of widely used analysis tools, employing those speci-fications, used by security practitioners and improving trans-parency outweigh the risks or potential for misuse. Ultimately, our commitment to responsible disclosure and to support the maintainers of widely used tooling guided the design of this work and will continue to guide its future development. 
+
+# B Open Science  
+
+> InSPECtor
+
+code and artifacts in the study are publicly archived at https://doi.org/10.6084/m9.figshare.32507811.v1, includ-ing. • GenSYS , the main implementation of our techniques, used to traverse the SLEIGH specifications and generate the test cases summarized in Table 2. • JuxtaPlayer , used for executing the test cases on both real-world hardware and in SLEIGH emulators. As well as for 22 for identifying and grouping the discrepancies for Table 3. • Documentation , on how to use each tool in the form of multiple README files, and on how to recreate the ablation study in Section 4.3. • Bug Fixes , individualized in our fork of the Ghidra project while they undergo the review process. We open-source the InSPECtor project on GitHub at https://github.com/Sleigh-InSPECtor. 
+
+# References 
+
+[1] Intel® 64 and ia-32 architectures software developer’s manual. https://www.intel.com/content/www/us /en/developer/articles/technical/intel-sdm .html , October 2025. [2] Open SSL Github. https://github.com/openssl /openssl/blob/afd8e29c360376420ea676581aa5 d50b6027d069/crypto/bn/asm/x86_64-mont.pl #L1168-L1169 , 2025. Access 26 March 2026. [3] N. Amit, D. Tsafrir, A. Schuster, A. Ayoub, and E. Shlomo. Virtual cpu validation. In Symposium on Operating Systems Principles (SOSP) , pages 311–327, 2015. [4] A. Armstrong, T. Bauereiss, B. Campbell, A. Reid, K. E. Gray, R. M. Norton, P. Mundkur, M. Wassell, J. French, C. Pulte, S. Flur, I. Stark, N. Krishnaswami, and P. Sewell. ISA semantics for armv8-a, RISC-v, and CHERI-MIPS. In ACM SIGPLAN Symposium on Principles of Programming Languages (POPL) , 2019. [5] N. Bjørner, A.-D. Phan, and L. Fleckenstein. νZ-an optimizing SMT solver. In International Conference on Tools and Algorithms for the Construction and Analysis of Systems (TACAS) , pages 194–199, 2015. [6] J. Blackthorne, A. Bulazel, A. Fasano, P. Biernat, and B. Yener. Avleak: Fingerprinting antivirus emulators through black-box testing. In USENIX Workshop on Offensive Technologies (WOOT) , 2016. [7] Z. Chen, S. L. Thomas, and F. D. Garcia. Metaemu: An architecture agnostic rehosting framework for au-tomotive firmware. In ACM SIGSAC Conference on Computer and Communications Security (CCS) , pages 515–529, 2022. [8] M. Chesser, S. Nepal, and D. C. Ranasinghe. Icicle: A re-designed emulator for grey-box firmware fuzzing. In 
+
+ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) , 2023. [9] S. Dasgupta, S. Dinesh, D. Venkatesh, V. S. Adve, and C. W. Fletcher. Scalable validation of binary lifters. In ACM SIGPLAN Conference on Program-ming Language Design and Implementation (PLDI) ,page 655–671, 2020. [10] F. Dola and G. Orlando. Ghidralligator: Emulate and fuzz the embedded world. https://www.cyber.airb us.com/ghidralligator_emulate_and_fuzz_the _embedded_world/ , 2023. [11] C. Domas. Breaking the x86 ISA. Black Hat , 2017. [12] A. Fioraldi, D. Maier, H. Eißfeldt, and M. Heuse. AFL++: Combining incremental steps of fuzzing re-search. In USENIX Workshop on Offensive Technologies (WOOT) , 2020. [13] A. Fog. The microarchitecture of intel, amd and via cpus: An optimization guide for assembly programmers and compiler makers. https://www.agner.org/op timize/microarchitecture.pdf , 2023. [14] P. Fonseca, X. Wang, and A. Krishnamurthy. Multi-Nyx: a multi-level abstraction framework for systematic analysis of hypervisors. In European Conference on Computer Systems (EuroSys) , 2018. [15] F. Freitag, L. Halder, B. Huber, B. Kasper, M. Nestler, K. Per, M. Raschhofer, A. Ripar, J. Zottele, and A. Krall. Openvadl: An open source implementation of the vienna architecture description language. In Architecture of Computing Systems (ARCS) , pages 156–171, 2026. [16] R. Gopinath, C. Jensen, and A. Groce. Code coverage for suite evaluation by developers. In International conference on software engineering (ICSE) , pages 72– 82, 2014. [17] J. Hur, S. Song, D. Kwon, E. Baek, J. Kim, and B. Lee. Difuzzrtl: Differential fuzz testing to find CPU bugs. In 
+
+IEEE Symposium on Security and Privacy (SP) , 2021. [18] M. Jiang, T. Xu, Y. Zhou, Y. Hu, M. Zhong, L. Wu, X. Luo, and K. Ren. EXAMINER: Automatically locating inconsistent instructions between real devices and CPU emulators for ARM. In ACM International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) , pages 846–858, 2022. [19] S. Kim, M. Faerevaag, M. Jung, S. Jung, D. Oh, J. Lee, and S. K. Cha. Testing intermediate representations for binary analysis. In IEEE/ACM International Confer-ence on Automated Software Engineering (ASE) , page 353–364, 2017. [20] S. Kim, M. Faerevaag, M. Jung, S. Jung, D. Oh, J. Lee, and S. K. Cha. Testing intermediate representations for binary analysis. In IEEE/ACM International Conference 
+
+23 on Automated Software Engineering (ASE) , pages 353– 364, 2017. [21] P. S. Kochhar, F. Thung, and D. Lo. Code coverage and test suite effectiveness: Empirical study with real bugs in large systems. In IEEE international confer-ence on software analysis, evolution, and reengineering (SANER) , pages 560–564, 2015. [22] a. L. C. Kudu Dynamics, LLC. Styx emulator. https: //github.com/styx-emulator/styx-emulator ,2025. [23] L. Martignoni, S. McCamant, P. Poosankam, D. Song, and P. Maniatis. Path-exploration lifting: Hi-Fi tests for Lo-Fi emulators. In International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS) , pages 337–348, 2012. [24] L. Martignoni, R. Paleari, G. Fresi Roglia, and D. Br-uschi. ACM SIGSOF testing system virtual machines. In ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) , pages 171–182, 2010. [25] L. Martignoni, R. Paleari, G. F. Roglia, and D. Br-uschi. Testing CPU emulators. In ACM SIGSOFT International Symposium on Software Testing and Anal-ysis (ISSTA) , pages 261–272, 2009. [26] N. Naus, F. Verbeek, D. Walker, and B. Ravindran. A formal semantics for p-code. In Verified Software. The-ories, Tools and Experiments (VSTTE) , page 111–128, 2022. [27] T. Ormandy. Reptar. https://lock.cmpxchg8b.com /reptar.html , 2023. [28] R. Paleari, L. Martignoni, G. Fresi Roglia, and D. Br-uschi. N-Version disassembly: Differential testing of x86 disassemblers. In ACM SIGSOFT International Symposium on Software Testing and Analysis (ISSTA) ,pages 265–274, 2010. [29] R. Paleari, L. Martignoni, G. F. Roglia, and D. Bruschi. A fistful of red-pills: How to automatically generate procedures to detect cpu emulators. In USENIX Work-shop on Offensive Technologies (WOOT) , volume 41, page 86, 2009. [30] O. Project and Contributors. RISC-V open source su-pervisor binary interface (opensbi). https://github .com/riscv-software-src/opensbi , 2026. [31] A. Reid. Trustworthy specifications of ARM® v8-A and v8-M system level architecture. In Formal Methods in Computer-Aided Design (FMCAD) , pages 161–168, 2016. [32] K. Serebryany, M. Lifantsev, K. Shtoyk, D. Kwan, and P. Hochschild. SiliFuzz: Fuzzing CPUs by proxy. arXiv preprint arXiv:2110.11519 , 2021. [33] H. Shi, A. Alwabel, and J. Mirkovic. Cardinal pill testing of system virtual machines. In USENIX Security Symposium (USENIX Security) , pages 271–285, 2014. [34] H. Shi, J. Mirkovic, and A. Alwabel. Handling anti-virtual machine techniques in malicious software. ACM Transactions on Privacy and Security (TOPS) , 21(1):1– 31, 2017. [35] F. Solt, K. Ceesay-Seitz, and K. Razavi. Cascade: CPU fuzzing via intricate program generation. In USENIX Security Symposium (USENIX Security) , pages 1–18, 2024. [36] The National Security Agency (NSA). Ghidra: Software reverse engineering framework. https://ghidra-s re.org/ , 2019. [37] The National Security Agency (NSA). SLEIGH: A language for rapid processor specification. https: //ghidra.re/ghidra_docs/languages/html/sle igh.html , 2023. [38] Q. Yan and S. McCamant. Fast PokeEMU: Scaling generated instruction tests using aggregation and state chaining. In ACM SIGPLAN/SIGOPS International Conference on Virtual Execution Environments (VEE) ,pages 71–83, 2018. 
+
+# C Hardware Discrepancies x86-64 Hardware Discrepancies 
+
+For x86-64 , we experimented with different hardware ref-erence systems for differential testing: an Intel(R) Xeon(R) CPU E5-2660 v4 CPU and an AMD Ryzen 9 7950X (the CPU used for the final results). We observed many discrepancies between the two CPUs, most of which were expected. The  
+
+> x86-64
+
+ISA includes instructions that expose model-specific or internal processor state, such as RDTSC , CLZERO , CPUID ,and RDRAND , and therefore produce processor-dependent out-puts. The processors also implement different sets of ISA extensions and vendor-specific features, in part because the AMD processor is newer than the Intel processor. Other expected differences arise from outputs that the ven-dors’ ISA manuals explicitly define as undefined. These cases mosly occur in arithmetic instructions for which some flags are undefined after execution, giving hardware implementa-tions flexibility. For example, many discrepancies result from the AMD processor not setting the auxiliary carry flag ( AF ), 24 which was designed for binary-coded decimal (BCD) arith-metic and is rarely used by modern programs. We also identi-fied four notable discrepancies that are neither attributable to ISA extensions nor explicitly documented as undefined: • Control-flow instructions with an operand-size override prefix ( 66 ) are interpreted differently by the two proces-sors. The Intel CPU respects the prefix and truncates the destination address to 16 bits, while the AMD CPU ignores it and uses the full 64-bit address. • Because of subtle differences in prefix decoding, the Intel CPU decodes the byte sequence [f3 47 90] as PAUSE ,while the AMD CPU decodes it as XCHG .• The VGATHER/VPGATHER* instruction family loads values from memory using vector index and mask operands. Both the index and mask operands are vector registers; however, only the lower 64 bits of the mask are used. The Intel CPU fills the upper bits of the mask register with copies of the most significant bit of the original value, while the AMD CPU leaves the upper bits unchanged. • RCPPS , RSQRTPS , and their variants compute approximate reciprocal and reciprocal square root operations, respec-tively. Intel and AMD CPUs use different approximation algorithms, producing different results. The discrepancies involving nonstandard instruction encod-ings or unusual input values are highly unlikely to occur in real-world programs. Of the four cases, only the approxima-tion differences are likely to affect such programs. However, since the associated instructions are explicitly documented as approximate, programmers should not rely on identical results across processors. ANonetheless, knowing these dis-crepancies exist is necessary to accurately assess the correct-ness of the x86-64 SLEIGH specification. We filtered most processor-dependent discrepancies by instruction mnemonic during analysis to avoid misclassifying them as specification bugs. 
+
+MSP430 Hardware Discrepancies 
+
+For some discrepancies between the hardware and the  
+
+> SLEIGH
+
+specification, the specification was actually more 
+
+faithful to the documentation. For example, the documenta-tion notes that the least significant bit of the stack pointer is fixed at zero and states that the stack pointer is always even-aligned. This description suggests that bit 0 is hardwired to zero and that an odd value cannot be written to the register. However, the hardware was found to allow and to use odd stack pointer values. As word memory accesses are forcibly aligned to word boundaries but byte accesses are not, this behavior can cause data pushed by PUSH.B and PUSH.W to overlap. The behavior of CMPA SR, SR also differed between the hardware and documentation. This instruction should com-pare the status register with itself and set the flags based on the result, but the hardware treated the status register in the destination operand position as zero. The documentation states that, for non-word accesses using the register address-ing mode, the status register acts as a constant-generator reg-ister. However, the observed behavior is inconsistent with the documented constant generator, which yields zero when the register appears in either operand position. Overly permissive constraints in the SLEIGH specification also allowed us to discover undocumented instructions. The MSP430X extension-word encoding occupies the range from 
+
+0x14XX to 0x1CXX , but the documented encoding uses only 
+
+0x14XX , with the low byte and bit 8 ignored. The SLEIGH 
+
+constructor for the extension word checks only bits 11–15, ignoring bits 9–10 even though they should be zero. This allowed us to find a special case where the SXTX.W instruction is used with the register addressing mode and bits 8–10 of the extension word set (bit 8 being the zero carry bit). Normally, 
+
+SXTX.W sign-extends a byte in the destination register to a word size value, but with this illegal encoding, it instead sign-extends a word to an address sized value. The documentation describes neither this encoding nor any instruction that sign-extends a word to address size. 
+
+RISC-V Hardware Discrepancies 
+
+The RISC-V SLEIGH specification includes all extensions for a given base instruction set. Because test cases are generated from this combined specification, the generator cannot dis-tinguish extensions supported by the target hardware from those it does not support. Consequently, many tests raise illegal-instruction exceptions when the hardware attempts to execute unsupported instructions. Another source of illegal instructions came from Control and Status Register (CSR) accesses. CSRs control proces-sor behavior and expose status information. The SLEIGH 
+
+implementation defines every possible CSR address, assign-ing unallocated registers generic names of the form csrXXX .However, the hardware faults with an illegal instruction ex-ception on instructions that access these CSRs as they are not implemented and have no function. The set of CSRs which can be used for testing is further reduced by the privilege level the hart is running on, as accesses to those on a higher level will also raise an illegal instruction-exception. 25 D Bug Tables 
+
+SLEIGH Issue Fix Status Encoding Disassembly 
+
+Memory operands decoded incorrectly with address override and REX.W prefixes. Assigned [67 43 . . . ] Many instructions 0x82 allowed as an alternative opcode for 0x80 in long-mode (should be invalid). Merged (11.2) [82 f8 00] (invalid) 64-bit SBB instruction does not sign-extend the 32-bit immediate operand. Merged (11.2) [4f 1d ff . . . ] SBB RAX,-0x1 Incorrect semantics for CMOV instructions if source = destination register. Merged (11.2) [0f 40 00] CMOVO EAX,[RAX] Multiple SIMD instructions behave incorrectly if source = destination register. Merged (11.2) [0f 5a c0] CVTPS2PD XMM0, XMM0 LZCNT instruction behaves incorrectly if source = destination register. Assigned [f3 0f bd c0] LZCNT EAX,EAX Destination address incorrect when base address register matches source register. Assigned [0f c1 00] XADD [RAX], EAX MOVSXD/MOVZX with 16-bit destination decoded as having a 32-bit destination. Merged (11.1) [66 40 63 c0] MOVSXD AX,AX PEXTR* instructions do not write to memory when destination is a memory operand. Merged (11.2) [66 40 0f . . . ] PEXTRB [RDX], XMM0, 0x0 String instructions with a 32-bit operand size fail to zero upper bits of operands. Assigned [67 af] SCASD [EDI] Loop instructions with a 32-bit operand size fail to zero upper bits of RCX. Assigned [67 e2 0a] LOOP RIP+10 Instructions with repeat prefix do not set RIP correctly when RCX = 1. Pending [f2 a4] MOVSB.REPNE RDI,RSI XCHG with 32-bit operand size fails to zero upper bits. Assigned [87 00] XCHG [RAX], EAX CMPXCHG8B fails to zero the upper bits of 64-bit registers. Assigned [0f c7 08] CMPXCHG8B [RAX] Bits 96 to 128 not compared in CMPPS semantics. Merged (11.2) [0f c2 c0 00] CMPEQPS XMM0,XMM0 Decoding issue for MOV reg,imm8 instructions with address override and REX prefix. Assigned [67 48 b7 00] MOV DIL,0x0 Wrong casting operation used in CVT instructions. Merged (11.2) [f2 0f 2d c0] CVTSD2SI EAX, XMM0 REX prefix causes NOP to be decoded as a 32-bit XCHG which zeroes the upper bits. Assigned [40 90] NOP Destination of bit-scan instructions is modified when source operand is zero. Pending [0f bc f1] BSF ESI,ECX Carry flag for rotate instructions should not be set when count operand is zero. Assigned [48 d3 d0] RCL RAX,CL BSWAP with operand size override interpreted as 32-bit instead of 16-bit instruction. Pending [66 0f c8] BSWAP AX POPF with address size / operand size overrides is not decodable. Merged (11.4) [66 67 9d] POPF ModRM:reg (w) destination encoding handled incorrectly (multiple instructions). Assigned [0f c5 00 00] (invalid) Many instructions with a ‘no-prefix’ constraint are decoded when prefixes is present. Pending [66 0f 37] GETSEC PACKUSWB is incorrect when the value to convert is exactly 0x00ff. Merged (11.2) [66 0f 67 c0] PACKUSWB XMM0, XMM0 Address size prefix not handled in bit test instructions. Pending [67 48 0f . . . ] BTC [EAX],RAX MOV instructions can reference invalid control registers. Pending [0f 20 08] MOV RAX, CR1 MOV to/from debug registers with REX.R prefix are not treated as invalid. Pending [44 0f 23 c0] (invalid) Lockable INC missing reg_opcode constraint. Assigned [fe 3f] (invalid) Redundant and out-of-order prefixes are handled incorrectly. Pending [66 66 . . . ] Many instructions Instructions invalid in long-mode are decoded with address override prefix. Pending [67 . . . ] AAA No-prefix constraint not checked in several places. Pending [66 0f 37] GETSEC Table 7: Issues discovered and fixed in the x86-64 SLEIGH specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 
+
+SLEIGH Issue Fix Status Encoding Disassembly 
+
+Incorrect operator used in vdup. Merged (12.1) [10 0b e0 ee] vdup.8 q0,r0 ldaexd behaves incorrectly when registers alias. Merged (11.2) [d2 e8 f0 2b] ldaexd r2,r11,[r2] vselgt checks the wrong condition. Merged (12.1) [a1 7a 7a fe] vselgt.f32 s15,s21,s3 Incorrect constraints used in THUMB encoding of vdup. Merged (12.1) [a0 ee 90 0b] vdup.32 q8,r0 VMVN operands are reversed in output. Merged (12.0) [e0 05 f0 f3] vmvn q8,q8 Some instructions that modify PC do not handle the THUMB bit correctly. Assigned [c7 46] mov pc,r8 Immediates used in thumb shift operations not decoded correctly. Assigned [5f ea 10 00] lsrs.w r0,r0,#0x20 ldrsh.w/ldrsb.w treat the loaded value as a pointer. Merged (12.1) [bf f9 00 00] ldrsh.w r0,[0x10004] vst2 uses wrong registers when reglist encoding wraps. Assigned [80 e3 40 f4] vst2.32 {d30,d31,d0,d1} ... Arithmetic operations with shifted immediate do not handle the carry bit correctly. Assigned [10 ea 70 00] ands.w r0,r0,r0, ror #0x1 PC relative encodings for FLDM*X/FSTM*X load from the wrong address. Assigned [03 fb 9f bc] fldmiaxlt pc, d15 PC relative encodings for STR/STRT load from the wrong address. Assigned [10 f0 8f e5] str pc,[0x10018] Aliasing issue between index and destination register for ldrexd. Merged (12.1) [9f 0f b0 e1] ldrexd r0,r1,[r2] vpush/vpop order elements in reverse. Assigned [2d ed 02 0a] vpush s0,s1 vmov.8/16/32 calculates register subslices incorrectly. Assigned [10 0b 40 ee] vmov.8 d0[0x0],r0 addrmode3 loads input as pointer instead of returning it as an address. Assigned [d8 00 cf e1] ldrd r0,r1,[0x10] sha1su1.32/sha1su1.32 performs shift on incorrectly sized register. Merged (11.2) [f2 07 c7 e0] sha1su0.32 q8,q8,q8 Table 8: Issues discovered in the ARM32/Thumb specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 26 SLEIGH Issue Fix Status Encoding Disassembly 
+
+RMIF uses the wrong value for masked flags. Assigned [00 04 00 ba] rmif x0, #0x0, #0x0 SHA1H uses a shift operation instead of rotate. Merged (12.1) [00 08 28 5e] sha1h s0, s0 XAR performs an or operation instead of a xor. Assigned [1d b1 93 ce] xar v29.2D, v8.2D, v19.2D, #0x2c BCAX performs an or operation instead of a xor. Assigned [d4 09 25 ce] bcax v20.16B, v14.16B, v5.16B, v2.16B FMLSL/FMLAL use integer instead of floating point operations. Assigned [00 40 80 0f] fmlsl v0.2S, v0.2H, v0.H[0x0] EOR3 performs an or operation instead of a xor. Assigned [00 00 00 ce] eor3 v0.16B, v0.16B, v0.16B, v0.16B FMLS wrong operand used in calculation. Assigned [80 51 20 5f] fmls h0, h12, v0.H[0x2] FMLAL2/FMLSL2 use the wrong register subslices Assigned [22 82 86 2f] fmlal2 v2.2S, v17.2H, v6.H[0x0] RAX1 uses a shift and or operation instead of a rotate and xor. Assigned [b4 8e 60 ce] rax1 v20.2D, v21.2D, v0.2D SBCS/NGCS flags incorrect when destination is XZR. Assigned [9f 03 1d 7a] sbcs wzr, w28, w29 LDURSB zero extends value instead of sign extending it. Assigned [e0 03 c0 38] ldursb w0, [sp] STLRB/STLRH store the wrong sized value. Assigned [e0 83 80 08] strlb w0, [sp] LDPSW loads the wrong sized value. Merged (12.1) [e0 77 c0 68] ldpsw x0, x29, [sp], #0x0 LDRSH/LDRSB sign-extend the result to the wrong size. Assigned [e0 03 c0] ldrsh w0, [sp] FRINT* operations perform an integer round instead of a float round. Assigned [00 40 e6 1e] frintn s0, s0 FMLS does not perform a vectorised operation. Assigned [80 51 20 5f] fmls v19.2S, v26.2S, v14.2S FMOV performs a float cast instead of a copy. Assigned [00 00 e6 1e] fmov w0, h0 FADDP orders input vectors incorrectly in fused vector operations. Assigned [52 15 43 2e] faddp v18.4H, v10.4H, v3.4H FMLA uses wrong element size for vector operations. Assigned [e7 0e 41 0e] fmla v7.4H, v23.4H, v1.4H LDAPR does not actually load the value from memory. Merged (12.1) [e0 c3 a0 f8] ldapr x0, [sp] RMIF performs a shift instead of a rotate. Assigned [cf 87 1f ba] rmif x30, #0x3f, #0xf 32-bit variant of LDAR loads the wrong sized value. Merged (12.1) [e0 83 a0 f8] ldar w0, [sp] ld2r/ld3r/ld4r write to the wrong destination registers. Merged (11.4) [e0 c3 60 0d] ld2r {v0.8B, v1.8B}, [sp] Table 9: Issues discovered in the AArch64 specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 
+
+SLEIGH Issue Fix Status Encoding Disassembly 
+
+CSR instructions can write to the zero register. Assigned [73 a0 02 34] CSRRS zero, mscratch, t0 FSCSR/FSRM/FSFLAGS write to the zero register. Assigned [73 90 12 00] FSFLAGS t0 CSRRW/CSRRWI fail to write to destination when the source is zero. Assigned [f3 12 00 34] CSRRW t0, mscratch, zero Incorrect value is returned on divide by zero and remainder by zero. Assigned [b3 47 00 02] DIV a0, zero, zero Incorrect value is returned on division overflow. Assigned [33 c5 c5 02] DIV a0, a1, a2 Reserved instructions in the compressed extension are not decoded correctly. Assigned [02, 40] (invalid) Jumps in the compressed extension fail to align PC. Assigned [82 87] C.JR a5 ‘C.JALR ra’ jumps to the next instruction instead of the value in ra. Assigned [82 90] C.JALR ra C.ADDI variants with the zero register as the destination should decode as a NOP. Assigned [05 00] C.NOP FSCSR/FSRM/FSFLAGS fail to swap value when source and destination registers alias. Assigned [f3 92 12 00] FSFLAGS t0, t0 Floating-point instructions fail to set exceptions flags. Assigned [ .. ] Many instructions Floating point instructions do not support NaN boxing. Assigned [ .. ] Many instructions FCLASS.S/FCLASS.D are not fully implemented. Assigned [d3 12 00 e0] FCLASS.s t0, ft0 FCVT and FMV fails to update destination register. Assigned [53 f0 00 42] FCVT.d.s ft0, ft1 FMV.x.w missing sign-extension. Assigned [d3 02 00 e0] FMV.x.w t0, ft0 FMV.x.d writes wrong value to destination. Assigned [53 05 05 e2] FMV.x.d a0, fa0 FCVT.wu.s/d and FCVT.lu.s/d implements unsigned truncation incorrectly. Assigned [d3 72 10 c0] FCVT.wu.s t0, ft0 FCVT with integer destination fail to sign extend result. Assigned [d3 72 00 c0] FCVT.w.s t0, ft0 Table 10: Issues discovered in the RISC-V specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 27 SLEIGH Issue Fix Status Encoding Disassembly 
+
+Address instructions should use special immediate instead of SR and CG. Assigned [ef 02] ADDA #4, R15 SUBA carry flag is inverted. Assigned [ff 0f] SUBA R15, R15 Indexed addressing mode does not wrap correctly. Assigned [8f 43 10 00] MOV #0, 0x10(R15) Upper bits of 20 bit registers not zeroed on smaller register writes. Assigned [0f 10] RRC.W R15 Upper bits of 20 bit immediates are ignored when extension word is present. Assigned [0f 18 70 12 ...] PUSHX.A #0xF0000 RRUX instruction missing. Assigned [40 19 0f 10] RRUX.W R15 Overflow bit in RRCX not reset. Assigned [40 18 0f 10] RRCX.W R15 PC not word aligned after indirect branches. Assigned [c0 0f] BRA R15 Symbolic mode does not sign extend immediates. Assigned [10 10 fe ff] RRC.W SYM 16 and 20 bit memory accesses are not word aligned. Assigned [2f 00 01 1c] MOVA &0x1C01, R15 Sign extended immediates are not masked to 20 bit. Assigned [8f 0f ff ff] MOVA #-1, R15 POPM incorrectly writes values to SP or CG. Assigned [21 17] POPM #3, R3 Address sized values written to PC are restricted to lower 64KB of memory. Assigned [00 18 70 50 ...] ADDX.A #0xa, PC PC as a source in the register addressing mode has the wrong value. Assigned [cf 00] MOVA PC, R15 PC as a source in the index addressing mode has the wrong value. Pending [3f 00 00 00] MOVA 0x0(PC), R15 Signed 20 bit values are not always properly handled. Assigned [df 03] TSTA R15 Aliasing issue with source and destination registers in ADDA and SUBA. Assigned [ef 0f] ADDA R15, R15 Register indirect, and indexed addressing modes cannot access memory above 64KB. Assigned [2f 10] RRC.W @R15 Destination for POP.B, POP.W, and POPX instructions incorrect when SP is an input. Assigned [f1 41 00 00] POP.B 0x0(SP) MOV, MOVX, MOVA, and BRA @Rn+ do not correctly order operations. Assigned [3f 4f] MOV.W @R15+, R15 CALLA decrements SP too early. Assigned [41 13] CALLA SP POPX does not jump when destination operand is PC. Assigned [00 18 70 41] POPX.A PC RRAM.W and RLAM.W compute negative flag incorrectly. Assigned [5f 02] RLAM.W #1, R15 Extension word instructions that write to the CG register should be invalid. Assigned [83 00 0a 00] (invalid) PUSHM pushes wrong value for PC and SP. Assigned [11 15] PUSHM #2, SP PUSHM does not correctly handle wrapping. Pending [f5 15] PUSHM.W #16,R5 SXT does not sign extend up to 20 bits. Assigned [8f 11] SXT R15 The 20 bit indirect auto increment addressing mode increments by the wrong value. Assigned [00 18 7f 10] RRCX.A @R15+ PUSHX incorrectly orders SP register decrement. Assigned [00 18 41 12] PUSHX.A SP RRCX.A uses the wrong mask value. Assigned [00 18 4f 10] RRCX.A R15 RRAX and SXTX, and RRCX and SWPBX instruction encodings overlap. Assigned [40 18 cf 11] (invalid) RLAX with rpt prefix does not handle PC as the destination register correctly. Assigned [00 18 40 50] RLAX.A PC rpt instructions are invalid in non-register addressing modes. Assigned [40 18 13 12] PUSHX #1 Variations of the address instructions do not jump when the destination is PC. Assigned [e0 03] INCDA PC Writes to the status register and operation flags are ordered incorrectly. Pending [02 10] RRC.W SR Table 11: Issues discovered in the MSP430X specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 28 E Bug Tables 
+
+SLEIGH Issue Fix Status Encoding Disassembly 
+
+Memory operands decoded incorrectly with address override and REX.W prefixes. Assigned [67 43 . . . ] Many instructions 0x82 allowed as an alternative opcode for 0x80 in long-mode (should be invalid). Merged (11.2) [82 f8 00] (invalid) 64-bit SBB instruction does not sign-extend the 32-bit immediate operand. Merged (11.2) [4f 1d ff . . . ] SBB RAX,-0x1 Incorrect semantics for CMOV instructions if source = destination register. Merged (11.2) [0f 40 00] CMOVO EAX,[RAX] Multiple SIMD instructions behave incorrectly if source = destination register. Merged (11.2) [0f 5a c0] CVTPS2PD XMM0, XMM0 LZCNT instruction behaves incorrectly if source = destination register. Assigned [f3 0f bd c0] LZCNT EAX,EAX Destination address incorrect when base address register matches source register. Assigned [0f c1 00] XADD [RAX], EAX MOVSXD/MOVZX with 16-bit destination decoded as having a 32-bit destination. Merged (11.1) [66 40 63 c0] MOVSXD AX,AX PEXTR* instructions do not write to memory when destination is a memory operand. Merged (11.2) [66 40 0f . . . ] PEXTRB [RDX], XMM0, 0x0 String instructions with a 32-bit operand size fail to zero upper bits of operands. Assigned [67 af] SCASD [EDI] Loop instructions with a 32-bit operand size fail to zero upper bits of RCX. Assigned [67 e2 0a] LOOP RIP+10 Instructions with repeat prefix do not set RIP correctly when RCX = 1. Pending [f2 a4] MOVSB.REPNE RDI,RSI XCHG with 32-bit operand size fails to zero upper bits. Assigned [87 00] XCHG [RAX], EAX CMPXCHG8B fails to zero the upper bits of 64-bit registers. Assigned [0f c7 08] CMPXCHG8B [RAX] Bits 96 to 128 not compared in CMPPS semantics. Merged (11.2) [0f c2 c0 00] CMPEQPS XMM0,XMM0 Decoding issue for MOV reg,imm8 instructions with address override and REX prefix. Assigned [67 48 b7 00] MOV DIL,0x0 Wrong casting operation used in CVT instructions. Merged (11.2) [f2 0f 2d c0] CVTSD2SI EAX, XMM0 REX prefix causes NOP to be decoded as a 32-bit XCHG which zeroes the upper bits. Assigned [40 90] NOP Destination of bit-scan instructions is modified when source operand is zero. Pending [0f bc f1] BSF ESI,ECX Carry flag for rotate instructions should not be set when count operand is zero. Assigned [48 d3 d0] RCL RAX,CL BSWAP with operand size override interpreted as 32-bit instead of 16-bit instruction. Pending [66 0f c8] BSWAP AX POPF with address size / operand size overrides is not decodable. Merged (11.4) [66 67 9d] POPF ModRM:reg (w) destination encoding handled incorrectly (multiple instructions). Assigned [0f c5 00 00] (invalid) Many instructions with a ‘no-prefix’ constraint are decoded when prefixes is present. Pending [66 0f 37] GETSEC PACKUSWB is incorrect when the value to convert is exactly 0x00ff. Merged (11.2) [66 0f 67 c0] PACKUSWB XMM0, XMM0 Address size prefix not handled in bit test instructions. Pending [67 48 0f . . . ] BTC [EAX],RAX MOV instructions can reference invalid control registers. Pending [0f 20 08] MOV RAX, CR1 MOV to/from debug registers with REX.R prefix are not treated as invalid. Pending [44 0f 23 c0] (invalid) Lockable INC missing reg_opcode constraint. Assigned [fe 3f] (invalid) Redundant and out-of-order prefixes are handled incorrectly. Pending [66 66 . . . ] Many instructions Instructions invalid in long-mode are decoded with address override prefix. Pending [67 . . . ] AAA No-prefix constraint not checked in several places. Pending [66 0f 37] GETSEC Table 12: Issues discovered and fixed in the x86-64 SLEIGH specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 
+
+SLEIGH Issue Fix Status Encoding Disassembly 
+
+Incorrect operator used in vdup. Merged (12.1) [10 0b e0 ee] vdup.8 q0,r0 ldaexd behaves incorrectly when registers alias. Merged (11.2) [d2 e8 f0 2b] ldaexd r2,r11,[r2] vselgt checks the wrong condition. Merged (12.1) [a1 7a 7a fe] vselgt.f32 s15,s21,s3 Incorrect constraints used in THUMB encoding of vdup. Merged (12.1) [a0 ee 90 0b] vdup.32 q8,r0 VMVN operands are reversed in output. Merged (12.0) [e0 05 f0 f3] vmvn q8,q8 Some instructions that modify PC do not handle the THUMB bit correctly. Assigned [c7 46] mov pc,r8 Immediates used in thumb shift operations not decoded correctly. Assigned [5f ea 10 00] lsrs.w r0,r0,#0x20 ldrsh.w/ldrsb.w treat the loaded value as a pointer. Merged (12.1) [bf f9 00 00] ldrsh.w r0,[0x10004] vst2 uses wrong registers when reglist encoding wraps. Assigned [80 e3 40 f4] vst2.32 {d30,d31,d0,d1} ... Arithmetic operations with shifted immediate do not handle the carry bit correctly. Assigned [10 ea 70 00] ands.w r0,r0,r0, ror #0x1 PC relative encodings for FLDM*X/FSTM*X load from the wrong address. Assigned [03 fb 9f bc] fldmiaxlt pc, d15 PC relative encodings for STR/STRT load from the wrong address. Assigned [10 f0 8f e5] str pc,[0x10018] Aliasing issue between index and destination register for ldrexd. Merged (12.1) [9f 0f b0 e1] ldrexd r0,r1,[r2] vpush/vpop order elements in reverse. Assigned [2d ed 02 0a] vpush s0,s1 vmov.8/16/32 calculates register subslices incorrectly. Assigned [10 0b 40 ee] vmov.8 d0[0x0],r0 addrmode3 loads input as pointer instead of returning it as an address. Assigned [d8 00 cf e1] ldrd r0,r1,[0x10] sha1su1.32/sha1su1.32 performs shift on incorrectly sized register. Merged (11.2) [f2 07 c7 e0] sha1su0.32 q8,q8,q8 Table 13: Issues discovered in the ARM32/Thumb specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 29 SLEIGH Issue Fix Status Encoding Disassembly 
+
+RMIF uses the wrong value for masked flags. Assigned [00 04 00 ba] rmif x0, #0x0, #0x0 SHA1H uses a shift operation instead of rotate. Merged (12.1) [00 08 28 5e] sha1h s0, s0 XAR performs an or operation instead of a xor. Assigned [1d b1 93 ce] xar v29.2D, v8.2D, v19.2D, #0x2c BCAX performs an or operation instead of a xor. Assigned [d4 09 25 ce] bcax v20.16B, v14.16B, v5.16B, v2.16B FMLSL/FMLAL use integer instead of floating point operations. Assigned [00 40 80 0f] fmlsl v0.2S, v0.2H, v0.H[0x0] EOR3 performs an or operation instead of a xor. Assigned [00 00 00 ce] eor3 v0.16B, v0.16B, v0.16B, v0.16B FMLS wrong operand used in calculation. Assigned [80 51 20 5f] fmls h0, h12, v0.H[0x2] FMLAL2/FMLSL2 use the wrong register subslices Assigned [22 82 86 2f] fmlal2 v2.2S, v17.2H, v6.H[0x0] RAX1 uses a shift and or operation instead of a rotate and xor. Assigned [b4 8e 60 ce] rax1 v20.2D, v21.2D, v0.2D SBCS/NGCS flags incorrect when destination is XZR. Assigned [9f 03 1d 7a] sbcs wzr, w28, w29 LDURSB zero extends value instead of sign extending it. Assigned [e0 03 c0 38] ldursb w0, [sp] STLRB/STLRH store the wrong sized value. Assigned [e0 83 80 08] strlb w0, [sp] LDPSW loads the wrong sized value. Merged (12.1) [e0 77 c0 68] ldpsw x0, x29, [sp], #0x0 LDRSH/LDRSB sign-extend the result to the wrong size. Assigned [e0 03 c0] ldrsh w0, [sp] FRINT* operations perform an integer round instead of a float round. Assigned [00 40 e6 1e] frintn s0, s0 FMLS does not perform a vectorised operation. Assigned [80 51 20 5f] fmls v19.2S, v26.2S, v14.2S FMOV performs a float cast instead of a copy. Assigned [00 00 e6 1e] fmov w0, h0 FADDP orders input vectors incorrectly in fused vector operations. Assigned [52 15 43 2e] faddp v18.4H, v10.4H, v3.4H FMLA uses wrong element size for vector operations. Assigned [e7 0e 41 0e] fmla v7.4H, v23.4H, v1.4H LDAPR does not actually load the value from memory. Merged (12.1) [e0 c3 a0 f8] ldapr x0, [sp] RMIF performs a shift instead of a rotate. Assigned [cf 87 1f ba] rmif x30, #0x3f, #0xf 32-bit variant of LDAR loads the wrong sized value. Merged (12.1) [e0 83 a0 f8] ldar w0, [sp] ld2r/ld3r/ld4r write to the wrong destination registers. Merged (11.4) [e0 c3 60 0d] ld2r {v0.8B, v1.8B}, [sp] Table 14: Issues discovered in the AArch64 specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 
+
+SLEIGH Issue Fix Status Encoding Disassembly 
+
+CSR instructions can write to the zero register. Assigned [73 a0 02 34] CSRRS zero, mscratch, t0 FSCSR/FSRM/FSFLAGS write to the zero register. Assigned [73 90 12 00] FSFLAGS t0 CSRRW/CSRRWI fail to write to destination when the source is zero. Assigned [f3 12 00 34] CSRRW t0, mscratch, zero Incorrect value is returned on divide by zero and remainder by zero. Assigned [b3 47 00 02] DIV a0, zero, zero Incorrect value is returned on division overflow. Assigned [33 c5 c5 02] DIV a0, a1, a2 Reserved instructions in the compressed extension are not decoded correctly. Assigned [02, 40] (invalid) Jumps in the compressed extension fail to align PC. Assigned [82 87] C.JR a5 ‘C.JALR ra’ jumps to the next instruction instead of the value in ra. Assigned [82 90] C.JALR ra C.ADDI variants with the zero register as the destination should decode as a NOP. Assigned [05 00] C.NOP FSCSR/FSRM/FSFLAGS fail to swap value when source and destination registers alias. Assigned [f3 92 12 00] FSFLAGS t0, t0 Floating-point instructions fail to set exceptions flags. Assigned [ .. ] Many instructions Floating point instructions do not support NaN boxing. Assigned [ .. ] Many instructions FCLASS.S/FCLASS.D are not fully implemented. Assigned [d3 12 00 e0] FCLASS.s t0, ft0 FCVT and FMV fails to update destination register. Assigned [53 f0 00 42] FCVT.d.s ft0, ft1 FMV.x.w missing sign-extension. Assigned [d3 02 00 e0] FMV.x.w t0, ft0 FMV.x.d writes wrong value to destination. Assigned [53 05 05 e2] FMV.x.d a0, fa0 FCVT.wu.s/d and FCVT.lu.s/d implements unsigned truncation incorrectly. Assigned [d3 72 10 c0] FCVT.wu.s t0, ft0 FCVT with integer destination fail to sign extend result. Assigned [d3 72 00 c0] FCVT.w.s t0, ft0 Table 15: Issues discovered in the RISC-V specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 30 SLEIGH Issue Fix Status Encoding Disassembly 
+
+Address instructions should use special immediate instead of SR and CG. Assigned [ef 02] ADDA #4, R15 SUBA carry flag is inverted. Assigned [ff 0f] SUBA R15, R15 Indexed addressing mode does not wrap correctly. Assigned [8f 43 10 00] MOV #0, 0x10(R15) Upper bits of 20 bit registers not zeroed on smaller register writes. Assigned [0f 10] RRC.W R15 Upper bits of 20 bit immediates are ignored when extension word is present. Assigned [0f 18 70 12 ...] PUSHX.A #0xF0000 RRUX instruction missing. Assigned [40 19 0f 10] RRUX.W R15 Overflow bit in RRCX not reset. Assigned [40 18 0f 10] RRCX.W R15 PC not word aligned after indirect branches. Assigned [c0 0f] BRA R15 Symbolic mode does not sign extend immediates. Assigned [10 10 fe ff] RRC.W SYM 16 and 20 bit memory accesses are not word aligned. Assigned [2f 00 01 1c] MOVA &0x1C01, R15 Sign extended immediates are not masked to 20 bit. Assigned [8f 0f ff ff] MOVA #-1, R15 POPM incorrectly writes values to SP or CG. Assigned [21 17] POPM #3, R3 Address sized values written to PC are restricted to lower 64KB of memory. Assigned [00 18 70 50 ...] ADDX.A #0xa, PC PC as a source in the register addressing mode has the wrong value. Assigned [cf 00] MOVA PC, R15 PC as a source in the index addressing mode has the wrong value. Pending [3f 00 00 00] MOVA 0x0(PC), R15 Signed 20 bit values are not always properly handled. Assigned [df 03] TSTA R15 Aliasing issue with source and destination registers in ADDA and SUBA. Assigned [ef 0f] ADDA R15, R15 Register indirect, and indexed addressing modes cannot access memory above 64KB. Assigned [2f 10] RRC.W @R15 Destination for POP.B, POP.W, and POPX instructions incorrect when SP is an input. Assigned [f1 41 00 00] POP.B 0x0(SP) MOV, MOVX, MOVA, and BRA @Rn+ do not correctly order operations. Assigned [3f 4f] MOV.W @R15+, R15 CALLA decrements SP too early. Assigned [41 13] CALLA SP POPX does not jump when destination operand is PC. Assigned [00 18 70 41] POPX.A PC RRAM.W and RLAM.W compute negative flag incorrectly. Assigned [5f 02] RLAM.W #1, R15 Extension word instructions that write to the CG register should be invalid. Assigned [83 00 0a 00] (invalid) PUSHM pushes wrong value for PC and SP. Assigned [11 15] PUSHM #2, SP PUSHM does not correctly handle wrapping. Pending [f5 15] PUSHM.W #16,R5 SXT does not sign extend up to 20 bits. Assigned [8f 11] SXT R15 The 20 bit indirect auto increment addressing mode increments by the wrong value. Assigned [00 18 7f 10] RRCX.A @R15+ PUSHX incorrectly orders SP register decrement. Assigned [00 18 41 12] PUSHX.A SP RRCX.A uses the wrong mask value. Assigned [00 18 4f 10] RRCX.A R15 RRAX and SXTX, and RRCX and SWPBX instruction encodings overlap. Assigned [40 18 cf 11] (invalid) RLAX with rpt prefix does not handle PC as the destination register correctly. Assigned [00 18 40 50] RLAX.A PC rpt instructions are invalid in non-register addressing modes. Assigned [40 18 13 12] PUSHX #1 Variations of the address instructions do not jump when the destination is PC. Assigned [e0 03] INCDA PC Writes to the status register and operation flags are ordered incorrectly. Pending [02 10] RRC.W SR Table 16: Issues discovered in the MSP430X specification. Example instruction encodings and disassembly are provided to aid interpretation, however there are typically multiple encodings with the same issue. 31 F SLEIGH Extensions 
+
+Listing 1: Example syntax for an extension to the SLEIGH language that allows arrays and templated constructors to be defined. 32
